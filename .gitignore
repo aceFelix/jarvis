@@ -1,0 +1,46 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ---- 环境变量 / 密钥 ----
+.env
+.env.*
+*.key
+*.pem
+configs/settings.toml
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 运行时产物 ----
+*.log
+*.tmp
+*.bak
+sessions/
+
+# ---- 本地 jarvis 目录 ----
+.jarvis/
+
+# ---- 误创建的文件 ----
+-p/
+
+# ---- 文档 ----
+jarvis vs claudecode.md
+TEST_CHECKLIST.md
+PUBLISH.md

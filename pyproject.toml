@@ -1,0 +1,93 @@
+[project]
+name = "jarvis-agent"
+version = "0.1.0"
+description = "J.A.R.V.I.S — Personal computer AI agent, referencing core architecture design from mainstream AI Coding Agents, rewritten in Python"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.39.0",
+    "openai>=1.50.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "rich>=13.7.0",
+    "prompt_toolkit>=3.0.0",
+    "pyyaml>=6.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+gui = [
+    # pyautogui 跨平台（Windows/macOS/Linux）
+    "pyautogui>=0.9.54",
+    "pillow>=10.0.0",
+    # pywinauto 仅 Windows（UI 元素级操作，非必需）
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
+    # pygetwindow 跨平台，Linux 上支持有限
+    "pygetwindow>=0.0.9; sys_platform != 'linux'",
+]
+browser = [
+    "playwright>=1.40.0",
+]
+mcp = [
+    "mcp>=1.0.0",
+]
+camera = [
+    # 摄像头工具：OpenCV VideoCapture 读帧
+    "opencv-python>=4.8.0",
+]
+vision = [
+    # 实时视觉监控：mediapipe 手势/人脸检测（CPU 实时）+ OpenCV
+    "mediapipe>=0.10.14",
+    "opencv-python>=4.8.0",
+    # OCR 可选
+    "paddleocr>=2.7.0",
+]
+voice = [
+    # 阿里 CosyVoice TTS / Paraformer STT SDK（跨平台）
+    "dashscope>=1.20.0",
+    # 音频播放/录音（跨平台，Linux 需 portaudio19-dev，macOS 需 brew install portaudio）
+    "pyaudio>=0.2.14",
+]
+daemon = [
+    # 常驻模式：系统托盘（跨平台，macOS 用 AppKit，Linux 需 GTK）
+    "pystray>=0.19.0",
+    # Windows 上 pystray 默认使用 win32 backend，需要 pywin32
+    "pywin32>=227; sys_platform == 'win32'",
+    # 全局热键（Windows/Linux 需要 root，macOS 需辅助功能权限）
+    "keyboard>=0.13.0; sys_platform != 'darwin'",
+    "pillow>=10.0.0",
+    # 主动感知：系统资源监控（跨平台）
+    "psutil>=5.9.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.5.0",
+]
+# 一键安装全功能（不含 dev 测试工具）
+# 用法: pip install "jarvis-agent[all]"
+all = [
+    "jarvis-agent[gui]",
+    "jarvis-agent[browser]",
+    "jarvis-agent[mcp]",
+    "jarvis-agent[camera]",
+    "jarvis-agent[vision]",
+    "jarvis-agent[voice]",
+    "jarvis-agent[daemon]",
+]
+
+[project.scripts]
+jarvis = "agent.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,104 @@
+# jarvis 配置文件（示例模板）
+# 复制为 configs/settings.toml 并修改为你自己的配置。
+# 项目级配置。会被 ~/.jarvis/settings.toml 和环境变量覆盖。
+# 所有字段都可以省略（用默认值）。
+
+# ---- LLM ----
+# 默认接阿里云百炼 DashScope（OpenAI 兼容接口），用 qwen3.7-plus（带视觉）。
+# api_key 不写这里，走环境变量 DASHSCOPE_API_KEY。
+# provider = 模型提供商（vendor），仅显示用途
+# api_format = API 协议格式（openai / anthropic），控制用哪个 Provider 类
+provider = "dashscope"
+api_format = "openai"
+model = "qwen3.7-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = ""           # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
+# temperature = 0.7
+max_tokens = 20480
+thinking_budget = 800
+enable_thinking = true
+
+# ---- 运行时 ----
+# workdir: 贾维斯默认工作目录。开发/文件操作/项目管理都在此目录下进行。
+# 可通过 --workdir 命令行参数临时覆盖。
+workdir = "./workspace"
+# permission_mode: default / plan / accept_edits / yolo
+permission_mode = "default"
+max_iterations = 50
+
+# ---- 权限规则文件 ----
+# permissions_file = "configs/permissions.yaml"
+
+# ---- 系统提示追加 ----
+# system_prompt_append = ""
+
+# ---- 调试 ----
+debug = false
+verbose = false
+
+# 可选模型列表（/model 命令列出并切换）。添加新模型只需往这里追加。
+# 也可以在 ~/.jarvis/settings.toml 里覆盖此列表。
+[llm.models]
+"qwen3.7-plus" = "通义千问 3.7 Plus（默认，带视觉）"
+"qwen3.6-plus" = "通义千问 3.6 Plus"
+"qwen3.6-flash" = "通义千问 3.6 Flash（快）"
+"qwen3.5-plus" = "通义千问 3.5 Plus"
+"qwen3.5-flash" = "通义千问 3.5 Flash（快）"
+
+# ---- 语音 ----
+# 基于 DashScope。复用 DASHSCOPE_API_KEY。
+# TTS: CosyVoice，音色 longanlang_v3
+# STT: Paraformer 实时识别
+[tts]
+model = "cosyvoice-v3-flash"
+voice = "longanlang_v3"
+volume = 50
+speech_rate = 1.0
+pitch_rate = 1.0
+
+[stt]
+model = "qwen3-asr-flash-realtime"
+max_seconds = 15
+silence_seconds = 1.5
+silence_threshold = 500
+
+[voice]
+barge_in = false
+barge_in_key = true
+
+[ui]
+boot_animation = true
+
+[context]
+compaction = true
+compaction_threshold = 8000
+keep_recent_messages = 6
+
+[memory]
+auto_resume_session = true
+long_term_memory = true
+
+[skills]
+enable = true
+
+[mcp]
+enable = true
+
+[lsp]
+enable = true
+[lsp.servers.python]
+command = "python-lsp-server"
+args = []
+extensions = ["py"]
+
+[daemon]
+hotkey = "ctrl+shift+j"
+tray = true
+
+[monitor]
+enabled = true
+cpu_threshold = 85.0
+memory_threshold = 90.0
+disk_threshold = 10.0
+check_interval = 10
+alert_cooldown = 600
