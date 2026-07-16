@@ -24,6 +24,8 @@ key: DASHSCOPE_API_KEY 环境变量（复用已有配置）
 from __future__ import annotations
 
 import array
+import base64
+import json
 import os
 import threading
 import time
@@ -75,7 +77,26 @@ _PCM_WIDTH = 2  # 16-bit = 2 bytes
 _FRAMES_PER_BUFFER = 3200  # 200ms @ 16kHz 单声道 16bit（6400 bytes/帧）
 
 # 静音检测默认参数
-_SILENCE_THRESHOLD = 500  # RMS 阈值，低于此值视为静音（16-bit PCM 量级）
+_SILENCE_THRESHOLD = 500
+# Ctrl+C 阻塞机制：pyaudio stream.read() 在 Windows 上无法被 Python 信号中断。
+# stop_flag 用于非阻塞轮询（stream.read(..., exception_on_overflow=False) 本身不阻塞）。
+# 当主线程调用 stop() 时，置位 stop_flag → 录音循环结束 → 清理资源。
+_stop_flag = threading.Event()
+
+
+def _is_stopped() -> bool:
+    """检查是否通过信号收到停止请求。"""
+    return _stop_flag.is_set()
+
+
+def _request_stop() -> None:
+    """请求停止当前正在阻塞的 listen()。用于 Ctrl+C 信号处理器。"""
+    _stop_flag.set()
+
+
+def _reset_stop() -> None:
+    """重置停止标志（每次 listen() 前调用）。"""
+    _stop_flag.clear()  # RMS 阈值，低于此值视为静音（16-bit PCM 量级）
 _SILENCE_SECONDS = 1.5  # 连续静音多少秒视为"说完了"
 _MAX_SECONDS = 15  # 单次录音最长秒数（防卡死）
 
@@ -226,6 +247,7 @@ class ParaformerSTT:
         Returns:
             {text, duration, error?}
         """
+        _reset_stop()  # 每轮 listen() 重置停止标志
         callback = _RecognitionCallback()
         recognizer = self._create_recognizer(callback)
         if recognizer is None:
@@ -268,7 +290,7 @@ class ParaformerSTT:
         silence_start: float | None = None
         aborted = False
         try:
-            while True:
+            while not _stop_flag.is_set():
                 elapsed = time.time() - t0
                 if elapsed >= max_seconds:
                     break
@@ -638,7 +660,7 @@ class QwenASR:
 
         t0 = time.time()
         try:
-            while True:
+            while not _stop_flag.is_set():
                 elapsed = time.time() - t0
                 if elapsed >= max_seconds:
                     break
@@ -787,7 +809,7 @@ def create_stt(
     api_key: str | None = None,
     model: str = "paraformer-realtime-v2",
     language: str = "zh",
-) -> "ParaformerSTT | QwenASR":
+) -> "ParaformerSTT | QwenASR | FunASRFlashSTT":
     """根据 model 名创建对应的 STT 后端。
 
     - model 以 "qwen" 开头 → QwenASR（OmniRealtimeConversation，服务端 VAD，质量高）
@@ -799,4 +821,212 @@ def create_stt(
     m = model.lower()
     if m.startswith("qwen"):
         return QwenASR(api_key=api_key, model=model, language=language)
+    if m.startswith("fun-asr"):
+        return FunASRFlashSTT(api_key=api_key, model=model)
     return ParaformerSTT(api_key=api_key, model=model)
+
+
+# ============================================================================
+# FunASRFlashSTT —— 文件上传式语音识别
+# ============================================================================
+
+
+class FunASRFlashSTT:
+    """FunASR Flash 语音识别器。
+
+    基于 DashScope fun-asr-flash-2026-06-15，
+    通过 HTTP POST 上传音频文件（WAV base64）获取转写文字。
+    客户端做 RMS 静音检测，检测到静音后发送音频数据到服务端。
+
+    用法::
+
+        stt = FunASRFlashSTT(model="fun-asr-flash-2026-06-15")
+        result = stt.listen()
+        print(result["text"])  # "你好贾维斯"
+    """
+
+    API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str = "fun-asr-flash-2026-06-15",
+    ) -> None:
+        self._api_key = api_key or os.environ.get("DASHSCOPE_API_KEY", "")
+        self._model = model
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def listen(
+        self,
+        *,
+        max_seconds: float = _MAX_SECONDS,
+        silence_seconds: float = _SILENCE_SECONDS,
+        silence_threshold: int = _SILENCE_THRESHOLD,
+        on_partial: Any = None,
+        on_open: Any = None,
+    ) -> dict[str, Any]:
+        """录音并识别。阻塞直到识别完成。"""
+        _reset_stop()
+
+        from agent.voice.audio import get_pyaudio
+        pa = get_pyaudio()
+        stream = pa.open(
+            format=pa.get_format_from_width(2),
+            channels=_PCM_CHANNELS,
+            rate=_PCM_RATE,
+            input=True,
+            frames_per_buffer=_FRAMES_PER_BUFFER,
+        )
+
+        if on_open:
+            try:
+                on_open()
+            except Exception:
+                pass
+
+        frames: list[bytes] = []
+        t0 = time.time()
+        silence_start: float | None = None
+        aborted = False
+
+        try:
+            while not _stop_flag.is_set():
+                elapsed = time.time() - t0
+                if elapsed >= max_seconds:
+                    break
+
+                try:
+                    frame = stream.read(_FRAMES_PER_BUFFER, False)
+                except Exception:
+                    break
+
+                frames.append(frame)
+
+                # RMS 静音检测
+                rms = _rms(frame)
+                if rms < silence_threshold:
+                    if silence_start is None:
+                        silence_start = time.time()
+                    elif time.time() - silence_start >= silence_seconds:
+                        break
+                else:
+                    silence_start = None
+
+                if on_partial:
+                    try:
+                        on_partial(f"[录音中 {elapsed:.1f}s]")
+                    except Exception:
+                        pass
+
+        except KeyboardInterrupt:
+            aborted = True
+        finally:
+            stream.stop_stream()
+            stream.close()
+
+        if aborted:
+            return {"text": "", "duration": time.time() - t0, "error": "用户取消"}
+
+        if not frames:
+            return {"text": "", "duration": time.time() - t0, "error": "未检测到语音"}
+
+        # 将 PCM 帧转为 WAV 格式
+        raw_pcm = b"".join(frames)
+        wav_bytes = _pcm_to_wav(raw_pcm, _PCM_RATE, _PCM_CHANNELS, 16)
+
+        # 转为 base64 data URI
+        b64 = base64.b64encode(wav_bytes).decode()
+        data_uri = f"data:audio/wav;base64,{b64}"
+
+        # 发送到 FunASR Flash API
+        try:
+            text = self._call_api(data_uri)
+            return {"text": text, "duration": time.time() - t0}
+        except Exception as e:
+            return {"text": "", "duration": time.time() - t0, "error": f"识别失败: {e}"}
+
+    def _call_api(self, audio_data_uri: str) -> str:
+        """调 HTTP POST，同步模式下获取转写文字。"""
+        import urllib.request
+        import urllib.error
+
+        payload = json.dumps({
+            "model": self._model,
+            "input": {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": audio_data_uri,
+                        },
+                    }],
+                }],
+            },
+            "parameters": {
+                "format": "wav",
+                "sample_rate": str(_PCM_RATE),
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            self.API_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            raise RuntimeError(f"API {e.code}: {body[:200]}") from e
+
+        # 解析：output.output.sentence.text 或 output.text
+        output = result.get("output", {})
+        if isinstance(output, dict):
+            inner = output.get("output", {})
+            if isinstance(inner, dict):
+                sentence = inner.get("sentence", {})
+                if isinstance(sentence, dict) and sentence.get("text"):
+                    return sentence["text"]
+            text = output.get("text", "")
+            if text:
+                return text
+
+        raise RuntimeError(f"无法解析识别结果: {json.dumps(result, ensure_ascii=False)[:200]}")
+
+
+# ---- 工具函数 ----
+
+
+def _pcm_to_wav(pcm_data: bytes, sample_rate: int, channels: int, bits: int) -> bytes:
+    """将原始 PCM 数据封装为 WAV 格式（44 字节头 + PCM 数据）。"""
+    import struct
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_size = len(pcm_data)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + data_size,
+        b"WAVE",
+        b"fmt ",
+        16,          # chunk size
+        1,           # PCM
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits,
+        b"data",
+        data_size,
+    )
+    return header + pcm_data

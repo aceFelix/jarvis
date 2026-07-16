@@ -929,6 +929,7 @@ class JarvisDaemon:
             from agent.voice.voice_loop import voice_loop
             asyncio.run(voice_loop(
                 ui, self._settings, self._loop, self._ctx,
+                daemon_mode=True,
             ))
         except ImportError as e:
             ui.error(f"语音模块不可用: {e}")

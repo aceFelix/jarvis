@@ -66,6 +66,15 @@ silence_threshold = 500
 barge_in = false
 barge_in_key = true
 
+# 实时双工语音对话（/talk）
+# 基于 DashScope 实时语音/多模态 WebSocket 服务，必须使用 DashScope API Key。
+# 默认使用公共域名 wss://dashscope.aliyuncs.com/api-ws/v1/realtime。
+# 如需业务空间专属域名，取消 ws_url 注释并替换 {WorkspaceId}。
+[realtime_talk]
+# ws_url = "wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+model = "qwen-audio-3.0-realtime-flash"
+voice = "longanqian"
+
 [ui]
 boot_animation = true
 

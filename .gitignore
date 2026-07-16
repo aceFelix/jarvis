@@ -41,6 +41,4 @@ sessions/
 -p/
 
 # ---- 文档 ----
-jarvis vs claudecode.md
-TEST_CHECKLIST.md
-PUBLISH.md
+doc/

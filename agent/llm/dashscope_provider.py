@@ -69,10 +69,11 @@ def _messages_to_dashscope(messages: list[Message], system: str) -> list[dict[st
             tool_results = [b for b in msg.content if isinstance(b, ToolResultContent)]
             if tool_results:
                 for tr in tool_results:
+                    # ToolResultContent 的属性是 tool_use_id 和 content（不是 id/output）
                     out.append({
                         "role": "tool",
-                        "tool_call_id": tr.id,
-                        "content": tr.output if isinstance(tr.output, str) else json.dumps(tr.output, ensure_ascii=False),
+                        "tool_call_id": tr.tool_use_id,
+                        "content": tr.content,
                     })
             # 普通 user 文本
             text_parts = [b.text for b in msg.content if isinstance(b, TextContent)]
@@ -151,7 +152,8 @@ def _messages_to_dashscope_multimodal(
             tool_results_no_img = [b for b in msg.content
                                    if isinstance(b, ToolResultContent) and not b.images]
             for tr in tool_results_no_img:
-                tr_text = tr.output if isinstance(tr.output, str) else json.dumps(tr.output, ensure_ascii=False)
+                # ToolResultContent.content 是 str（不是 output 属性）
+                tr_text = tr.content
                 out.append({
                     "role": "tool",
                     "tool_call_id": tr.tool_use_id,

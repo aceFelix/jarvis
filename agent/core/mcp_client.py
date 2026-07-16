@@ -162,6 +162,39 @@ def load_mcp_config() -> dict[str, dict[str, Any]]:
     return servers
 
 
+def save_mcp_config(config: dict[str, Any]) -> None:
+    """写回 MCP 配置到 ~/.jarvis/mcp.json。config 格式: {"mcpServers": {...}}。"""
+    path = mcp_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def merge_mcp_config(new_servers: dict[str, dict[str, Any]]) -> list[str]:
+    """合并新 MCP server 到 ~/.jarvis/mcp.json。同名 server 跳过不覆盖。返回新增的 server 名列表。"""
+    current = load_mcp_config()
+    added: list[str] = []
+    for name, cfg in new_servers.items():
+        if name not in current:
+            current[name] = cfg
+            added.append(name)
+    if added:
+        save_mcp_config({"mcpServers": current})
+    return added
+
+
+def remove_mcp_config(server_names: list[str]) -> int:
+    """从 ~/.jarvis/mcp.json 中移除指定 MCP server。返回实际移除数量。"""
+    current = load_mcp_config()
+    removed = 0
+    for name in server_names:
+        if name in current:
+            del current[name]
+            removed += 1
+    if removed:
+        save_mcp_config({"mcpServers": current})
+    return removed
+
+
 @dataclass
 class McpToolDef:
     """一个 MCP server 暴露的工具定义。"""

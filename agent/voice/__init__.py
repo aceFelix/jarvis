@@ -11,7 +11,8 @@
 """
 
 from agent.voice.stt import ParaformerSTT, QwenASR, create_stt
+from agent.voice.stream_tts import StreamTTSPlayer
 from agent.voice.tts import CosyVoiceTTS
 from agent.voice.voice_loop import voice_loop
 
-__all__ = ["CosyVoiceTTS", "ParaformerSTT", "QwenASR", "create_stt", "voice_loop"]
+__all__ = ["CosyVoiceTTS", "ParaformerSTT", "QwenASR", "StreamTTSPlayer", "create_stt", "voice_loop"]

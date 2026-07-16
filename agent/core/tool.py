@@ -192,6 +192,8 @@ def build_default_registry() -> ToolRegistry:
     from agent.tools.glob import GlobTool
     from agent.tools.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
+    from agent.tools.location import LocationTool
+    from agent.tools.marketplace_tool import MarketSearchTool
     from agent.tools.web import WebFetchTool, WebSearchTool
 
     registry = ToolRegistry()
@@ -201,6 +203,8 @@ def build_default_registry() -> ToolRegistry:
     registry.register(FileWriteTool())
     registry.register(GlobTool())
     registry.register(GrepTool())
+    registry.register(LocationTool())
+    registry.register(MarketSearchTool())
     registry.register(TodoWriteTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())

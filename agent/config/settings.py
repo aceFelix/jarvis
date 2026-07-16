@@ -46,6 +46,9 @@ class Settings:
     default_api_key: str = ""
     api_key: str = ""
     base_url: str = ""
+    # DashScope 专属 API Key（实时语音/多模态等必须使用 DashScope key，
+    # 不能与当前 LLM 的 deepseek/openai key 混用）
+    dashscope_api_key: str = ""
     max_tokens: int = 4096
     temperature: float | None = None
     # 可选模型列表 {model_name: description}，/model 命令列出并切换
@@ -94,6 +97,12 @@ class Settings:
     # 按下立即停止播报并切回聆听。不占 PyAudio，无 segfault 风险，daemon 无窗口也能捕获。
     voice_barge_in_key: bool = True
 
+    # 实时双工语音对话（/talk）
+    # endpoint 默认使用 DashScope 公共域名；如使用业务空间专属域名，在此覆盖
+    realtime_ws_url: str = ""
+    realtime_model: str = "qwen-audio-3.0-realtime-flash"
+    realtime_voice: str = "longanqian"
+
     # UI（启动动画）
     # 启动时播放 JARVIS 蓝色方舟反应炉粒子动画（致敬 Claude Code 启动动画）。
     # 终端太窄/太矮/非 TTY 时自动跳过，回退到简单横幅。--no-boot 也可关闭。
@@ -119,6 +128,12 @@ class Settings:
     # MCP 接入（阶段四第三刀）
     # 启动时连接 ~/.jarvis/mcp.json 配置的 MCP server，注册其工具
     enable_mcp: bool = True
+
+    # 插件市场（阶段五第五刀）
+    # /plugin search/install/uninstall 管理插件。安装的插件 skills
+    # 写入 ~/.jarvis/skills/，MCP 配置合并到 ~/.jarvis/mcp.json。
+    enable_plugins: bool = True
+    plugin_marketplace: str = ""
 
     # LSP 集成（对标 Claude Code）
     # 启动时按 [lsp.servers.<name>] 配置启动语言服务器
@@ -252,6 +267,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
     updates: dict[str, object] = {}
     for key in (
         "provider", "api_format", "model", "last_model", "api_key", "base_url",
+        "dashscope_api_key",
         "max_tokens", "temperature",
         "max_iterations",
         "permissions_file", "system_prompt_append",
@@ -259,11 +275,13 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "tts_model", "tts_voice", "tts_volume", "tts_speech_rate", "tts_pitch_rate",
         "stt_model", "stt_max_seconds", "stt_silence_seconds", "stt_silence_threshold",
         "voice_max_seconds",
+        "realtime_ws_url", "realtime_model", "realtime_voice",
         "boot_animation",
         "context_compaction", "compaction_threshold", "keep_recent_messages",
         "auto_resume_session", "long_term_memory",
         "enable_skills",
         "enable_mcp",
+        "enable_plugins", "plugin_marketplace",
         "enable_lsp",
         "enable_thinking", "thinking_budget",
         "vendor_fallback",
@@ -305,6 +323,16 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in voice_table:
                 updates[field] = voice_table[sub_key]
+    # [realtime_talk] 表 → realtime_* 字段
+    rt_table = data.get("realtime_talk", {})
+    if isinstance(rt_table, dict):
+        for sub_key, field in (
+            ("ws_url", "realtime_ws_url"),
+            ("model", "realtime_model"),
+            ("voice", "realtime_voice"),
+        ):
+            if sub_key in rt_table:
+                updates[field] = rt_table[sub_key]
     # [ui] 表 → UI 字段
     ui_table = data.get("ui", {})
     if isinstance(ui_table, dict):
@@ -348,6 +376,15 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in mcp_table:
                 updates[field] = mcp_table[sub_key]
+    # [plugins] 表 → 插件市场字段
+    plugins_table = data.get("plugins", {})
+    if isinstance(plugins_table, dict):
+        for sub_key, field in (
+            ("enable", "enable_plugins"),
+            ("marketplace_url", "plugin_marketplace"),
+        ):
+            if sub_key in plugins_table:
+                updates[field] = plugins_table[sub_key]
     # [lsp] 表 → LSP 集成字段
     lsp_table = data.get("lsp", {})
     if isinstance(lsp_table, dict):
@@ -426,6 +463,10 @@ def _apply_env(s: Settings) -> Settings:
     # 常见 LLM API key 环境变量直通
     # 顺序: 先认各家专属变量（DASHSCOPE_API_KEY / ANTHROPIC_API_KEY），
     # 再认通用变量（OPENAI_API_KEY / JARVIS_API_KEY / MY_AGENT_API_KEY）。
+    # 实时语音/多模态等 DashScope 专属能力需要独立的 dashscope_api_key。
+    dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
+    if dashscope_key and not s.dashscope_api_key:
+        updates["dashscope_api_key"] = dashscope_key
     if not s.api_key:
         for key_env in (
             "DASHSCOPE_API_KEY",    # 阿里云百炼 DashScope

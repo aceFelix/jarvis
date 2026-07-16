@@ -78,11 +78,19 @@ def _detect_standby(messages: list) -> bool:
 
     遍历 messages 找最后一条 role=assistant，调 get_text() 检测标记。
     工具调用轮次会产生多条 assistant 消息，取最后一条（最终回复）。
+
+    防止误触发：若去掉 <standby/> 后的正文超过 30 字，
+    说明模型在正常回答的同时输出了标记（如 deepseek-v4-flash 误触），
+    此时忽略标记，不进入待机。
     """
     for msg in reversed(messages):
         if getattr(msg, "role", None) == "assistant":
             text = msg.get_text() if hasattr(msg, "get_text") else ""
             if text and _STANDBY_TAG.search(text):
+                # 去掉标记后看正文长度
+                body = _STANDBY_TAG.sub("", text).strip()
+                if len(body) > 30:
+                    return False  # 有实质内容，不是真正的退下
                 return True
             # 只查最后一条 assistant 消息即可
             break
@@ -105,6 +113,17 @@ def _voice_log(fmt: str, *args: object) -> None:
             _f.write(f"[{ts}] {msg}\n")
     except Exception:
         pass
+
+
+def _voice_api_key(settings) -> str:
+    """获取 DashScope API Key（语音服务专用）。
+
+    语音 STT/TTS 始终走 DashScope，不受当前 LLM 模型切换影响。
+    优先从环境变量 DASHSCOPE_API_KEY 取值。
+    """
+    import os
+    return os.environ.get("DASHSCOPE_API_KEY", "") or getattr(settings, "api_key", "") or ""
+
 
 _BARGE_IN_THRESHOLD = 2500     # RMS 阈值，远高于 STT 的 500，避免 TTS 自回声触发
 _BARGE_IN_MIN_SPEAK = 0.4      # 持续发声多少秒视为用户开口（防瞬时噪音误触发）
@@ -373,7 +392,10 @@ class _BargeInWatcher:
 
 
 class _KeyBargeInWatcher:
-    """键盘打断监听器：TTS 播报期间轮询 ESC 键，按下立即打断。
+    """键盘 ESC 监听器：全阶段通用退出/打断信号。
+
+    - 对话阶段（聆听/思考/说话）：停止当前播报 → 返回聆听
+    - 待机阶段（等唤醒词）：退出语音模式 → 回到文本 REPL
 
     用 keyboard.is_pressed() 轮询，不依赖全局钩子（Windows 上全局钩子需管理员权限）。
     后台线程每 100ms 检查一次，响应延迟 < 200ms。
@@ -497,6 +519,10 @@ async def _voice_loop_round(
             on_partial=_on_partial,
             on_open=lambda: None,
         )
+        # ESC 或 Ctrl+C 触发了停止标志
+        from agent.voice.stt import _is_stopped
+        if _is_stopped():
+            raise KeyboardInterrupt
     except KeyboardInterrupt:
         # Ctrl+C 在聆听阶段: 重新抛出，让 voice_loop 的 except 捕获并退出语音模式
         # （不能 return False，否则 voice_loop 会误认为"退下"进入待机而非退出）
@@ -539,9 +565,24 @@ async def _voice_loop_round(
         ui._thinking_live = None
     ui._thinking_buf = ""
 
-    # 不预先开 TTS 流——等 LLM 输出完毕，拿到完整文本后再调用 tts.speak()。
-    # 原因：流式 TTS 的 WebSocket 长期存活容易被 DashScope RST，切成整段播放。
-    ctx.on_assistant_text = None
+    # 阶段 1 流式 TTS：用 StreamTTSPlayer 实现句子级流式播放。
+    # LLM 每输出一个完整句子 → 立即送 CosyVoice 合成 → 边来边播。
+    # 替代原来"等 LLM 全文 → tts.speak() 整段播放"的阻塞模式。
+    from agent.voice.stream_tts import StreamTTSPlayer
+    stream_player = StreamTTSPlayer(
+        api_key=_voice_api_key(settings),
+        model=settings.tts_model,
+        voice=settings.tts_voice,
+        volume=settings.tts_volume,
+        speech_rate=settings.tts_speech_rate,
+        pitch_rate=settings.tts_pitch_rate,
+        debug_log=settings.verbose,
+    )
+    stream_ok = stream_player.start()
+    if stream_ok:
+        ctx.on_assistant_text = stream_player.feed
+    else:
+        ctx.on_assistant_text = None
 
     # 键盘 ESC 打断监听（LLM 推理中按 ESC = 中断回复）
     interrupted = False
@@ -567,6 +608,7 @@ async def _voice_loop_round(
         ui.warn("\n已打断（继续聆听）")
         ctx.abort_event = asyncio.Event()
         ctx.on_assistant_text = None
+        stream_player.stop()
         ui._voice_mode = False
         ui._voice_tts_feed = None
         for w in watchers:
@@ -575,6 +617,7 @@ async def _voice_loop_round(
     except Exception as e:
         ui.error(f"回复出错: {type(e).__name__}: {e}")
         ctx.on_assistant_text = None
+        stream_player.stop()
         ui._voice_mode = False
         ui._voice_tts_feed = None
         for w in watchers:
@@ -591,10 +634,15 @@ async def _voice_loop_round(
     if interrupted:
         ui.warn("🔇 检测到打断（ESC），已停止回复（继续聆听）")
         ctx.abort_event = asyncio.Event()
+        stream_player.stop()
         return True
 
-    # ---- 3. 说：拿到"想"阶段的完整文本，整段转语音 ----
-    # 从最后一条 assistant message 提取纯文本（不含思考内容）
+    # ---- 3. 说：StreamTTSPlayer 已通过 ctx.on_assistant_text 流式接收文本 ----
+    # finish() 冲刷剩余缓冲 + 阻塞等待全部音频播放完毕。
+    # 若 WS 中途断开，自动降级到整段 tts.speak() 兜底。
+    reply_elapsed = time.time() - t_reply
+
+    # 从最后一条 assistant message 提取完整文本（用于退下检测、verbose 日志）
     reply_text = ""
     for msg in reversed(ctx.messages):
         if msg.role == "assistant":
@@ -602,32 +650,20 @@ async def _voice_loop_round(
             if reply_text.strip():
                 break
 
-    reply_elapsed = time.time() - t_reply
+    try:
+        player_stats = stream_player.finish()
+    except Exception:
+        player_stats = {}
 
-    if reply_text.strip():
-        # 清洗特殊标记:
-        # - <standby/> 退下标记（用户听不到）
-        # - <think>...</think> 思考内容（模型按 system prompt 把分析放标签里，用户听不到）
-        # - 未闭合的 <think> 标签（流式末尾可能没结尾，兜底过滤）
-        clean_text = _STANDBY_TAG.sub("", reply_text)
-        clean_text = _THINK_TAG.sub("", clean_text)
-        clean_text = _THINK_OPEN_TAG.sub("", clean_text)
-        clean_text = clean_text.strip()
-        if clean_text:
-            try:
-                tts_stats = tts.speak(clean_text, on_first_data=lambda: None)
-            except Exception:
-                tts_stats = {}
-            if settings.verbose and isinstance(tts_stats, dict):
-                ui.info(
-                f"  [回复 {reply_elapsed:.1f}s，音频 {tts_stats.get('total_seconds', 0)}s，"
-                f"首包 {tts_stats.get('first_package_delay_ms', '?')}ms，"
-                f"iter={stats.iterations} tools={stats.tool_calls}]"
-            )
-    else:
-        # 无文本（纯工具调用等），跳过 TTS
-        if settings.verbose:
-            ui.info(f"  [回复 {reply_elapsed:.1f}s，iter={stats.iterations} tools={stats.tool_calls}]")
+    if settings.verbose:
+        degraded = " (降级)" if player_stats.get("degraded") else ""
+        audio_s = player_stats.get("audio_seconds", 0) or 0
+        first_ms = player_stats.get("first_feed_to_first_audio_ms", "?")
+        ui.info(
+            f"  [回复 {reply_elapsed:.1f}s，音频 {audio_s}s{degraded}，"
+            f"首句 {first_ms}ms，"
+            f"iter={stats.iterations} tools={stats.tool_calls}]"
+        )
 
     # TTS speak 内部已完成 WS 关闭，无需额外等待
 
@@ -656,6 +692,9 @@ async def _standby_round(ui: RichCLI, settings: Settings, stt: Any) -> str:
             on_partial=lambda t: None,
             on_open=lambda: None,
         )
+        from agent.voice import stt as _stt_mod
+        if _stt_mod._is_stopped():
+            raise KeyboardInterrupt
     except KeyboardInterrupt:
         raise
     if result.get("error"):
@@ -670,6 +709,8 @@ async def voice_loop(
     loop: QueryLoop,
     ctx: ToolContext,
     pause_event: threading.Event | None = None,
+    *,
+    daemon_mode: bool = False,
 ) -> None:
     """进入语音模式。对话 ⇄ 待机 循环，直到 Ctrl+C 彻底退出。
 
@@ -705,11 +746,11 @@ async def voice_loop(
         return
 
     stt = create_stt(
-        api_key=settings.api_key,
+        api_key=_voice_api_key(settings),
         model=settings.stt_model,
     )
     tts = CosyVoiceTTS(
-        api_key=settings.api_key,
+        api_key=_voice_api_key(settings),
         model=settings.tts_model,
         voice=settings.tts_voice,
         volume=settings.tts_volume,
@@ -753,50 +794,90 @@ async def voice_loop(
     ui.info(f"   {barge_hint}说「退下/不聊了/去忙吧」进入待机 · 说「贾维斯」唤醒 · Ctrl+C 退出")
     ui.info("=" * 56)
 
-    # 降级链：连续失败 N 次自动降级
+    # ---- 跨进程语音互斥锁 ----
+    # 防止 CLI /talk 和 daemon 托盘同时开语音模式导致麦克风冲突。
+    from agent.daemon.voice_state import acquire_voice_lock, release_voice_lock, is_voice_enabled
+    if not acquire_voice_lock():
+        ui.error("🎙️ 语音模式已被另一个 jarvis 进程占用")
+        ui.error("   请先关闭另一个 jarvis 的语音模式后再试")
+        return
+
     tts_fail_count = 0
     stt_fail_count = 0
     DEGRADE_THRESHOLD = 3
 
-    # 跨进程语音开关状态（从文件读取，托盘菜单控制）
-    from agent.daemon.voice_state import is_voice_enabled
-    voice_was_enabled = is_voice_enabled()
+    # 跨进程语音开关状态（仅 daemon 模式需要，CLI /talk 忽略文件直接对话）
+    voice_was_enabled = is_voice_enabled() if daemon_mode else True
+
+    # 注册 Ctrl+C 信号处理器：Windows 上 pyaudio stream.read() 阻塞时
+    # KeyboardInterrupt 无法被 Python asyncio 捕获（C 扩展阻塞）。
+    # 用 signal handler 触发 stt._request_stop() 来非阻塞地中断录音循环。
+    from agent.voice import stt as stt_module
+    # 全局 ESC 监听器：对话/待机/聆听阶段均可按下 ESC
+    # - 对话阶段 → 打断当前操作，返回聆听
+    # - 待机阶段 → 退出语音模式，回到文本 REPL
+    # ESC 会同时触发 _request_stop()（中断阻塞中的 stt.listen()）
+    esc_watcher = _KeyBargeInWatcher(
+        lambda: stt_module._request_stop() if not _esc_exit.get("triggered") else None,
+    )
+    _esc_exit: dict[str, bool] = {"triggered": False}
+    if esc_watcher.available:
+
+        def _on_esc_barge() -> None:
+            """ESC 回调：优先打断当前操作，若已在待机则退出语音模式。"""
+            stt_module._request_stop()  # 中断阻塞中的 stt.listen()
+            ctx.abort_event.set()       # 中断 LLM 推理
+
+        esc_watcher._on_barge = _on_esc_barge
+        esc_watcher.start()
+        ui.info("   按 ESC 打断说话/推理，待机中按 ESC 退出语音模式")
+    else:
+        ui.info("   ⚠ keyboard 库未安装，ESC 打断不可用（pip install keyboard）")
+
+    # 注册 Ctrl+C 信号处理器：Windows 上 pyaudio stream.read() 阻塞时
+    # KeyboardInterrupt 无法被 Python asyncio 捕获（C 扩展阻塞）。
+    # 用 signal handler 触发 stt._request_stop() 来非阻塞地中断录音循环。
+    from agent.voice import stt as stt_module
+    def _on_sigint(sig, frame):
+        stt_module._request_stop()
+    prev_sigint = __import__("signal").signal(__import__("signal").SIGINT, _on_sigint)
 
     try:
         in_dialog = True  # True=对话阶段, False=待机阶段
         while True:
-            # ---- 语音开关检查（跨进程文件信号）----
-            # 托盘「语音对话」菜单切换 ~/.jarvis/voice_enabled 文件:
-            # - false → 进入待机（类似说"退下"），但仍听唤醒词"贾维斯"
-            # - true  → 恢复正常对话
-            voice_now = is_voice_enabled()
-            if not voice_now:
-                # 语音被关闭 → 进入待机（但不退出 voice_loop）
-                if voice_was_enabled:
-                    _voice_log("[voice_loop] 语音开关已关闭，进入待机")
-                    ui.info("🔇 语音对话已关闭（进入待机，说「贾维斯」仍可唤醒）")
-                    in_dialog = False
-                # 待机阶段：循环短录，等唤醒词
-                text = await _standby_round(ui, settings, stt)
-                if text and _contains_any(text, _WAKE_WORDS):
-                    # 唤醒词触发 → 临时恢复对话（即使开关是关闭的）
-                    ui.info("🔊 唤醒，回到对话模式（语音开关仍为关闭，可随时说「退下」）")
+            if daemon_mode:
+                # ---- 语音开关检查（仅 daemon 模式；CLI /talk 跳过）----
+                voice_now = is_voice_enabled()
+                if not voice_now:
+                    if voice_was_enabled:
+                        _voice_log("[voice_loop] 语音开关已关闭，进入待机")
+                        ui.info("🔇 语音对话已关闭（进入待机，说「贾维斯」仍可唤醒）")
+                        in_dialog = False
+                    text = await _standby_round(ui, settings, stt)
+                    if text and _contains_any(text, _WAKE_WORDS):
+                        ui.info("🔊 唤醒，回到对话模式（语音开关仍为关闭，可随时说「退下」）")
+                        in_dialog = True
+                    voice_was_enabled = voice_now
+                    continue
+
+                if voice_now and not voice_was_enabled:
+                    _voice_log("[voice_loop] 语音开关已开启，恢复对话")
+                    ui.info("🎙️ 语音对话已开启，随时待命")
                     in_dialog = True
                 voice_was_enabled = voice_now
-                continue
-
-            if voice_now and not voice_was_enabled:
-                # 语音从关闭→开启，恢复正常对话
-                _voice_log("[voice_loop] 语音开关已开启，恢复对话")
-                ui.info("🎙️ 语音对话已开启，随时待命")
-                in_dialog = True
-            voice_was_enabled = voice_now
 
             if in_dialog:
                 # 对话阶段：连续多轮，直到用户说退下
                 cont = True
                 while cont:
                     cont = await _voice_loop_round(ui, settings, loop, ctx, tts, stt)
+                    # ESC 打断了 stt.listen() → cont 仍然为 True 但 _stop_flag 已置位
+                    if cont and stt_module._is_stopped():
+                        # 用户在对话阶段按 ESC：打断 → 清标志 → 回到聆听（继续该阶段）
+                        stt_module._reset_stop()
+                        ui.info("   ⏎ 已打断（继续聆听）")
+                        # 不改变 in_dialog 状态，继续对话阶段
+                        continue
                     # 降级计数：TTS 失败时记录
                     if cont and not getattr(ctx, 'tts_ok', True):
                         tts_fail_count += 1
@@ -813,6 +894,10 @@ async def voice_loop(
             else:
                 # 待机阶段：循环短录，等唤醒词
                 text = await _standby_round(ui, settings, stt)
+                # ESC 在待机阶段按 → 退出语音模式
+                if stt_module._is_stopped():
+                    ui.info("\n🛑 ESC 退出语音模式")
+                    break
                 if text and _contains_any(text, _WAKE_WORDS):
                     ui.info("🔊 唤醒，回到对话模式")
                     in_dialog = True
@@ -820,14 +905,32 @@ async def voice_loop(
     except KeyboardInterrupt:
         ui.info("\n退出语音模式")
     finally:
-        # 恢复思考模式 + 清理 TTS（用 try 包裹整个 finally，
-        # 防止用户快速双击 Ctrl+C 时二次 KeyboardInterrupt 打断清理流程）
+        # 停止 ESC 监听器
+        try:
+            esc_watcher.stop()
+        except Exception:
+            pass
+        # 确保 stop flag 被重置（signal handler 只 set，不自动清）
+        try:
+            stt_module._reset_stop()
+        except Exception:
+            pass
+        # 恢复信号处理器
+        try:
+            __import__("signal").signal(__import__("signal").SIGINT, prev_sigint)
+        except Exception:
+            pass
+        # 恢复思考模式 + 清理 TTS + 释放语音互斥锁
         try:
             loop.set_thinking_enabled(_thinking_was_enabled)
             try:
                 tts.stop()
             except Exception:
                 pass
+        except Exception:
+            pass
+        try:
+            release_voice_lock()
         except Exception:
             pass
         ui.info("已回到文本模式（输入 /help 查看命令）")

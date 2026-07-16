@@ -55,3 +55,57 @@ def set_voice_enabled(enabled: bool) -> None:
         os.replace(str(tmp), str(f))
     except Exception:
         pass
+
+
+# ---- 语音互斥锁（跨进程）----
+# 防止 CLI /talk 和 daemon 托盘同时开启语音模式导致麦克风/扬声器冲突。
+# 文件锁 + PID 记录，进程崩溃后锁自动过期（无 PID 或 PID 不存在）。
+
+_LOCK_FILE = Path(".jarvis") / "voice.lock"
+_LOCK_TTL = 60  # 锁过期秒数（进程崩溃后的兜底）
+
+
+def acquire_voice_lock() -> bool:
+    """尝试获取语音独占锁。成功返回 True，失败返回 False 并返回占用者信息。
+
+    调用方拿到 False 时应提示用户并放弃进入语音模式。
+    """
+    import signal
+
+    try:
+        lock_path = _state_file().parent / "voice.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if lock_path.exists():
+            try:
+                content = lock_path.read_text(encoding="utf-8").strip()
+                pid_str, ts_str = content.split(",", 1)
+                pid = int(pid_str)
+                ts = float(ts_str)
+                # 检查进程是否还活着
+                os.kill(pid, 0)  # signal 0 = 不发送信号，只检查存在
+                # PID 存在且未过期 → 锁有效
+                now = __import__("time").time()
+                if now - ts < _LOCK_TTL:
+                    return False
+            except (ValueError, OSError):
+                # 文件损坏或 PID 不存在 → 锁已失效，覆盖
+                pass
+
+        # 写入当前 PID + 时间戳
+        pid = os.getpid()
+        ts = __import__("time").time()
+        lock_path.write_text(f"{pid},{ts}", encoding="utf-8")
+        return True
+    except Exception:
+        return True  # 锁文件写入失败不影响功能，放行
+
+
+def release_voice_lock() -> None:
+    """释放语音独占锁。voice_loop 退出时必须调用。"""
+    try:
+        lock_path = _state_file().parent / "voice.lock"
+        if lock_path.exists():
+            lock_path.unlink()
+    except Exception:
+        pass

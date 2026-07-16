@@ -895,6 +895,18 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if cmd in ("/skills",):
                 _list_skills(ui, settings)
                 continue
+            if cmd in ("/plugin", "/plugins"):
+                _show_plugins(ui, settings)
+                continue
+            if cmd.startswith("/plugin install "):
+                _plugin_install(ui, settings, stripped)
+                continue
+            if cmd.startswith("/plugin uninstall "):
+                _plugin_uninstall(ui, settings, stripped)
+                continue
+            if cmd.startswith("/plugin search") or cmd.startswith("/plugin search "):
+                _plugin_search(ui, settings, stripped)
+                continue
             if cmd in ("/agents",):
                 _show_agents(ui, team_mgr, task_list)
                 continue
@@ -919,8 +931,11 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if cmd in ("/listen", "/mic"):
                 _listen(ui, settings, loop, ctx)
                 continue
-            if cmd in ("/voice", "/talk"):
+            if cmd in ("/voice",):
                 await _voice_mode(ui, settings, loop, ctx)
+                continue
+            if cmd == "/talk":
+                await _realtime_talk(ui, settings)
                 continue
             if cmd == "/models":
                 # 终端内联选择器：含内置模型 + 自定义模型 + 添加按钮
@@ -1050,6 +1065,11 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                         result = _switch_model(ui, settings, provider, registry, orchestrator, system_prompt, picked)
                         if result: provider, loop, model = result
                 continue
+            # ---- /<skill-name>: 用斜杠命令触发已安装的 skill ----
+            _maybe_skill = await _dispatch_skill(ui, settings, stripped, loop, ctx)
+            if _maybe_skill:
+                continue
+
             ui.warn(f"未知命令: {stripped}（/help 查看可用命令）")
             continue
 
@@ -1684,6 +1704,108 @@ def _show_memory(ui: RichCLI, settings: Settings) -> None:
         ui.info("（暂无长期记忆。可手动创建上述文件写入需要记住的信息。）")
 
 
+# ---- plugin 命令辅助函数 ----
+
+def _show_plugins(ui: RichCLI, settings: Settings) -> None:
+    """/plugin — 列出已安装插件。"""
+    from agent.core.plugins import PluginManager
+    pm = PluginManager(settings.plugin_marketplace)
+    installed = pm.list_installed()
+    plugins = installed.get("plugins", {})
+    if not plugins:
+        ui.info("（暂无已安装插件。使用 /plugin search 搜索可安装的插件。）")
+        return
+    if ui._console:
+        from rich.table import Table
+        table = Table(title="已安装插件", show_lines=False)
+        table.add_column("名称", style="cyan", no_wrap=True)
+        table.add_column("版本", style="dim")
+        table.add_column("来源", style="dim")
+        table.add_column("安装时间", style="dim")
+        for p in plugins.values():
+            table.add_row(
+                p.get("name", "?"),
+                p.get("version", "?"),
+                p.get("source", "?"),
+                p.get("installed_at", "?")[:19],
+            )
+        ui._console.print(table)
+    else:
+        for p in plugins.values():
+            ui.info(f"  {p['name']} v{p['version']} 来自 {p['source']}")
+
+
+def _plugin_install(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin install <name>"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin install <插件名>")
+        return
+    name = parts[2].strip()
+    from agent.core.plugins import PluginManager
+    pm = PluginManager(settings.plugin_marketplace)
+    ui.info(f"正在安装插件: {name} ...")
+    ok, msg = pm.install(name)
+    if ok:
+        ui.info(f"插件 '{name}' 安装成功！" + (f" ({msg})" if msg else ""))
+        ui.info("技能已安装到 ~/.jarvis/skills/，请 /reset 或重启后生效。")
+    else:
+        ui.error(f"安装失败: {msg}")
+
+
+def _plugin_uninstall(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin uninstall <name>"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin uninstall <插件名>")
+        return
+    name = parts[2].strip()
+    from agent.core.plugins import PluginManager
+    pm = PluginManager(settings.plugin_marketplace)
+    ok, msg = pm.uninstall(name)
+    if ok:
+        ui.info(f"插件 '{name}' 已卸载。")
+    else:
+        ui.error(f"卸载失败: {msg}")
+
+
+def _plugin_search(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin search [keyword]"""
+    parts = stripped.split(None, 2)
+    keyword = parts[2].strip() if len(parts) > 2 else ""
+    from agent.core.plugins import PluginManager
+    pm = PluginManager(settings.plugin_marketplace)
+    label = keyword if keyword else "全部"
+    ui.info(f"搜索插件: {label} ...")
+    try:
+        results = pm.search(keyword)
+    except Exception as e:
+        ui.error(f"搜索失败: {e}")
+        return
+    if not results:
+        ui.info("无匹配插件。")
+        return
+    if ui._console:
+        from rich.table import Table
+        table = Table(title=f"插件市场搜索结果: {label}", show_lines=True)
+        table.add_column("名称", style="cyan", no_wrap=True)
+        table.add_column("版本", style="dim")
+        table.add_column("描述")
+        table.add_column("作者")
+        for p in results:
+            table.add_row(
+                p.get("name", "?"),
+                p.get("version", "?"),
+                p.get("description", ""),
+                p.get("author", ""),
+            )
+        ui._console.print(table)
+    else:
+        for p in results:
+            ui.info(f"  {p['name']} v{p['version']} - {p.get('description', '')}")
+    ui.info("使用 /plugin install <名称> 安装")
+
+
 def _list_skills(ui: RichCLI, settings: Settings) -> None:
     """/skills — 列出已加载的技能包。"""
     from agent.core.skills import load_skills, list_skill_files
@@ -1713,6 +1835,56 @@ def _list_skills(ui: RichCLI, settings: Settings) -> None:
     else:
         for s in skills:
             print(f"  {s.name} [{s.source}] {s.description} — {s.when_to_use}")
+
+
+async def _dispatch_skill(
+    ui: RichCLI,
+    settings: Settings,
+    stripped: str,
+    loop: Any,
+    ctx: ToolContext,
+) -> bool:
+    """如果 stripped = /<skill-name> [...args]，则把 skill 提示词 + 用户参数注入对话。
+
+    Returns:
+        True 表示已匹配并执行了 skill（调用方应 continue），False 表示不是 skill 命令。
+    """
+    from agent.core.skills import load_skills
+
+    parts = stripped[1:].split(None, 1)  # 去掉 /
+    if not parts:
+        return False
+    skill_name = parts[0].lower()
+    user_arg = parts[1] if len(parts) > 1 else ""
+
+    skills = load_skills(settings.workdir)
+    matched = None
+    for s in skills:
+        if s.name.lower() == skill_name:
+            matched = s
+            break
+
+    if matched is None:
+        return False
+
+    prompt = matched.content
+    if user_arg:
+        prompt = f"{user_arg}\n\n请运用以下技能来完成上述请求：\n\n{matched.content}"
+    else:
+        prompt = f"请运用以下技能来帮助我：\n\n{matched.content}"
+
+    ui.info(f"调用技能: {matched.name}")
+    try:
+        stats = await loop.run(prompt, ctx)
+        if settings.verbose:
+            ui.info(
+                f"[{matched.name}] iterations={stats.iterations} "
+                f"tool_calls={stats.tool_calls} "
+                f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}]"
+            )
+    except Exception as e:
+        ui.error(f"技能执行出错: {type(e).__name__}: {e}")
+    return True
 
 
 # ---- /agents /tasks /plan 命令处理器 (Phase 1-3) ----
@@ -1992,6 +2164,41 @@ async def _voice_mode(ui: RichCLI, settings: Settings, loop: QueryLoop, ctx: Too
         ui.error(f"语音模块不可用: {e}")
         return
     await voice_loop(ui, settings, loop, ctx)
+
+
+async def _realtime_talk(ui: RichCLI, settings: Settings) -> None:
+    """/talk 命令 —— 实时双工语音对话。
+
+    实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
+    如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，
+    不能直接用于 DashScope WebSocket 鉴权，因此优先使用独立的 dashscope_api_key。
+    """
+    api_key = (
+        settings.dashscope_api_key
+        or os.environ.get("DASHSCOPE_API_KEY", "")
+        or settings.api_key
+        or os.environ.get("OPENAI_API_KEY", "")
+    )
+    if not api_key:
+        ui.error(
+            "未配置 DashScope API Key。实时双工语音对话依赖 DashScope 服务，"
+            "请设置环境变量 DASHSCOPE_API_KEY，或在 settings.toml 中配置 dashscope_api_key。"
+        )
+        return
+
+    try:
+        from agent.voice.realtime_talk import RealtimeTalk, DEFAULT_WS_URL
+    except ImportError as e:
+        ui.error(f"实时语音模块不可用: {e}")
+        return
+
+    rt = RealtimeTalk(
+        api_key=api_key,
+        model=getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
+        voice=getattr(settings, "realtime_voice", "longanqian"),
+        ws_url=getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+    )
+    await rt.run(ui)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

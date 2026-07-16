@@ -137,7 +137,11 @@ SLASH_COMMANDS = [
     ("/listen",     "录音并识别成文字（麦克风→STT→文本）"),
     ("/mic",        "录音并识别文字（/listen 别名）"),
     ("/voice",      "进入语音对话模式（连续听→想→说循环）"),
-    ("/talk",       "进入语音对话模式（/voice 别名）"),
+    ("/talk",       "进入实时双工语音对话（全双工，说话即可打断）"),
+    ("/plugin",                 "列出已安装插件"),
+    ("/plugin install <名称>",  "安装指定插件"),
+    ("/plugin uninstall <名称>","卸载指定插件"),
+    ("/plugin search <关键词>", "搜索可用插件"),
 ]
 
 # 工具名 → 语音播报描述（方言/中文，适合 TTS 朗读）
@@ -208,7 +212,7 @@ class _SlashCompleter(Completer):
         if text_lower.startswith("/save ") or text_before_cursor.startswith("/save "):
             return self._complete_sessions(text_before_cursor, prefix_cmd="/save ")
 
-        # ---- 默认：斜杠命令补全 ----
+        # ---- 默认：斜杠命令补全 + 技能补全 ----
         word = text_lower
         results: list[Completion] = []
         for cmd_name, desc in SLASH_COMMANDS:
@@ -224,6 +228,29 @@ class _SlashCompleter(Completer):
                         ]),
                     )
                 )
+
+        # 技能名补全（每个 skill 也作为 /<skill-name> 使用）
+        try:
+            from agent.core.skills import load_skills
+            import os
+            workdir = os.getcwd()
+            for skill in load_skills(workdir):
+                skill_cmd = f"/{skill.name}"
+                if skill_cmd.lower().startswith(word):
+                    desc = skill.description or "技能包"
+                    results.append(
+                        Completion(
+                            text=skill_cmd,
+                            start_position=-len(word),
+                            display=FormattedText([
+                                ("#5bc8ff", f"{skill_cmd:<16}"),
+                                ("#aaaaaa", f"  {desc}"),
+                            ]),
+                        )
+                    )
+        except Exception:
+            pass
+
         return results
 
     @staticmethod
