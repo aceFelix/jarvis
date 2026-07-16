@@ -1,7 +1,5 @@
 """权限规则模型。
 
-对应原项目 utils/permissions/PermissionRule.ts + permissionRuleParser.ts。
-
 规则格式: "ToolName(spec)"
 - spec 支持 fnmatch 通配符: Bash(git *), Read(src/**), Write(~/.ssh/*)
 - 无 spec 的规则: Bash -> 匹配该工具任意调用

@@ -1,6 +1,6 @@
 """TodoWrite 工具 —— 任务清单管理。
 
-对应原项目 tools/TodoWriteTool/。模型用它来规划和展示进度。
+模型用它来规划和展示进度。
 不是文件操作，状态存在 ctx.extra['todos'] 里（会话级）。
 """
 

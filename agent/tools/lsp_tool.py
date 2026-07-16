@@ -1,7 +1,5 @@
 """LSP 工具 —— 模型可调用的代码智能工具。
 
-对标 Claude Code 的 src/tools/LSPTool/LSPTool.ts。
-
 9 种操作：
 - goToDefinition: 跳转定义
 - findReferences: 查引用

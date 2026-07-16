@@ -1,7 +1,7 @@
 """配置加载。
 
-对应原项目 utils/config.ts + settings/。原版配置来源极多（文件/环境变量/
-MDM/keychain/CLI 参数），v0.1 用 TOML 文件 + 环境变量两层即可。
+配置来源（文件/环境变量/MDM/keychain/CLI 参数），
+v0.1 用 TOML 文件 + 环境变量两层即可。
 
 配置查找顺序（后者覆盖前者）:
 1. 内置默认值

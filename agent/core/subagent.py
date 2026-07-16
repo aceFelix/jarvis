@@ -1,7 +1,6 @@
 """子代理协作 —— 让主 agent 派生子 agent 并行处理子任务。
 
 阶段五第二刀。致敬 Claude Code 的 AgentTool + LocalAgentTask 架构，
-用 Python 重写为更简洁的实现。
 
 核心概念:
 1. **AgentDefinition**: 子 agent 的"人格定义"——system prompt、允许的工具集、

@@ -1,7 +1,5 @@
 """共享任务列表 —— 团队协作的任务追踪系统。
 
-致敬 Claude Code 的 tasks.ts + TaskCreate/Get/List/Update 工具。
-
 核心概念：
 1. **TodoTask**: 任务数据模型——id、标题、描述、状态、owner、依赖链。
 2. **依赖链**: blocks（此任务阻塞谁）/ blockedBy（谁阻塞此任务）。

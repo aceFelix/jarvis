@@ -1,7 +1,5 @@
 """Shell 命令分类器。
 
-对应原项目 bashClassifier.ts + dangerousPatterns.ts + shellRuleMatching.ts。
-
 两类判定:
 1. 只读白名单: 这些命令无副作用（ls/cat/grep/find/git status 等），
    可在 plan 模式或没命中 allow 规则时安全放行。

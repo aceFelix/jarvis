@@ -1,6 +1,6 @@
 """FileWrite 工具 —— 写入文件（覆盖或新建）。
 
-对应原项目 tools/FileWriteTool/。语义: 把 content 完整写入指定文件。
+语义: 把 content 完整写入指定文件。
 已存在的文件会被覆盖（v0.1 不做备份，依赖外部 git/versionControl）。
 """
 

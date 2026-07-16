@@ -1,7 +1,6 @@
 """prompt_toolkit 终端内联选择器 + 文本输入。
 
-类似 Claude Code 的 Ink Select / Ink TextInput 组件，在同一个终端窗口内显示，
-不弹独立窗口。
+在同一个终端窗口内显示，不弹独立窗口。
 
 用法:
     # 选择列表

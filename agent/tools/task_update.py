@@ -1,7 +1,5 @@
 """TaskUpdate 工具 —— 更新任务状态、分配 owner、设置依赖链。
 
-致敬 Claude Code 的 TaskUpdateTool。
-
 支持的操作：
 - 更新状态（pending → in_progress → completed）
 - 分配 owner（格式: agent 名）

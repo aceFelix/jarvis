@@ -1,7 +1,5 @@
 """ExitPlanMode 工具 —— 提交方案，退出规划模式进入执行阶段。
 
-致敬 Claude Code 的 ExitPlanModeV2Tool。
-
 工作流：
 1. EnterPlanMode → 只读调研分析 → 输出方案
 2. ExitPlanMode(plan_file="...") → 保存方案到文件 → 用户审核

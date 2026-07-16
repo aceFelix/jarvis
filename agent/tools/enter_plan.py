@@ -1,7 +1,5 @@
 """EnterPlanMode 工具 —— 复杂任务先规划、再执行。
 
-致敬 Claude Code 的 EnterPlanModeTool。
-
 用途：
 - 模型完成规划阶段后可调此工具请求退出规划模式
 - 如已生成方案文件（含路径），系统将其注入后续执行的 system prompt

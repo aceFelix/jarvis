@@ -1,7 +1,7 @@
 """Agent 主循环 —— Agent 的大脑。
 
-对应原项目 query.ts（1608 行）。原版极其复杂（含 3 种压缩、context collapse、
-token budget、stop hooks、SDK 适配……），v0.1 实现最核心的闭环:
+（含 3 种压缩、context collapse、token budget、stop hooks、SDK 适配……），
+v0.1 实现最核心的闭环:
 
     user 输入 -> LLM 流 -> (有 tool_use? -> 执行工具 -> 回灌 -> 再调 LLM) -> 结束
 

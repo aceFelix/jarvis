@@ -1,8 +1,7 @@
 """权限模式。
 
-对应原项目 utils/permissions/PermissionMode.ts。模式是"全局策略开关"，
-规则是"细粒度配置"。模式可以放宽 ASK（比如 accept_edits 自动放行写文件），
-但不能放宽 DENY。
+模式是"全局策略开关"，规则是"细粒度配置"。
+模式可以放宽 ASK（比如 accept_edits 自动放行写文件），但不能放宽 DENY。
 
 模式语义:
 - default:       严格模式，所有非 allow 规则命中的操作都 ASK

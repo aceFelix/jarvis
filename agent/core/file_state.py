@@ -1,7 +1,5 @@
 """文件状态缓存 —— 追踪文件修改时间，检测编辑冲突。
 
-对标 Claude Code 的 fileStateCache。
-
 工作原理:
 1. FileRead 读取文件时，记录文件路径 + mtime（最后修改时间）
 2. FileEdit / FileWrite 编辑文件前，检查磁盘上文件的 mtime

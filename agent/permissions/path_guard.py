@@ -1,6 +1,6 @@
 """路径守护。
 
-对应原项目 utils/permissions/pathGuard / filesystem.ts（1626 行）。精简到核心:
+核心:
 - 危险目录拒绝写入（.ssh / .aws / .gnupg / 系统9个关键目录）
 - 符号链接逃逸检测（防止通过软链绕过限制）
 - workdir 限制（默认禁止写到工作目录之外，除非用户显式加白名单）

@@ -1,6 +1,6 @@
 """主入口 —— 装配所有零件，跑通 REPL。
 
-对应原项目 main.tsx + replLauncher.tsx。原版有 200+ 行 import 和大量启动优化，
+大量import 和大量启动优化，
 v0.1 聚焦"能跑起来": 解析 CLI 参数 -> 加载配置 -> 构建 provider/registry/checker/
 loop -> 进入 REPL 循环。
 

@@ -1,7 +1,5 @@
 """Web 工具 —— WebFetch + WebSearch。
 
-对应原项目 tools/WebFetchTool/ + tools/WebSearchTool/。
-
 设计要点:
 1. WebFetch: 抓取 URL 内容，转 Markdown 给 LLM
 2. WebSearch: 用搜索引擎查询（默认 DuckDuckGo HTML，无需 API key）

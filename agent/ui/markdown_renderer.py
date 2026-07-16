@@ -1,7 +1,5 @@
 """Markdown 富文本渲染模块。
 
-对应原项目 ui/Markdown.tsx（用 Ink/React 渲染 Markdown）。
-
 设计目标:
 1. 用 rich 库渲染 Markdown 文本（代码块、表格、列表、标题、加粗、链接）
 2. 提供:

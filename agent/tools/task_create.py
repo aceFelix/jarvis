@@ -1,6 +1,4 @@
 """TaskCreate 工具 —— 在共享任务列表中创建新任务。
-
-致敬 Claude Code 的 TaskCreateTool。
 """
 
 from __future__ import annotations

@@ -1,7 +1,5 @@
 """Agent 间消息邮箱系统 —— 基于文件的异步消息传递。
 
-致敬 Claude Code 的 teammateMailbox.ts。
-
 核心概念：
 1. **文件邮箱**: 每个 agent 在 inboxes/{name}.json 有一个消息队列。
 2. **消息类型**: 支持 10+ 种结构化消息（idle/plan/shutdown/permission/assignment）。

@@ -1,7 +1,6 @@
 """Hooks 钩子系统 —— 事件订阅与分发。
 
-对应原项目 utils/hooks/（17 文件）。原版支持 Agent/HTTP/Prompt 三类钩子、
-文件变更监听、frontmatter/skill 钩子、SSRF 防护等复杂场景。
+支持 Agent/HTTP/Prompt 三类钩子、文件变更监听、frontmatter/skill 钩子、SSRF 防护等复杂场景。
 
 v0.1 实现核心:
 1. AsyncHookRegistry —— 异步钩子注册中心

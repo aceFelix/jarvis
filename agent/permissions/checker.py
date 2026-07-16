@@ -1,7 +1,6 @@
 """权限校验主流程。
 
-对应原项目 utils/permissions/permissions.ts（1387 行）。把"模式 / 规则 /
-工具特判 / 路径守护 / Shell 分类"五者串成一个统一的判定管线。
+把"模式 / 规则 / 工具特判 / 路径守护 / Shell 分类"五者串成一个统一的判定管线。
 
 判定顺序（fail-closed，安全侧优先）:
 1. 工具特判（tool.check_permissions）—— 工具自己最懂自己

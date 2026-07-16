@@ -1,6 +1,6 @@
 """权限系统。
 
-对应原项目 utils/permissions/（8000+ 行）。这里大幅精简，保留核心:
+核心:
 - modes.py:    权限模式（default/plan/accept_edits/yolo）
 - rules.py:    三态规则模型（allow/deny/ask）+ 来源层级
 - checker.py:  权限校验主流程（规则匹配 + 模式覆写 + 工具特判）

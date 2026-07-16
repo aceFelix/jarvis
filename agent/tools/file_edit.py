@@ -1,6 +1,6 @@
 """FileEdit 工具 —— 精确替换文件内容。
 
-对应原项目 tools/FileEditTool/。语义: 在文件中找到 old_string，替换为 new_string。
+语义: 在文件中找到 old_string，替换为 new_string。
 要求 old_string 在文件中唯一，否则报错（避免改错地方）。
 """
 

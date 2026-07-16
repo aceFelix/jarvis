@@ -1,7 +1,5 @@
 """TeamDelete 工具 —— 解散多 Agent 协作团队。
 
-致敬 Claude Code 的 TeamDeleteTool。
-
 前置条件：除 leader 外无活跃成员（需先用 SendMessage shutdown 让队友退出）。
 """
 

@@ -1,7 +1,7 @@
 """对话消息类型。
 
-对应原项目 types/message.ts。刻意用 dataclass 而非 pydantic —— 这些是
-内部数据结构，不需要序列化校验开销。给 LLM 的格式转换在 llm/ 层完成。
+刻意用 dataclass 而非 pydantic —— 这些是内部数据结构，不需要序列化校验开销。
+给 LLM 的格式转换在 llm/ 层完成。
 """
 
 from __future__ import annotations

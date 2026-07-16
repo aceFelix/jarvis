@@ -1,8 +1,6 @@
 """工具编排器 —— 把模型发起的 tool_use 批量调度执行。
 
-对应原项目 services/tools/toolOrchestration.ts + StreamingToolExecutor.ts。
-
-核心策略（沿用原项目）:
+核心策略:
 1. 并发安全分组: is_concurrency_safe=True 的工具可并行；False 的串行。
 2. 权限校验: 每个工具调用前过 PermissionChecker，ASK 时通过 UI 问用户。
 3. 失败隔离: 一个工具失败不影响其他工具（返回 is_error=True 的结果给 LLM）。

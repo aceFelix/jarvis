@@ -1,7 +1,6 @@
 """LLM 抽象层。
 
-对应原项目 services/api/claude.ts。原项目硬编码了 Anthropic SDK，这里抽
-象成 Provider 接口，便于切换 Anthropic / OpenAI / 本地模型 / Mock。
+抽象成 Provider 接口，便于切换 Anthropic / OpenAI / 本地模型 / Mock。
 
 设计原则:
 - Provider 只负责"消息 + 工具定义 -> 流式响应"的转换，不碰业务逻辑。

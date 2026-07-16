@@ -1,7 +1,5 @@
 """TeamCreate 工具 —— 创建多 Agent 协作团队。
 
-致敬 Claude Code 的 TeamCreateTool。
-
 创建团队后：
 1. 自动生成共享任务列表（Team = TaskList，1:1 对应）
 2. Leader 固定为 "team-lead@teamName"

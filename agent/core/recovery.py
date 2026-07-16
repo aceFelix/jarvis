@@ -1,7 +1,5 @@
 """会话崩溃恢复 —— crossProjectResume 等价物。
 
-对应原项目 utils/messages/crossProjectResume.ts + session 自动保存机制。
-
 设计目标:
 1. 每轮对话结束后自动写"恢复点"到 ~/.jarvis/sessions/.recovery.json
 2. 启动时检查恢复点：

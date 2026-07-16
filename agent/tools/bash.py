@@ -1,6 +1,6 @@
 """Bash 工具 —— 执行 shell 命令。
 
-对应原项目 tools/BashTool/。这是权限系统最关心的工具:
+这是权限系统最关心的工具:
 - 默认 ASK（无 allow 规则时必须确认）
 - 命令分类（readonly/dangerous/unknown）由 permissions/shell_classifier.py 做
 - prepare_permission_matcher 解析命令前缀，让规则 "Bash(git *)" 能命中

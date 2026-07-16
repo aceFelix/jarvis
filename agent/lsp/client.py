@@ -1,7 +1,5 @@
 """LSP 客户端 —— JSON-RPC over stdio 通信。
 
-对标 Claude Code 的 src/services/lsp/LSPClient.ts。
-
 LSP 协议基于 JSON-RPC 2.0，通过子进程的 stdin/stdout 传输。
 每条消息前有 `Content-Length: N\r\n\r\n` 头，body 是 N 字节的 JSON。
 

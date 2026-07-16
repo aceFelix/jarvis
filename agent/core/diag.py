@@ -1,7 +1,5 @@
 """诊断日志（Diagnostic Logging）。
 
-对应原项目 utils/diagLogs.ts + utils/errorLogSink.ts。
-
 设计目标:
 1. 与 ui.info/warn/error 解耦 —— 诊断日志给开发者排查问题用，不干扰用户
 2. 分类（component + level），便于过滤

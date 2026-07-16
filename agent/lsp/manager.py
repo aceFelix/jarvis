@@ -1,7 +1,5 @@
 """LSP Server Manager —— 多 server 路由 + 文件追踪。
 
-对标 Claude Code 的 src/services/lsp/LSPServerManager.ts。
-
 按文件扩展名路由到对应的 LSP server（如 .py → pylsp, .ts → tsserver）。
 管理文件打开/关闭状态，把工具调用转发到正确的 server。
 """

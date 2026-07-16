@@ -1,7 +1,5 @@
 """SendMessage 工具 —— Agent 间消息传递。
 
-致敬 Claude Code 的 SendMessageTool。
-
 支持消息类型：
 - message: 向特定队友发文本消息
 - broadcast: 向所有队友广播

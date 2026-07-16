@@ -1,6 +1,5 @@
 """工具执行结果与权限结果的数据模型。
 
-对应原项目 Tool.ts 中的 ToolResult<T>、ValidationResult、PermissionResult。
 刻意保持精简：只保留运行时真正需要的字段，避免过度抽象。
 """
 

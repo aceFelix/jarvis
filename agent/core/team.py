@@ -1,7 +1,5 @@
 """多 Agent 团队系统 —— 管理团队生命周期、成员、状态持久化。
 
-致敬 Claude Code 的 TeamCreate/TeamDelete/Swarm 架构，用 Python 重写。
-
 核心概念：
 1. **Team**: 一个协作团队，1:1 对应一个 TaskList。包含成员列表、配置、邮件箱。
 2. **TeamMember**: 队友身份——agentId(name@teamName)、角色、状态、模型。

@@ -1,6 +1,6 @@
 """FileRead 工具 —— 读取文件内容。
 
-对应原项目 tools/FileReadTool/。支持:
+支持:
 - 按行范围读取（offset + limit）
 - 二进制文件检测（拒绝读取，提示用户）
 - 大文件截断（超过 max_result_chars 时保留首尾）
