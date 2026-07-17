@@ -29,7 +29,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.context import ToolContext
-from agent.core.message import Message, TextContent, ThinkingContent, ToolResultContent, ToolUseContent
+from agent.core.message import (
+    ContentBlock,
+    ImageContent,
+    Message,
+    TextContent,
+    ThinkingContent,
+    ToolResultContent,
+    ToolUseContent,
+)
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.tool import ToolRegistry
 from agent.core.memory.compactor import (
@@ -151,10 +159,16 @@ class QueryLoop:
                 ctx.ui.warn(f"上下文压缩失败，继续使用完整历史: {e}")
             return False
 
-    async def run(self, user_text: str, ctx: ToolContext) -> QueryStats:
+    async def run(
+        self,
+        user_text: str,
+        ctx: ToolContext,
+        images: list[ImageContent] | None = None,
+    ) -> QueryStats:
         """跑一轮对话（从用户消息开始，直到模型不再调用工具）。
 
         会修改 ctx.messages（追加 assistant/user 消息）。
+        传入的 images 会作为 user message 的 image content block 一并发给模型。
         """
         stats = QueryStats()
 
@@ -171,8 +185,11 @@ class QueryLoop:
         except Exception:
             pass
 
-        # 追加用户消息
-        ctx.messages.append(Message.user_text(user_text))
+        # 追加用户消息（文本 + 可选图片）
+        content_blocks: list[ContentBlock] = [TextContent(text=user_text)]
+        if images:
+            content_blocks.extend(images)
+        ctx.messages.append(Message(role="user", content=content_blocks))
 
         # 动态水位线压缩：根据当前 token 水位应用不同策略
         if self._enable_compaction:

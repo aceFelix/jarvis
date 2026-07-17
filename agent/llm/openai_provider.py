@@ -11,7 +11,14 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
-from agent.core.message import Message, TextContent, ThinkingContent, ToolResultContent, ToolUseContent
+from agent.core.message import (
+    ImageContent,
+    Message,
+    TextContent,
+    ThinkingContent,
+    ToolResultContent,
+    ToolUseContent,
+)
 from agent.llm.base import (
     LLMEvent,
     LLMProvider,
@@ -69,51 +76,73 @@ def _messages_to_openai(
                 entry["tool_calls"] = tool_calls
             out.append(entry)
         elif msg.role == "user":
-            # user 消息里可能是普通文本，也可能是 tool_result
+            # user 消息里可能是普通文本、图片，也可能是 tool_result
+            user_content: list[dict[str, Any]] = []
+            has_user_image = False
+            tool_results: list[ToolResultContent] = []
+
             for b in msg.content:
                 if isinstance(b, TextContent):
                     if b.text:
-                        out.append({"role": "user", "content": b.text})
+                        user_content.append({"type": "text", "text": b.text})
+                elif isinstance(b, ImageContent):
+                    has_user_image = True
+                    if not skip_images:
+                        user_content.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{b.media_type};base64,{b.data}"
+                                },
+                            }
+                        )
                 elif isinstance(b, ToolResultContent):
-                    # 多模态: 带 images 时 content 序列化成 [text, image_url...] 列表，
-                    # 让支持视觉的 GPT-4o 等直接看到图片（如 ScreenShot 截图回传）。
-                    # 纯文本模型时跳过图片（改为文本占位），避免 API 报错。
-                    if b.images:
-                        if skip_images:
-                            # 纯文本模型：用文字描述替代图片
-                            img_count = len(b.images)
-                            content_list = [
-                                {"type": "text",
-                                 "text": b.content + f"\n[附带 {img_count} 张图片（当前为纯文本模型，图片已省略）]"}
-                            ]
-                        else:
-                            content_list: list[dict[str, Any]] = [
-                                {"type": "text", "text": b.content}
-                            ]
-                            for img in b.images:
-                                content_list.append(
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:{img.media_type};base64,{img.data}"
-                                        },
-                                    }
-                                )
-                        out.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": b.tool_use_id,
-                                "content": content_list,
-                            }
-                        )
+                    tool_results.append(b)
+
+            if has_user_image and skip_images and user_content:
+                # 纯文本模型：用文字描述替代图片
+                user_content[0]["text"] += "\n[附带图片（当前为纯文本模型，图片已省略）]"
+
+            if user_content:
+                out.append({"role": "user", "content": user_content})
+
+            for b in tool_results:
+                if b.images:
+                    if skip_images:
+                        # 纯文本模型：用文字描述替代图片
+                        img_count = len(b.images)
+                        content_list = [
+                            {"type": "text",
+                             "text": b.content + f"\n[附带 {img_count} 张图片（当前为纯文本模型，图片已省略）]"}
+                        ]
                     else:
-                        out.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": b.tool_use_id,
-                                "content": b.content,
-                            }
-                        )
+                        content_list: list[dict[str, Any]] = [
+                            {"type": "text", "text": b.content}
+                        ]
+                        for img in b.images:
+                            content_list.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{img.media_type};base64,{img.data}"
+                                    },
+                                }
+                            )
+                    out.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": b.tool_use_id,
+                            "content": content_list,
+                        }
+                    )
+                else:
+                    out.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": b.tool_use_id,
+                            "content": b.content,
+                        }
+                    )
     return out
 
 

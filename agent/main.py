@@ -40,7 +40,7 @@ sys.set_asyncgen_hooks(firstiter=_orig_firstiter, finalizer=_jarvis_agen_finaliz
 
 from agent.config.settings import Settings, load_settings
 from agent.core.context import ToolContext
-from agent.core.message import Message, TextContent
+from agent.core.message import ImageContent, Message, TextContent
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
 from agent.core.tool import ToolRegistry, build_default_registry
@@ -546,6 +546,78 @@ def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> 
     )
 
 
+def _load_image_from_path(path: str) -> ImageContent | None:
+    """从文件路径加载图片，缩放并编码为 ImageContent。"""
+    try:
+        from PIL import Image
+        from agent.tools.system.screen import ScreenShotTool
+    except ImportError:
+        return None
+
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return None
+    try:
+        img = Image.open(p)
+        img.load()
+        return ScreenShotTool._encode_image(img, "jpeg", 1280)
+    except Exception:
+        return None
+
+
+def _load_image_from_clipboard() -> ImageContent | None:
+    """从系统剪贴板读取图片（Windows/macOS 支持），编码为 ImageContent。"""
+    try:
+        from PIL import Image, ImageGrab
+        from agent.tools.system.screen import ScreenShotTool
+    except ImportError:
+        return None
+
+    data = ImageGrab.grabclipboard()
+    if data is None:
+        return None
+    if isinstance(data, Image.Image):
+        return ScreenShotTool._encode_image(data, "jpeg", 1280)
+    # Windows 剪贴板有时是文件路径列表
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, str):
+                ext = Path(item).suffix.lower()
+                if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
+                    content = _load_image_from_path(item)
+                    if content is not None:
+                        return content
+    return None
+
+
+def _pending_images(ctx: ToolContext) -> list[ImageContent]:
+    """获取当前待发送的图片列表。"""
+    return ctx.extra.setdefault("pending_images", [])
+
+
+def _hash_image(img: ImageContent) -> str:
+    """为 ImageContent 生成稳定哈希，用于去重。"""
+    import hashlib
+    return hashlib.md5(f"{img.media_type}:{img.data}".encode()).hexdigest()
+
+
+def _auto_attach_clipboard_image(ctx: ToolContext, ui: RichCLI) -> list[ImageContent]:
+    """如果剪贴板有新图片，自动加入待发送列表并返回。"""
+    pending = ctx.extra.pop("pending_images", None) or []
+    if pending:
+        return pending
+    img = _load_image_from_clipboard()
+    if img is None:
+        return []
+    h = _hash_image(img)
+    if h == ctx.extra.get("_last_clipboard_image_hash"):
+        return []
+    pending.append(img)
+    ctx.extra["_last_clipboard_image_hash"] = h
+    ui.info("✅ 检测到剪贴板图片，已自动附加到当前消息")
+    return pending
+
+
 async def repl(settings: Settings, with_tray: bool = False) -> int:
     """REPL 主循环。返回退出码。
 
@@ -680,6 +752,10 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 on_voice=lambda: None,   # 前台 REPL 不需要托盘唤起
                 on_text=lambda: None,    # 用户在终端直接打字
                 on_quit=_tray_quit,
+                voice_enabled_getter=lambda: True,  # 前台 REPL 无语音开关概念，默认开启
+                voice_toggle=lambda: None,
+                realtime_enabled_getter=lambda: False,  # 前台 REPL 不展示实时聊天开关
+                realtime_toggle=lambda: None,
             )
             if tray.start():
                 ui.info("✓ 托盘图标已启动（右键「退出贾维斯」可关闭）")
@@ -749,10 +825,19 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             print()
             break
 
-        if not user_input:
-            continue
+        stripped = user_input.strip() if user_input else ""
 
-        stripped = user_input.strip()
+        # 空行提交：检测剪贴板图片，允许「复制图片 → 直接回车」的粘贴操作
+        if not stripped:
+            img = _load_image_from_clipboard()
+            if img:
+                h = _hash_image(img)
+                if h != ctx.extra.get("_last_clipboard_image_hash"):
+                    _pending_images(ctx).append(img)
+                    ctx.extra["_last_clipboard_image_hash"] = h
+                    ui.info("✅ 检测到剪贴板图片，已添加到待发送列表，请输入消息")
+                    continue
+            continue
 
         # ---- 斜杠命令 ----
         if stripped.startswith("/"):
@@ -928,6 +1013,26 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if cmd.startswith("/say "):
                 _say(ui, settings, stripped.split(" ", 1)[1])
                 continue
+            if cmd in ("/paste", "/p", "/clipboard"):
+                img = _load_image_from_clipboard()
+                if img is None:
+                    ui.warn("剪贴板中没有图片（或缺少 Pillow）")
+                else:
+                    _pending_images(ctx).append(img)
+                    ui.info("✅ 已添加剪贴板图片，下一条消息会附带发送")
+                continue
+            if cmd.startswith(("/image", "/img")):
+                parts = stripped.split(None, 1)
+                if len(parts) < 2:
+                    ui.warn("用法: /image <图片路径>")
+                else:
+                    img = _load_image_from_path(parts[1].strip())
+                    if img is None:
+                        ui.warn(f"无法加载图片: {parts[1].strip()}")
+                    else:
+                        _pending_images(ctx).append(img)
+                        ui.info(f"✅ 已添加图片，下一条消息会附带发送: {parts[1].strip()}")
+                continue
             if cmd in ("/listen", "/mic"):
                 _listen(ui, settings, loop, ctx)
                 continue
@@ -1075,7 +1180,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
 
         # ---- 普通对话 ----
         try:
-            stats = await loop.run(stripped, ctx)
+            pending = _auto_attach_clipboard_image(ctx, ui)
+            stats = await loop.run(stripped, ctx, images=pending)
             if settings.verbose:
                 ui.info(
                     f"[iterations={stats.iterations} tool_calls={stats.tool_calls} "
@@ -1099,17 +1205,15 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 pass
 
             # 1轮对话后用用户首句生成标题；2轮对话后用 LLM 根据前两轮生成标题
-            if not _title_generated:
-                if _dialog_count == 1:
-                    _title_generated = True
-                    _session_name = await _generate_title_from_first_user(
-                        ui, messages, _session_name
-                    )
-                elif _dialog_count == 2 and len(messages) >= 4:
-                    _title_generated = True
-                    _session_name = await _generate_session_title(
-                        ui, provider, model, messages, _session_name
-                    )
+            if _dialog_count == 1:
+                _session_name = await _generate_title_from_first_user(
+                    ui, messages, _session_name
+                )
+            elif _dialog_count == 2 and len(messages) >= 4 and not _title_generated:
+                _title_generated = True
+                _session_name = await _generate_session_title(
+                    ui, provider, model, messages, _session_name
+                )
         except KeyboardInterrupt:
             ctx.abort_event.set()
             ui.warn("已中断（按回车继续）")
@@ -1147,10 +1251,10 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
 
 
 def _sanitize_title(title: str) -> str:
-    """标题文件名安全化：去标点、换空格为连字符，截断到 12 字。"""
+    """标题文件名安全化：去标点、换空格为连字符，截断到 15 字。"""
     import re
 
-    title = title.strip()[:12]
+    title = title.strip()[:15]
     title = re.sub(r'[^\w\s\u4e00-\u9fff-]', '', title).strip()
     title = re.sub(r'\s+', '-', title)
     return title
@@ -1177,7 +1281,7 @@ def _rename_session_file(old_name: str, title: str) -> str:
 async def _generate_title_from_first_user(
     ui: RichCLI, messages: list[Message], old_name: str
 ) -> str:
-    """第 1 轮对话结束后：取用户第一条消息的前 12 字作为标题。"""
+    """第 1 轮对话结束后：取用户第一条消息的前 15 字作为标题。"""
     try:
         first_user_text = ""
         for m in messages:
@@ -1191,8 +1295,8 @@ async def _generate_title_from_first_user(
         if not first_user_text:
             return old_name
 
-        # 取前 12 个字符（中英文混排按字符计）
-        title = first_user_text[:12]
+        # 取前 15 个字符（中英文混排按字符计）
+        title = first_user_text[:15]
         title = _rename_session_file(old_name, title)
         if title != old_name:
             ui.info(f"📝 会话标题已生成: {title}")
@@ -1207,7 +1311,7 @@ async def _generate_session_title(
     """第 2 轮对话结束后：用 LLM 根据前两轮对话生成标题。返回新名称（失败则返回旧名）。
 
     只取前两轮 user/assistant 消息（最多 4 条）喂给 LLM，不污染上下文。
-    标题限制 12 字以内，去标点，作文件名时安全截断。
+    标题限制 15 字以内，去标点，作文件名时安全截断。
     """
     try:
         # 取前两轮 user/assistant 消息（最多 4 条），跳过 tool 消息
@@ -1228,27 +1332,42 @@ async def _generate_session_title(
 
         dialog_text = "\n".join(dialog_lines)
         prompt = (
-            "根据以下对话，用12个字以内总结一个会话标题。"
-            "只输出标题文本（不含标点、引号、换行），不要任何额外内容。\n\n"
-            f"{dialog_text}"
+            "请根据以下对话内容，用15个字以内生成一个会话标题。\n"
+            "要求：只输出标题文本，不要输出任何解释、标点、引号，"
+            "不要重复题目或用户原话。\n\n"
+            f"对话：\n{dialog_text}\n\n"
+            "标题："
         )
 
         msgs = [Message(role="user", content=[TextContent(text=prompt)])]
-        events = provider.stream(
-            model=model,
-            system="你是会话标题生成器，仅输出简短标题。",
-            messages=msgs,
-            tools=[],
-            max_tokens=30,
-            temperature=0,
-        )
 
+        # 标题生成不需要深度思考，临时关闭避免模型输出冗余 reasoning/echo
+        old_thinking = provider.is_thinking_enabled()
         title_text = ""
-        async for event in events:
-            if hasattr(event, "text") and event.text:
-                title_text += event.text
+        try:
+            provider.set_thinking_enabled(False)
+            events = provider.stream(
+                model=model,
+                system="",
+                messages=msgs,
+                tools=[],
+                max_tokens=30,
+                temperature=0.3,
+            )
+            async for event in events:
+                if hasattr(event, "text") and event.text:
+                    title_text += event.text
+        finally:
+            provider.set_thinking_enabled(old_thinking)
 
-        title = _rename_session_file(old_name, title_text.strip())
+        # 去除模型可能带出的 "标题：" 前缀、引号等多余字符
+        title_text = title_text.strip()
+        for prefix in ("标题：", "标题:", "会话标题：", "会话标题:", "Title:", "Title："):
+            if title_text.startswith(prefix):
+                title_text = title_text[len(prefix):].strip()
+        title_text = title_text.strip("'\"«»")
+
+        title = _rename_session_file(old_name, title_text)
         if title != old_name:
             ui.info(f"📝 会话标题已生成: {title}")
         return title
@@ -1318,6 +1437,10 @@ def _print_help(ui: RichCLI) -> None:
         "  /skills      列出已加载的技能包\n"
         "  /mcp         查看 MCP server 连接状态\n"
         "  /tools       列出可用工具\n"
+        "  /image <path> 添加本地图片到待发送列表（下条消息附带）\n"
+        "  /img <path>   添加本地图片（/image 别名）\n"
+        "  /paste       添加剪贴板图片到待发送列表（下条消息附带）\n"
+        "  /p           添加剪贴板图片（/paste 别名）\n"
         "  /say <text>  用语音朗读一段文字\n"
         "  /listen      录音并识别成文字（麦克风→文字）\n"
         "  /voice       进入语音对话模式（连续听→想→说，说「退出」结束）\n"
@@ -2312,6 +2435,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="ACP (Agent Client Protocol) 模式：JSON-RPC stdio 传输（供 cc-connect 桥接）",
     )
+    p.add_argument(
+        "--talk",
+        action="store_true",
+        help="直接启动实时双工语音对话（/talk），需要配置 DashScope API Key",
+    )
     return p.parse_args(argv)
 
 
@@ -2541,6 +2669,14 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as e:
         print(f"无法进入工作目录 {settings.workdir}: {e}", file=sys.stderr)
         return 1
+
+    # 直接启动实时双工语音对话
+    if args.talk:
+        ui = RichCLI(verbose=settings.verbose, boot_animation=not args.no_boot)
+        try:
+            return asyncio.run(_realtime_talk(ui, settings))
+        except KeyboardInterrupt:
+            return 130
 
     # ACP 模式：cc-connect 通过 JSON-RPC over stdio 桥接贾维斯到 IM 平台
     if args.headless or args.acp:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
-from agent.core.message import Message, TextContent, ToolResultContent, ToolUseContent
+from agent.core.message import ImageContent, Message, TextContent, ToolResultContent, ToolUseContent
 from agent.llm.base import (
     LLMEvent,
     LLMProvider,
@@ -36,6 +36,16 @@ def _block_to_anthropic(block: Any) -> dict[str, Any]:
             "id": block.id,
             "name": block.name,
             "input": block.input,
+        }
+    if isinstance(block, ImageContent):
+        # 用户直接传入的图片（/image /paste）
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": block.media_type,
+                "data": block.data,
+            },
         }
     if isinstance(block, ToolResultContent):
         # 多模态: 带 images 时 content 序列化成 [text, image...] 列表，

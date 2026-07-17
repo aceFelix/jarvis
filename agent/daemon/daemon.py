@@ -374,12 +374,16 @@ class TrayIcon:
         on_quit: Callable[[], None],
         voice_enabled_getter: Callable[[], bool],
         voice_toggle: Callable[[], None],
+        realtime_enabled_getter: Callable[[], bool],
+        realtime_toggle: Callable[[], None],
     ) -> None:
         self._on_voice = on_voice
         self._on_text = on_text
         self._on_quit = on_quit
         self._voice_enabled_getter = voice_enabled_getter
         self._voice_toggle = voice_toggle
+        self._realtime_enabled_getter = realtime_enabled_getter
+        self._realtime_toggle = realtime_toggle
         self._icon: Any = None
         self._thread: threading.Thread | None = None
 
@@ -420,6 +424,11 @@ class TrayIcon:
                     self._handle_voice,
                     checked=lambda item: self._voice_enabled_getter(),
                     default=True,
+                ),
+                pystray.MenuItem(
+                    lambda item: "实时聊天" if self._realtime_enabled_getter() else "实时聊天：已关闭",
+                    self._handle_realtime_talk,
+                    checked=lambda item: self._realtime_enabled_getter(),
                 ),
                 pystray.MenuItem("文本对话", self._handle_text),
                 pystray.Menu.SEPARATOR,
@@ -480,6 +489,27 @@ class TrayIcon:
             except Exception:
                 pass
 
+    def _handle_realtime_talk(self, item=None) -> None:
+        """处理托盘「实时聊天」项点击。
+
+        切换开关状态并通知 daemon 启动/停止实时双工语音对话子进程。
+        开启时持久化配置并启动独立进程；关闭时终止进程并更新配置。
+
+        @author aceFelix
+        """
+        try:
+            self._realtime_toggle()
+            self.update_menu()
+            if self._realtime_enabled_getter():
+                self.notify("J.A.R.V.I.S", "实时聊天已开启")
+            else:
+                self.notify("J.A.R.V.I.S", "实时聊天已关闭")
+        except Exception as e:
+            try:
+                self.notify("J.A.R.V.I.S", f"实时聊天操作失败: {e}")
+            except Exception:
+                pass
+
     def _handle_text(self, *_args) -> None:
         try:
             self._on_text()
@@ -527,9 +557,12 @@ class JarvisDaemon:
         self._wake_mode: str = "voice"  # "voice" 或 "text"
         self._quit_event = threading.Event()
         self._text_terminal_proc: Any = None  # 跟踪已弹出的文本终端子进程
+        self._realtime_talk_proc: Any = None  # 跟踪实时聊天子进程
         # 语音开关状态: 用文件作为跨进程 SSOT，self._voice_enabled 仅作内存缓存
         from agent.daemon.voice_state import is_voice_enabled
         self._voice_enabled = is_voice_enabled()
+        # 实时聊天开关状态：从配置读取，托盘切换后持久化到 settings.toml
+        self._realtime_talk_enabled = bool(getattr(settings, "realtime_talk_auto_start", False))
 
         self._hotkey = HotkeyListener(
             settings.daemon_hotkey, self._trigger_voice
@@ -540,6 +573,8 @@ class JarvisDaemon:
             on_quit=self._trigger_quit,
             voice_enabled_getter=lambda: self._read_voice_enabled(),
             voice_toggle=self._toggle_voice_enabled,
+            realtime_enabled_getter=lambda: self._read_realtime_talk_enabled(),
+            realtime_toggle=self._toggle_realtime_talk,
         )
 
     def run(self) -> int:
@@ -561,6 +596,12 @@ class JarvisDaemon:
             ui.info("   托盘右键「语音对话」可关闭语音模式")
         else:
             ui.info("   语音对话已关闭 · 仅通过托盘/热键唤起交互")
+
+        if self._realtime_talk_enabled:
+            ui.info("   实时聊天默认开启 · 启动后会自动打开实时语音对话窗口")
+            ui.info("   托盘右键「实时聊天」可关闭自动启动")
+        else:
+            ui.info("   实时聊天默认关闭 · 可在托盘菜单手动开启")
 
         ui.info("   Ctrl+C 退出")
         ui.info("=" * 56)
@@ -618,6 +659,15 @@ class JarvisDaemon:
             self._wake_event.set()
         else:
             ui.info("🔇 语音对话已关闭，保持后台待命")
+
+        # 启动后根据实时聊天开关决定是否默认启动实时语音对话子进程。
+        # 实时对话在独立进程中运行，不阻塞 daemon 主循环，用户按 ESC 退出。
+        if self._realtime_talk_enabled:
+            ui.info("🎙️ 实时聊天默认开启，正在启动实时语音对话窗口")
+            # 延迟一点启动，让托盘图标和日志先就位
+            threading.Timer(1.0, self._start_realtime_talk).start()
+        else:
+            ui.info("🔇 实时聊天默认关闭，保持后台待命")
 
 
         # daemon 主循环
@@ -755,6 +805,160 @@ class JarvisDaemon:
         from agent.daemon.voice_state import is_voice_enabled
         self._voice_enabled = is_voice_enabled()
         return self._voice_enabled
+
+    def _read_realtime_talk_enabled(self) -> bool:
+        """读取实时聊天开关最新状态（内存缓存）。
+
+        @author aceFelix
+        """
+        return self._realtime_talk_enabled
+
+    def _toggle_realtime_talk(self) -> None:
+        """切换托盘「实时聊天」开关状态。
+
+        开启时持久化配置并启动实时语音对话子进程；
+        关闭时终止子进程并更新配置到 settings.toml。
+
+        @author aceFelix
+        """
+        self._realtime_talk_enabled = not self._realtime_talk_enabled
+        try:
+            from agent.config.settings import save_realtime_talk_auto_start
+            save_realtime_talk_auto_start(self._realtime_talk_enabled)
+        except Exception as e:
+            self._daemon_log("保存实时聊天配置失败: %s", e)
+
+        ui = self._ui
+        if self._realtime_talk_enabled:
+            if ui:
+                ui.info("🎙️ 实时聊天已开启")
+            self._start_realtime_talk()
+        else:
+            if ui:
+                ui.info("🔇 实时聊天已关闭")
+            self._stop_realtime_talk()
+
+    def _is_realtime_talk_running(self) -> bool:
+        """检查实时聊天子进程是否仍在运行。"""
+        if self._realtime_talk_proc is None:
+            return False
+        poll = self._realtime_talk_proc.poll()
+        return poll is None
+
+    def _start_realtime_talk(self) -> None:
+        """启动实时双工语音对话子进程。
+
+        通过 ``python -m agent.main --talk`` 启动独立进程，
+        不阻塞 daemon 主循环，用户在弹出的终端中按 ESC 退出。
+        Windows 弹出新控制台窗口；macOS 调用 Terminal.app；
+        Linux 尝试常见终端模拟器。
+
+        @author aceFelix
+        """
+        import subprocess
+
+        if self._is_realtime_talk_running():
+            if self._tray and self._tray.available:
+                self._tray.notify("J.A.R.V.I.S", "实时聊天已在运行")
+            return
+
+        python_exe = _find_python()
+        if not python_exe:
+            ui = self._ui
+            if ui:
+                ui.warn("实时聊天失败: 未找到 Python 解释器")
+            if self._tray and self._tray.available:
+                self._tray.notify("J.A.R.V.I.S", "无法找到 Python 解释器，实时聊天不可用")
+            return
+
+        project_root = _project_root()
+        workdir = self._settings.workdir or project_root
+
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+
+        try:
+            if _is_windows():
+                self._realtime_talk_proc = subprocess.Popen(
+                    [python_exe, "-m", "agent.main", "--talk", "--workdir", workdir],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    cwd=project_root,
+                    env=env,
+                )
+            elif _is_macos():
+                shell_cmd = (
+                    f'cd "{workdir}" && '
+                    f'"{python_exe}" -m agent.main --talk --workdir "{workdir}"; '
+                    f'exec bash'
+                )
+                applescript = (
+                    f'tell application "Terminal"\n'
+                    f'    activate\n'
+                    f'    do script "{shell_cmd}"\n'
+                    f'end tell'
+                )
+                self._realtime_talk_proc = subprocess.Popen(
+                    ["osascript", "-e", applescript],
+                    env=env,
+                )
+            else:
+                # Linux: 按优先级尝试常见终端模拟器
+                shell_cmd = (
+                    f'cd "{workdir}" && '
+                    f'"{python_exe}" -m agent.main --talk --workdir "{workdir}"; '
+                    f'exec bash'
+                )
+                terminals = [
+                    (["x-terminal-emulator", "-e", f"bash -c '{shell_cmd}'"], "x-terminal-emulator"),
+                    (["gnome-terminal", "--", "bash", "-c", shell_cmd], "gnome-terminal"),
+                    (["konsole", "-e", "bash", "-c", shell_cmd], "konsole"),
+                    (["xterm", "-e", f"bash -c '{shell_cmd}'"], "xterm"),
+                ]
+                started = False
+                for cmd, _name in terminals:
+                    try:
+                        self._realtime_talk_proc = subprocess.Popen(cmd, env=env)
+                        started = True
+                        break
+                    except FileNotFoundError:
+                        continue
+                if not started:
+                    raise RuntimeError("未找到可用的终端模拟器（尝试安装 xterm 或 gnome-terminal）")
+
+            ui = self._ui
+            if ui:
+                ui.info("🎙️ 已启动实时聊天窗口")
+            if self._tray and self._tray.available:
+                self._tray.notify("J.A.R.V.I.S", "实时聊天已启动")
+        except Exception as e:
+            ui = self._ui
+            if ui:
+                ui.error(f"启动实时聊天失败: {type(e).__name__}: {e}")
+            if self._tray and self._tray.available:
+                self._tray.notify("J.A.R.V.I.S", f"启动实时聊天失败: {e}")
+
+    def _stop_realtime_talk(self) -> None:
+        """停止实时聊天子进程。
+
+        先发送 SIGTERM，超时未退出则强制 kill。
+
+        @author aceFelix
+        """
+        if self._realtime_talk_proc is None:
+            return
+        try:
+            poll = self._realtime_talk_proc.poll()
+            if poll is None:
+                self._realtime_talk_proc.terminate()
+                try:
+                    self._realtime_talk_proc.wait(timeout=3)
+                except Exception:
+                    self._realtime_talk_proc.kill()
+        except Exception as e:
+            self._daemon_log("停止实时聊天进程失败: %s", e)
+        finally:
+            self._realtime_talk_proc = None
 
     def _trigger_voice(self) -> None:
         """热键/托盘触发语音对话。
@@ -1186,6 +1390,8 @@ class JarvisDaemon:
                            verbose=False)
             except Exception:
                 pass
+        # 停止实时聊天子进程，避免 daemon 退出后残留
+        self._stop_realtime_talk()
         self._hotkey.stop()
         self._tray.stop()
         # 停止视觉监控（释放摄像头）
