@@ -355,7 +355,7 @@ def _persist_result(content: str, tool_name: str, tool_use_id: str, ctx) -> str 
 
 def _track_file_accesses(tool_uses: list, ctx) -> None:
     """记录本轮工具调用中涉及的文件路径。"""
-    from agent.core.compactor import track_file_access
+    from agent.core.memory.compactor import track_file_access
     for tu in tool_uses:
         name = getattr(tu, 'name', '')
         if name not in _FILE_TOOLS and not name.startswith("file_"):

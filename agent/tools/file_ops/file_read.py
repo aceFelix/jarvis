@@ -95,7 +95,7 @@ class FileReadTool(Tool):
         body = truncate_for_llm(sliced, self.max_result_chars)
 
         # 记录文件状态（供 FileEdit/FileWrite 冲突检测用）
-        from agent.core.file_state import record_file_read
+        from agent.core.memory.file_state import record_file_read
         record_file_read(ctx, str(path))
 
         return ToolResult.ok(data=header + body)

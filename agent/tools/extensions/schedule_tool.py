@@ -22,7 +22,7 @@ from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.scheduler import Scheduler
+from agent.core.daemon.scheduler import Scheduler
 from agent.core.tool import JSONSchema, Tool
 
 

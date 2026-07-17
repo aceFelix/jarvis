@@ -191,7 +191,7 @@ class PluginManager:
             try:
                 mcp_data = json.loads(mcp_file.read_text(encoding="utf-8"))
                 new_servers = mcp_data.get("mcpServers", {})
-                from agent.core.mcp_client import merge_mcp_config
+                from agent.core.extensions.mcp_client import merge_mcp_config
                 added_mcp = merge_mcp_config(new_servers)
             except Exception as e:
                 return False, f"MCP 配置合并失败: {e}"
@@ -244,7 +244,7 @@ class PluginManager:
         mcp_servers = entry.get("mcp_servers", [])
         if mcp_servers:
             try:
-                from agent.core.mcp_client import remove_mcp_config
+                from agent.core.extensions.mcp_client import remove_mcp_config
                 remove_mcp_config(mcp_servers)
             except Exception as e:
                 errors.append(f"移除 MCP 配置失败: {e}")

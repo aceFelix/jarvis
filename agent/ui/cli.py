@@ -231,7 +231,7 @@ class _SlashCompleter(Completer):
 
         # 技能名补全（每个 skill 也作为 /<skill-name> 使用）
         try:
-            from agent.core.skills import load_skills
+            from agent.core.extensions.skills import load_skills
             import os
             workdir = os.getcwd()
             for skill in load_skills(workdir):
@@ -331,7 +331,7 @@ class _SlashCompleter(Completer):
 
         all_sessions: list[tuple[str, str]] = []  # [(name, desc), ...]
         try:
-            from agent.core.memory import list_sessions
+            from agent.core.memory.store import list_sessions
             for s in list_sessions():
                 desc = f"{s.message_count} 条消息 | {s.workdir or '(无)'}"
                 all_sessions.append((s.name, desc))

@@ -32,7 +32,7 @@ from agent.core.context import ToolContext
 from agent.core.message import Message, TextContent, ThinkingContent, ToolResultContent, ToolUseContent
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.tool import ToolRegistry
-from agent.core.compactor import (
+from agent.core.memory.compactor import (
     DEFAULT_KEEP_RECENT,
     DEFAULT_THRESHOLD_TOKENS,
     compact_messages,

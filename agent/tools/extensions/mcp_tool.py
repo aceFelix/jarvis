@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.core.context import ToolContext
-from agent.core.mcp_client import MCPClient, McpToolDef
+from agent.core.extensions.mcp_client import MCPClient, McpToolDef
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import Tool
 

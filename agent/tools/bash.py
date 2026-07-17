@@ -11,6 +11,7 @@ v0.1 用 asyncio subprocess 执行，统一 stdout/stderr 合并输出，有超�
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
 from typing import Any
 
@@ -24,6 +25,7 @@ class BashTool(Tool):
     name = "Bash"
     description = (
         "执行 shell 命令并返回输出。命令在工作目录下执行。"
+        "Windows 上使用 Git Bash（bash -c），支持 Unix 风格路径和命令。"
         "默认会询问用户确认；只读命令（ls/cat/grep 等）和用户配置了 allow 规则的命令会自动放行。"
         "有超时保护（默认 120 秒）。"
     )
@@ -36,6 +38,10 @@ class BashTool(Tool):
                 "description": "超时秒数（默认 120，最大 600）",
                 "minimum": 1,
                 "maximum": 600,
+            },
+            "cwd": {
+                "type": "string",
+                "description": "工作目录（绝对路径，如 E:\\\\project）。留空则用默认工作目录。",
             },
         },
         "required": ["command"],
@@ -82,17 +88,27 @@ class BashTool(Tool):
         command = args["command"]
         timeout = min(600, max(1, int(args.get("timeout", 120))))
 
-        # Windows 用 cmd，其他用 bash/sh
+        # 工作目录：优先用 args["cwd"]，其次 ctx.workdir
+        work_dir = args.get("cwd", "") or ctx.workdir
+
+        # Windows 上用 Git Bash（bash -c），而非 cmd /c
+        # Git Bash 支持 Unix 风格路径（/e/...）、管道、heredoc 等
         is_win = platform.system() == "Windows"
         if is_win:
-            shell_args = ["cmd", "/c", command]
+            # 查找 Git Bash（优先用 PATH 里的 bash）
+            bash_path = self._find_bash()
+            if bash_path:
+                shell_args = [bash_path, "-c", command]
+            else:
+                # 回退到 cmd（不推荐，路径处理会有问题）
+                shell_args = ["cmd", "/c", command]
         else:
             shell_args = ["/bin/bash", "-c", command]
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *shell_args,
-                cwd=ctx.workdir,
+                cwd=work_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -121,10 +137,42 @@ class BashTool(Tool):
             parts.append(f"[stderr]\n{err.rstrip()}")
         body = "\n\n".join(parts) if parts else "(无输出)"
 
-        header = f"[exit={code} | cwd={ctx.workdir}]\n"
+        header = f"[exit={code} | cwd={work_dir}]\n"
         if code != 0:
             return ToolResult(data=header + body, is_error=True)
         return ToolResult.ok(data=header + body)
+
+    @staticmethod
+    def _find_bash() -> str | None:
+        """查找 Git Bash 可执行文件路径（跳过 WSL relay）。"""
+        import shutil
+
+        # 1. 优先检查用户 Git 安装路径（避免 WSL relay 误导）
+        for candidate in (
+            r"D:\SoftwareDevelopmentKit\Git\bin\bash.exe",
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+
+        # 2. PATH 里的 bash（排除 System32 下的 WSL relay）
+        path = shutil.which("bash")
+        if path:
+            normalized = os.path.normpath(path).lower()
+            if "system32" not in normalized and "syswow64" not in normalized:
+                return path
+
+        # 3. 常见便携 Git 路径
+        home = os.path.expanduser("~")
+        for sub in (".workbuddy/vendor/PortableGit/bin/bash.exe",
+                    ".workbuddy/vendor/PortableGit/usr/bin/bash.exe"):
+            candidate = os.path.join(home, sub)
+            if os.path.isfile(candidate):
+                return candidate
+
+        return None
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         if args and args.get("command"):

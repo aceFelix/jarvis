@@ -52,7 +52,7 @@ class FileWriteTool(Tool):
         return args.get("file_path", "")
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        from agent.core.file_state import check_file_stale, record_file_write, invalidate
+        from agent.core.memory.file_state import check_file_stale, record_file_write, invalidate
 
         path = resolve_path(ctx, args["file_path"])
         content = args["content"]

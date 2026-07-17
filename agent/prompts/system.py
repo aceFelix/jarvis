@@ -92,12 +92,29 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 - **Glob**: 按通配符找文件（如 `**/*.py`）。
 - **Grep**: 在文件内容里搜正则。
 - **LSP**: 代码智能。跳转定义/查引用/类型信息/文档符号/调用层次。写代码前先用 documentSymbol 了解结构，修改前用 findReferences 看影响范围，不确定类型时用 hover。
-- **Bash**: 执行 shell 命令。只读命令自动放行，写类命令会询问用户。
-  **Windows 路径规范**: 先生用的是 Git Bash（Unix 风格，非 CMD）。所有涉及 E:\\ 路径的命令必须：
-  - 用正斜杠 `/e/J.A.R.V.I.S_Work/...` 代替反斜杠
-  - 用单引号或双引号包裹含空格的路径
-  - 优先用 PowerShell `-Command "..."` 代替 cmd `/c`（Git Bash 下 cmd 编码会乱）
-  - 示例：`ls /e/J.A.R.V.I.S_Work/jarvis-work/`（正确） vs `dir E:\\...\\`（错误）
+- **Bash**: 执行 shell 命令（Windows 上走 Git Bash，bash -c）。只读命令自动放行，写类命令会询问用户。
+  支持 `cwd` 参数指定工作目录（如 `"E:\\\\project"`）。
+
+  **路径铁律（Windows 上 Bash 已切换为 Git Bash，以下规则严格执行）**：
+  - 命令中必须用**正斜杠**路径：`/e/J.A.R.V.I.S_Work/...`（不要用反斜杠）
+  - 最佳实践：用 `cd <相对路径> && <命令>` 结构，避免绝对路径
+    ✅ `cd jarvis-website && npm install`
+    ✅ `ls /e/J.A.R.V.I.S_Work/jarvis-work/`
+    ❌ `ls E:\\J.A.R.V.I.S_Work\\...`
+    ❌ `dir E:\\...`
+  - 不要用 Git Bash 不认识的 Windows 命令：用 `ls` 不用 `dir`，用 `cat` 不用 `type`
+  - mkdir 创建多级目录：`mkdir -p /e/path/to/dir`（Unix 风格）
+
+  **交互式 CLI 命令（npm create / npx create-* / vue create 等）**：
+  这些命令会弹交互提示导致卡死。必须加非交互标志：
+  - npm create / npx create-vite → `npx create-vite@latest <name> --template react`（不要漏 `--template`）
+  - 如果已经卡住了：不要重试同一命令，直接手动创建目录和文件（FileWrite）
+  - npm init / npm create 的其他变体 → 加 `--yes` 或 `-y`
+
+  **PowerShell 输出捕获**：
+  不要用 `$output = <cmd> 2>&1` 这种变量赋值来捕获输出——会吞输出。直接写命令：
+  ✅ `powershell -Command "npm install 2>&1"`
+  ❌ `powershell -Command "$output = npm install 2>&1; Write-Output $output"`
 
 # MCP 外部服务工具
 
@@ -410,9 +427,9 @@ def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking
 
     顺序: 基础原则 -> 长期记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
     """
-    from agent.core.memory import memory_section
-    from agent.core.skills import skills_section
-    from agent.core.compactor import load_session_memory
+    from agent.core.memory.store import memory_section
+    from agent.core.extensions.skills import skills_section
+    from agent.core.memory.compactor import load_session_memory
 
     session_mem = load_session_memory(workdir)
 

@@ -596,7 +596,7 @@ class JarvisDaemon:
 
         # 节假日提醒：检查明天是否节假日
         try:
-            from agent.core.holidays import check_tomorrow_holiday
+            from agent.core.daemon.holidays import check_tomorrow_holiday
             holiday_msg = check_tomorrow_holiday()
             if holiday_msg:
                 ui.info(f"📅 {holiday_msg}")
@@ -653,18 +653,18 @@ class JarvisDaemon:
         register_subagent_tool(self._registry, provider=self._provider, permission_mode=settings.permission_mode)
 
         # 视觉监控（阶段五扩展）：mediapipe 实时手势/人脸检测
-        from agent.core.vision_watcher import VisionWatcher
+        from agent.core.daemon.vision_watcher import VisionWatcher
         self._vision_watcher = VisionWatcher(on_event=self._on_vision_event)
         from agent.tools.vision.vision_tools import register_vision_tools
         register_vision_tools(self._registry, watcher_factory=lambda: self._vision_watcher)
 
         # 主动感知（阶段五第三刀）：定时任务调度器 + 系统监控器
-        from agent.core.scheduler import Scheduler
+        from agent.core.daemon.scheduler import Scheduler
         from agent.tools.extensions.schedule_tool import register_schedule_tools
         self._scheduler = Scheduler(on_fire=self._on_schedule_fire)
         register_schedule_tools(self._registry, self._scheduler)
 
-        from agent.core.monitor import SystemMonitor, MonitorConfig
+        from agent.core.daemon.monitor import SystemMonitor, MonitorConfig
         self._monitor = SystemMonitor(
             config=MonitorConfig(
                 enabled=settings.monitor_enabled,

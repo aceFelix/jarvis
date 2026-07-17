@@ -562,7 +562,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     mcp_client = None
     if settings.enable_mcp:
         try:
-            from agent.core.mcp_client import MCPClient, load_mcp_config
+            from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
             from agent.core.tool import register_dynamic_tools
             mcp_client = MCPClient()
             if mcp_client.available:
@@ -649,7 +649,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
 
     # 自动恢复上次会话
     if settings.auto_resume_session:
-        from agent.core.memory import latest_session_name, load_session
+        from agent.core.memory.store import latest_session_name, load_session
         latest_name = latest_session_name()
         if latest_name:
             session = load_session(latest_name)
@@ -715,7 +715,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     # ---- 崩溃恢复检测 ----
     # 检查上次会话是否异常退出，是则提示用户是否恢复
     try:
-        from agent.core.recovery import load_recovery_point, format_recovery_summary, clear_recovery_point
+        from agent.core.memory.recovery import load_recovery_point, format_recovery_summary, clear_recovery_point
         point = load_recovery_point()
         if point is not None and point.messages:
             ui.warn("检测到上次会话异常退出，是否恢复？")
@@ -768,7 +768,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                     pass
                 # 标记正常退出（清除恢复点）
                 try:
-                    from agent.core.recovery import mark_clean_exit
+                    from agent.core.memory.recovery import mark_clean_exit
                     mark_clean_exit()
                 except Exception:
                     pass
@@ -860,7 +860,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 parts = stripped.split(None, 1)
                 if len(parts) > 1 and parts[1].strip():
                     want = parts[1].strip().lower()
-                    from agent.core.memory import list_sessions, load_session
+                    from agent.core.memory.store import list_sessions, load_session
 
                     sessions = list_sessions()
                     # 精确匹配优先
@@ -1087,7 +1087,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider, session_name=_session_name, verbose=False)
             # 写恢复点（崩溃恢复用）
             try:
-                from agent.core.recovery import save_recovery_point
+                from agent.core.memory.recovery import save_recovery_point
                 save_recovery_point(
                     messages,
                     workdir=settings.workdir,
@@ -1158,7 +1158,7 @@ def _sanitize_title(title: str) -> str:
 
 def _rename_session_file(old_name: str, title: str) -> str:
     """重命名会话文件。返回最终可用的新名称。"""
-    from agent.core.memory import sessions_dir
+    from agent.core.memory.store import sessions_dir
 
     title = _sanitize_title(title)
     if not title:
@@ -1274,7 +1274,7 @@ def _auto_save(
     if not messages:
         return
     try:
-        from agent.core.memory import save_session, user_jarvis_dir
+        from agent.core.memory.store import save_session, user_jarvis_dir
         jarvis_dir = user_jarvis_dir()
         jarvis_dir.mkdir(parents=True, exist_ok=True)
         # 写入独立的会话文件
@@ -1330,7 +1330,7 @@ def _print_help(ui: RichCLI) -> None:
 
 def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: str, provider_name: str) -> None:
     """/cost: 显示本会话累计 token 用量与估算成本。"""
-    from agent.core.compactor import estimate_tokens
+    from agent.core.memory.compactor import estimate_tokens
     from agent.ui.markdown_renderer import render_table
     total_in = 0
     total_out = 0
@@ -1353,7 +1353,7 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
 
 def _print_context(ui: RichCLI, messages: list[Message], model: str) -> None:
     """/context: 显示上下文窗口使用情况，按角色分组统计消息数。"""
-    from agent.core.compactor import estimate_tokens
+    from agent.core.memory.compactor import estimate_tokens
     from agent.ui.markdown_renderer import render_tree, render_table
     # 按角色统计
     role_counts: dict[str, int] = {}
@@ -1525,7 +1525,7 @@ def _doctor(ui: RichCLI, settings: Settings, provider, model: str, messages: lis
 
 def _compact(ui: RichCLI, loop: QueryLoop, ctx: ToolContext) -> None:
     """手动触发上下文压缩。/compact 命令的执行体。"""
-    from agent.core.compactor import estimate_tokens, should_compact
+    from agent.core.memory.compactor import estimate_tokens, should_compact
 
     pre_tokens = estimate_tokens(ctx.messages)
     if not should_compact(ctx.messages, threshold=1):  # threshold=1 强制触发
@@ -1584,7 +1584,7 @@ def _list_models(ui: RichCLI, settings: Settings, current: str) -> None:
 
 def _save_session(ui: RichCLI, settings: Settings, cmd: str, messages: list[Message]) -> None:
     """/save [name] — 保存当前会话。"""
-    from agent.core.memory import save_session
+    from agent.core.memory.store import save_session
     from datetime import datetime
 
     # 解析名字: /save myname → myname; /save → auto-<timestamp>
@@ -1613,7 +1613,7 @@ def _load_session(ui: RichCLI, settings: Settings, cmd: str, messages: list[Mess
 
 def _load_by_name(ui: RichCLI, settings: Settings, name: str, messages: list[Message]) -> None:
     """/load <name> — 直接加载指定会话。"""
-    from agent.core.memory import load_session
+    from agent.core.memory.store import load_session
 
     session = load_session(name)
     if not session:
@@ -1629,7 +1629,7 @@ def _load_by_name(ui: RichCLI, settings: Settings, name: str, messages: list[Mes
 
 def _load_by_picker(ui: RichCLI, messages: list[Message]) -> None:
     """/load（无参数）— 终端内联选择（↑↓ Enter Esc，不弹窗）。"""
-    from agent.core.memory import list_sessions, load_session
+    from agent.core.memory.store import list_sessions, load_session
 
     sessions = list_sessions()
     if not sessions:
@@ -1708,7 +1708,7 @@ def _render_session(ui: RichCLI, msgs: list[Message]) -> None:
 
 def _list_sessions(ui: RichCLI) -> None:
     """/sessions — 列出所有已保存会话。"""
-    from agent.core.memory import list_sessions
+    from agent.core.memory.store import list_sessions
     from datetime import datetime
 
     sessions = list_sessions()
@@ -1735,7 +1735,7 @@ def _list_sessions(ui: RichCLI) -> None:
 
 def _show_memory(ui: RichCLI, settings: Settings) -> None:
     """/memory — 查看长期记忆文件。"""
-    from agent.core.memory import get_memory_files, load_long_term_memory
+    from agent.core.memory.store import get_memory_files, load_long_term_memory
 
     files = get_memory_files(settings.workdir)
     ui.info("长期记忆文件:")
@@ -1758,7 +1758,7 @@ def _show_memory(ui: RichCLI, settings: Settings) -> None:
 
 def _show_plugins(ui: RichCLI, settings: Settings) -> None:
     """/plugin — 列出已安装插件。"""
-    from agent.core.plugins import PluginManager
+    from agent.core.extensions.plugins import PluginManager
     pm = PluginManager(settings.plugin_marketplace)
     installed = pm.list_installed()
     plugins = installed.get("plugins", {})
@@ -1792,7 +1792,7 @@ def _plugin_install(ui: RichCLI, settings: Settings, stripped: str) -> None:
         ui.warn("用法: /plugin install <插件名>")
         return
     name = parts[2].strip()
-    from agent.core.plugins import PluginManager
+    from agent.core.extensions.plugins import PluginManager
     pm = PluginManager(settings.plugin_marketplace)
     ui.info(f"正在安装插件: {name} ...")
     ok, msg = pm.install(name)
@@ -1810,7 +1810,7 @@ def _plugin_uninstall(ui: RichCLI, settings: Settings, stripped: str) -> None:
         ui.warn("用法: /plugin uninstall <插件名>")
         return
     name = parts[2].strip()
-    from agent.core.plugins import PluginManager
+    from agent.core.extensions.plugins import PluginManager
     pm = PluginManager(settings.plugin_marketplace)
     ok, msg = pm.uninstall(name)
     if ok:
@@ -1823,7 +1823,7 @@ def _plugin_search(ui: RichCLI, settings: Settings, stripped: str) -> None:
     """/plugin search [keyword]"""
     parts = stripped.split(None, 2)
     keyword = parts[2].strip() if len(parts) > 2 else ""
-    from agent.core.plugins import PluginManager
+    from agent.core.extensions.plugins import PluginManager
     pm = PluginManager(settings.plugin_marketplace)
     label = keyword if keyword else "全部"
     ui.info(f"搜索插件: {label} ...")
@@ -1858,7 +1858,7 @@ def _plugin_search(ui: RichCLI, settings: Settings, stripped: str) -> None:
 
 def _list_skills(ui: RichCLI, settings: Settings) -> None:
     """/skills — 列出已加载的技能包。"""
-    from agent.core.skills import load_skills, list_skill_files
+    from agent.core.extensions.skills import load_skills, list_skill_files
 
     files = list_skill_files(settings.workdir)
     ui.info("技能包目录:")
@@ -1899,7 +1899,7 @@ async def _dispatch_skill(
     Returns:
         True 表示已匹配并执行了 skill（调用方应 continue），False 表示不是 skill 命令。
     """
-    from agent.core.skills import load_skills
+    from agent.core.extensions.skills import load_skills
 
     parts = stripped[1:].split(None, 1)  # 去掉 /
     if not parts:
@@ -2079,7 +2079,7 @@ def _toggle_thinking(
 
 def _show_mcp(ui: RichCLI, mcp_client) -> None:
     """/mcp — 查看 MCP server 连接状态。"""
-    from agent.core.mcp_client import mcp_config_path, load_mcp_config
+    from agent.core.extensions.mcp_client import mcp_config_path, load_mcp_config
 
     config_path = mcp_config_path()
     ui.info(f"MCP 配置文件: {config_path}")
@@ -2365,7 +2365,7 @@ async def repl_headless(settings: Settings) -> int:
     mcp_client = None
     if settings.enable_mcp:
         try:
-            from agent.core.mcp_client import MCPClient, load_mcp_config
+            from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
             from agent.core.tool import register_dynamic_tools
             mcp_client = MCPClient()
             if mcp_client.available:

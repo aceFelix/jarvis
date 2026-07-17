@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.diag import diag_log, diag_warn
-from agent.core.memory import sessions_dir, _message_to_dict, _message_from_dict
+from agent.core.memory.store import sessions_dir, _message_to_dict, _message_from_dict
 from agent.core.message import Message
 
 

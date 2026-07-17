@@ -13,7 +13,7 @@ daemon 启动时检查"明天是否节假日"，是则当天提醒用户"明天 
     日期字符串格式: "MM-DD"（同每年重复的节日）或 "YYYY-MM-DD"（特定日期）
 
 用法:
-    from agent.core.holidays import is_holiday, is_workday, check_tomorrow_holiday
+    from agent.core.daemon.holidays import is_holiday, is_workday, check_tomorrow_holiday
     if is_holiday("2026-01-01"):
         print("元旦放假")
     reminder = check_tomorrow_holiday()  # 返回提醒文本或 None

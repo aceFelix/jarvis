@@ -51,7 +51,7 @@ class MarketSearchTool(Tool):
             ctx.ui.info(f"搜索插件: {label}")
 
         def _search():
-            from agent.core.plugins import PluginManager
+            from agent.core.extensions.plugins import PluginManager
             pm = PluginManager()
             return pm.search(keyword)
 
