@@ -233,15 +233,19 @@ class OpenAIProvider(LLMProvider):
 
         # 深度思考——通过 extra_body 传递，不支持的服务会静默忽略
         # 注意：qwen3 系列模型默认开启思考，必须显式传 enable_thinking=False 才能关闭
-        if self._enable_thinking and not getattr(self, '_force_no_thinking', False):
-            extra = request_kwargs.setdefault("extra_body", {})
-            extra["enable_thinking"] = True
-            if self._thinking_budget > 0:
-                extra["thinking_budget"] = self._thinking_budget
+        thinking_on = self._enable_thinking and not getattr(self, '_force_no_thinking', False)
+        extra = request_kwargs.setdefault("extra_body", {})
+        if self.name == "deepseek":
+            # DeepSeek 官方 API 使用 thinking.type 开关思考模式
+            extra["thinking"] = {"type": "enabled" if thinking_on else "disabled"}
+            if thinking_on:
+                # DeepSeek 思考强度默认 high，可通过 reasoning_effort 调整
+                request_kwargs.setdefault("reasoning_effort", "high")
         else:
-            # 显式关闭思考（qwen3 默认开启，不传会继续思考）
-            extra = request_kwargs.setdefault("extra_body", {})
-            extra["enable_thinking"] = False
+            # 阿里云等 OpenAI 兼容接口使用 enable_thinking
+            extra["enable_thinking"] = thinking_on
+            if thinking_on and self._thinking_budget > 0:
+                extra["thinking_budget"] = self._thinking_budget
 
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}
@@ -262,7 +266,7 @@ class OpenAIProvider(LLMProvider):
                 delta = choice.delta
                 # 思维链思考内容（reasoning_content 先于 content 到达）
                 reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
+                if reasoning and self.is_thinking_enabled():
                     yield ThinkingDelta(text=reasoning)
                 if delta.content:
                     yield TextDelta(text=delta.content)

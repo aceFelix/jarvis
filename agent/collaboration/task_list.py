@@ -186,7 +186,7 @@ def _jarvis_home() -> Path:
 
 def _task_list_dir(task_list_id: str) -> Path:
     """任务列表目录。"""
-    from agent.core.team import sanitize_name
+    from .team import sanitize_name
     return _jarvis_home() / "tasks" / sanitize_name(task_list_id)
 
 

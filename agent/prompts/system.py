@@ -216,7 +216,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 | 场景 | 理由 |
 |------|------|
 | 多模块并行改造 | explorer 搜代码 + coder 改代码，并行 |
-| 先调研后实现 | researcher 分析 → coder 基于分析结果写代码（依赖链） |
+| 先调研后实现 | researcher 分析 → coder 基于分析写代码（依赖链） |
 | 大重构（改多处） | 多个 coder 每人改一个模块，并行 |
 | 复杂 Bug 排查 | explorer 定位 + coder 修复，并行 |
 
@@ -234,7 +234,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 ## 子代理类型
 
 | 类型 | 能力 | 适用场景 |
-|------|------|----------|
+|------|------|------|
 | `explorer` | 只读搜索（Glob/Grep/FileRead/Bash只读） | 找文件、搜代码、定位实现 |
 | `researcher` | 只读分析（同 explorer + 深度调研） | 理解架构、评估方案、技术调研 |
 | `coder` | 完整工具（含写操作） | 实现功能、修 bug、重构 |
@@ -285,7 +285,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 把用户的自然语言时间转成具体 ISO 时间（基于当前时间计算）:
 - "明天下午3点" → 明天日期 + T15:00:00
 - "下周一早上9点" → 下周一日期 + T09:00:00
-- "每天早上8点" → 明天日期 + T08:00:00，repeat=daily
+- "每天早上8点" → 明天日期 + T08:00:00, repeat=daily
 - "一小时后" → 当前时间+1小时
 - "30分钟后" → 当前时间+30分钟
 
@@ -317,7 +317,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 
 - "你看看我桌上有什么" → CameraShot + 描述物体
 - "我这件衣服搭配怎么样" → CameraShot + 评价
-- "帮我看看这个错误提示写的啥"（对准纸张/屏幕）→ CameraShot + OCR
+- "帮我看看这个错误提示写的啥"（对准纸张/屏幕） → CameraShot + OCR
 - "房间里有人吗" → CameraShot + 判断
 - "我姿势标准吗" → CameraShot + 看姿态
 
@@ -377,6 +377,13 @@ mediapipe 能识别: 点赞(Thumb_Up)/踩(Thumb_Down)/握拳(Closed_Fist)/
 - 艾斯交办的事，办成了就说办成了；有风险就如实说，不报喜不报忧。
 """
 
+_NO_THINKING_SECTION = """\
+# 思考规范（深度思考已关闭）
+
+当前已关闭深度思考模式。请直接给出简洁、准确的回复或执行工具调用。
+不要输出 reasoning_content 思维链，也不要在回复中暴露内部思考过程。
+"""
+
 
 def _env_section(workdir: str) -> str:
     """环境信息小节。"""
@@ -398,7 +405,7 @@ def _tools_section(registry: ToolRegistry) -> str:
     return "# 可用工具\n\n" + "\n".join(lines) + "\n"
 
 
-def build_system_prompt(workdir: str, registry: ToolRegistry) -> str:
+def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking: bool = True) -> str:
     """组装完整系统提示。
 
     顺序: 基础原则 -> 长期记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
@@ -409,9 +416,24 @@ def build_system_prompt(workdir: str, registry: ToolRegistry) -> str:
 
     session_mem = load_session_memory(workdir)
 
+    # 根据思考模式开关替换系统提示中的思考规范
+    if enable_thinking:
+        base = _BASE_PROMPT
+    else:
+        thinking_start = _BASE_PROMPT.find("# 思考规范（思维链）")
+        thinking_end = _BASE_PROMPT.find("\n\n# 工具使用规范", thinking_start)
+        if thinking_start != -1 and thinking_end != -1:
+            base = (
+                _BASE_PROMPT[:thinking_start]
+                + _NO_THINKING_SECTION
+                + _BASE_PROMPT[thinking_end:]
+            )
+        else:
+            base = _BASE_PROMPT
+
     return "\n".join(
         [
-            _BASE_PROMPT,
+            base,
             memory_section(workdir),
             f"# 会话记忆\n\n{session_mem}" if session_mem else "",
             skills_section(workdir),

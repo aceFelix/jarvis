@@ -545,8 +545,8 @@ def _inject_teammate_notifications(ctx: ToolContext) -> None:
     无需 Sleep 轮询或手动检查。
     """
     try:
-        from agent.core.team import get_team_manager
-        from agent.core.mailbox import read_mailbox
+        from agent.collaboration.team import get_team_manager
+        from agent.collaboration.mailbox import read_mailbox
     except ImportError:
         return
 

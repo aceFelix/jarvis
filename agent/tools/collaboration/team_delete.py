@@ -9,7 +9,7 @@ from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.team import TeamManager, get_team_manager
+from agent.collaboration.team import TeamManager, get_team_manager
 from agent.core.tool import JSONSchema, Tool
 
 

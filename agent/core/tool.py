@@ -185,15 +185,15 @@ def build_default_registry() -> ToolRegistry:
     # 延迟 import: 工具模块 import 了 core 层，core 层不能反向 import 工具
     from agent.tools.ask_user import AskUserTool
     from agent.tools.bash import BashTool
-    from agent.tools.file_edit import FileEditTool
-    from agent.tools.file_read import FileReadTool
-    from agent.tools.file_write import FileWriteTool
-    from agent.tools.glob import GlobTool
-    from agent.tools.grep import GrepTool
+    from agent.tools.file_ops.file_edit import FileEditTool
+    from agent.tools.file_ops.file_read import FileReadTool
+    from agent.tools.file_ops.file_write import FileWriteTool
+    from agent.tools.file_ops.glob import GlobTool
+    from agent.tools.file_ops.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
     from agent.tools.location import LocationTool
-    from agent.tools.marketplace_tool import MarketSearchTool
-    from agent.tools.web import WebFetchTool, WebSearchTool
+    from agent.tools.extensions.marketplace_tool import MarketSearchTool
+    from agent.tools.web.web import WebFetchTool, WebSearchTool
 
     registry = ToolRegistry()
     registry.register(BashTool())
@@ -230,7 +230,7 @@ def register_dynamic_tools(registry: ToolRegistry, mcp_client: "Any | None" = No
     count = 0
     if mcp_client is not None:
         try:
-            from agent.tools.mcp_tool import register_mcp_tools
+            from agent.tools.extensions.mcp_tool import register_mcp_tools
             count += register_mcp_tools(registry, mcp_client)
         except ImportError:
             pass
@@ -256,7 +256,7 @@ def register_subagent_tool(
     Returns: True 注册成功，False 已存在或导入失败。
     """
     try:
-        from agent.tools.subagent_tool import SubagentTool
+        from agent.tools.collaboration.subagent_tool import SubagentTool
         from agent.permissions.modes import PermissionMode
 
         if "Agent" in registry:
@@ -298,8 +298,8 @@ def register_team_tools(
 
     # Team 工具
     try:
-        from agent.tools.team_create import TeamCreateTool
-        from agent.tools.team_delete import TeamDeleteTool
+        from agent.tools.collaboration.team_create import TeamCreateTool
+        from agent.tools.collaboration.team_delete import TeamDeleteTool
     except ImportError:
         pass
     else:
@@ -309,7 +309,7 @@ def register_team_tools(
 
     # SendMessage 工具
     try:
-        from agent.tools.send_message import SendMessageTool
+        from agent.tools.collaboration.send_message import SendMessageTool
     except ImportError:
         pass
     else:
@@ -319,11 +319,11 @@ def register_team_tools(
     # Task 工具（需要 task_list）
     if task_list is not None:
         try:
-            from agent.tools.task_create import TaskCreateTool
-            from agent.tools.task_get import TaskGetTool
-            from agent.tools.task_list import TaskListTool
-            from agent.tools.task_update import TaskUpdateTool
-            from agent.tools.task_stop import TaskStopTool
+            from agent.tools.collaboration.task_create import TaskCreateTool
+            from agent.tools.collaboration.task_get import TaskGetTool
+            from agent.tools.collaboration.task_list import TaskListTool
+            from agent.tools.collaboration.task_update import TaskUpdateTool
+            from agent.tools.collaboration.task_stop import TaskStopTool
         except ImportError:
             pass
         else:
@@ -341,8 +341,8 @@ def register_plan_tools(registry: ToolRegistry) -> int:
     """注册 Plan Mode 工具（Phase 3）。返回注册数。"""
     count = 0
     try:
-        from agent.tools.enter_plan import EnterPlanModeTool
-        from agent.tools.exit_plan import ExitPlanModeTool
+        from agent.tools.collaboration.enter_plan import EnterPlanModeTool
+        from agent.tools.collaboration.exit_plan import ExitPlanModeTool
     except ImportError:
         pass
     else:
@@ -364,7 +364,7 @@ def register_lsp_tool(registry: ToolRegistry) -> int:
         return 0  # LSP 未配置，静默跳过
 
     try:
-        from agent.tools.lsp_tool import LSPTool
+        from agent.tools.extensions.lsp_tool import LSPTool
     except ImportError:
         return 0
 
@@ -378,10 +378,10 @@ def _register_gui_tools(registry: ToolRegistry) -> None:
     阶段二新增: 鼠标 / 键盘 / 屏幕 / 窗口 共 11 个工具。
     """
     try:
-        from agent.tools.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
-        from agent.tools.keyboard import TypeTextTool, KeyTapTool
-        from agent.tools.screen import GetScreenSizeTool, ScreenShotTool
-        from agent.tools.window import (
+        from agent.tools.system.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
+        from agent.tools.system.keyboard import TypeTextTool, KeyTapTool
+        from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool
+        from agent.tools.system.window import (
             WindowListTool,
             WindowFocusTool,
             WindowCloseTool,
@@ -411,7 +411,7 @@ def _register_browser_tools(registry: ToolRegistry) -> None:
     依赖: pip install playwright && playwright install chromium
     """
     try:
-        from agent.tools.browser import (
+        from agent.tools.web.browser import (
             BrowserClickTool,
             BrowserCloseTool,
             BrowserGetTextTool,
@@ -438,7 +438,7 @@ def _register_camera_tools(registry: ToolRegistry) -> None:
     依赖: pip install opencv-python
     """
     try:
-        from agent.tools.camera import CameraShotTool, ListCamerasTool
+        from agent.tools.vision.camera import CameraShotTool, ListCamerasTool
     except ImportError:
         # opencv-python 未安装，摄像头工具不可用
         return

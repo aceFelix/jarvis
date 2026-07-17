@@ -655,12 +655,12 @@ class JarvisDaemon:
         # 视觉监控（阶段五扩展）：mediapipe 实时手势/人脸检测
         from agent.core.vision_watcher import VisionWatcher
         self._vision_watcher = VisionWatcher(on_event=self._on_vision_event)
-        from agent.tools.vision_tools import register_vision_tools
+        from agent.tools.vision.vision_tools import register_vision_tools
         register_vision_tools(self._registry, watcher_factory=lambda: self._vision_watcher)
 
         # 主动感知（阶段五第三刀）：定时任务调度器 + 系统监控器
         from agent.core.scheduler import Scheduler
-        from agent.tools.schedule_tool import register_schedule_tools
+        from agent.tools.extensions.schedule_tool import register_schedule_tools
         self._scheduler = Scheduler(on_fire=self._on_schedule_fire)
         register_schedule_tools(self._registry, self._scheduler)
 
@@ -682,7 +682,7 @@ class JarvisDaemon:
             registry=self._registry, permission_checker=checker
         )
 
-        system_prompt = build_system_prompt(settings.workdir, self._registry)
+        system_prompt = build_system_prompt(settings.workdir, self._registry, enable_thinking=getattr(settings, 'enable_thinking', True))
         if settings.system_prompt_append:
             system_prompt += "\n\n" + settings.system_prompt_append
 

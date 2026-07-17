@@ -254,7 +254,7 @@ class DashScopeProvider(LLMProvider):
             for t in tools
         ]
 
-        # 思考模式：inc_thinking 控制
+        # 思考模式：enable_thinking 控制（DashScope SDK 官方参数）
         thinking_on = self._enable_thinking and not self._force_no_thinking
 
         call_kwargs: dict[str, Any] = {
@@ -263,7 +263,7 @@ class DashScopeProvider(LLMProvider):
             "max_tokens": max_tokens,
             "stream": True,
             "result_format": "message",
-            "inc_thinking": thinking_on,
+            "enable_thinking": thinking_on,
         }
         if tool_schemas:
             call_kwargs["tools"] = tool_schemas
@@ -316,7 +316,7 @@ class DashScopeProvider(LLMProvider):
                     # Generation 流式：reasoning_content 是累积的（完整到当前点），需取增量
                     # MultiModalConversation 流式：reasoning_content 是增量的（仅含新增），直接用
                     reasoning = getattr(msg, "reasoning_content", None) or ""
-                    if reasoning:
+                    if reasoning and thinking_on:
                         if use_multimodal:
                             # 增量模式：直接发出
                             loop.call_soon_threadsafe(queue.put_nowait, ThinkingDelta(text=reasoning))
@@ -325,6 +325,9 @@ class DashScopeProvider(LLMProvider):
                             delta = reasoning[len(prev_reasoning):]
                             prev_reasoning = reasoning
                             loop.call_soon_threadsafe(queue.put_nowait, ThinkingDelta(text=delta))
+                    elif reasoning and not thinking_on and not use_multimodal:
+                        # 关闭思考模式时同步 prev_reasoning，避免后续开启时增量计算错误
+                        prev_reasoning = reasoning
 
                     # 文本内容
                     # Generation 返回 string（累积）；MultiModalConversation 返回 list[{"text": "..."}]（增量）

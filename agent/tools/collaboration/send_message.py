@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.core.context import ToolContext
-from agent.core.mailbox import (
+from agent.collaboration.mailbox import (
     TeammateMessage,
     broadcast_mailbox,
     make_broadcast,
@@ -26,7 +26,7 @@ from agent.core.mailbox import (
     write_mailbox,
 )
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.team import TEAM_LEAD_NAME, TeamManager, get_team_manager
+from agent.collaboration.team import TEAM_LEAD_NAME, TeamManager, get_team_manager
 from agent.core.tool import JSONSchema, Tool
 
 

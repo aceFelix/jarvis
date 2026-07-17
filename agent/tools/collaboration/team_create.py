@@ -12,7 +12,7 @@ from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.team import TEAM_LEAD_NAME, TeamManager, get_team_manager
+from agent.collaboration.team import TEAM_LEAD_NAME, TeamManager, get_team_manager
 from agent.core.tool import JSONSchema, Tool
 
 
@@ -65,7 +65,7 @@ class TeamCreateTool(Tool):
             )
 
         try:
-            from agent.core.team import sanitize_name
+            from agent.collaboration.team import sanitize_name
             safe_name = sanitize_name(name)
 
             team = self._mgr.create(

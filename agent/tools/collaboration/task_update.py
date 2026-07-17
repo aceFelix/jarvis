@@ -14,13 +14,13 @@ from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.task_list import (
+from agent.collaboration.task_list import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_DELETED,
     TASK_STATUS_IN_PROGRESS,
     TASK_STATUS_PENDING,
 )
-from agent.core.task_list import TaskList
+from agent.collaboration.task_list import TaskList
 from agent.core.tool import JSONSchema, Tool
 
 

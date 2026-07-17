@@ -9,15 +9,15 @@ GUI 工具依赖 pyautogui/pygetwindow，浏览器工具依赖 playwright，未�
 
 from agent.tools.ask_user import AskUserTool
 from agent.tools.bash import BashTool
-from agent.tools.file_edit import FileEditTool
-from agent.tools.file_read import FileReadTool
-from agent.tools.file_write import FileWriteTool
-from agent.tools.glob import GlobTool
-from agent.tools.grep import GrepTool
+from agent.tools.file_ops.file_edit import FileEditTool
+from agent.tools.file_ops.file_read import FileReadTool
+from agent.tools.file_ops.file_write import FileWriteTool
+from agent.tools.file_ops.glob import GlobTool
+from agent.tools.file_ops.grep import GrepTool
 from agent.tools.todo import TodoWriteTool
 from agent.tools.location import LocationTool
-from agent.tools.marketplace_tool import MarketSearchTool
-from agent.tools.web import WebFetchTool, WebSearchTool
+from agent.tools.extensions.marketplace_tool import MarketSearchTool
+from agent.tools.web.web import WebFetchTool, WebSearchTool
 
 __all__ = [
     "AskUserTool",
@@ -36,10 +36,10 @@ __all__ = [
 
 # GUI 工具可选导入（依赖未安装时不影响基础工具）
 try:
-    from agent.tools.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
-    from agent.tools.keyboard import TypeTextTool, KeyTapTool
-    from agent.tools.screen import GetScreenSizeTool, ScreenShotTool
-    from agent.tools.window import (
+    from agent.tools.system.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
+    from agent.tools.system.keyboard import TypeTextTool, KeyTapTool
+    from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool
+    from agent.tools.system.window import (
         WindowListTool,
         WindowFocusTool,
         WindowCloseTool,
@@ -64,7 +64,7 @@ except ImportError:
 
 # 浏览器工具可选导入（依赖 playwright，未安装时不影响基础工具）
 try:
-    from agent.tools.browser import (
+    from agent.tools.web.browser import (
         BrowserClickTool,
         BrowserCloseTool,
         BrowserGetTextTool,

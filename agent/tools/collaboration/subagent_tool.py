@@ -28,7 +28,7 @@ from typing import Any, Optional
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
-from agent.core.subagent import (
+from agent.collaboration.subagent import (
     BUILTIN_AGENTS,
     AgentDefinition,
     SubagentResult,
@@ -198,7 +198,7 @@ class SubagentTool(Tool):
             return ToolResult.error("run_in_background 模式需要指定 name（队友名）")
 
         # 获取团队
-        from agent.core.team import (
+        from agent.collaboration.team import (
             TEAM_LEAD_NAME,
             TeamManager,
             TeamMember,
@@ -239,7 +239,7 @@ class SubagentTool(Tool):
         mgr.add_member(team_name, member)
 
         # 构建 TeammateRunner
-        from agent.core.teammate import TeammateIdentity, TeammateRunner
+        from agent.collaboration.teammate import TeammateIdentity, TeammateRunner
 
         identity = TeammateIdentity(
             agent_id=agent_id,
@@ -270,7 +270,7 @@ class SubagentTool(Tool):
 
         # 注册到 TaskStopTool（如果有）
         try:
-            from agent.tools.task_stop import TaskStopTool
+            from .task_stop import TaskStopTool
             import sys
             # 通过 ctx.extra 或全局单例注册
         except ImportError:

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agent.core.context import ToolContext
-from agent.core.mailbox import (
+from .mailbox import (
     TeammateMessage,
     clear_mailbox,
     has_unread,

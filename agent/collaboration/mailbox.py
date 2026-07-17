@@ -257,7 +257,7 @@ def _generate_request_id() -> str:
 
 def _mailbox_path(name: str, team_name: str) -> Path:
     """某个 agent 的邮箱文件路径。"""
-    from agent.core.team import sanitize_name, team_inbox_dir
+    from .team import sanitize_name, team_inbox_dir
 
     inbox_dir = team_inbox_dir(sanitize_name(team_name))
     inbox_dir.mkdir(parents=True, exist_ok=True)
@@ -357,7 +357,7 @@ def broadcast_mailbox(
         team_name: 团队名。
         exclude: 排除的成员名列表（如排除自己）。
     """
-    from agent.core.team import get_team_manager
+    from .team import get_team_manager
 
     mgr = get_team_manager()
     team = mgr.load(team_name)

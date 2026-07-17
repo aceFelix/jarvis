@@ -585,8 +585,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             ui.warn(f"MCP 接入异常: {e}")
 
     # 子代理协作工具注入（阶段五第二刀）：Agent Tool 需要 provider 才能派生子 agent/队友
-    from agent.core.team import get_team_manager
-    from agent.core.task_list import TaskList
+    from agent.collaboration.team import get_team_manager
+    from agent.collaboration.task_list import TaskList
 
     team_mgr = get_team_manager()
     # 用会话 ID 作为默认任务列表 ID（独立使用时用；团队模式下会被 TeamCreate 覆盖）
@@ -624,7 +624,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if settings.verbose:
                 ui.warn(f"LSP 初始化失败: {e}")
 
-    system_prompt = build_system_prompt(settings.workdir, registry)
+    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
     if settings.system_prompt_append:
         system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
 
@@ -923,7 +923,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 await _toggle_plan(ui, settings, ctx)
                 continue
             if cmd == "/think" or cmd.startswith("/think "):
-                _toggle_thinking(ui, settings, provider, stripped)
+                _toggle_thinking(ui, settings, provider, loop, registry, stripped)
                 continue
             if cmd.startswith("/say "):
                 _say(ui, settings, stripped.split(" ", 1)[1])
@@ -1098,10 +1098,18 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             except Exception:
                 pass
 
-            # 2轮对话后 LLM 自动生成会话标题（1轮内保留时间戳）
-            if _dialog_count == 2 and not _title_generated and len(messages) >= 4:
-                _title_generated = True
-                _session_name = await _generate_session_title(ui, provider, model, messages, _session_name)
+            # 1轮对话后用用户首句生成标题；2轮对话后用 LLM 根据前两轮生成标题
+            if not _title_generated:
+                if _dialog_count == 1:
+                    _title_generated = True
+                    _session_name = await _generate_title_from_first_user(
+                        ui, messages, _session_name
+                    )
+                elif _dialog_count == 2 and len(messages) >= 4:
+                    _title_generated = True
+                    _session_name = await _generate_session_title(
+                        ui, provider, model, messages, _session_name
+                    )
         except KeyboardInterrupt:
             ctx.abort_event.set()
             ui.warn("已中断（按回车继续）")
@@ -1138,26 +1146,81 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     return 0
 
 
+def _sanitize_title(title: str) -> str:
+    """标题文件名安全化：去标点、换空格为连字符，截断到 12 字。"""
+    import re
+
+    title = title.strip()[:12]
+    title = re.sub(r'[^\w\s\u4e00-\u9fff-]', '', title).strip()
+    title = re.sub(r'\s+', '-', title)
+    return title
+
+
+def _rename_session_file(old_name: str, title: str) -> str:
+    """重命名会话文件。返回最终可用的新名称。"""
+    from agent.core.memory import sessions_dir
+
+    title = _sanitize_title(title)
+    if not title:
+        return old_name
+
+    old_path = sessions_dir() / f"{old_name}.json"
+    new_path = sessions_dir() / f"{title}.json"
+    if old_path.exists() and not new_path.exists():
+        old_path.rename(new_path)
+    elif new_path.exists():
+        # 目标已存在：保留原文件名但把标题信息附在末尾
+        return old_name
+    return title
+
+
+async def _generate_title_from_first_user(
+    ui: RichCLI, messages: list[Message], old_name: str
+) -> str:
+    """第 1 轮对话结束后：取用户第一条消息的前 12 字作为标题。"""
+    try:
+        first_user_text = ""
+        for m in messages:
+            if getattr(m, "role", "") == "user":
+                text = m.get_text() if hasattr(m, "get_text") else ""
+                text = text.strip()
+                if text:
+                    first_user_text = text
+                    break
+
+        if not first_user_text:
+            return old_name
+
+        # 取前 12 个字符（中英文混排按字符计）
+        title = first_user_text[:12]
+        title = _rename_session_file(old_name, title)
+        if title != old_name:
+            ui.info(f"📝 会话标题已生成: {title}")
+        return title
+    except Exception:
+        return old_name
+
+
 async def _generate_session_title(
     ui: RichCLI, provider, model: str, messages: list[Message], old_name: str
 ) -> str:
-    """用 LLM 生成会话标题，重命名会话文件。返回新名称（失败则返回旧名）。
+    """第 2 轮对话结束后：用 LLM 根据前两轮对话生成标题。返回新名称（失败则返回旧名）。
 
-    仅取前几条对话做摘要，用独立 API 调用（不污染上下文）。
+    只取前两轮 user/assistant 消息（最多 4 条）喂给 LLM，不污染上下文。
     标题限制 12 字以内，去标点，作文件名时安全截断。
     """
     try:
-        # 取前几条 user/assistant 消息（跳过 tool 消息）
+        # 取前两轮 user/assistant 消息（最多 4 条），跳过 tool 消息
         dialog_lines: list[str] = []
         for m in messages:
             role = getattr(m, "role", "")
             if role in ("user", "assistant"):
                 text = m.get_text() if hasattr(m, "get_text") else ""
-                text = text.strip()[:200]  # 每段截 200 字
+                text = text.strip()[:200]
                 if text:
                     who = "用户" if role == "user" else "贾维斯"
                     dialog_lines.append(f"{who}: {text}")
-            if len(dialog_lines) >= 6:
+            if len(dialog_lines) >= 4:
                 break
 
         if not dialog_lines:
@@ -1185,22 +1248,9 @@ async def _generate_session_title(
             if hasattr(event, "text") and event.text:
                 title_text += event.text
 
-        title = title_text.strip()[:24]  # 限制长度
-        # 文件名安全化：去标点、换空格为连字符
-        import re
-        title = re.sub(r'[^\w\s\u4e00-\u9fff-]', '', title).strip()
-        title = re.sub(r'\s+', '-', title)
-        if not title:
-            return old_name
-
-        # 重命名会话文件
-        from agent.core.memory import sessions_dir
-        old_path = sessions_dir() / f"{old_name}.json"
-        new_path = sessions_dir() / f"{title}.json"
-        if old_path.exists() and not new_path.exists():
-            old_path.rename(new_path)
-
-        ui.info(f"📝 会话标题已生成: {title}")
+        title = _rename_session_file(old_name, title_text.strip())
+        if title != old_name:
+            ui.info(f"📝 会话标题已生成: {title}")
         return title
     except Exception:
         return old_name
@@ -1892,7 +1942,7 @@ async def _dispatch_skill(
 
 def _show_agents(ui: RichCLI, team_mgr, task_list) -> None:
     """/agents —— 查看多 Agent 团队状态。"""
-    from agent.core.team import TeamManager
+    from agent.collaboration.team import TeamManager
 
     mgr: TeamManager = team_mgr
     team_name = mgr.active_team
@@ -1989,10 +2039,16 @@ async def _toggle_plan(ui: RichCLI, settings, ctx) -> None:
         ui.info("调研完整后，用 ExitPlanMode 提交方案，或用 /plan 切回。")
 
 
-def _toggle_thinking(ui: RichCLI, settings, provider, raw: str) -> None:
+def _toggle_thinking(
+    ui: RichCLI,
+    settings,
+    provider,
+    loop,
+    registry,
+    raw: str,
+) -> None:
     """/think [on|off] —— 开关深度思考模式。"""
     current = getattr(provider, '_enable_thinking', True)
-    forced = getattr(provider, '_force_no_thinking', False)
 
     parts = raw.split(maxsplit=1)
     if len(parts) == 1:
@@ -2009,12 +2065,14 @@ def _toggle_thinking(ui: RichCLI, settings, provider, raw: str) -> None:
             return
 
     # 更新 provider 和 settings
-    provider._enable_thinking = new_state
-    if not new_state:
-        provider._force_no_thinking = True
-    else:
-        provider._force_no_thinking = False
+    provider.set_thinking_enabled(new_state)
     settings.enable_thinking = new_state
+
+    # 重新生成系统提示，让模型知道当前是否需要输出 reasoning_content
+    new_system = build_system_prompt(settings.workdir, registry, enable_thinking=new_state)
+    if settings.system_prompt_append:
+        new_system = new_system + "\n\n" + settings.system_prompt_append
+    loop._system = new_system
 
     ui.info(f"深度思考: {'✅ 开' if new_state else '❌ 关'}")
 
@@ -2323,7 +2381,7 @@ async def repl_headless(settings: Settings) -> int:
     from agent.core.tool import register_subagent_tool
     register_subagent_tool(registry, provider=provider, permission_mode=settings.permission_mode)
 
-    system_prompt = build_system_prompt(settings.workdir, registry)
+    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
     if settings.system_prompt_append:
         system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
 
@@ -2412,7 +2470,7 @@ def _run_acp(settings: Settings) -> int:
     from agent.core.tool import register_subagent_tool
     register_subagent_tool(registry, provider=provider, permission_mode=settings.permission_mode)
 
-    system_prompt = build_system_prompt(settings.workdir, registry)
+    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
     if settings.system_prompt_append:
         system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
 
