@@ -1,9 +1,117 @@
 <div align="center">
-  <pre>
-   ██ ▄████▄ █████▄  ██  ██ ██ ▄█████
-   ██ ██▄▄██ ██▄▄██▄ ██▄▄██ ██ ▀▀▀▄▄▄
-████▀ ██  ██ ██   ██  ▀██▀  ██ █████▀
-  </pre>
+  <svg xmlns="http://www.w3.org/2000/svg" width="800" height="260" viewBox="0 0 800 260">
+    <defs>
+      <!-- 深蓝黑色背景渐变 -->
+      <radialGradient id="bg-glow" cx="50%" cy="50%" r="70%">
+        <stop offset="0%" stop-color="#0a1f3d"/>
+        <stop offset="50%" stop-color="#030812"/>
+        <stop offset="100%" stop-color="#000000"/>
+      </radialGradient>
+
+      <!-- 核心蓝色发光 -->
+      <radialGradient id="core-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#00e5ff" stop-opacity="0.9"/>
+        <stop offset="40%" stop-color="#0099cc" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+      </radialGradient>
+
+      <!-- 文字蓝色金属渐变 -->
+      <linearGradient id="text-blue" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#80f4ff"/>
+        <stop offset="50%" stop-color="#00d4ff"/>
+        <stop offset="100%" stop-color="#0088cc"/>
+      </linearGradient>
+
+      <!-- 外环扫描光 -->
+      <linearGradient id="ring-shine" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00e5ff" stop-opacity="0"/>
+        <stop offset="50%" stop-color="#00e5ff" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+      </linearGradient>
+
+      <!-- 文字发光滤镜 -->
+      <filter id="text-glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="2.5" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+
+      <!-- 粒子模糊 -->
+      <filter id="particle-blur">
+        <feGaussianBlur stdDeviation="1.2"/>
+      </filter>
+    </defs>
+
+    <!-- 背景 -->
+    <rect width="800" height="260" fill="url(#bg-glow)"/>
+
+    <!-- 反应堆同心圆环 -->
+    <g transform="translate(400,130)">
+      <!-- 最外层暗环 -->
+      <circle r="110" fill="none" stroke="#003344" stroke-width="2" opacity="0.5"/>
+      <circle r="95" fill="none" stroke="#004d66" stroke-width="3" opacity="0.6"/>
+      <circle r="78" fill="none" stroke="#006680" stroke-width="4" opacity="0.7"/>
+      <circle r="60" fill="none" stroke="#0088aa" stroke-width="5" opacity="0.8"/>
+      <!-- 内层核心三角结构 -->
+      <polygon points="0,-45 39,22 -39,22" fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.6"/>
+      <polygon points="0,45 -39,-22 39,-22" fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.6"/>
+      <circle r="25" fill="url(#core-glow)"/>
+      <circle r="12" fill="#00e5ff" opacity="0.9"/>
+
+      <!-- 旋转扫描环 -->
+      <circle r="102" fill="none" stroke="url(#ring-shine)" stroke-width="3" opacity="0.7">
+        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite"/>
+      </circle>
+
+      <!-- 脉冲波纹 -->
+      <circle r="25" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0">
+        <animate attributeName="r" values="25;110" dur="2.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.8;0" dur="2.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle r="25" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0">
+        <animate attributeName="r" values="25;110" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.8;0" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- 漂浮粒子 -->
+    <g fill="#00e5ff" filter="url(#particle-blur)">
+      <circle cx="200" cy="80" r="1.5" opacity="0.6">
+        <animate attributeName="cy" values="80;40;80" dur="4s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.6;0;0.6" dur="4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="650" cy="180" r="2" opacity="0.5">
+        <animate attributeName="cy" values="180;220;180" dur="5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0;0.5" dur="5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="120" cy="160" r="1.2" opacity="0.4">
+        <animate attributeName="cx" values="120;160;120" dur="6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.4;0;0.4" dur="6s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="700" cy="90" r="1.8" opacity="0.5">
+        <animate attributeName="cx" values="700;660;700" dur="5.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0;0.5" dur="5.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="300" cy="210" r="1" opacity="0.4">
+        <animate attributeName="cy" values="210;170;210" dur="4.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.4;0;0.4" dur="4.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="520" cy="50" r="1.5" opacity="0.5">
+        <animate attributeName="cy" values="50;90;50" dur="5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0;0.5" dur="5s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- J.A.R.V.I.S 艺术字 -->
+    <text x="400" y="220" text-anchor="middle" font-family="monospace" font-size="22" font-weight="bold" fill="url(#text-blue)" filter="url(#text-glow)" letter-spacing="2">
+      ██ ▄████▄ █████▄  ██  ██ ██ ▄█████
+      <tspan x="400" dy="24">██ ██▄▄██ ██▄▄██▄ ██▄▄██ ██ ▀▀▀▄▄▄</tspan>
+      <tspan x="400" dy="24">████▀ ██  ██ ██   ██  ▀██▀  ██ █████▀</tspan>
+    </text>
+  </svg>
 </div>
 
 # J.A.R.V.I.S
@@ -119,9 +227,9 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 | `mcp` | MCP 工具集成 | `pip install "jarvis-agent[mcp]"` |
 | `camera` | 摄像头拍照 | `pip install "jarvis-agent[camera]"` |
 | `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
-| `voice` | 语音对话（STT + TTS） | `pip install "jarvis-agent[voice]"` |
+| `voice` | 语音对话 `/voice` + 实时双工 `/talk`（STT+TTS+全双工） | `pip install "jarvis-agent[voice]"` |
 | `daemon` | 后台常驻/托盘/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | 实时聊天窗口（方舟反应炉动画） | `pip install "jarvis-agent[realtime_ui]"` |
+| `realtime_ui` | 实时聊天独立窗口（方舟反应炉动画，`/talk` 可视化） | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
 
 ### 平台系统依赖
@@ -202,15 +310,22 @@ max_iterations = 50              # 单轮最大工具调用次数
 
 # ---- 语音 ----
 [tts]
-model = "cosyvoice-v3-flash"     # TTS 模型（DashScope CosyVoice）
+model = "cosyvoice-v3-flash"     # TTS 模型（v3-flash/v3-plus/v3.5-plus）
 voice = "longanlang_v3"          # 音色
 volume = 50                      # 音量 0-100
 speech_rate = 1.0                # 语速 0.5-2.0
 
 [stt]
-model = "qwen3-asr-flash-realtime" # STT 模型（QwenASR / Paraformer）
+# 三后端自动适配（根据 model 前缀）：qwen3-asr-* → QwenASR | paraformer-* → ParaformerSTT | fun-asr-* → FunASRFlashSTT
+model = "fun-asr-flash-2026-06-15"
 max_seconds = 15                  # 单次录音最长秒数
 silence_seconds = 1.5             # 静音检测秒数
+
+# ---- 实时双工语音 ----
+[realtime_talk]
+model = "qwen-audio-3.0-realtime-flash"  # DashScope 实时语音模型
+voice = "longanqian"                      # 音色
+auto_start = false                        # daemon 启动时自动进入
 
 # ---- 上下文压缩 ----
 [context]
@@ -443,13 +558,21 @@ Jarvis 提供两套独立的语音系统：
 🎤 聆听 → STT 识别 → LLM 思考回答 → TTS 朗读 → 🎤 聆听 → ...
 ```
 
-- **语音输入**：Qwen3-ASR 流式识别（WebSocket，支持中英文混说）
-- **语音输出**：CosyVoice 自然语音合成（`longanlang_v3` 音色）
+- **语音输入**：三种 STT 后端可选，修改 `settings.toml` 中 `[stt].model` 切换：
+
+  | 配置 model 前缀 | 后端类 | 协议 | 特点 |
+  |---|---|---|---|
+  | `qwen3-asr-*` | **QwenASR** | WebSocket（OmniRealtimeConversation） | 服务端 VAD，质量最高，中英混合强 |
+  | `paraformer-*` | **ParaformerSTT** | WebSocket（Recognition） | 客户端 VAD，轻量快速 |
+  | `fun-asr-*` | **FunASRFlashSTT** | HTTP POST（文件上传） | 兼容性好，无需 WebSocket |
+
+- **语音输出**：两种 TTS 模式
+  - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
+  - **StreamTTSPlayer**：WebSocket 流式合成，LLM 逐句输出 → 即时合成播放，首句延迟 ~500ms
+  - 默认音色 `longanlang_v3`
 - **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
 - **思考隔离**：思考过程只显示在终端面板，不进入 TTS
 - **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
-
-> 也支持 Paraformer STT 后端：修改 `settings.toml` 中 `[stt]` 的 `model` 为 `paraformer-realtime-v2`
 
 ### 实时双工 `/talk`
 
@@ -601,53 +724,78 @@ Jarvis 支持插件扩展，通过命令行管理：
 
 ```
 agent/
+├── main.py            # 入口（REPL / daemon / --talk 分发）
+├── acp.py             # Agent Communication Protocol
 ├── core/              # 核心运行时
-│   ├── query_loop.py  # 对话循环（REPL 驱动）
+│   ├── query_loop.py  # 对话循环（REPL 驱动 + 语音对话流程）
 │   ├── orchestrator.py # Agent 编排器（ReAct 循环）
 │   ├── tool.py        # Tool 协议定义
-│   ├── context.py     # 工具上下文 + UI 协议
-│   ├── message.py     # 消息/内容块类型
-│   ├── result.py      # 工具调用结果
+│   ├── context.py     # 工具上下文 + UI 协议（RealtimeTalkUI）
+│   ├── message.py     # 消息/内容块类型（Message / ContentBlock）
+│   ├── result.py      # 工具调用结果（ToolResult）
 │   ├── hooks.py       # 钩子系统
 │   ├── diag.py        # 诊断日志
-│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望）
-│   ├── extensions/    # 外部扩展（MCP客户端/插件/Skill）
-│   └── memory/        # 记忆持久化（压缩/恢复/存储）
-├── permissions/       # 五层权限系统（规则/校验/路径守护/命令分类）
+│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日）
+│   ├── extensions/    # 外部扩展机制（MCP客户端/插件/Skill加载）
+│   └── memory/        # 记忆持久化（上下文压缩/恢复/文件状态/存储）
+├── collaboration/     # 多 Agent 协作框架
+│   ├── subagent.py    # 子代理定义与运行
+│   ├── team.py        # Agent 团队管理
+│   ├── teammate.py    # 团队成员
+│   ├── mailbox.py     # Agent 间消息邮箱
+│   └── task_list.py   # 共享任务列表
+├── lsp/               # LSP 代码智能
+│   ├── client.py      # LSP 客户端
+│   └── manager.py     # 多语言 LSP Server 管理
+├── permissions/       # 五层权限系统
+│   ├── rules.py       # 权限规则定义
+│   ├── checker.py     # 权限校验器
+│   ├── path_guard.py  # 路径安全守护
+│   ├── shell_classifier.py # Shell 命令危险分级
+│   └── modes.py       # 权限模式（default/plan/accept_edits/yolo）
 ├── tools/             # 内置工具（30+）
 │   ├── base.py        # 基础工具执行器
 │   ├── bash.py        # 命令执行
+│   ├── ask_user.py    # 向用户提问
+│   ├── location.py    # IP 定位
+│   ├── todo.py        # 任务计划
 │   ├── file_ops/      # 文件读写/编辑/搜索（glob/grep）
 │   ├── system/        # 系统操作（鼠标/键盘/屏幕/窗口）
 │   ├── web/           # 浏览器自动化 + 网络请求
 │   ├── vision/        # 摄像头拍照 + 视觉监控
-│   ├── collaboration/ # 多Agent协作（子代理/团队/任务）
-│   ├── extensions/    # 扩展工具（LSP/市场/MCP代理/日程）
-│   ├── ask_user.py    # 向用户提问
-│   ├── location.py    # IP 定位
-│   └── todo.py        # 任务计划
+│   ├── collaboration/ # 多Agent协作工具（子代理/团队/任务）
+│   └── extensions/    # 扩展工具（LSP/市场/MCP代理/日程）
 ├── llm/               # LLM 抽象层
 │   ├── base.py        # 基础 Provider 接口
 │   ├── openai_provider.py    # OpenAI 兼容协议
-│   ├── anthropic_provider.py # Anthropic 协议
-│   └── dashscope_provider.py # DashScope SDK 原生协议
+│   ├── anthropic_provider.py # Anthropic Messages API
+│   ├── dashscope_provider.py # DashScope SDK 原生协议
+│   └── mock.py        # Mock Provider（测试用）
 ├── ui/                # 用户界面
 │   ├── cli.py         # Rich 终端 REPL + 命令补全
-│   ├── bootscreen.py  # 启动动画（方舟反应炉）
+│   ├── boot_animation.py # 启动动画（方舟反应炉像素粒子）
+│   ├── markdown_renderer.py # Markdown 终端渲染
+│   ├── model_picker.py # 交互式模型选择器
+│   ├── session_picker.py # 交互式会话选择器
+│   ├── terminal_picker.py # 交互式终端选择器
 │   └── realtime_window/ # 实时聊天独立窗口
-│       ├── window.py  # 父进程窗口控制器（单例管理）
-│       ├── process.py # 子进程入口 + 前端窗口
-│       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接
-│       └── assets/    # HTML/JS/CSS（方舟反应炉动画）
+│       ├── window.py  # 父进程窗口控制器（单例 + 子进程管理）
+│       ├── process.py # 子进程入口 + 前端窗口 + JSBridge
+│       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接（UI 协议实现）
+│       └── assets/    # HTML/JS/CSS（方舟反应炉动画 + 对话气泡）
 ├── voice/             # 语音引擎
-│   ├── tts.py         # CosyVoice TTS 合成
-│   ├── stt.py         # QwenASR / Paraformer STT 识别
-│   ├── voice_loop.py  # /voice 语音对话循环（STT→LLM→TTS）
-│   └── realtime_talk.py # /talk 全双工实时语音（WebSocket）
-├── daemon/            # 常驻模式（daemon/热键/托盘/开机自启）
-├── config/            # 配置加载（TOML多源合并+环境变量覆盖）
-├── prompts/           # 系统提示组装
-└── memory/            # 会话持久化
+│   ├── tts.py         # CosyVoiceTTS（DashScope CosyVoice 合成）
+│   ├── stt.py         # STT 三后端（QwenASR / ParaformerSTT / FunASRFlashSTT）
+│   ├── stream_tts.py  # StreamTTSPlayer（WebSocket 流式 TTS，逐句播放）
+│   ├── audio.py       # 音频工具（PyAudio 管理/音量计算）
+│   ├── voice_loop.py  # /voice 语音对话循环（STT→LLM→TTS，含流式 TTS）
+│   └── realtime_talk.py # /talk 全双工实时语音（WebSocket 直连 DashScope）
+├── daemon/            # 常驻模式
+│   ├── daemon.py      # 守护进程（后台分离/托盘/热键）
+│   ├── autostart.py   # 开机自启/桌面快捷方式
+│   └── voice_state.py # 语音状态管理
+├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
+└── prompts/           # 系统提示组装（动态思维模式/语音模式）
 ```
 
 ---
@@ -669,8 +817,7 @@ agent/
 本项目采用 [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/) 许可协议。
 
 **简而言之：**
-- ✅ 自由使用、修改、分发
-- ✅ 必须保留原作者署名
+- ✅ 自由使用、修改、分发、开源
 - ❌ 禁止用于商业用途
 
 > "商业用途"指以营利为目的的使用，包括但不限于将本软件或其衍生作品作为商业产品/服务的一部分进行销售、出租、SaaS 化运营等。如有商业授权需求，请联系作者。
