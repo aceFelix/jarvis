@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
+import struct
 import sys
 from typing import Any
 
@@ -44,6 +46,20 @@ INPUT_RATE = 16000    # 麦克风：16kHz
 OUTPUT_RATE = 24000   # 扬声器：24kHz
 CHUNK_BYTES = 3200    # 每次读取 3200 字节（~100ms @ 16kHz mono 16bit）
 SEND_INTERVAL = 0.02  # 发送间隔 20ms
+VOLUME_REPORT_INTERVAL = 8  # 每 8 个 chunk 上报一次音量（~160ms）
+
+
+def _rms(data: bytes) -> float:
+    """计算 16bit PCM 音频数据的 RMS 音量，返回 0.0 ~ 1.0。
+
+    @author aceFelix
+    """
+    count = len(data) // 2
+    if count == 0:
+        return 0.0
+    samples = struct.unpack(f"{count}h", data[: count * 2])
+    mean_square = sum(s * s for s in samples) / count
+    return min(1.0, math.sqrt(mean_square) / 32768.0)
 
 
 class RealtimeTalk:
@@ -75,9 +91,16 @@ class RealtimeTalk:
         self._mic: Any = None
         self._spk: Any = None
         self._running = False
+        self._ai_speaking = False
+
+    @property
+    def running(self) -> bool:
+        """会话是否仍在运行。"""
+        return self._running
 
     async def run(self, ui) -> None:
         """启动实时对话。ESC 退出。"""
+
         if websockets is None:
             ui.error("缺少 websockets 库，请运行: pip install websockets")
             return
@@ -103,6 +126,7 @@ class RealtimeTalk:
         url = f"{self._ws_url}?model={self._model}"
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
+        ui.on_status("connecting")
         ui.info("=" * 56)
         ui.info("🎙️  实时双工语音对话已开启")
         ui.info(f"   模型: {self._model}  ·  音色: {self._voice}")
@@ -127,10 +151,11 @@ class RealtimeTalk:
                 }))
 
                 self._running = True
+                ui.on_status("standby")
 
                 # 并发：发音频 + 收事件 + ESC 监听
                 await asyncio.gather(
-                    self._send_audio(ws),
+                    self._send_audio(ws, ui),
                     self._recv_events(ws, ui),
                     self._esc_watcher(ui),
                 )
@@ -146,15 +171,19 @@ class RealtimeTalk:
                     "2) 是否已开通 DashScope 实时语音/多模态服务；"
                     "3) [realtime_talk] 中的 ws_url 是否与你的业务空间一致。"
                 )
+                ui.on_status("error")
             else:
                 ui.error(f"实时对话异常: {e}")
+                ui.on_status("error")
         finally:
             self._running = False
             self._cleanup()
+            ui.on_status("standby")
             ui.info("\n已退出实时语音对话")
 
-    async def _send_audio(self, ws) -> None:
-        """持续读取麦克风并发送音频。"""
+    async def _send_audio(self, ws, ui) -> None:
+        """持续读取麦克风并发送音频，同时周期性上报音量。"""
+        chunk_count = 0
         while self._running:
             try:
                 data = await asyncio.to_thread(self._mic.read, CHUNK_BYTES, False)
@@ -163,6 +192,15 @@ class RealtimeTalk:
                     "type": "input_audio_buffer.append",
                     "audio": b64,
                 }))
+
+                chunk_count += 1
+                if chunk_count >= VOLUME_REPORT_INTERVAL:
+                    chunk_count = 0
+                    try:
+                        ui.on_volume(_rms(data))
+                    except Exception:
+                        pass
+
                 await asyncio.sleep(SEND_INTERVAL)
             except asyncio.CancelledError:
                 break
@@ -185,11 +223,22 @@ class RealtimeTalk:
                 # AI 语音 → 直接播放（与官方示例一致）
                 delta = event.get("delta", "")
                 if delta:
+                    if not self._ai_speaking:
+                        self._ai_speaking = True
+                        ui.on_ai_speaking(True)
+                        ui.on_status("speaking")
                     audio = base64.b64decode(delta)
                     await asyncio.to_thread(self._spk.write, audio)
 
+            elif t == "response.audio.done":
+                self._ai_speaking = False
+                ui.on_ai_speaking(False)
+                ui.on_status("standby")
+
             elif t == "input_audio_buffer.speech_started":
                 # 用户开始说话 → 清空扬声器缓冲区
+                ui.on_user_speaking(True)
+                ui.on_status("listening")
                 if self._spk:
                     try:
                         self._spk.stop_stream()
@@ -197,19 +246,28 @@ class RealtimeTalk:
                     except Exception:
                         pass
 
+            elif t == "input_audio_buffer.speech_stopped":
+                ui.on_user_speaking(False)
+                if not self._ai_speaking:
+                    ui.on_status("standby")
+
             elif t == "conversation.item.input_audio_transcription.completed":
                 transcript = event.get("transcript", "")
                 if transcript:
-                    ui.info(f"\n🧑 你: {transcript}")
+                    # 统一交给 UI 协议中的 on_user_transcript 显示，
+                    # 不再额外调用 info()，避免 Webview 实现中气泡重复。
+                    ui.on_user_transcript(transcript)
 
             elif t == "response.audio_transcript.done":
                 transcript = event.get("transcript", "")
                 if transcript:
-                    ui.info(f"\n🤖 贾维斯: {transcript}")
+                    # 统一交给 UI 协议中的 on_ai_transcript 显示。
+                    ui.on_ai_transcript(transcript)
 
             elif t == "error":
                 err = event.get("error", {})
                 ui.warn(f"\n⚠ {err.get('message', str(event))}")
+                ui.on_status("error")
 
     async def _esc_watcher(self, ui) -> None:
         """ESC 键退出。"""

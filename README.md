@@ -12,7 +12,39 @@
 >
 > 「随时为您效劳，先生。」
 
-这是一个为个人电脑打造的 AI Agent —— 能像《钢铁侠》里的贾维斯一样与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它的工具协议、权限系统、编排模型、MCP 集成、上下文压缩等核心思想有着现代 AI Agent 的最佳实践，实现语言、交互方式和产品形态都围绕「个人电脑助手」设计，把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
+一个为个人电脑打造的 AI Agent —— 能像《钢铁侠》里的贾维斯一样与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
+
+---
+
+## 目录
+
+- [平台支持](#平台支持)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [配置指南](#配置指南)
+- [核心概念](#核心概念)
+  - [五层权限系统](#五层权限系统)
+  - [上下文压缩](#上下文压缩)
+  - [记忆系统](#记忆系统)
+  - [Skill 技能包](#skill-技能包)
+  - [MCP 集成](#mcp-集成)
+- [REPL 命令参考](#repl-命令参考)
+- [模型管理](#模型管理)
+- [深度思考模式](#深度思考模式)
+- [语音功能](#语音功能)
+  - [语音对话 `/voice`](#语音对话-voice)
+  - [实时双工 `/talk`](#实时双工-talk)
+  - [TTS 朗读 `/say`](#tts-朗读-say)
+  - [录音识别 `/listen`](#录音识别-listen)
+- [图片输入](#图片输入)
+- [常驻模式（贾维斯形态）](#常驻模式贾维斯形态)
+- [多 Agent 协作](#多-agent-协作)
+- [插件系统](#插件系统)
+- [目录结构](#目录结构)
+- [开发路线](#开发路线)
+- [许可证](#许可证)
+
+---
 
 ## 平台支持
 
@@ -22,7 +54,9 @@
 | LLM Provider（OpenAI / Anthropic / DashScope） | ✅ | ✅ | ✅ |
 | MCP 集成 / 会话记忆 / 上下文压缩 | ✅ | ✅ | ✅ |
 | Rich 终端 UI + 启动动画 | ✅ | ✅ | ✅ |
-| 语音 TTS / STT（`/voice`） | ✅ | ✅ | ✅ |
+| 语音对话 `/voice`（STT + TTS） | ✅ | ✅ | ✅ |
+| 实时双工语音 `/talk`（全双工） | ✅ | ✅ | ✅ |
+| 实时聊天窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
 | 鼠标 / 键盘 / 截屏（pyautogui） | ✅ | ✅¹ | ✅² |
 | 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
 | `--daemon` 后台常驻模式 | ✅ | ✅ | ⚠️ 前台运行³ |
@@ -34,12 +68,14 @@
 > ² Linux 鼠标键盘操作需 DISPLAY 环境变量（X11/Wayland 桌面环境）
 > ³ Linux 上 `--daemon` 会以前台模式运行（无法后台分离），功能完整
 
+---
+
 ## 安装
 
 ### 从 PyPI 安装（推荐）
 
 ```bash
-# 一键安装全功能（语音 + GUI + daemon + MCP + 浏览器 + 摄像头/视觉）
+# 一键安装全功能（语音 + GUI + daemon + MCP + 浏览器 + 摄像头/视觉 + 实时聊天窗口）
 pip install "jarvis-agent[all]"
 
 # 仅安装核心对话功能
@@ -76,32 +112,23 @@ jarvis
 
 jarvis 将不同能力拆分为可选依赖组，按需安装：
 
-| 依赖组 | 功能 |
-|---|---|
-| `gui` | 鼠标/键盘/截屏/窗口管理 |
-| `browser` | 浏览器自动化（Playwright） |
-| `mcp` | MCP 工具集成 |
-| `camera` | 摄像头拍照 |
-| `vision` | 实时视觉监控 + OCR |
-| `voice` | 语音对话（TTS + STT） |
-| `daemon` | 后台常驻/托盘/热键/开机自启 |
-| `all` | 上面全部 |
-
-```bash
-# 一键安装全部功能（推荐）
-pip install "jarvis-agent[all]"
-
-# 或按需安装
-pip install "jarvis-agent[voice]"                    # 语音对话
-pip install "jarvis-agent[gui]"                      # 鼠标/键盘/截屏
-pip install "jarvis-agent[daemon]"                   # 后台常驻模式
-pip install "jarvis-agent[mcp]"                      # MCP 工具集成
-pip install "jarvis-agent[camera,vision]"            # 摄像头/视觉监控
-pip install "jarvis-agent[browser]"                  # 浏览器自动化
-pip install playwright && playwright install chromium  # 浏览器需要额外安装 Chromium
-```
+| 依赖组 | 功能 | 安装命令 |
+|---|---|---|
+| `gui` | 鼠标/键盘/截屏/窗口管理 | `pip install "jarvis-agent[gui]"` |
+| `browser` | 浏览器自动化（Playwright） | `pip install "jarvis-agent[browser]"` |
+| `mcp` | MCP 工具集成 | `pip install "jarvis-agent[mcp]"` |
+| `camera` | 摄像头拍照 | `pip install "jarvis-agent[camera]"` |
+| `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
+| `voice` | 语音对话（STT + TTS） | `pip install "jarvis-agent[voice]"` |
+| `daemon` | 后台常驻/托盘/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
+| `realtime_ui` | 实时聊天窗口（方舟反应炉动画） | `pip install "jarvis-agent[realtime_ui]"` |
+| `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
 
 ### 平台系统依赖
+
+**Windows**: 无需额外系统依赖，直接 `pip install` 即可。
+
+> 实时聊天窗口需要 Edge WebView2 Runtime（Win10/11 通常已预装），如未安装请从 [Microsoft 官网](https://developer.microsoft.com/microsoft-edge/webview2/) 下载。
 
 **macOS**:
 
@@ -117,7 +144,6 @@ brew install portaudio          # pyaudio 编译依赖（语音功能必需）
 sudo apt install portaudio19-dev python3-pyaudio  # 语音功能
 sudo apt install libgtk-3-dev libnotify-dev        # 系统托盘（pystray）
 sudo apt install python3-tk                        # pyautogui 截屏依赖
-# 全局热键需要 root 权限: sudo jarvis --daemon
 ```
 
 **Linux (Fedora/RHEL)**:
@@ -126,7 +152,7 @@ sudo apt install python3-tk                        # pyautogui 截屏依赖
 sudo dnf install portaudio-devel gtk3-devel
 ```
 
-**Windows**: 无需额外系统依赖，直接 `pip install` 即可。
+---
 
 ## 快速开始
 
@@ -141,105 +167,365 @@ jarvis
 默认配置在 `configs/settings.toml`，环境变量 `JARVIS_*` 和 CLI 参数可覆盖。
 API Key 识别优先级：`DASHSCOPE_API_KEY` > `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `JARVIS_API_KEY`。
 
-### 模型管理（`/models`）
+启动后进入 REPL 终端界面，输入问题即可与 AI 对话：
+- 直接输入自然语言，AI 会自动调用工具完成任务
+- 输入 `/` 弹出命令列表，Tab 键自动补全
+- `Shift+Enter` 换行（Windows 终端自动转换）
+- `Ctrl+C` 中断当前回答
 
-内置 qwen 系列模型开箱即用，也支持添加自定义模型（DeepSeek / Claude / GPT 等）：
+![Jarvis REPL](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=A+futuristic+terminal+interface+with+a+glowing+blue+JARVIS+logo,+showing+AI+assistant+conversation+with+syntax-highlighted+tool+calls+and+responses,+dark+theme,+cyberpunk+aesthetic&image_size=landscape_16_9)
 
-- `/models` — 交互式模型列表，↑↓ 选择、Enter 切换、空格管理配置
-- `/model <name>` — 快速切换到指定模型
-- 内置模型可按空格键修改接口类型 / API Key / 模型类型（多模态 or 纯文本），保存为自定义覆盖配置
-- 自定义模型支持编辑和删除，配置持久化到 `~/.jarvis/settings.toml`
-- 接口类型支持：**OpenAI 兼容** / **Anthropic 兼容** / **DashScope SDK**（qwen 原生协议，支持 `MultiModalConversation` 和 `Generation` 双端点）
+---
 
-## 目录结构
+## 配置指南
+
+Jarvis 使用三层配置合并：
+
+1. **项目默认配置** — `configs/settings.toml`（随项目分发）
+2. **用户级覆盖** — `~/.jarvis/settings.toml`（自动创建，持久化个人设置）
+3. **环境变量覆盖** — `JARVIS_*` 前缀的环境变量（优先级最高）
+
+### 核心配置项
+
+```toml
+# ---- LLM ----
+provider = "dashscope"          # 模型提供商
+api_format = "openai"           # 协议格式（openai / anthropic）
+model = "qwen3.7-plus"          # 默认模型（多模态视觉）
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+max_tokens = 20480              # 单次输出最大 Token
+
+# ---- 运行时 ----
+workdir = "E:\\J.A.R.V.I.S_Work" # 默认工作目录
+permission_mode = "yolo"         # 权限模式（default / plan / accept_edits / yolo）
+max_iterations = 50              # 单轮最大工具调用次数
+
+# ---- 语音 ----
+[tts]
+model = "cosyvoice-v3-flash"     # TTS 模型（DashScope CosyVoice）
+voice = "longanlang_v3"          # 音色
+volume = 50                      # 音量 0-100
+speech_rate = 1.0                # 语速 0.5-2.0
+
+[stt]
+model = "qwen3-asr-flash-realtime" # STT 模型（QwenASR / Paraformer）
+max_seconds = 15                  # 单次录音最长秒数
+silence_seconds = 1.5             # 静音检测秒数
+
+# ---- 上下文压缩 ----
+[context]
+compaction = true
+compaction_threshold = 8000       # Token 阈值（超此值触发压缩）
+keep_recent_messages = 6          # 压缩时保留最近 N 条消息
+
+# ---- 常驻模式 ----
+[daemon]
+hotkey = "ctrl+shift+j"           # 全局热键
+tray = true                       # 系统托盘图标
+```
+
+> 完整配置项参见 `configs/settings.toml`。
+
+---
+
+## 核心概念
+
+### 五层权限系统
+
+Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
+
+| 层级 | 说明 |
+|---|---|
+| **L1 硬阻断** | `.ssh`/`.aws`/`.gnupg` 等敏感目录永久拒绝访问；`rm -rf /` 等危险命令永久拦截 |
+| **L2 路径守护** | 限制 AI 的文件操作范围，防止读写关键系统目录 |
+| **L3 命令分类** | 将命令分为安全/危险/敏感三级，危险命令需确认 |
+| **L4 权限模式** | `default` 逐次确认 / `plan` 只读规划 / `accept_edits` 编辑自动通过 / `yolo` 全自动 |
+| **L5 用户确认** | 关键操作（删除文件、执行脚本）弹窗确认 |
+
+切换权限模式：`/mode yolo`
+
+### 上下文压缩
+
+当对话历史 Tokens 超过阈值（默认 8000）时，自动将旧消息摘要压缩，保留最近 N 条原始消息：
+
+- **水位策略**：≥30% 保留最近 2 条，≥80% 保留最近 6 条
+- **图片驱逐**：旧图片替换为文字占位符释放 Token
+- **工具结果折叠**：只保留最近 4 个工具结果
+- **容错重试**：遇到 Context Too Long 错误自动压缩后重试
+- 手动触发：`/compact`
+
+### 记忆系统
+
+Jarvis 支持多层记忆持久化：
+
+- **会话记忆**：自动保存/恢复对话历史。`/save` `/load` `/sessions` 管理
+- **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
+- **自动恢复**：异常退出后下次启动自动提示恢复
+
+### Skill 技能包
+
+通过 Skill 文件为 AI 注入专业知识和工作流程：
 
 ```
-agent/
-├── core/           # 核心：Tool 协议、QueryLoop、Orchestrator、上下文压缩、
-│                   #   会话记忆、Skill 系统、MCP 客户端、子代理、调度器
-├── permissions/    # 五层权限系统：规则、校验、路径守护、命令分类
-├── tools/          # 内置工具（30+）：bash / 文件 / glob / grep / todo / ask_user +
-│                   #   GUI（鼠标/键盘/屏幕/窗口/浏览器）+ 摄像头 / 视觉监控 +
-│                   #   MCP 代理 / 子代理 / 日程 / 系统监控
-├── llm/            # LLM 抽象层：base + openai_provider + anthropic_provider + dashscope_provider
-├── ui/             # Rich 终端 UI + 启动动画 + prompt_toolkit 补全
-├── prompts/        # 系统提示组装
-├── config/         # 配置加载（TOML 多源合并 + 环境变量覆盖 + 用户级覆盖）
-├── voice/          # 语音引擎：TTS（CosyVoice）+ STT（Qwen3-ASR / Paraformer 双后端）+ /voice 闭环
-├── daemon/         # 常驻模式：后台守护 + 全局热键 + 系统托盘 + 开机自启
-└── memory/         # 会话 / 记忆持久化
+~/.jarvis/skills/<name>/SKILL.md        # 用户级技能包
+<workdir>/.jarvis/skills/<name>/SKILL.md # 项目级技能包
 ```
 
-## REPL 命令
+SKILL.md 包含：
+- **Frontmatter**：name / description / when_to_use / trigger_words
+- **正文**：Markdown 格式的专业知识指令
 
-启动后输入 `/` 自动弹出命令列表（Tab 补全）：
+查看已加载技能：`/skills`
+
+### MCP 集成
+
+支持 [Model Context Protocol](https://modelcontextprotocol.io/) 接入外部工具：
+
+- 配置文件：`~/.jarvis/mcp.json`
+- 工具命名：`mcp__<server>__<tool>` 格式注册
+- 默认 ASK 权限（外部进程），yolo 模式可放宽
+- 查看状态：`/mcp`
+
+---
+
+## REPL 命令参考
+
+启动后输入 `/` 弹出命令列表，Tab 键自动补全：
+
+### 对话控制
 
 | 命令 | 说明 |
 |---|---|
 | `/help` `/h` | 查看所有命令帮助 |
 | `/exit` `/quit` | 退出贾维斯 |
-| `/mode <m>` | 切换权限模式（default / plan / accept_edits / yolo）|
-| `/model` | 交互式模型选择 |
-| `/model <name>` | 直接切换到指定模型 |
-| `/models` | 管理模型列表（添加 / 编辑 / 删除） |
-| `/think` | 开关深度思考模式（ReAct 思维链） |
-| `/voice` `/talk` | 进入语音对话模式 |
-| `/say <text>` | TTS 语音朗读 |
-| `/listen` `/mic` | 录音识别成文字 |
-| `/save [name]` | 保存当前会话 |
-| `/load <name>` `/resume <n>` | 加载已保存会话 |
-| `/sessions` | 列出所有已保存会话 |
-| `/memory` | 查看长期记忆文件 |
-| `/skills` | 列出已加载技能包 |
-| `/mcp` | 查看 MCP server 连接状态 |
+| `/reset` `/clear` | 清空对话历史，重新开始 |
+| `/compact` | 手动压缩上下文（摘要旧消息节省 Token） |
+
+### 模型管理
+
+| 命令 | 说明 |
+|---|---|
+| `/model <前缀>` | 前缀匹配切换模型（支持模糊输入） |
+| `/models` | 交互式模型管理（↑↓选择、Enter切换、空格编辑配置） |
+| `/think` | 开关深度思考模式（`/think on` / `/think off`） |
+
+### 权限控制
+
+| 命令 | 说明 |
+|---|---|
+| `/mode <模式>` | 切换权限模式（default / plan / accept_edits / yolo） |
 | `/tools` | 列出所有可用工具 |
-| `/reset` `/clear` | 清空对话历史 |
-| `/compact` | 手动压缩上下文 |
 
-## 深度思考（ReAct 思维链）
+### 会话管理
 
-启用后，模型在每次回复前先输出 `reasoning_content`（思考过程），再进行正式回复或工具调用，形成完整的 **Think → Act → Observe** ReAct 循环。
+| 命令 | 说明 |
+|---|---|
+| `/save [名称]` | 保存当前会话 |
+| `/load <前缀>` | 前缀匹配加载已保存会话 |
+| `/sessions` `/loads` | 列出并交互选择已保存会话 |
 
-- 思考内容在终端显示为「💭 思考过程」暗色面板，不干扰正式回复输出
-- 配置：`configs/settings.toml` 中 `enable_thinking = true` / `thinking_budget = 2000`
-- 运行时开关：`/think on` / `/think off`
-- 环境变量关闭：`JARVIS_ENABLE_THINKING=0`
+### 记忆与知识
 
-## 语音对话（`/voice`）
+| 命令 | 说明 |
+|---|---|
+| `/memory` | 查看长期记忆文件内容 |
+| `/skills` | 列出已加载的技能包 |
 
-进入语音对话模式后，形成 **STT → LLM → TTS** 闭环：
+### 语音功能
 
-- **语音输入**：Qwen3-ASR 流式识别（WebSocket），支持中英文
-- **语音输出**：CosyVoice TTS 自然语音合成
-- **打断机制**：ESC 打断当前回复，LLM 意图识别退出（说"退下"）
-- **思考模式**：语音模式下思考内容显示在终端面板，不进入 TTS 朗读
-- **markdown 清洗**：自动过滤代码块 / 表格 / 链接等不适合朗读的内容
+| 命令 | 说明 |
+|---|---|
+| `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
+| `/talk` | 进入实时双工语音对话（全双工，说话即可打断） |
+| `/say <文本>` | TTS 朗读指定文字 |
+| `/listen` `/mic` | 录音并识别为文字 |
+
+### 图片输入
+
+| 命令 | 说明 |
+|---|---|
+| `/image <路径>` `/img <路径>` | 添加本地图片到待发送列表 |
+| `/paste` `/p` | 添加剪贴板图片到待发送列表 |
+
+> 图片在下次发送消息时自动附带。支持格式：PNG / JPG / WEBP / BMP。自动缩放到最长边 1280px。
+
+### 多 Agent 与插件
+
+| 命令 | 说明 |
+|---|---|
+| `/agents` | 查看多 Agent 团队状态与成员 |
+| `/tasks` | 查看共享任务列表进度 |
+| `/plan` | 切换规划模式（进入/退出只读规划） |
+| `/plugin` | 列出已安装插件 |
+| `/plugin install <名称>` | 安装指定插件 |
+| `/plugin uninstall <名称>` | 卸载指定插件 |
+| `/plugin search <关键词>` | 搜索可用插件 |
+
+### MCP 工具
+
+| 命令 | 说明 |
+|---|---|
+| `/mcp` | 查看 MCP server 连接状态与工具列表 |
+
+---
+
+## 模型管理
+
+### 内置模型
+
+开箱即用，接入阿里云 DashScope：
+
+- `qwen3.7-plus` — 通义千问 3.7 Plus（默认，多模态视觉）
+- `qwen3.6-plus` — 通义千问 3.6 Plus
+- `qwen3.6-flash` — 通义千问 3.6 Flash（快速响应）
+- `qwen3.5-plus` — 通义千问 3.5 Plus
+- `qwen3.5-flash` — 通义千问 3.5 Flash（快速响应）
+
+### 添加自定义模型
+
+通过 `/models` 命令交互式添加自定义模型，支持三种接口类型：
+
+| 接口类型 | 适用模型 | 说明 |
+|---|---|---|
+| **OpenAI 兼容** | DeepSeek / GPT-4o / 各类兼容服务 | 标准 OpenAI API 格式 |
+| **Anthropic 兼容** | Claude 系列 | Anthropic Messages API 格式 |
+| **DashScope SDK** | qwen 系列原生协议 | 支持 MultiModalConversation 和 Generation 双端点 |
+
+配置会自动保存到 `~/.jarvis/settings.toml` 的 `[llm.custom_models]` 中，重启后保持。
+
+### 自定义模型配置示例
+
+```toml
+[llm.custom_models."deepseek-v4"]
+api_format = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-your-deepseek-key"
+model_type = "text"              # "text" 纯文本 / "vision" 多模态
+```
+
+---
+
+## 深度思考模式
+
+启用后，模型在每次回复前先输出 `reasoning_content`（思考过程），形成完整的 **Think → Act → Observe** ReAct 循环。
+
+- **视觉效果**：思考内容在终端显示为暗色面板「💭 思考过程」
+- **运行中开关**：`/think on` / `/think off`（无需重启）
+- **配置项**：
+  ```toml
+  enable_thinking = true
+  thinking_budget = 800  # 思考过程 Token 上限
+  ```
+- **环境变量**：`JARVIS_ENABLE_THINKING=0` 关闭
+- **模型适配**：
+  - Qwen 系列：通过 `enable_thinking` 参数控制
+  - DeepSeek 系列：通过 `thinking.type` 参数控制，支持 `reasoning_effort` 可调
+  - `/think off` 时自动过滤 `reasoning_content`，净化输出
+
+---
+
+## 语音功能
+
+Jarvis 提供两套独立的语音系统：
+
+| 模式 | 技术路线 | 特点 |
+|---|---|---|
+| **`/voice` 语音对话** | STT → LLM → TTS 管线 | 识别→思考→朗读，逐轮对话 |
+| **`/talk` 实时聊天** | 全双工 WebSocket 直连 | 边说边听，AI 说话时可打断 |
+
+> 两套系统独立运行，但共用麦克风硬件。同时开启可能导致 PyAudio 设备冲突。
+
+### 语音对话 `/voice`
+
+进入语音对话模式后，形成 **听 → 想 → 说** 闭环：
+
+```
+🎤 聆听 → STT 识别 → LLM 思考回答 → TTS 朗读 → 🎤 聆听 → ...
+```
+
+- **语音输入**：Qwen3-ASR 流式识别（WebSocket，支持中英文混说）
+- **语音输出**：CosyVoice 自然语音合成（`longanlang_v3` 音色）
+- **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
+- **思考隔离**：思考过程只显示在终端面板，不进入 TTS
+- **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
+
+> 也支持 Paraformer STT 后端：修改 `settings.toml` 中 `[stt]` 的 `model` 为 `paraformer-realtime-v2`
+
+### 实时双工 `/talk`
+
+基于 DashScope 实时语音 WebSocket 服务（`qwen-audio-3.0-realtime-flash`）：
+
+- **全双工通信**：麦克风音频流实时送入模型，同时接收 AI 语音输出
+- **VAD 打断**：服务端自动检测人声，说话即可打断 AI 回复
+- **独立窗口 UI**：安装 `realtime_ui` 后，弹出专用对话窗口
+  - 黑色无边框设计，窗口自动最大化
+  - **方舟反应炉粒子动画**：背景实时波动，随语音音量改变
+  - AI 说话时反应炉核心变色发光，脉冲波纹扩散
+  - 对话气泡实时显示用户和 AI 的语音转录文本
+- **终端模式**：未安装 `realtime_ui` 时在终端中运行，同样支持打断
+- 退出方式：ESC 键或说"退下"
+
+### TTS 朗读 `/say`
+
+```bash
+/say 你好，我是贾维斯
+```
+
+将文字转为语音朗读。使用 DashScope CosyVoice 引擎。
+
+### 录音识别 `/listen`
+
+```bash
+/listen      # 录音并输出识别文本
+/mic         # 别名
+```
+
+---
+
+## 图片输入
+
+Jarvis 支持在对话中附带图片（需要多模态视觉模型，如 `qwen3.7-plus`）：
+
+```bash
+/image C:\Users\me\photo.png   # 添加本地图片
+/img C:\Users\me\photo.png     # 别名
+/paste                          # 添加剪贴板中的图片
+/p                              # 别名
+```
+
+- 图片加入待发送列表，下次发送消息时自动附带
+- 支持 PNG / JPG / WEBP / BMP 格式
+- 自动缩放到最长边 1280px，JPEG 质量 85
+- 剪贴板图片会自动检测并去重（MD5 判断）
+
+---
 
 ## 常驻模式（贾维斯形态）
 
 ```bash
-jarvis --daemon          # 后台启动，自动进入语音对话
+jarvis --daemon          # 后台启动
 ```
 
-**跨平台行为**：
+### 跨平台行为
 
 | 平台 | 后台分离方式 | 说明 |
 |---|---|---|
 | Windows | `pythonw.exe` + `DETACHED_PROCESS` | 无窗口进程，关闭终端不影响 |
-| macOS | `start_new_session=True` | 新会话脱离终端，关闭 Terminal.app 不影响 |
-| Linux | 不支持后台分离 | 以前台模式运行（功能完整，关闭终端即退出） |
+| macOS | `start_new_session=True` | 新会话脱离终端 |
+| Linux | 不支持后台分离 | 以前台模式运行 |
 
-启动后系统托盘出现蓝色同心圆图标。默认自动进入语音对话模式——说「退下」进待机，说「贾维斯」唤醒。
+启动后系统托盘出现蓝色同心圆图标。
 
-**托盘菜单（右键）：**
+### 托盘菜单（右键）
 
 | 菜单项 | 行为 |
 |---|---|
-| 语音对话 | 唤起语音对话模式 |
-| 文本对话 | 弹出终端窗口运行完整 REPL（自动恢复上次会话） |
-| 退出贾维斯 | 立即终止守护进程 |
+| **语音对话** | 唤起语音对话模式 |
+| **文本对话** | 弹出终端运行完整 REPL（自动恢复上次会话） |
+| **实时聊天** | 开关实时双工语音对话（勾选=开启），弹出方舟反应炉窗口 |
+| **退出贾维斯** | 立即终止守护进程 |
 
-> 文本对话弹窗：Windows 用 Git Bash / CMD，macOS 用 Terminal.app，Linux 用 gnome-terminal / xterm。
+> 实时聊天窗口：daemon 生命周期内保持单例，重复点击不会新建窗口，仅唤起已有窗口。窗口随 daemon 退出而销毁。
 
 ### 开机自启 / 桌面快捷方式
 
@@ -258,32 +544,143 @@ python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 | macOS | LaunchAgent plist（`launchctl load`） | .command（Terminal.app 打开） |
 | Linux | 不支持（提示手动 systemd） | .desktop 文件 |
 
-### 其他启动方式
+### 自动启动实时聊天
 
-| 方式 | 说明 |
-|---|---|
-| `jarvis` | 前台 REPL 模式（带启动动画） |
-| `jarvis --with-tray` | 前台 REPL + 托盘图标 |
-| `jarvis --daemon` | 后台常驻模式（Windows/macOS 后台分离，Linux 前台运行） |
+在 `~/.jarvis/settings.toml` 中配置：
 
-### 会话恢复
+```toml
+[realtime_talk]
+auto_start = true
+```
 
-异常退出时下次启动自动提示恢复上次会话（对话历史 + 工作目录）。文本对话窗口也会自动恢复。
+daemon 启动时自动进入实时聊天模式。托盘菜单可随时开关。
 
-## 可选依赖
+### 系统资源监控
 
-GUI 工具（鼠标 / 键盘 / 屏幕 / 窗口）未安装时自动跳过，不影响基础功能：
+daemon 模式下自动监控 CPU / 内存 / 磁盘：
+
+```toml
+[monitor]
+enabled = true
+cpu_threshold = 85.0       # CPU 超 85% 持续 30s 告警
+memory_threshold = 90.0    # 内存超 90% 告警
+disk_threshold = 10.0      # 磁盘剩余低于 10% 告警
+check_interval = 10        # 检查间隔（秒）
+alert_cooldown = 600       # 同类告警冷却（10 分钟）
+```
+
+---
+
+## 多 Agent 协作
+
+Jarvis 支持派生子 Agent 并行处理复杂任务：
+
+- **子代理**：主 Agent 可创建子代理处理独立的子任务，结果汇总后继续
+- **团队模式**：创建 Agent 团队，分配不同角色和工具集
+- **任务管理**：共享任务列表，追踪进度
+- **消息邮箱**：Agent 之间通过邮箱通信
+
+管理命令：`/agents` `/tasks` `/plan`
+
+---
+
+## 插件系统
+
+Jarvis 支持插件扩展，通过命令行管理：
 
 ```bash
-pip install -e ".[gui]"                              # 鼠标/键盘/截屏
-pip install -e ".[browser]" && playwright install chromium  # 浏览器自动化
+/plugin                       # 列出已安装插件
+/plugin search <关键词>        # 搜索可用插件
+/plugin install <名称>        # 安装插件
+/plugin uninstall <名称>      # 卸载插件
 ```
+
+---
+
+## 目录结构
+
+```
+agent/
+├── core/              # 核心运行时
+│   ├── query_loop.py  # 对话循环（REPL 驱动）
+│   ├── orchestrator.py # Agent 编排器（ReAct 循环）
+│   ├── tool.py        # Tool 协议定义
+│   ├── context.py     # 工具上下文 + UI 协议
+│   ├── message.py     # 消息/内容块类型
+│   ├── result.py      # 工具调用结果
+│   ├── hooks.py       # 钩子系统
+│   ├── diag.py        # 诊断日志
+│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望）
+│   ├── extensions/    # 外部扩展（MCP客户端/插件/Skill）
+│   └── memory/        # 记忆持久化（压缩/恢复/存储）
+├── permissions/       # 五层权限系统（规则/校验/路径守护/命令分类）
+├── tools/             # 内置工具（30+）
+│   ├── base.py        # 基础工具执行器
+│   ├── bash.py        # 命令执行
+│   ├── file_ops/      # 文件读写/编辑/搜索（glob/grep）
+│   ├── system/        # 系统操作（鼠标/键盘/屏幕/窗口）
+│   ├── web/           # 浏览器自动化 + 网络请求
+│   ├── vision/        # 摄像头拍照 + 视觉监控
+│   ├── collaboration/ # 多Agent协作（子代理/团队/任务）
+│   ├── extensions/    # 扩展工具（LSP/市场/MCP代理/日程）
+│   ├── ask_user.py    # 向用户提问
+│   ├── location.py    # IP 定位
+│   └── todo.py        # 任务计划
+├── llm/               # LLM 抽象层
+│   ├── base.py        # 基础 Provider 接口
+│   ├── openai_provider.py    # OpenAI 兼容协议
+│   ├── anthropic_provider.py # Anthropic 协议
+│   └── dashscope_provider.py # DashScope SDK 原生协议
+├── ui/                # 用户界面
+│   ├── cli.py         # Rich 终端 REPL + 命令补全
+│   ├── bootscreen.py  # 启动动画（方舟反应炉）
+│   └── realtime_window/ # 实时聊天独立窗口
+│       ├── window.py  # 父进程窗口控制器（单例管理）
+│       ├── process.py # 子进程入口 + 前端窗口
+│       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接
+│       └── assets/    # HTML/JS/CSS（方舟反应炉动画）
+├── voice/             # 语音引擎
+│   ├── tts.py         # CosyVoice TTS 合成
+│   ├── stt.py         # QwenASR / Paraformer STT 识别
+│   ├── voice_loop.py  # /voice 语音对话循环（STT→LLM→TTS）
+│   └── realtime_talk.py # /talk 全双工实时语音（WebSocket）
+├── daemon/            # 常驻模式（daemon/热键/托盘/开机自启）
+├── config/            # 配置加载（TOML多源合并+环境变量覆盖）
+├── prompts/           # 系统提示组装
+└── memory/            # 会话持久化
+```
+
+---
 
 ## 开发路线
 
-- [x] 阶段 1：最小可用 Agent（对话 + 文件 + 命令 + 五层权限）
-- [x] 阶段 2：电脑操作能力（GUI + 多模态视觉 + 浏览器自动化 + 摄像头拍照）
-- [x] 阶段 3：实时语音（TTS + STT + /voice 闭环 + 打断）
-- [x] 阶段 4：记忆与生态（会话持久化 / 长期记忆 / MCP 接入 / 上下文压缩 / Skill 系统）
-- [x] 阶段 5：贾维斯形态（daemon 常驻 + 全局热键 + 系统托盘 + 开机自启 + 子代理 + 主动感知 + 视觉监控）
-- [x] 阶段 6：跨平台适配（Windows / macOS / Linux）
+- [x] **阶段 1**：最小可用 Agent（对话 + 文件 + 命令 + 五层权限）
+- [x] **阶段 2**：电脑操作能力（GUI + 多模态视觉 + 浏览器自动化 + 摄像头拍照）
+- [x] **阶段 3**：实时语音（TTS + STT + `/voice` 闭环 + `/talk` 全双工）
+- [x] **阶段 4**：记忆与生态（会话持久化/长期记忆/MCP接入/上下文压缩/Skill系统）
+- [x] **阶段 5**：贾维斯形态（daemon常驻+全局热键+系统托盘+开机自启+子代理+主动感知+视觉监控）
+- [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
+- [x] **阶段 7**：实时聊天 UI（方舟反应炉动画窗口 + 全双工打断 + 单例管理）
+
+---
+
+## 许可证
+
+本项目采用 [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/) 许可协议。
+
+**简而言之：**
+- ✅ 自由使用、修改、分发
+- ✅ 必须保留原作者署名
+- ❌ 禁止用于商业用途
+
+> "商业用途"指以营利为目的的使用，包括但不限于将本软件或其衍生作品作为商业产品/服务的一部分进行销售、出租、SaaS 化运营等。如有商业授权需求，请联系作者。
+
+详细条款请参阅 [LICENSE](LICENSE) 文件。
+
+---
+
+<div align="center">
+
+**「J.A.R.V.I.S — 随时为您效劳，先生。」**
+
+</div>

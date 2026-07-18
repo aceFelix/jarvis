@@ -38,6 +38,44 @@ class UIProtocol(Protocol):
         ...
 
 
+class RealtimeTalkUI(UIProtocol, Protocol):
+    """实时双工语音对话的 UI 协议。
+
+    在 UIProtocol 基础上扩展实时对话专用的状态/音量/转录回调，
+    使 RichCLI 与 Webview 窗口两种实现都能被 RealtimeTalk 使用。
+
+    @author aceFelix
+    """
+
+    def on_status(self, status: str) -> None:
+        """状态变化：connecting / standby / listening / speaking / error。"""
+        ...
+
+    def on_volume(self, level: float) -> None:
+        """麦克风音量级别，0.0 ~ 1.0。"""
+        ...
+
+    def on_user_speaking(self, speaking: bool) -> None:
+        """用户开始/停止说话。"""
+        ...
+
+    def on_ai_speaking(self, speaking: bool) -> None:
+        """AI 开始/停止说话。"""
+        ...
+
+    def on_user_transcript(self, text: str) -> None:
+        """用户语音转录完成。"""
+        ...
+
+    def on_ai_transcript(self, text: str) -> None:
+        """AI 语音转录完成。"""
+        ...
+
+    def is_running(self) -> bool:
+        """UI 是否仍在运行（窗口未关闭）。"""
+        ...
+
+
 @dataclass
 class ToolContext:
     """工具执行上下文。

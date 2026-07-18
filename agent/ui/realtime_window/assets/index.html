@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S Realtime</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 背景 Canvas：方舟反应炉粒子动画 -->
+    <canvas id="reactor-canvas"></canvas>
+
+    <!-- 前景 UI -->
+    <div id="ui-layer">
+        <header id="status-bar">
+            <div id="status-indicator"></div>
+            <span id="status-text">连接中...</span>
+            <div id="volume-bar"><div id="volume-fill"></div></div>
+        </header>
+
+        <main id="chat-history"></main>
+
+        <footer id="control-bar">
+            <span id="hint-text">按 ESC 结束对话</span>
+            <button id="close-btn" title="结束对话">结束</button>
+        </footer>
+    </div>
+
+    <script src="reactor.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

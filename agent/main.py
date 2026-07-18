@@ -2347,12 +2347,20 @@ async def _voice_mode(ui: RichCLI, settings: Settings, loop: QueryLoop, ctx: Too
     await voice_loop(ui, settings, loop, ctx)
 
 
-async def _realtime_talk(ui: RichCLI, settings: Settings) -> None:
+async def _realtime_talk(
+    ui: RichCLI, settings: Settings, *, use_window: bool = True
+) -> None:
     """/talk 命令 —— 实时双工语音对话。
 
     实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
     如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，
     不能直接用于 DashScope WebSocket 鉴权，因此优先使用独立的 dashscope_api_key。
+
+    Args:
+        use_window: 为 True 时优先使用 pywebview 独立窗口 UI；
+                    未安装 pywebview 或环境不支持时回退到 RichCLI。
+
+    @author aceFelix
     """
     api_key = (
         settings.dashscope_api_key
@@ -2373,13 +2381,43 @@ async def _realtime_talk(ui: RichCLI, settings: Settings) -> None:
         ui.error(f"实时语音模块不可用: {e}")
         return
 
+    has_window = False
+    window = None
+    if use_window:
+        try:
+            from agent.ui.realtime_window import RealtimeTalkWindow, WebviewRealtimeTalkUI
+
+            window = RealtimeTalkWindow(on_close=lambda: None)
+            window.show()
+            has_window = window.is_open or True  # show 后立即认为有窗口（线程启动中）
+        except ImportError:
+            ui.warn("未安装 pywebview，实时聊天将回退到终端界面。")
+        except Exception as e:
+            ui.warn(f"启动实时聊天窗口失败: {e}，回退到终端界面。")
+
     rt = RealtimeTalk(
         api_key=api_key,
         model=getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
         voice=getattr(settings, "realtime_voice", "longanqian"),
         ws_url=getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
     )
-    await rt.run(ui)
+
+    if has_window and window is not None:
+        rt_ui = WebviewRealtimeTalkUI(window, loop=asyncio.get_running_loop())
+        task = asyncio.create_task(rt.run(rt_ui))
+
+        # 等待窗口关闭或会话结束
+        while window.is_open and not task.done():
+            await asyncio.sleep(0.2)
+
+        if not task.done():
+            rt._running = False
+            try:
+                await asyncio.wait_for(task, timeout=3)
+            except asyncio.TimeoutError:
+                task.cancel()
+    else:
+        await rt.run(ui)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

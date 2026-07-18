@@ -761,6 +761,50 @@ class RichCLI(UIProtocol):
             return Prompt.ask("[bold magenta]❓ " + prompt + "[/bold magenta]", console=self._console)
         return input(prompt + " ")
 
+    # ---- RealtimeTalkUI 扩展实现 ----
+    # 当 --talk 未安装 pywebview 时回退到 RichCLI，以下方法把实时对话事件
+    # 以终端友好的方式打印出来。
+
+    def on_status(self, status: str) -> None:
+        """实时对话状态变化。"""
+        labels = {
+            "connecting": "🟡 连接中...",
+            "standby": "🟢 待命",
+            "listening": "🎙️  聆听中...",
+            "speaking": "🔊 贾维斯说话中...",
+            "error": "🔴 连接异常",
+        }
+        if self.verbose and status in labels:
+            self.info(labels[status])
+
+    def on_volume(self, level: float) -> None:
+        """麦克风音量级别（verbose 模式下显示进度条）。"""
+        if self.verbose:
+            bars = int(level * 20)
+            self.info("音量: [" + "█" * bars + "░" * (20 - bars) + f"] {level:.0%}")
+
+    def on_user_speaking(self, speaking: bool) -> None:
+        """用户开始/停止说话。"""
+        if self.verbose:
+            self.info("用户" + ("开始" if speaking else "停止") + "说话")
+
+    def on_ai_speaking(self, speaking: bool) -> None:
+        """AI 开始/停止说话。"""
+        if self.verbose:
+            self.info("贾维斯" + ("开始" if speaking else "停止") + "说话")
+
+    def on_user_transcript(self, text: str) -> None:
+        """用户语音转录完成——在终端中显示为对话气泡样式。"""
+        self.info(f"\n🧑 你: {text}")
+
+    def on_ai_transcript(self, text: str) -> None:
+        """AI 语音转录完成——在终端中显示为对话气泡样式。"""
+        self.info(f"\n🤖 贾维斯: {text}")
+
+    def is_running(self) -> bool:
+        """终端 UI 始终认为自己在运行。"""
+        return True
+
     # ---- REPL 入口 ----
 
     def read_user_input(self, prompt_str: str = "> ") -> str:

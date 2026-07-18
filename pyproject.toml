@@ -58,6 +58,11 @@ daemon = [
     # 主动感知：系统资源监控（跨平台）
     "psutil>=5.9.0",
 ]
+realtime_ui = [
+    # 实时双工语音对话独立窗口（HTML5 Canvas 方舟反应炉动画）
+    # Windows 上需要 Edge WebView2 Runtime（Win10/11 通常已预装）
+    "pywebview>=5.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -73,6 +78,7 @@ all = [
     "jarvis-agent[vision]",
     "jarvis-agent[voice]",
     "jarvis-agent[daemon]",
+    "jarvis-agent[realtime_ui]",
 ]
 
 [project.scripts]

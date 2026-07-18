@@ -557,7 +557,9 @@ class JarvisDaemon:
         self._wake_mode: str = "voice"  # "voice" 或 "text"
         self._quit_event = threading.Event()
         self._text_terminal_proc: Any = None  # 跟踪已弹出的文本终端子进程
-        self._realtime_talk_proc: Any = None  # 跟踪实时聊天子进程
+        # 实时聊天窗口：daemon 生命周期内单例，同一进程内通过 pywebview 承载
+        self._realtime_talk_window: Any = None
+        self._realtime_talk_thread: threading.Thread | None = None
         # 语音开关状态: 用文件作为跨进程 SSOT，self._voice_enabled 仅作内存缓存
         from agent.daemon.voice_state import is_voice_enabled
         self._voice_enabled = is_voice_enabled()
@@ -839,126 +841,142 @@ class JarvisDaemon:
             self._stop_realtime_talk()
 
     def _is_realtime_talk_running(self) -> bool:
-        """检查实时聊天子进程是否仍在运行。"""
-        if self._realtime_talk_proc is None:
-            return False
-        poll = self._realtime_talk_proc.poll()
-        return poll is None
+        """检查实时聊天后台线程是否仍在运行。"""
+        return self._realtime_talk_thread is not None and self._realtime_talk_thread.is_alive()
 
     def _start_realtime_talk(self) -> None:
-        """启动实时双工语音对话子进程。
+        """启动实时双工语音对话窗口。
 
-        通过 ``python -m agent.main --talk`` 启动独立进程，
-        不阻塞 daemon 主循环，用户在弹出的终端中按 ESC 退出。
-        Windows 弹出新控制台窗口；macOS 调用 Terminal.app；
-        Linux 尝试常见终端模拟器。
+        在 daemon 进程内创建/唤起一个 pywebview 窗口，并在独立后台线程中
+        运行 RealtimeTalk 的 asyncio 事件循环。daemon 生命周期内只维护
+        一个窗口实例，反复开关复用该窗口。
 
         @author aceFelix
         """
-        import subprocess
+        try:
+            from agent.ui.realtime_window import RealtimeTalkWindow
+        except ImportError as e:
+            ui = self._ui
+            if ui:
+                ui.warn(f"实时聊天窗口不可用: {e}（请安装 pywebview）")
+            if self._tray and self._tray.available:
+                self._tray.notify("J.A.R.V.I.S", "实时聊天窗口不可用，请安装 pywebview")
+            return
+
+        if self._realtime_talk_window is None:
+            # daemon 模式下 RealtimeTalk 在父进程后台线程运行，
+            # 子进程窗口只负责渲染 UI，不单独启动 RealtimeTalk。
+            self._realtime_talk_window = RealtimeTalkWindow(
+                on_close=self._on_realtime_window_closed,
+                standalone=False,
+            )
+
+        self._realtime_talk_window.show()
 
         if self._is_realtime_talk_running():
             if self._tray and self._tray.available:
-                self._tray.notify("J.A.R.V.I.S", "实时聊天已在运行")
+                self._tray.notify("J.A.R.V.I.S", "实时聊天窗口已唤起")
             return
 
-        python_exe = _find_python()
-        if not python_exe:
-            ui = self._ui
-            if ui:
-                ui.warn("实时聊天失败: 未找到 Python 解释器")
-            if self._tray and self._tray.available:
-                self._tray.notify("J.A.R.V.I.S", "无法找到 Python 解释器，实时聊天不可用")
-            return
+        self._realtime_talk_thread = threading.Thread(
+            target=self._run_realtime_talk_in_thread,
+            daemon=True,
+        )
+        self._realtime_talk_thread.start()
 
-        project_root = _project_root()
-        workdir = self._settings.workdir or project_root
+        ui = self._ui
+        if ui:
+            ui.info("🎙️ 已启动实时聊天窗口")
+        if self._tray and self._tray.available:
+            self._tray.notify("J.A.R.V.I.S", "实时聊天已启动")
 
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        env["PYTHONIOENCODING"] = "utf-8"
+    def _run_realtime_talk_in_thread(self) -> None:
+        """在独立线程中运行 RealtimeTalk 的 asyncio 事件循环。"""
+        asyncio.run(self._realtime_talk_loop())
 
-        try:
-            if _is_windows():
-                self._realtime_talk_proc = subprocess.Popen(
-                    [python_exe, "-m", "agent.main", "--talk", "--workdir", workdir],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
-                    cwd=project_root,
-                    env=env,
-                )
-            elif _is_macos():
-                shell_cmd = (
-                    f'cd "{workdir}" && '
-                    f'"{python_exe}" -m agent.main --talk --workdir "{workdir}"; '
-                    f'exec bash'
-                )
-                applescript = (
-                    f'tell application "Terminal"\n'
-                    f'    activate\n'
-                    f'    do script "{shell_cmd}"\n'
-                    f'end tell'
-                )
-                self._realtime_talk_proc = subprocess.Popen(
-                    ["osascript", "-e", applescript],
-                    env=env,
-                )
-            else:
-                # Linux: 按优先级尝试常见终端模拟器
-                shell_cmd = (
-                    f'cd "{workdir}" && '
-                    f'"{python_exe}" -m agent.main --talk --workdir "{workdir}"; '
-                    f'exec bash'
-                )
-                terminals = [
-                    (["x-terminal-emulator", "-e", f"bash -c '{shell_cmd}'"], "x-terminal-emulator"),
-                    (["gnome-terminal", "--", "bash", "-c", shell_cmd], "gnome-terminal"),
-                    (["konsole", "-e", "bash", "-c", shell_cmd], "konsole"),
-                    (["xterm", "-e", f"bash -c '{shell_cmd}'"], "xterm"),
-                ]
-                started = False
-                for cmd, _name in terminals:
-                    try:
-                        self._realtime_talk_proc = subprocess.Popen(cmd, env=env)
-                        started = True
-                        break
-                    except FileNotFoundError:
-                        continue
-                if not started:
-                    raise RuntimeError("未找到可用的终端模拟器（尝试安装 xterm 或 gnome-terminal）")
+    async def _realtime_talk_loop(self) -> None:
+        """实时语音对话协程主循环。
 
-            ui = self._ui
-            if ui:
-                ui.info("🎙️ 已启动实时聊天窗口")
-            if self._tray and self._tray.available:
-                self._tray.notify("J.A.R.V.I.S", "实时聊天已启动")
-        except Exception as e:
-            ui = self._ui
-            if ui:
-                ui.error(f"启动实时聊天失败: {type(e).__name__}: {e}")
-            if self._tray and self._tray.available:
-                self._tray.notify("J.A.R.V.I.S", f"启动实时聊天失败: {e}")
-
-    def _stop_realtime_talk(self) -> None:
-        """停止实时聊天子进程。
-
-        先发送 SIGTERM，超时未退出则强制 kill。
+        连接 DashScope 实时语音服务，音频/WebSocket 逻辑与 UI 解耦。
+        窗口关闭或发生致命错误时退出循环。
 
         @author aceFelix
         """
-        if self._realtime_talk_proc is None:
+        from agent.voice.realtime_talk import RealtimeTalk, DEFAULT_WS_URL
+        from agent.ui.realtime_window import WebviewRealtimeTalkUI
+
+        window = self._realtime_talk_window
+        if window is None:
             return
+
+        api_key = (
+            self._settings.dashscope_api_key
+            or os.environ.get("DASHSCOPE_API_KEY", "")
+            or self._settings.api_key
+            or os.environ.get("OPENAI_API_KEY", "")
+        )
+        if not api_key:
+            window.emit("error", "未配置 DashScope API Key")
+            return
+
+        ui = WebviewRealtimeTalkUI(window, loop=asyncio.get_running_loop())
+        rt = RealtimeTalk(
+            api_key=api_key,
+            model=getattr(self._settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
+            voice=getattr(self._settings, "realtime_voice", "longanqian"),
+            ws_url=getattr(self._settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+        )
+
+        # 窗口关闭时同步停止 RealtimeTalk
+        def _on_close() -> None:
+            rt._running = False
+
+        # 更新窗口关闭回调，确保点击关闭按钮能停止本会话
+        original_on_close = window._on_close
+        window._on_close = lambda: (_on_close(), original_on_close() if original_on_close else None)
+
         try:
-            poll = self._realtime_talk_proc.poll()
-            if poll is None:
-                self._realtime_talk_proc.terminate()
-                try:
-                    self._realtime_talk_proc.wait(timeout=3)
-                except Exception:
-                    self._realtime_talk_proc.kill()
+            await rt.run(ui)
         except Exception as e:
-            self._daemon_log("停止实时聊天进程失败: %s", e)
+            window.emit("error", f"实时聊天异常: {e}")
         finally:
-            self._realtime_talk_proc = None
+            window._on_close = original_on_close
+
+    def _on_realtime_window_closed(self) -> None:
+        """实时聊天窗口被关闭时的回调。
+
+        由 RealtimeTalkWindow 在用户点击关闭按钮时调用，
+        通知 daemon 更新托盘菜单状态（不销毁窗口实例）。
+        """
+        # 托盘菜单的勾选状态由 _realtime_talk_enabled 控制；
+        # 如果当前是开启状态且窗口被用户手动关闭，则视为临时关闭。
+        # 这里不修改 _realtime_talk_enabled，保持配置不变。
+        self._daemon_log("实时聊天窗口已关闭")
+
+    def _stop_realtime_talk(self) -> None:
+        """停止实时聊天窗口。
+
+        隐藏窗口并等待后台 RealtimeTalk 线程结束。
+        不销毁窗口实例，便于再次唤起复用。
+
+        @author aceFelix
+        """
+        if self._realtime_talk_window is not None:
+            try:
+                # 通知 RealtimeTalk 停止（如果还在运行）
+                # _realtime_talk_loop 中已把窗口关闭回调关联到 rt._running
+                self._realtime_talk_window._notify_close()
+                # 隐藏窗口
+                self._realtime_talk_window.hide()
+            except Exception as e:
+                self._daemon_log("隐藏实时聊天窗口失败: %s", e)
+
+        if self._realtime_talk_thread is not None and self._realtime_talk_thread.is_alive():
+            try:
+                self._realtime_talk_thread.join(timeout=3)
+            except Exception as e:
+                self._daemon_log("等待实时聊天线程结束失败: %s", e)
+        self._realtime_talk_thread = None
 
     def _trigger_voice(self) -> None:
         """热键/托盘触发语音对话。
@@ -1390,8 +1408,14 @@ class JarvisDaemon:
                            verbose=False)
             except Exception:
                 pass
-        # 停止实时聊天子进程，避免 daemon 退出后残留
+        # 停止实时聊天并销毁窗口，避免 daemon 退出后残留 GUI
         self._stop_realtime_talk()
+        if self._realtime_talk_window is not None:
+            try:
+                self._realtime_talk_window.destroy()
+            except Exception:
+                pass
+            self._realtime_talk_window = None
         self._hotkey.stop()
         self._tray.stop()
         # 停止视觉监控（释放摄像头）
