@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="docs/assets/jarvis-banner.svg" alt="J.A.R.V.I.S" width="800"/>
+  <pre style="color: #00aaff;">
+   ██ ▄████▄ █████▄  ██  ██ ██ ▄█████
+   ██ ██▄▄██ ██▄▄██▄ ██▄▄██ ██ ▀▀▀▄▄▄
+████▀ ██  ██ ██   ██  ▀██▀  ██ █████▀
+  </pre>
 </div>
 
 # J.A.R.V.I.S
