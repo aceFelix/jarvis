@@ -52,27 +52,30 @@ class ArcReactor {
         this.ctx.scale(this.dpr, this.dpr);
         this.cx = this.width / 2;
         this.cy = this.height / 2;
-        this.baseRadius = Math.min(this.width, this.height) * 0.22;
+        // 窗口最大化后反应炉仍要足够醒目，这里取 38% 让整体充满画面中央
+        this.baseRadius = Math.min(this.width, this.height) * 0.38;
     }
 
     initRings() {
+        // 圆环半径随 baseRadius 变大，保持视觉层次
         this.rings = [
-            { radius: 0.35, speed: 0.004, width: 2, alpha: 0.4 },
-            { radius: 0.55, speed: -0.006, width: 2, alpha: 0.35 },
-            { radius: 0.75, speed: 0.008, width: 1.5, alpha: 0.25 },
-            { radius: 0.95, speed: -0.010, width: 1, alpha: 0.15 },
+            { radius: 0.45, speed: 0.004, width: 3, alpha: 0.45 },
+            { radius: 0.65, speed: -0.006, width: 2.5, alpha: 0.38 },
+            { radius: 0.82, speed: 0.008, width: 2, alpha: 0.28 },
+            { radius: 1.0, speed: -0.010, width: 1.5, alpha: 0.18 },
         ];
     }
 
     initParticles() {
-        const count = 120;
+        // 粒子更多、分布更广，配合放大后的反应炉
+        const count = 200;
         this.particles = [];
         for (let i = 0; i < count; i++) {
             this.particles.push({
                 angle: Math.random() * Math.PI * 2,
-                orbitRadius: 0.4 + Math.random() * 0.55,
-                speed: 0.002 + Math.random() * 0.006,
-                size: 1 + Math.random() * 2,
+                orbitRadius: 0.35 + Math.random() * 0.75,
+                speed: 0.0015 + Math.random() * 0.005,
+                size: 1 + Math.random() * 2.5,
                 phase: Math.random() * Math.PI * 2,
             });
         }
@@ -256,7 +259,7 @@ class ArcReactor {
         ctx.fillRect(0, 0, width, height);
 
         this.drawGlow(cx, cy, baseRadius, color);
-        this.drawCore(cx, cy, baseRadius * 0.3, color);
+        this.drawCore(cx, cy, baseRadius * 0.35, color);
         this.drawRings(cx, cy, baseRadius, color);
         this.drawParticles(cx, cy, baseRadius, color);
         this.drawRipples(cx, cy, color);

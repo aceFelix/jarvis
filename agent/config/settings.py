@@ -325,10 +325,11 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in voice_table:
                 updates[field] = voice_table[sub_key]
-    # [realtime_talk] 表 → realtime_* 字段
+    # [realtime_talk] 表 → realtime_* 字段 + dashscope_api_key
     rt_table = data.get("realtime_talk", {})
     if isinstance(rt_table, dict):
         for sub_key, field in (
+            ("api_key", "dashscope_api_key"),
             ("ws_url", "realtime_ws_url"),
             ("model", "realtime_model"),
             ("voice", "realtime_voice"),

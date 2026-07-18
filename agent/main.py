@@ -2381,13 +2381,23 @@ async def _realtime_talk(
         ui.error(f"实时语音模块不可用: {e}")
         return
 
+    config = {
+        "api_key": api_key,
+        "model": getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
+        "voice": getattr(settings, "realtime_voice", "longanqian"),
+        "ws_url": getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+    }
+
     has_window = False
     window = None
     if use_window:
         try:
-            from agent.ui.realtime_window import RealtimeTalkWindow, WebviewRealtimeTalkUI
+            from agent.ui.realtime_window import RealtimeTalkWindow
 
-            window = RealtimeTalkWindow(on_close=lambda: None)
+            # standalone=True：子进程自己启动 RealtimeTalk，父进程只负责窗口。
+            # 必须把配置传给窗口，否则子进程里的 RealtimeTalk 拿不到 api_key。
+            window = RealtimeTalkWindow(on_close=lambda: None, standalone=True)
+            window.set_config(config)
             window.show()
             has_window = window.is_open or True  # show 后立即认为有窗口（线程启动中）
         except ImportError:
@@ -2395,28 +2405,12 @@ async def _realtime_talk(
         except Exception as e:
             ui.warn(f"启动实时聊天窗口失败: {e}，回退到终端界面。")
 
-    rt = RealtimeTalk(
-        api_key=api_key,
-        model=getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
-        voice=getattr(settings, "realtime_voice", "longanqian"),
-        ws_url=getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
-    )
-
     if has_window and window is not None:
-        rt_ui = WebviewRealtimeTalkUI(window, loop=asyncio.get_running_loop())
-        task = asyncio.create_task(rt.run(rt_ui))
-
-        # 等待窗口关闭或会话结束
-        while window.is_open and not task.done():
+        # standalone=True 时 RealtimeTalk 在子进程中运行，父进程只需等待窗口关闭。
+        while window.is_open:
             await asyncio.sleep(0.2)
-
-        if not task.done():
-            rt._running = False
-            try:
-                await asyncio.wait_for(task, timeout=3)
-            except asyncio.TimeoutError:
-                task.cancel()
     else:
+        rt = RealtimeTalk(**config)
         await rt.run(ui)
 
 

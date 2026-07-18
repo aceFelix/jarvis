@@ -55,8 +55,13 @@ class JSBridge:
     @author aceFelix
     """
 
-    def __init__(self, event_queue: queue.Queue[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        event_queue: queue.Queue[dict[str, Any]],
+        window: _FrontendWindow | None = None,
+    ) -> None:
         self._event_queue = event_queue
+        self._window = window
 
     def poll_events(self) -> list[dict[str, Any]]:
         """JS 轮询获取 Python 端产生的事件。"""
@@ -69,8 +74,12 @@ class JSBridge:
         return items
 
     def close_session(self) -> None:
-        """用户点击窗口关闭按钮时通知 Python 停止会话。"""
-        self._event_queue.put_nowait({"type": "__close_session__"})
+        """用户点击"结束"按钮：关闭窗口以停止会话。"""
+        if self._window is not None:
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
 
 
 class _FrontendWindow:
@@ -95,7 +104,7 @@ class _FrontendWindow:
 
         try:
             _frontend_log("webview 开始创建窗口")
-            api = JSBridge(self._event_queue)
+            api = JSBridge(self._event_queue, window=self)
             self._window = webview.create_window(
                 title="J.A.R.V.I.S Realtime",
                 url=str(_ASSETS_DIR / "index.html"),
@@ -153,7 +162,11 @@ class _FrontendWindow:
                 pass
 
 
-def _run_realtime_talk(config: dict[str, Any], event_queue: queue.Queue[dict[str, Any]]) -> None:
+def _run_realtime_talk(
+    config: dict[str, Any],
+    event_queue: queue.Queue[dict[str, Any]],
+    rt_ref: dict[str, Any],
+) -> None:
     """在子进程的独立线程中运行 RealtimeTalk。"""
     import asyncio
     from agent.voice.realtime_talk import RealtimeTalk, DEFAULT_WS_URL
@@ -168,6 +181,7 @@ def _run_realtime_talk(config: dict[str, Any], event_queue: queue.Queue[dict[str
             voice=config.get("voice", "longanqian"),
             ws_url=config.get("ws_url") or DEFAULT_WS_URL,
         )
+        rt_ref["rt"] = rt
         asyncio.run(rt.run(ui))
     except Exception as e:
         _frontend_log(f"RealtimeTalk 线程异常: {type(e).__name__}: {e}")
@@ -229,15 +243,27 @@ def _frontend_process_main(
     cmd_thread = threading.Thread(target=_command_loop, daemon=True)
     cmd_thread.start()
 
+    rt_ref: dict[str, Any] = {"rt": None}
     rt_thread: threading.Thread | None = None
     if standalone:
         # 独立入口：子进程自己启动 RealtimeTalk
         rt_thread = threading.Thread(
             target=_run_realtime_talk,
-            args=(config, frontend._event_queue),
+            args=(config, frontend._event_queue, rt_ref),
             daemon=True,
         )
         rt_thread.start()
+
+    # 窗口关闭时通知 RealtimeTalk 停止会话
+    def _on_window_closed() -> None:
+        rt = rt_ref.get("rt")
+        if rt is not None:
+            try:
+                rt._running = False
+            except Exception:
+                pass
+
+    frontend._on_close = _on_window_closed
 
     try:
         # 主线程运行 webview
@@ -248,6 +274,7 @@ def _frontend_process_main(
     finally:
         # 窗口关闭后停止 RealtimeTalk（如果启动了）
         stop_event.set()
+        _on_window_closed()
         if rt_thread is not None:
             rt_thread.join(timeout=3)
         _frontend_log("子进程即将退出")

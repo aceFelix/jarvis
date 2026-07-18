@@ -8,11 +8,17 @@
 
 # J.A.R.V.I.S
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
+[![PyPI version](https://img.shields.io/pypi/v/jarvis-agent.svg)](https://pypi.org/project/jarvis-agent/)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持)
+[![GitHub stars](https://img.shields.io/github/stars/yourname/J.A.R.V.I.S?style=social)](https://github.com/yourname/J.A.R.V.I.S)
+
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 >
 > 「随时为您效劳，先生。」
 
-一个为个人电脑打造的 AI Agent —— 能像《钢铁侠》里的贾维斯一样与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
+一个为个人电脑打造的 AI Agent —— 致敬《钢铁侠》里的贾维斯，与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
 
 ---
 
@@ -559,16 +565,21 @@ python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 | macOS | LaunchAgent plist（`launchctl load`） | .command（Terminal.app 打开） |
 | Linux | 不支持（提示手动 systemd） | .desktop 文件 |
 
-### 自动启动实时聊天
+### 实时双工配置
 
 在 `~/.jarvis/settings.toml` 中配置：
 
 ```toml
 [realtime_talk]
-auto_start = true
+api_key = "sk-xxx"              # DashScope API Key（实时语音必需）
+model = "qwen-audio-3.0-realtime-flash"
+voice = "longanqian"
+auto_start = false              # daemon 启动时是否自动进入实时聊天
 ```
 
-daemon 启动时自动进入实时聊天模式。托盘菜单可随时开关。
+> `api_key` 用于 `/talk` 实时双工语音鉴权。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量。
+>
+> daemon 启动时自动进入实时聊天模式。托盘菜单可随时开关。
 
 ### 系统资源监控
 
@@ -706,13 +717,9 @@ agent/
 
 ## 许可证
 
-本项目采用 [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/) 许可协议。
+本项目采用 [MIT License](LICENSE) 许可协议。
 
-**简而言之：**
-- ✅ 自由使用、修改、分发、开源
-- ❌ 禁止用于商业用途
-
-> "商业用途"指以营利为目的的使用，包括但不限于将本软件或其衍生作品作为商业产品/服务的一部分进行销售、出租、SaaS 化运营等。如有商业授权需求，请联系作者。
+> 本项目借鉴了 ClaudeCode 等优秀工具的设计思想。作者保留创作署名权，但不对使用方式做任何限制。
 
 详细条款请参阅 [LICENSE](LICENSE) 文件。
 
