@@ -61,48 +61,26 @@
       <circle r="25" fill="url(#core-glow)"/>
       <circle r="12" fill="#00e5ff" opacity="0.9"/>
 
-      <!-- 旋转扫描环 -->
-      <circle r="102" fill="none" stroke="url(#ring-shine)" stroke-width="3" opacity="0.7">
-        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite"/>
-      </circle>
+      <!-- 静止高光环 -->
+      <circle r="102" fill="none" stroke="url(#ring-shine)" stroke-width="3" opacity="0.7"/>
 
-      <!-- 脉冲波纹 -->
-      <circle r="25" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0">
-        <animate attributeName="r" values="25;110" dur="2.5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.8;0" dur="2.5s" repeatCount="indefinite"/>
-      </circle>
-      <circle r="25" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0">
-        <animate attributeName="r" values="25;110" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.8;0" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
-      </circle>
+      <!-- 外扩静态波纹 -->
+      <circle r="70" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0.25"/>
+      <circle r="95" fill="none" stroke="#00e5ff" stroke-width="1" opacity="0.15"/>
     </g>
 
-    <!-- 漂浮粒子 -->
+    <!-- 静态漂浮粒子 -->
     <g fill="#00e5ff" filter="url(#particle-blur)">
-      <circle cx="200" cy="80" r="1.5" opacity="0.6">
-        <animate attributeName="cy" values="80;40;80" dur="4s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.6;0;0.6" dur="4s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="650" cy="180" r="2" opacity="0.5">
-        <animate attributeName="cy" values="180;220;180" dur="5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.5;0;0.5" dur="5s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="120" cy="160" r="1.2" opacity="0.4">
-        <animate attributeName="cx" values="120;160;120" dur="6s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.4;0;0.4" dur="6s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="700" cy="90" r="1.8" opacity="0.5">
-        <animate attributeName="cx" values="700;660;700" dur="5.5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.5;0;0.5" dur="5.5s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="300" cy="210" r="1" opacity="0.4">
-        <animate attributeName="cy" values="210;170;210" dur="4.5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.4;0;0.4" dur="4.5s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="520" cy="50" r="1.5" opacity="0.5">
-        <animate attributeName="cy" values="50;90;50" dur="5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.5;0;0.5" dur="5s" repeatCount="indefinite"/>
-      </circle>
+      <circle cx="200" cy="60" r="1.5" opacity="0.5"/>
+      <circle cx="650" cy="200" r="2" opacity="0.4"/>
+      <circle cx="140" cy="160" r="1.2" opacity="0.35"/>
+      <circle cx="680" cy="90" r="1.8" opacity="0.4"/>
+      <circle cx="300" cy="190" r="1" opacity="0.35"/>
+      <circle cx="520" cy="70" r="1.5" opacity="0.4"/>
+      <circle cx="250" cy="120" r="1" opacity="0.3"/>
+      <circle cx="580" cy="150" r="1.3" opacity="0.35"/>
+      <circle cx="160" cy="100" r="0.9" opacity="0.4"/>
+      <circle cx="720" cy="170" r="1.1" opacity="0.3"/>
     </g>
 
     <!-- J.A.R.V.I.S 艺术字 -->
