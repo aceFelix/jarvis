@@ -68,7 +68,7 @@ _BASE_PROMPT = """\
 
 # 思考规范（思维链）
 
-你具备深度思考能力。每次回应都应在 reasoning_content 中充分思考：
+你具备深度思考能力。开启深度思考模式后，每次回应都应在 reasoning_content 中充分思考：
 
 1. **分析意图**: 理解先生到底想要什么，有没有隐含需求。
 2. **评估方案**: 有几个可行方案？各自利弊是什么？选哪个最优？
@@ -422,6 +422,30 @@ def _tools_section(registry: ToolRegistry) -> str:
     return "# 可用工具\n\n" + "\n".join(lines) + "\n"
 
 
+def _cli_anything_section(registry: ToolRegistry) -> str:
+    """CLI-Anything harness 能力说明。
+
+    从 registry 中找出所有 ``cli_anything__`` 前缀的工具，把 harness 的
+    能力、触发场景、示例单独汇总，让 LLM 明确何时调用。
+    """
+    harness_tools = [
+        tool for tool in registry.all()
+        if tool.name.startswith("cli_anything__")
+    ]
+    if not harness_tools:
+        return ""
+
+    lines = ["# CLI-Anything 外部软件控制", ""]
+    for tool in harness_tools:
+        lines.append(f"## {tool.name}")
+        # description 已包含 name/description/when_to_use/examples
+        for paragraph in tool.description.split("\n"):
+            if paragraph.strip():
+                lines.append(paragraph)
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
 def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking: bool = True) -> str:
     """组装完整系统提示。
 
@@ -455,6 +479,7 @@ def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking
             f"# 会话记忆\n\n{session_mem}" if session_mem else "",
             skills_section(workdir),
             _env_section(workdir),
+            _cli_anything_section(registry),
             _tools_section(registry),
         ]
     )

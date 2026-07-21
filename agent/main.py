@@ -627,6 +627,13 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     ui = RichCLI(verbose=settings.verbose, boot_animation=settings.boot_animation)
     provider = _build_provider(settings)
     registry: ToolRegistry = build_default_registry()
+
+    # 动态工具：CLI-Anything harness（~/.jarvis/cli_anything/ 与项目级 .jarvis/cli_anything/）
+    from agent.core.tool import register_dynamic_tools
+    harness_count = register_dynamic_tools(registry, workdir=settings.workdir)
+    if harness_count > 0 and settings.verbose:
+        ui.info(f"✓ CLI-Anything harness 已注册（{harness_count} 个）")
+
     checker = _build_checker(settings)
     orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
 
@@ -635,7 +642,6 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     if settings.enable_mcp:
         try:
             from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
-            from agent.core.tool import register_dynamic_tools
             mcp_client = MCPClient()
             if mcp_client.available:
                 config = load_mcp_config()
@@ -1003,6 +1009,18 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 continue
             if cmd in ("/tools",):
                 _print_tools(ui, registry)
+                continue
+            if cmd in ("/cli_anything", "/cli_anything list", "/harnesses"):
+                _cli_anything_list(ui, workdir=settings.workdir)
+                continue
+            if cmd == "/cli_anything market":
+                _cli_anything_market(ui)
+                continue
+            if cmd.startswith("/cli_anything install "):
+                _cli_anything_install(ui, settings, registry, stripped)
+                continue
+            if cmd.startswith("/cli_anything uninstall "):
+                _cli_anything_uninstall(ui, settings, registry, stripped)
                 continue
             if cmd in ("/plan",):
                 await _toggle_plan(ui, settings, ctx)
@@ -1437,6 +1455,10 @@ def _print_help(ui: RichCLI) -> None:
         "  /skills      列出已加载的技能包\n"
         "  /mcp         查看 MCP server 连接状态\n"
         "  /tools       列出可用工具\n"
+        "  /cli_anything list    列出已安装 CLI-Anything harness\n"
+        "  /cli_anything market  列出市场可用 harness\n"
+        "  /cli_anything install <id>  安装 harness\n"
+        "  /cli_anything uninstall <id> 卸载 harness\n"
         "  /image <path> 添加本地图片到待发送列表（下条消息附带）\n"
         "  /img <path>   添加本地图片（/image 别名）\n"
         "  /paste       添加剪贴板图片到待发送列表（下条消息附带）\n"
@@ -1677,6 +1699,80 @@ def _print_tools(ui: RichCLI, registry: ToolRegistry) -> None:
         ui._console.print(text)
     else:
         print(text)
+
+
+def _cli_anything_list(ui: RichCLI, workdir: str = "") -> None:
+    """/cli_anything list — 列出已安装 harness。"""
+    from agent.cli_anything import list_installed
+
+    installed = list_installed(workdir=workdir or None)
+    if not installed:
+        ui.info("暂无已安装的 CLI-Anything harness")
+        return
+    lines = [f"  - {h['id']}: {h['name']} — {h['description']}" for h in installed]
+    text = "[bold]已安装 harness:[/bold]\n" + "\n".join(lines)
+    if ui._console:
+        ui._console.print(text)
+    else:
+        print(text)
+
+
+def _cli_anything_market(ui: RichCLI) -> None:
+    """/cli_anything market — 列出市场可用 harness。"""
+    from agent.cli_anything import list_market
+
+    market = list_market()
+    if not market:
+        ui.warn("无法读取市场列表，请确保 CLI-Anything 仓库在同级目录")
+        return
+    lines = [f"  - {h['id']}: {h['name']} [{h['installed']}] — {h['description']}" for h in market]
+    text = "[bold]市场可用 harness:[/bold]\n" + "\n".join(lines)
+    if ui._console:
+        ui._console.print(text)
+    else:
+        print(text)
+
+
+def _cli_anything_install(
+    ui: RichCLI,
+    settings: Settings,
+    registry: ToolRegistry,
+    stripped: str,
+) -> None:
+    """/cli_anything install <id> — 安装 harness。"""
+    from agent.cli_anything import install_harness
+
+    parts = stripped.split()
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything install <harness-id>")
+        return
+    harness_id = parts[2].strip()
+    result = install_harness(harness_id, registry, workdir=settings.workdir or None)
+    if result["success"]:
+        ui.info(result["message"])
+    else:
+        ui.warn(result["message"])
+
+
+def _cli_anything_uninstall(
+    ui: RichCLI,
+    settings: Settings,
+    registry: ToolRegistry,
+    stripped: str,
+) -> None:
+    """/cli_anything uninstall <id> — 卸载 harness。"""
+    from agent.cli_anything import uninstall_harness
+
+    parts = stripped.split()
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything uninstall <harness-id>")
+        return
+    harness_id = parts[2].strip()
+    result = uninstall_harness(harness_id, registry, workdir=settings.workdir or None)
+    if result["success"]:
+        ui.info(result["message"])
+    else:
+        ui.warn(result["message"])
 
 
 def _list_models(ui: RichCLI, settings: Settings, current: str) -> None:
@@ -2415,9 +2511,17 @@ async def _realtime_talk(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    from agent import __version__
+
     p = argparse.ArgumentParser(
         prog="jarvis",
         description="个人电脑 AI Agent（借鉴 Claude Code 架构）",
+    )
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"jarvis {__version__}",
+        help="显示版本号并退出",
     )
     p.add_argument(
         "--provider",
@@ -2518,6 +2622,11 @@ async def repl_headless(settings: Settings) -> int:
     """
     provider = _build_provider(settings)
     registry: ToolRegistry = build_default_registry()
+
+    # 动态工具：CLI-Anything harness
+    from agent.core.tool import register_dynamic_tools
+    register_dynamic_tools(registry, workdir=settings.workdir)
+
     checker = _build_checker(settings)
     orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
 
@@ -2526,7 +2635,6 @@ async def repl_headless(settings: Settings) -> int:
     if settings.enable_mcp:
         try:
             from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
-            from agent.core.tool import register_dynamic_tools
             mcp_client = MCPClient()
             if mcp_client.available:
                 config = load_mcp_config()
@@ -2621,6 +2729,11 @@ def _run_acp(settings: Settings) -> int:
     # 构建 agent 核心（和 repl() 相同的装配逻辑）
     provider = _build_provider(settings)
     registry: ToolRegistry = build_default_registry()
+
+    # 动态工具：CLI-Anything harness
+    from agent.core.tool import register_dynamic_tools
+    register_dynamic_tools(registry, workdir=settings.workdir)
+
     checker = _build_checker(settings)
     orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
 

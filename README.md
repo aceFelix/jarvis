@@ -1,8 +1,11 @@
 <div align="center">
   <pre style="color: #00aaff;">
-   ██ ▄████▄ █████▄  ██  ██ ██ ▄█████
-   ██ ██▄▄██ ██▄▄██▄ ██▄▄██ ██ ▀▀▀▄▄▄
-████▀ ██  ██ ██   ██  ▀██▀  ██ █████▀
+     ██╗    █████╗    ██████╗   ██╗   ██╗  ██╗   ███████╗   
+     ██║   ██╔══██╗   ██╔══██╗  ██║   ██║  ██║   ██╔════╝   
+     ██║   ███████║   ██████╔╝  ██║   ██║  ██║   ███████╗   
+██   ██║   ██╔══██║   ██╔══██╗  ╚██╗ ██╔╝  ██║   ╚════██║   
+╚█████╔╝██╗██║  ██║██╗██║  ██║██╗╚████╔╝██╗██║██╗███████║██╗
+ ╚════╝ ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝ ╚═══╝ ╚═╝╚═╝╚═╝╚══════╝╚═╝
   </pre>
 </div>
 
@@ -46,6 +49,7 @@
 - [常驻模式（贾维斯形态）](#常驻模式贾维斯形态)
 - [多 Agent 协作](#多-agent-协作)
 - [插件系统](#插件系统)
+- [CLI-Anything 外部软件控制](#cli-anything-外部软件控制)
 - [目录结构](#目录结构)
 - [开发路线](#开发路线)
 - [许可证](#许可证)
@@ -113,6 +117,19 @@ uv tool install "jarvis-agent[all]"
 # 之后直接用
 jarvis
 ```
+
+### 用 npm 安装
+
+如果你习惯 Node.js 生态，也可以通过 npm 一键安装（需要系统已安装 Python 3.11+）：
+
+```bash
+npm install -g jarvis-agent
+
+# 之后直接用
+jarvis
+```
+
+> npm 包会自动检测 Python 环境并通过 pip 安装 `jarvis-agent[all]`。前提是系统已安装 [Python 3.11+](https://www.python.org/downloads/) 并加入 PATH。
 
 ### 安装可选功能
 
@@ -214,8 +231,12 @@ volume = 50                      # 音量 0-100
 speech_rate = 1.0                # 语速 0.5-2.0
 
 [stt]
-# 三后端自动适配（根据 model 前缀）：qwen3-asr-* → QwenASR | paraformer-* → ParaformerSTT | fun-asr-* → FunASRFlashSTT
-model = "fun-asr-flash-2026-06-15"
+# 三后端自动适配（根据 model 名）：
+#   qwen3-asr-*        → QwenASR（OmniRealtimeConversation，服务端 VAD，质量最高）
+#   paraformer-*       → ParaformerSTT（Recognition WebSocket，客户端 VAD，轻量快）
+#   fun-asr-realtime   → ParaformerSTT（同为 Recognition 实时识别后端）
+#   fun-asr-flash-*    → FunASRFlashSTT（HTTP POST 文件上传，非实时，/voice 体验差）
+model = "fun-asr-realtime"
 max_seconds = 15                  # 单次录音最长秒数
 silence_seconds = 1.5             # 静音检测秒数
 
@@ -458,11 +479,12 @@ Jarvis 提供两套独立的语音系统：
 
 - **语音输入**：三种 STT 后端可选，修改 `settings.toml` 中 `[stt].model` 切换：
 
-  | 配置 model 前缀 | 后端类 | 协议 | 特点 |
+  | 配置 model | 后端类 | 协议 | 特点 |
   |---|---|---|---|
   | `qwen3-asr-*` | **QwenASR** | WebSocket（OmniRealtimeConversation） | 服务端 VAD，质量最高，中英混合强 |
   | `paraformer-*` | **ParaformerSTT** | WebSocket（Recognition） | 客户端 VAD，轻量快速 |
-  | `fun-asr-*` | **FunASRFlashSTT** | HTTP POST（文件上传） | 兼容性好，无需 WebSocket |
+  | `fun-asr-realtime` | **ParaformerSTT** | WebSocket（Recognition） | 实时识别，与 paraformer 同后端 |
+  | `fun-asr-flash-*` | **FunASRFlashSTT** | HTTP POST（文件上传） | 非实时，/voice 循环体验差，不推荐 |
 
 - **语音输出**：两种 TTS 模式
   - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
@@ -623,12 +645,92 @@ Jarvis 支持插件扩展，通过命令行管理：
 
 ---
 
+## CLI-Anything 外部软件控制
+
+Jarvis 内置 **CLI-Anything harness** 机制，可以把任意第三方软件（如 Blender、Obsidian、GIMP、Godot 等）包装成 Agent 可调用的工具。
+
+### 安装 harness
+
+在 `~/.jarvis/cli_anything/<软件名>/` 目录下放置：
+
+- `SKILL.md`：描述软件能力、参数、触发场景
+- `run.py`：执行入口（接收 `--<参数名>` 和 `--harness-dir`、`--workdir`）
+
+示例：
+
+```
+~/.jarvis/cli_anything/
+├── blender/
+│   ├── SKILL.md
+│   └── run.py
+└── obsidian/
+    ├── SKILL.md
+    └── run.py
+```
+
+### SKILL.md 示例
+
+```markdown
+---
+name: Blender
+id: blender
+description: 通过 CLI 控制 Blender 3D 建模软件
+when_to_use: 用户需要创建/修改 3D 模型、渲染场景时
+trigger_words: [blender, 3d, 建模, 渲染]
+command: python
+args:
+  - name: operation
+    type: string
+    enum: [create_mesh, render, export, info]
+    required: true
+    description: 操作类型
+  - name: prompt
+    type: string
+    required: false
+    description: 自然语言描述要执行的操作
+examples:
+  - "用 Blender 创建一个立方体"
+---
+```
+
+### 市场命令
+
+Jarvis 会自动从 CLI-Anything 官方 GitHub 仓库拉取市场列表，无需手动 clone 仓库：
+
+```text
+/cli_anything market              # 查看官方市场可用 harness
+/cli_anything install blender     # 从官方仓库安装 Blender harness
+/cli_anything uninstall blender   # 卸载已安装 harness
+/cli_anything list                # 列出本地已安装 harness
+```
+
+网络不可用时，命令会自动回退到本地 `../CLI-Anything-main` 仓库（如果存在）。
+
+### 使用
+
+启动 Jarvis 后，harness 会自动注册为工具 `cli_anything__<id>`。例如：
+
+```
+> 用 Blender 创建一个立方体
+```
+
+Jarvis 会调用 `cli_anything__blender`，并在执行前询问你确认（默认 ASK 权限）。
+
+### 安全说明
+
+- 所有 harness 工具默认 **ASK** 权限，执行前需要确认。
+- 不通过 shell 执行，避免命令注入。
+- 支持超时和强制终止（默认 120 秒）。
+
+---
+
 ## 目录结构
 
 ```
 agent/
 ├── main.py            # 入口（REPL / daemon / --talk 分发）
 ├── acp.py             # Agent Communication Protocol
+├── cli_anything/      # CLI-Anything harness 集成（包装任意软件为 CLI）
 ├── core/              # 核心运行时
 │   ├── query_loop.py  # 对话循环（REPL 驱动 + 语音对话流程）
 │   ├── orchestrator.py # Agent 编排器（ReAct 循环）
@@ -699,6 +801,11 @@ agent/
 │   └── voice_state.py # 语音状态管理
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
 └── prompts/           # 系统提示组装（动态思维模式/语音模式）
+
+npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g 安装）
+├── package.json       # npm 包定义（bin 指向 run.js）
+├── install.js         # postinstall：检测 Python + pip install jarvis-agent[all]
+└── run.js             # CLI 入口：转发参数给 jarvis 命令
 ```
 
 ---

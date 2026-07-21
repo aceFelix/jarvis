@@ -345,7 +345,7 @@ def _compose(canvas: BrailleCanvas, geo: ReactorGeo,
             line1 = Text()
             line1.append("provider ", style="dim")
             line1.append(provider, style=_color_for(0.7))
-            line1.append("   model ", style="dim")
+            line1.append("                     model ", style="dim")
             line1.append(model, style=_color_for(0.7))
             banner_lines.append(line1)
         if workdir:
@@ -355,7 +355,7 @@ def _compose(canvas: BrailleCanvas, geo: ReactorGeo,
             banner_lines.append(line2)
         if banner_lines:
             banner_lines.append(
-                Text("/help 查看命令    /voice 语音对话    /exit 退出", style="dim")
+                Text("/help 查看命令    /voice 语音对话    /talk 实时聊天    /exit 退出", style="dim")
             )
             from rich.panel import Panel
             banner_text = Text("\n").join(banner_lines)
@@ -366,7 +366,7 @@ def _compose(canvas: BrailleCanvas, geo: ReactorGeo,
             )))
         else:
             parts.append(Align.center(
-                Text("/help 查看命令    /voice 语音对话    /exit 退出", style="dim")
+                Text("/help 查看命令    /voice 语音对话    /talk 实时聊天    /exit 退出", style="dim")
             ))
     return Group(*parts)
 

@@ -814,6 +814,8 @@ def create_stt(
 
     - model 以 "qwen" 开头 → QwenASR（OmniRealtimeConversation，服务端 VAD，质量高）
     - model 以 "paraformer" 开头 → ParaformerSTT（Recognition，客户端 VAD，轻量快）
+    - model 为 "fun-asr-realtime" → ParaformerSTT（同为 Recognition 实时识别后端）
+    - model 以 "fun-asr" 开头 → FunASRFlashSTT（HTTP POST 文件上传，非实时）
     - 其他 → 默认 ParaformerSTT
 
     这样上层只需改 settings.toml 的 stt_model 即可切换后端，代码自动适配。
@@ -821,6 +823,8 @@ def create_stt(
     m = model.lower()
     if m.startswith("qwen"):
         return QwenASR(api_key=api_key, model=model, language=language)
+    if m.startswith("paraformer") or m == "fun-asr-realtime":
+        return ParaformerSTT(api_key=api_key, model=model)
     if m.startswith("fun-asr"):
         return FunASRFlashSTT(api_key=api_key, model=model)
     return ParaformerSTT(api_key=api_key, model=model)
@@ -869,7 +873,13 @@ class FunASRFlashSTT:
         on_partial: Any = None,
         on_open: Any = None,
     ) -> dict[str, Any]:
-        """录音并识别。阻塞直到识别完成。"""
+        """录音并识别。阻塞直到识别完成。
+
+        流程分为两段，避免用户还没开口就送空音频给 API：
+        1. 预录音等待：最多等待 ``pre_recording_seconds``，直到检测到用户声音；
+        2. 正式录音：检测到声音后，按静音阈值结束，再整段送给 FunASR Flash。
+        若整段都没有有效语音，直接返回空文本，不会触发 ``ASR_RESPONSE_HAVE_NO_WORDS``。
+        """
         _reset_stop()
 
         from agent.voice.audio import get_pyaudio
@@ -890,37 +900,64 @@ class FunASRFlashSTT:
 
         frames: list[bytes] = []
         t0 = time.time()
-        silence_start: float | None = None
         aborted = False
+        # 预录音等待：给用户一点时间开口，避免还没说话就进入静音检测
+        pre_recording_seconds = min(5.0, max_seconds)
+        voice_started = False
 
         try:
+            # ---- 阶段 1：等待用户开始说话 ----
             while not _stop_flag.is_set():
                 elapsed = time.time() - t0
-                if elapsed >= max_seconds:
+                if elapsed >= pre_recording_seconds:
                     break
 
                 try:
                     frame = stream.read(_FRAMES_PER_BUFFER, False)
                 except Exception:
+                    aborted = True
                     break
 
                 frames.append(frame)
-
-                # RMS 静音检测
                 rms = _rms(frame)
-                if rms < silence_threshold:
-                    if silence_start is None:
-                        silence_start = time.time()
-                    elif time.time() - silence_start >= silence_seconds:
-                        break
-                else:
-                    silence_start = None
+                if rms >= silence_threshold:
+                    voice_started = True
+                    break
 
                 if on_partial:
                     try:
-                        on_partial(f"[录音中 {elapsed:.1f}s]")
+                        on_partial(f"[聆听中 {elapsed:.1f}s]")
                     except Exception:
                         pass
+
+            # ---- 阶段 2：检测到声音后继续录音，直到静音结束或超时 ----
+            if voice_started and not _stop_flag.is_set() and not aborted:
+                silence_start: float | None = None
+                while not _stop_flag.is_set():
+                    elapsed = time.time() - t0
+                    if elapsed >= max_seconds:
+                        break
+
+                    try:
+                        frame = stream.read(_FRAMES_PER_BUFFER, False)
+                    except Exception:
+                        break
+
+                    frames.append(frame)
+                    rms = _rms(frame)
+                    if rms < silence_threshold:
+                        if silence_start is None:
+                            silence_start = time.time()
+                        elif time.time() - silence_start >= silence_seconds:
+                            break
+                    else:
+                        silence_start = None
+
+                    if on_partial:
+                        try:
+                            on_partial(f"[录音中 {elapsed:.1f}s]")
+                        except Exception:
+                            pass
 
         except KeyboardInterrupt:
             aborted = True
@@ -928,11 +965,13 @@ class FunASRFlashSTT:
             stream.stop_stream()
             stream.close()
 
-        if aborted:
-            return {"text": "", "duration": time.time() - t0, "error": "用户取消"}
+        duration = time.time() - t0
 
-        if not frames:
-            return {"text": "", "duration": time.time() - t0, "error": "未检测到语音"}
+        if aborted:
+            return {"text": "", "duration": duration, "error": "用户取消"}
+
+        if not voice_started or not frames:
+            return {"text": "", "duration": duration, "error": "未检测到语音"}
 
         # 将 PCM 帧转为 WAV 格式
         raw_pcm = b"".join(frames)
@@ -945,9 +984,9 @@ class FunASRFlashSTT:
         # 发送到 FunASR Flash API
         try:
             text = self._call_api(data_uri)
-            return {"text": text, "duration": time.time() - t0}
+            return {"text": text, "duration": duration}
         except Exception as e:
-            return {"text": "", "duration": time.time() - t0, "error": f"识别失败: {e}"}
+            return {"text": "", "duration": duration, "error": f"识别失败: {e}"}
 
     def _call_api(self, audio_data_uri: str) -> str:
         """调 HTTP POST，同步模式下获取转写文字。"""

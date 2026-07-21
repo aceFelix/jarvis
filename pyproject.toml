@@ -1,8 +1,21 @@
 [project]
 name = "jarvis-agent"
-version = "0.1.1"
+version = "0.1.2"
 description = "J.A.R.V.I.S — 你的钢铁侠同款桌面 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 30+ 内置工具、MCP 生态接入、多模型动态切换。"
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "anthropic>=0.39.0",
     "openai>=1.50.0",

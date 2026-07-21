@@ -146,6 +146,11 @@ SLASH_COMMANDS = [
     ("/plugin install <名称>",  "安装指定插件"),
     ("/plugin uninstall <名称>","卸载指定插件"),
     ("/plugin search <关键词>", "搜索可用插件"),
+    ("/cli_anything",           "列出已安装 CLI-Anything harness"),
+    ("/cli_anything list",      "列出已安装 CLI-Anything harness"),
+    ("/cli_anything market",    "列出市场可用 harness"),
+    ("/cli_anything install <id>",  "安装指定 harness"),
+    ("/cli_anything uninstall <id>","卸载指定 harness"),
 ]
 
 # 工具名 → 语音播报描述（方言/中文，适合 TTS 朗读）
@@ -859,7 +864,8 @@ class RichCLI(UIProtocol):
                 f"[bold]jarvis[/bold] v0.1\n"
                 f"provider: [cyan]{provider}[/cyan]  model: [cyan]{model}[/cyan]\n"
                 f"workdir:  [cyan]{workdir}[/cyan]\n"
-                f"输入 [magenta]/exit[/magenta] 退出，[magenta]/help[/magenta] 查看命令",
+                f"输入 [magenta]/help[/magenta] 查看命令，[magenta]/voice[/magenta] 语音对话，"
+                f"[magenta]/talk[/magenta] 实时聊天，[magenta]/exit[/magenta] 退出",
                 border_style="green",
                 expand=False,
             )

@@ -221,13 +221,30 @@ def build_default_registry() -> ToolRegistry:
     return registry
 
 
-def register_dynamic_tools(registry: ToolRegistry, mcp_client: "Any | None" = None) -> int:
-    """注册动态加载的工具（MCP 等）。返回注册数。
+def register_dynamic_tools(
+    registry: ToolRegistry,
+    mcp_client: "Any | None" = None,
+    workdir: "Path | str | None" = None,
+) -> int:
+    """注册动态加载的工具（CLI-Anything harness、MCP 等）。返回注册数。
 
     在 build_default_registry 之后调用，用于注入运行时发现的工具。
-    mcp_client: 已连接的 MCPClient 实例（None 则跳过 MCP 工具）。
+
+    Args:
+        registry: ToolRegistry 实例。
+        mcp_client: 已连接的 MCPClient 实例（None 则跳过 MCP 工具）。
+        workdir: 当前工作目录，用于加载项目级 harness。
     """
     count = 0
+
+    # 1. CLI-Anything harness（~/.jarvis/cli_anything/ 与 <workdir>/.jarvis/cli_anything/）
+    try:
+        from agent.cli_anything import discover_and_register
+        count += discover_and_register(registry, workdir=workdir)
+    except ImportError:
+        pass
+
+    # 2. MCP 工具
     if mcp_client is not None:
         try:
             from agent.tools.extensions.mcp_tool import register_mcp_tools
