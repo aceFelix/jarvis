@@ -8,7 +8,7 @@
 3. 本地缓存
 4. 本地仓库目录（回退）
 
-同 id 的 harness，jarvis市场覆盖官方。
+同 id 的 harness，jarvis市场覆盖CLI-Anything官方。
 
 @author aceFelix
 """
@@ -136,7 +136,7 @@ def _fetch_remote_registry(base_url: str | None = None, cache_name: str | None =
 
 
 def _custom_market_local_path(market_local: str) -> Path | None:
-    """解析自定义市场本地路径（支持相对路径）。"""
+    """解析jarvis自定义市场本地路径（支持相对路径）。"""
     if not market_local:
         return None
     p = Path(market_local)
@@ -157,7 +157,7 @@ def _load_registry(
     """加载并合并多市场源的 registry。
 
     加载顺序（同 id 自定义覆盖官方）：
-    1. 自定义市场远程 registry.json
+    1. jarvis自定义市场远程 registry.json
     2. 官方 CLI-Anything 远程 registry.json
     3. 本地缓存
     4. 自定义市场本地 registry.json
@@ -165,8 +165,8 @@ def _load_registry(
 
     Args:
         path: 可选的本地 registry.json 路径。
-        custom_market_url: 自定义市场 GitHub raw 前缀。
-        custom_market_local: 自定义市场本地路径。
+        custom_market_url: jarvis自定义市场 GitHub raw 前缀。
+        custom_market_local: jarvis自定义市场本地路径。
 
     Returns:
         合并后的 registry dict。
@@ -195,7 +195,7 @@ def _load_registry(
                 except Exception as e:
                     logger.warning("读取本地 registry.json 失败: %s", e)
 
-    # --- 自定义市场 ---
+    # --- jarvis自定义市场 ---
     if custom_market_url:
         remote_custom = _fetch_remote_registry(
             base_url=custom_market_url,
@@ -212,7 +212,7 @@ def _load_registry(
                 try:
                     custom_registry = json.loads(custom_reg_file.read_text(encoding="utf-8")) or {}
                 except Exception as e:
-                    logger.warning("读取自定义市场本地 registry.json 失败: %s", e)
+                    logger.warning("读取jarvis自定义市场本地 registry.json 失败: %s", e)
 
     # --- 合并（自定义覆盖官方） ---
     if not custom_registry:
@@ -344,10 +344,10 @@ def list_market(
     custom_market_url: str = "",
     custom_market_local: str = "",
 ) -> list[dict[str, str]]:
-    """列出市场可用 harness（合并自定义 + 官方）。
+    """列出市场可用 harness（合并jarvis自定义 + CLI_Anything官方）。
 
     ID 统一从 ``skill_md`` 路径或 ``id`` 字段提取。
-    输出增加 ``source`` 字段（"自定义" / "官方"）区分来源。
+    输出增加 ``source`` 字段（"jarvis自定义" / "CLI-Anything官方"）区分来源。
     """
     registry = _load_registry(
         custom_market_url=custom_market_url,
@@ -369,7 +369,7 @@ def list_market(
             cid = _normalize_id(str(cli.get(_CLI_NAME_KEY, "")))
         if not cid:
             continue
-        source = "自定义" if cid in custom_ids else "官方"
+        source = "jarvis自定义" if cid in custom_ids else "CLI_Anything官方"
         result.append({
             "id": cid,
             "name": str(cli.get(_CLI_DISPLAY_KEY, cli.get("display_name", cid))),
@@ -452,13 +452,13 @@ def install_harness(
         if is_custom and custom_market_url:
             source_skill_text = _fetch_remote_skill_md(skill_md_relative, base_url=custom_market_url)
             if source_skill_text:
-                logger.info("已从自定义市场远程下载 harness SKILL.md: %s", cid)
+                logger.info("已从jarvis自定义市场远程下载 harness SKILL.md: %s", cid)
 
         # 官方远程
         if source_skill_text is None:
             source_skill_text = _fetch_remote_skill_md(skill_md_relative)
             if source_skill_text:
-                logger.info("已从官方远程下载 harness SKILL.md: %s", cid)
+                logger.info("已从CLI-Anything官方远程下载 harness SKILL.md: %s", cid)
 
     # 2. 远程失败则回退本地
     if source_skill_text is None:
