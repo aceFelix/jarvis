@@ -2,9 +2,13 @@
 
 提供已安装 harness 列表、市场可用列表、安装/卸载能力。
 
-市场数据优先从 CLI-Anything 官方 GitHub 仓库远程读取，
-网络不可用或本地仓库更新时，会回退到本地 ``CLI-Anything-main/`` 目录。
-安装 harness 时同样优先从远程下载 ``SKILL.md``，失败再尝试本地仓库。
+支持多市场源：
+1. jarvis市场（jarvis官方的 GitHub 仓库，最优先）
+2. CLI-Anything 官方 GitHub 仓库
+3. 本地缓存
+4. 本地仓库目录（回退）
+
+同 id 的 harness，jarvis市场覆盖官方。
 
 @author aceFelix
 """
@@ -104,20 +108,26 @@ def _fetch_url(url: str, timeout: float = _REMOTE_TIMEOUT_SECONDS) -> bytes | No
         return None
 
 
-def _fetch_remote_registry() -> dict[str, Any] | None:
+def _fetch_remote_registry(base_url: str | None = None, cache_name: str | None = None) -> dict[str, Any] | None:
     """从 GitHub 远程拉取 registry.json 并缓存。
+
+    Args:
+        base_url: 远程 raw 前缀。None 时用官方 CLI-Anything 地址。
+        cache_name: 缓存文件名。None 时用默认名。
 
     Returns:
         解析后的 registry dict，失败返回 None。
     """
-    url = f"{_REMOTE_RAW_BASE}/registry.json"
+    raw_base = base_url or _REMOTE_RAW_BASE
+    url = f"{raw_base}/registry.json"
     data = _fetch_url(url)
     if data is None:
         return None
     try:
         registry = json.loads(data.decode("utf-8")) or {}
         # 写入缓存
-        cache = _cache_path(_REGISTRY_CACHE_FILE)
+        fname = cache_name or _REGISTRY_CACHE_FILE
+        cache = _cache_path(fname)
         cache.write_bytes(data)
         return registry
     except Exception as e:
@@ -125,41 +135,124 @@ def _fetch_remote_registry() -> dict[str, Any] | None:
         return None
 
 
-def _load_registry(path: Path | None = None) -> dict[str, Any]:
-    """加载 CLI-Anything registry.json。
+def _custom_market_local_path(market_local: str) -> Path | None:
+    """解析自定义市场本地路径（支持相对路径）。"""
+    if not market_local:
+        return None
+    p = Path(market_local)
+    if p.is_absolute():
+        return p if p.is_dir() else None
+    # 相对于 jarvis 项目目录
+    project_root = Path(__file__).resolve().parent.parent.parent
+    resolved = (project_root / p).resolve()
+    return resolved if resolved.is_dir() else None
 
-    加载顺序：
-    1. 远程 GitHub registry.json（优先，成功后缓存）
-    2. 本地有效缓存
-    3. 本地 CLI-Anything-main/registry.json
+
+def _load_registry(
+    path: Path | None = None,
+    *,
+    custom_market_url: str = "",
+    custom_market_local: str = "",
+) -> dict[str, Any]:
+    """加载并合并多市场源的 registry。
+
+    加载顺序（同 id 自定义覆盖官方）：
+    1. 自定义市场远程 registry.json
+    2. 官方 CLI-Anything 远程 registry.json
+    3. 本地缓存
+    4. 自定义市场本地 registry.json
+    5. 官方本地 CLI-Anything-main/registry.json
 
     Args:
         path: 可选的本地 registry.json 路径。
+        custom_market_url: 自定义市场 GitHub raw 前缀。
+        custom_market_local: 自定义市场本地路径。
 
     Returns:
-        registry dict，全部失败返回空 dict。
+        合并后的 registry dict。
     """
-    # 1. 优先远程
-    remote_registry = _fetch_remote_registry()
-    if remote_registry:
-        return remote_registry
+    official_registry: dict[str, Any] = {}
+    custom_registry: dict[str, Any] = {}
 
-    # 2. 回退缓存
-    cache = _cache_path(_REGISTRY_CACHE_FILE)
-    if _is_cache_valid(cache):
-        try:
-            return json.loads(cache.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            logger.warning("读取缓存 registry.json 失败: %s", e)
+    # --- 官方市场 ---
+    remote_official = _fetch_remote_registry()
+    if remote_official:
+        official_registry = remote_official
+    else:
+        # 回退缓存
+        cache = _cache_path(_REGISTRY_CACHE_FILE)
+        if _is_cache_valid(cache):
+            try:
+                official_registry = json.loads(cache.read_text(encoding="utf-8")) or {}
+            except Exception as e:
+                logger.warning("读取缓存 registry.json 失败: %s", e)
+        if not official_registry:
+            # 回退本地仓库
+            local_path = path or _market_repo() / "registry.json"
+            if local_path.is_file():
+                try:
+                    official_registry = json.loads(local_path.read_text(encoding="utf-8")) or {}
+                except Exception as e:
+                    logger.warning("读取本地 registry.json 失败: %s", e)
 
-    # 3. 回退本地仓库
-    local_path = path or _market_repo() / "registry.json"
-    if local_path.is_file():
-        try:
-            return json.loads(local_path.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            logger.warning("读取本地 registry.json 失败: %s", e)
-    return {}
+    # --- 自定义市场 ---
+    if custom_market_url:
+        remote_custom = _fetch_remote_registry(
+            base_url=custom_market_url,
+            cache_name="custom_registry.json",
+        )
+        if remote_custom:
+            custom_registry = remote_custom
+
+    if not custom_registry and custom_market_local:
+        custom_local = _custom_market_local_path(custom_market_local)
+        if custom_local:
+            custom_reg_file = custom_local / "registry.json"
+            if custom_reg_file.is_file():
+                try:
+                    custom_registry = json.loads(custom_reg_file.read_text(encoding="utf-8")) or {}
+                except Exception as e:
+                    logger.warning("读取自定义市场本地 registry.json 失败: %s", e)
+
+    # --- 合并（自定义覆盖官方） ---
+    if not custom_registry:
+        return official_registry
+    if not official_registry:
+        return custom_registry
+
+    # 合并 harnesses/clis 列表，同 id 自定义优先
+    merged = dict(official_registry)
+    official_clis = official_registry.get("clis", official_registry.get("harnesses", []))
+    custom_clis = custom_registry.get("clis", custom_registry.get("harnesses", []))
+
+    # 用自定义的覆盖同 id 的官方条目
+    official_ids = set()
+    for cli in official_clis:
+        cid = _normalize_id(str(cli.get("name", cli.get("id", ""))))
+        if cid:
+            official_ids.add(cid)
+
+    merged_clis = list(official_clis)
+    for cli in custom_clis:
+        cid = _normalize_id(str(cli.get("name", cli.get("id", ""))))
+        if cid and cid in official_ids:
+            # 替换官方同 id 条目
+            merged_clis = [c for c in merged_clis if _normalize_id(str(c.get("name", c.get("id", "")))) != cid]
+        merged_clis.append(cli)
+
+    # 自定义市场用 "harnesses" 键，官方用 "clis" 键，统一输出为 "clis"
+    merged["clis"] = merged_clis
+    merged.pop("harnesses", None)
+    # 标记自定义来源 id 集合（供 list_market 使用）
+    custom_ids = set()
+    for cli in custom_clis:
+        cid = _normalize_id(str(cli.get("name", cli.get("id", ""))))
+        if cid:
+            custom_ids.add(cid)
+    merged["_custom_ids"] = custom_ids
+    merged["_custom_market_url"] = custom_market_url
+    merged["_custom_market_local"] = custom_market_local
+    return merged
 
 
 def _normalize_id(value: str) -> str:
@@ -191,39 +284,43 @@ def _id_from_skill_md(skill_md: str) -> str:
         return ""
 
 
-def _remote_skill_url(skill_md: str) -> str:
+def _remote_skill_url(skill_md: str, base_url: str | None = None) -> str:
     """根据 registry 中的 skill_md 路径构造远程 raw URL。
 
     支持三种形式：
-    1. 相对路径，如 ``skills/cli-anything-xxx/SKILL.md``
+    1. 相对路径，如 ``skills/cli-anything-xxx/SKILL.md`` 或 ``harnesses/qq/SKILL.md``
     2. GitHub raw 地址，直接返回
     3. GitHub blob 页面地址，转换为 raw 地址
+
+    Args:
+        skill_md: registry 中记录的 skill_md 路径或 URL。
+        base_url: 自定义市场 raw 前缀。None 时用官方地址。
     """
+    raw_base = base_url or _REMOTE_RAW_BASE
     # skill_md 可能已经是完整 URL
     if skill_md.startswith("http://") or skill_md.startswith("https://"):
         # 把 GitHub blob 页面转换为 raw 地址
-        # https://github.com/<user>/<repo>/blob/<branch>/<path>
-        # -> https://raw.githubusercontent.com/<user>/<repo>/<branch>/<path>
         if "/blob/" in skill_md and skill_md.startswith("https://github.com/"):
             return skill_md.replace("https://github.com/", "https://raw.githubusercontent.com/", 1).replace("/blob/", "/", 1)
         return skill_md
-    # 去掉可能的前导 skills/，统一拼接
+    # 相对路径拼接
     relative = skill_md.lstrip("/")
-    if relative.startswith("skills/"):
-        return f"{_REMOTE_RAW_BASE}/{relative}"
-    return f"{_REMOTE_RAW_BASE}/skills/{relative}"
+    if relative.startswith("skills/") or relative.startswith("harnesses/"):
+        return f"{raw_base}/{relative}"
+    return f"{raw_base}/skills/{relative}"
 
 
-def _fetch_remote_skill_md(skill_md: str) -> str | None:
+def _fetch_remote_skill_md(skill_md: str, base_url: str | None = None) -> str | None:
     """从远程下载单个 SKILL.md 内容。
 
     Args:
         skill_md: registry 中记录的 skill_md 路径或 URL。
+        base_url: 自定义市场 raw 前缀。
 
     Returns:
         SKILL.md 文本内容，失败返回 None。
     """
-    url = _remote_skill_url(skill_md)
+    url = _remote_skill_url(skill_md, base_url=base_url)
     data = _fetch_url(url)
     if data is None:
         return None
@@ -242,38 +339,54 @@ def list_installed(workdir: str | None = None) -> list[dict[str, str]]:
     ]
 
 
-def list_market() -> list[dict[str, str]]:
-    """列出市场可用 harness（优先远程 registry.json）。
+def list_market(
+    *,
+    custom_market_url: str = "",
+    custom_market_local: str = "",
+) -> list[dict[str, str]]:
+    """列出市场可用 harness（合并自定义 + 官方）。
 
-    ID 统一从 ``skill_md`` 路径中提取，确保与已安装 harness 的 id 一致。
+    ID 统一从 ``skill_md`` 路径或 ``id`` 字段提取。
+    输出增加 ``source`` 字段（"自定义" / "官方"）区分来源。
     """
-    registry = _load_registry()
-    clis: list[dict[str, Any]] = registry.get("clis", [])
+    registry = _load_registry(
+        custom_market_url=custom_market_url,
+        custom_market_local=custom_market_local,
+    )
+    clis: list[dict[str, Any]] = registry.get("clis", registry.get("harnesses", []))
+    custom_ids: set[str] = registry.get("_custom_ids", set())
     installed_ids = {h.id for h in discover_harnesses()}
     result: list[dict[str, str]] = []
     for cli in clis:
         skill_md = str(cli.get(_CLI_SKILL_MD_KEY, ""))
-        if not skill_md or "cli-anything-" not in skill_md:
-            # 只列出标准 CLI-Anything harness（skill_md 路径含 cli-anything-）
-            continue
-        cid = _id_from_skill_md(skill_md)
+        # 自定义市场 harness 可能没有 cli-anything- 前缀，用 id 字段
+        cid = ""
+        if cli.get("id"):
+            cid = _normalize_id(str(cli["id"]))
+        if not cid and skill_md:
+            cid = _id_from_skill_md(skill_md)
         if not cid:
             cid = _normalize_id(str(cli.get(_CLI_NAME_KEY, "")))
         if not cid:
             continue
+        source = "自定义" if cid in custom_ids else "官方"
         result.append({
             "id": cid,
-            "name": str(cli.get(_CLI_DISPLAY_KEY, cid)),
+            "name": str(cli.get(_CLI_DISPLAY_KEY, cli.get("display_name", cid))),
             "description": str(cli.get(_CLI_DESC_KEY, "")),
             "requires": str(cli.get(_CLI_REQUIRES_KEY, "")),
             "installed": "是" if cid in installed_ids else "否",
+            "source": source,
         })
     return result
 
 
 def _cli_info_from_registry(cid: str, registry: dict[str, Any]) -> dict[str, Any] | None:
     """从 registry 中查找指定 harness 的元数据。"""
-    for cli in registry.get("clis", []):
+    for cli in registry.get("clis", registry.get("harnesses", [])):
+        # 支持 id 字段和 name 字段两种匹配
+        if _normalize_id(str(cli.get("id", ""))) == cid:
+            return cli
         if _normalize_id(str(cli.get(_CLI_NAME_KEY, ""))) == cid:
             return cli
     return None
@@ -285,20 +398,27 @@ def install_harness(
     *,
     workdir: str | None = None,
     run_pip: bool = False,
+    custom_market_url: str = "",
+    custom_market_local: str = "",
 ) -> dict[str, Any]:
     """安装指定 harness。
 
     安装顺序：
-    1. 从远程 GitHub raw 下载 ``SKILL.md``。
-    2. 远程失败时回退到本地 ``CLI-Anything-main/skills/.../SKILL.md``。
-    3. 迁移 SKILL.md 到 ``~/.jarvis/cli_anything/<id>/``。
-    4. 刷新 ToolRegistry。
+    1. 从自定义市场远程下载 ``SKILL.md``（优先）。
+    2. 从官方 CLI-Anything 远程下载。
+    3. 回退自定义市场本地目录。
+    4. 回退官方本地 ``CLI-Anything-main/skills/.../SKILL.md``。
+    5. 自定义市场 harness → 整目录复制到 ``~/.jarvis/cli_anything/<id>/``；
+       官方 harness → 迁移 SKILL.md。
+    6. 刷新 ToolRegistry。
 
     Args:
-        harness_id: harness ID（如 ``blender``）。
+        harness_id: harness ID（如 ``blender`` 或 ``qq``）。
         registry: 当前 ToolRegistry，安装成功后刷新。
         workdir: 当前工作目录，用于扫描项目级 harness。
         run_pip: 是否自动执行 registry 中的 ``install_cmd``。
+        custom_market_url: 自定义市场 GitHub raw 前缀。
+        custom_market_local: 自定义市场本地路径。
 
     Returns:
         dict，包含 success / message / harness_id。
@@ -307,67 +427,76 @@ def install_harness(
     if not cid:
         return {"success": False, "message": "harness ID 为空", "harness_id": ""}
 
-    # 加载 registry（会触发远程优先 + 缓存 + 本地回退）
-    registry_data = _load_registry()
+    # 加载合并后的 registry
+    registry_data = _load_registry(
+        custom_market_url=custom_market_url,
+        custom_market_local=custom_market_local,
+    )
     cli_info = _cli_info_from_registry(cid, registry_data)
+    custom_ids: set[str] = registry_data.get("_custom_ids", set())
+    is_custom = cid in custom_ids
 
     skill_md_relative = ""
     if cli_info:
         skill_md_relative = str(cli_info.get(_CLI_SKILL_MD_KEY, ""))
 
-    from agent.cli_anything.migrate import migrate_one
-
     target_dir = _DEFAULT_USER_HARNESS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 尝试远程下载 SKILL.md
+    # 1. 尝试远程下载 SKILL.md（自定义市场优先）
     source_skill_text: str | None = None
     source_skill_path: Path | None = None
-    if skill_md_relative:
-        source_skill_text = _fetch_remote_skill_md(skill_md_relative)
-        if source_skill_text:
-            logger.info("已从远程下载 harness SKILL.md: %s", cid)
 
-    # 2. 远程失败则回退本地仓库
+    if skill_md_relative:
+        # 自定义市场远程
+        if is_custom and custom_market_url:
+            source_skill_text = _fetch_remote_skill_md(skill_md_relative, base_url=custom_market_url)
+            if source_skill_text:
+                logger.info("已从自定义市场远程下载 harness SKILL.md: %s", cid)
+
+        # 官方远程
+        if source_skill_text is None:
+            source_skill_text = _fetch_remote_skill_md(skill_md_relative)
+            if source_skill_text:
+                logger.info("已从官方远程下载 harness SKILL.md: %s", cid)
+
+    # 2. 远程失败则回退本地
     if source_skill_text is None:
-        market = _market_repo()
-        source_dir = market / "skills" / f"cli-anything-{cid}"
-        source_skill_path = source_dir / "SKILL.md"
-        if not source_skill_path.is_file():
+        # 自定义市场本地
+        if custom_market_local:
+            custom_local = _custom_market_local_path(custom_market_local)
+            if custom_local and skill_md_relative:
+                local_skill = custom_local / skill_md_relative
+                if local_skill.is_file():
+                    source_skill_path = local_skill
+
+        # 官方本地
+        if source_skill_path is None:
+            market = _market_repo()
+            source_dir = market / "skills" / f"cli-anything-{cid}"
+            source_skill_path = source_dir / "SKILL.md"
+
+        if source_skill_path is None or not source_skill_path.is_file():
             return {
                 "success": False,
                 "message": f"远程与本地均未找到 harness: {cid}（skill_md={skill_md_relative or '无'}）",
                 "harness_id": cid,
             }
 
-    # 3. 迁移：远程下载的内容直接写到临时文件再迁移；本地则直接迁移原文件
-    if source_skill_text is not None:
-        # 创建临时 SKILL.md 供 migrate_one 读取
-        tmp_dir = target_dir / f"{cid}.tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_skill = tmp_dir / "SKILL.md"
-        tmp_skill.write_text(source_skill_text, encoding="utf-8")
-        try:
-            _, ok = migrate_one(tmp_skill, target_dir, harness_id=cid)
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-    else:
-        _, ok = migrate_one(source_skill_path, target_dir)  # type: ignore[arg-type]
+    # 3. 安装到 ~/.jarvis/cli_anything/<id>/
+    #    pip 型自定义 harness（有 install_cmd）：pip install + 复制 SKILL.md
+    #    目录型自定义 harness（无 install_cmd）：整目录复制
+    #    官方 harness：仅迁移 SKILL.md
+    target_harness_dir = target_dir / cid
 
-    if not ok:
-        return {
-            "success": False,
-            "message": f"迁移 {cid} SKILL.md 失败",
-            "harness_id": cid,
-        }
-
-    # 4. 可选：执行 pip install
-    pip_msg = ""
+    # 提前读取 install_cmd
     install_cmd = ""
     if cli_info:
         install_cmd = str(cli_info.get(_CLI_CLI_INSTALL_KEY, "")).strip()
 
-    if run_pip and install_cmd:
+    if is_custom and install_cmd:
+        # ── pip 型自定义 harness：pip install + 复制 SKILL.md ──
+        # 先执行 pip install，安装全局命令（如 jarvis-harness-wps）
         try:
             proc = subprocess.run(
                 install_cmd,
@@ -378,27 +507,128 @@ def install_harness(
                 encoding="utf-8",
                 errors="replace",
             )
-            pip_msg = f"\n安装命令退出码: {proc.returncode}"
-            if proc.stdout:
-                pip_msg += f"\n{proc.stdout.strip()}"
-            if proc.stderr:
-                pip_msg += f"\n{proc.stderr.strip()}"
             if proc.returncode != 0:
+                err_detail = (proc.stderr or proc.stdout or "").strip()
                 return {
                     "success": False,
-                    "message": f"迁移成功，但 install 命令执行失败{pip_msg}",
+                    "message": f"pip install 失败 (exit={proc.returncode}): {err_detail}",
                     "harness_id": cid,
                 }
         except Exception as e:
-            pip_msg = f"\n执行 install 命令异常: {e}"
+            return {
+                "success": False,
+                "message": f"执行 install_cmd 异常: {e}",
+                "harness_id": cid,
+            }
+
+        # 再复制 SKILL.md（原样保留，不经过 migrate_one 重写）
+        target_harness_dir.mkdir(parents=True, exist_ok=True)
+        if source_skill_text is not None:
+            (target_harness_dir / "SKILL.md").write_text(source_skill_text, encoding="utf-8")
+        elif source_skill_path is not None and source_skill_path.is_file():
+            shutil.copy2(source_skill_path, target_harness_dir / "SKILL.md")
+        else:
+            return {
+                "success": False,
+                "message": f"pip install 成功，但未找到 SKILL.md: {cid}",
+                "harness_id": cid,
+            }
+        ok = True
+        logger.info("pip 型 harness 安装完成: %s (cmd=%s)", cid, install_cmd)
+
+    elif is_custom:
+        # ── 自定义市场：整目录复制 ──
+        # 优先从本地市场目录复制整个 harness 文件夹
+        local_harness_dir: Path | None = None
+        if custom_market_local and skill_md_relative:
+            custom_local = _custom_market_local_path(custom_market_local)
+            if custom_local:
+                # skill_md_relative 形如 "harnesses/wps/SKILL.md"，取父目录
+                candidate = custom_local / Path(skill_md_relative).parent
+                if candidate.is_dir():
+                    local_harness_dir = candidate
+
+        if local_harness_dir is not None:
+            # 整目录复制（排除 __pycache__）
+            if target_harness_dir.exists():
+                shutil.rmtree(target_harness_dir)
+            shutil.copytree(
+                local_harness_dir,
+                target_harness_dir,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+            ok = (target_harness_dir / "SKILL.md").is_file()
+            logger.info("已从本地市场复制 harness 目录: %s → %s", local_harness_dir, target_harness_dir)
+        elif source_skill_text is not None:
+            # 远程下载：直接写入 SKILL.md（不经过 migrate_one 重写）
+            target_harness_dir.mkdir(parents=True, exist_ok=True)
+            (target_harness_dir / "SKILL.md").write_text(source_skill_text, encoding="utf-8")
+            ok = True
+            logger.info("已从远程写入 harness SKILL.md: %s", target_harness_dir)
+        else:
+            ok = False
+    else:
+        # ── 官方 harness：原有 migrate_one 逻辑 ──
+        from agent.cli_anything.migrate import migrate_one
+
+        if source_skill_text is not None:
+            tmp_dir = target_dir / f"{cid}.tmp"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            tmp_skill = tmp_dir / "SKILL.md"
+            tmp_skill.write_text(source_skill_text, encoding="utf-8")
+            try:
+                _, ok = migrate_one(tmp_skill, target_dir, harness_id=cid)
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        else:
+            _, ok = migrate_one(source_skill_path, target_dir)  # type: ignore[arg-type]
+
+    if not ok:
+        return {
+            "success": False,
+            "message": f"安装 {cid} 失败（迁移 SKILL.md 或复制目录出错）",
+            "harness_id": cid,
+        }
+
+    # 4. 可选：执行 pip install（仅对非 pip 型自定义 harness 和官方 harness）
+    pip_msg = ""
+    if not (is_custom and install_cmd):  # pip 型已在步骤 3 执行过
+        if run_pip and install_cmd:
+            try:
+                proc = subprocess.run(
+                    install_cmd,
+                    shell=True,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                pip_msg = f"\n安装命令退出码: {proc.returncode}"
+                if proc.stdout:
+                    pip_msg += f"\n{proc.stdout.strip()}"
+                if proc.stderr:
+                    pip_msg += f"\n{proc.stderr.strip()}"
+                if proc.returncode != 0:
+                    return {
+                        "success": False,
+                        "message": f"迁移成功，但 install 命令执行失败{pip_msg}",
+                        "harness_id": cid,
+                    }
+            except Exception as e:
+                pip_msg = f"\n执行 install 命令异常: {e}"
 
     # 5. 刷新 registry
     discover_and_register(registry, workdir=workdir)
 
     msg = f"已安装 harness: {cid}"
-    if source_skill_text is not None:
+    if is_custom and install_cmd:
+        msg += "（pip 安装 + SKILL.md）"
+    elif is_custom:
+        msg += "（自定义市场，整目录复制）"
+    elif source_skill_text is not None:
         msg += "（从远程下载）"
-    if install_cmd and not run_pip:
+    if install_cmd and not run_pip and not (is_custom and install_cmd):
         msg += f"\n如需使用，请手动执行安装命令:\n  {install_cmd}"
     msg += pip_msg
     return {"success": True, "message": msg, "harness_id": cid}

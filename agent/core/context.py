@@ -16,7 +16,12 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from typing import TYPE_CHECKING
+
 from agent.core.message import Message
+
+if TYPE_CHECKING:
+    from agent.config.settings import Settings
 
 
 class UIProtocol(Protocol):
@@ -103,6 +108,7 @@ class ToolContext:
     ui: UIProtocol | None = None
     extra: dict[str, Any] = field(default_factory=dict)
     on_assistant_text: Callable[[str], None] | None = None
+    settings: "Settings | None" = None
 
     def clone_for_subagent(self, workdir: str | None = None) -> ToolContext:
         """子代理场景克隆上下文。messages 共享引用（子代理读父对话历史）。"""
@@ -114,4 +120,5 @@ class ToolContext:
             ui=self.ui,
             extra=dict(self.extra),
             on_assistant_text=self.on_assistant_text,
+            settings=self.settings,
         )

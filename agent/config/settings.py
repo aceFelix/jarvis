@@ -136,6 +136,24 @@ class Settings:
     enable_plugins: bool = True
     plugin_marketplace: str = ""
 
+    # CLI-Anything 自定义市场
+    # 自定义 harness 市场源（优先远程，回退本地）。
+    # market_url: GitHub raw 前缀，如 https://raw.githubusercontent.com/user/jarvis-harness-market/main
+    # market_local: 本地市场仓库路径（绝对或相对于 jarvis 项目目录）
+    harness_market_url: str = ""
+    harness_market_local: str = ""
+
+    # 邮件发送（EmailTool）
+    # 用于 Jarvis 主动向用户发送邮件提醒、摘要、附件等。
+    # smtp_password 通常填写邮箱授权码（如 163/QQ 邮箱），而非登录密码。
+    email_enabled: bool = False
+    email_smtp_host: str = "smtp.163.com"
+    email_smtp_port: int = 465
+    email_smtp_user: str = ""
+    email_smtp_password: str = ""
+    email_sender: str = ""
+    email_default_recipient: str = ""
+
     # LSP 集成（对标 Claude Code）
     # 启动时按 [lsp.servers.<name>] 配置启动语言服务器
     # .py → pylsp/pyright, .ts → typescript-language-server 等
@@ -284,6 +302,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "enable_skills",
         "enable_mcp",
         "enable_plugins", "plugin_marketplace",
+        "harness_market_url", "harness_market_local",
         "enable_lsp",
         "enable_thinking", "thinking_budget",
         "vendor_fallback",
@@ -389,6 +408,29 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in plugins_table:
                 updates[field] = plugins_table[sub_key]
+    # [cli_anything] 表 → 自定义 harness 市场字段
+    cli_anything_table = data.get("cli_anything", {})
+    if isinstance(cli_anything_table, dict):
+        for sub_key, field in (
+            ("market_url", "harness_market_url"),
+            ("market_local", "harness_market_local"),
+        ):
+            if sub_key in cli_anything_table:
+                updates[field] = cli_anything_table[sub_key]
+    # [email] 表 → 邮件发送字段
+    email_table = data.get("email", {})
+    if isinstance(email_table, dict):
+        for sub_key, field in (
+            ("enabled", "email_enabled"),
+            ("smtp_host", "email_smtp_host"),
+            ("smtp_port", "email_smtp_port"),
+            ("smtp_user", "email_smtp_user"),
+            ("smtp_password", "email_smtp_password"),
+            ("sender", "email_sender"),
+            ("default_recipient", "email_default_recipient"),
+        ):
+            if sub_key in email_table:
+                updates[field] = email_table[sub_key]
     # [lsp] 表 → LSP 集成字段
     lsp_table = data.get("lsp", {})
     if isinstance(lsp_table, dict):

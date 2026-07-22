@@ -543,6 +543,7 @@ def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> 
         messages=messages,
         permission_mode=settings.permission_mode.value,
         ui=ui,
+        settings=settings,
     )
 
 
@@ -1014,7 +1015,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 _cli_anything_list(ui, workdir=settings.workdir)
                 continue
             if cmd == "/cli_anything market":
-                _cli_anything_market(ui)
+                _cli_anything_market(ui, settings)
                 continue
             if cmd.startswith("/cli_anything install "):
                 _cli_anything_install(ui, settings, registry, stripped)
@@ -1717,15 +1718,20 @@ def _cli_anything_list(ui: RichCLI, workdir: str = "") -> None:
         print(text)
 
 
-def _cli_anything_market(ui: RichCLI) -> None:
+def _cli_anything_market(ui: RichCLI, settings: "Settings | None" = None) -> None:
     """/cli_anything market — 列出市场可用 harness。"""
     from agent.cli_anything import list_market
 
-    market = list_market()
+    custom_url = getattr(settings, "harness_market_url", "") or ""
+    custom_local = getattr(settings, "harness_market_local", "") or ""
+    market = list_market(custom_market_url=custom_url, custom_market_local=custom_local)
     if not market:
-        ui.warn("无法读取市场列表，请确保 CLI-Anything 仓库在同级目录")
+        ui.warn("无法读取市场列表，请确保 CLI-Anything 仓库在同级目录或配置了自定义市场")
         return
-    lines = [f"  - {h['id']}: {h['name']} [{h['installed']}] — {h['description']}" for h in market]
+    lines = [
+        f"  - {h['id']}: {h['name']} [{h['installed']}] [{h.get('source', '官方')}] — {h['description']}"
+        for h in market
+    ]
     text = "[bold]市场可用 harness:[/bold]\n" + "\n".join(lines)
     if ui._console:
         ui._console.print(text)
@@ -1747,7 +1753,12 @@ def _cli_anything_install(
         ui.warn("用法: /cli_anything install <harness-id>")
         return
     harness_id = parts[2].strip()
-    result = install_harness(harness_id, registry, workdir=settings.workdir or None)
+    result = install_harness(
+        harness_id, registry,
+        workdir=settings.workdir or None,
+        custom_market_url=getattr(settings, "harness_market_url", "") or "",
+        custom_market_local=getattr(settings, "harness_market_local", "") or "",
+    )
     if result["success"]:
         ui.info(result["message"])
     else:

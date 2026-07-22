@@ -192,6 +192,7 @@ def build_default_registry() -> ToolRegistry:
     from agent.tools.file_ops.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
     from agent.tools.location import LocationTool
+    from agent.tools.extensions.email_tool import SendEmailTool
     from agent.tools.extensions.marketplace_tool import MarketSearchTool
     from agent.tools.web.web import WebFetchTool, WebSearchTool
 
@@ -208,6 +209,7 @@ def build_default_registry() -> ToolRegistry:
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
+    registry.register(SendEmailTool())
 
     # 阶段二: GUI 工具（可选，依赖 pyautogui/pygetwindow，缺失则跳过）
     _register_gui_tools(registry)

@@ -647,7 +647,7 @@ Jarvis 支持插件扩展，通过命令行管理：
 
 ## CLI-Anything 外部软件控制
 
-Jarvis 内置 **CLI-Anything harness** 机制，可以把任意第三方软件（如 Blender、Obsidian、GIMP、Godot 等）包装成 Agent 可调用的工具。
+Jarvis 内置 **CLI-Anything harness** 机制，可以把任意第三方软件（如 Blender、Obsidian、GIMP、Godot、WPS 等）包装成 Agent 可调用的工具。
 
 ### 安装 harness
 
@@ -663,9 +663,8 @@ Jarvis 内置 **CLI-Anything harness** 机制，可以把任意第三方软件�
 ├── blender/
 │   ├── SKILL.md
 │   └── run.py
-└── obsidian/
-    ├── SKILL.md
-    └── run.py
+└── wps/
+    └── SKILL.md       # pip 型 harness 只需 SKILL.md（全局命令已安装）
 ```
 
 ### SKILL.md 示例
@@ -695,16 +694,37 @@ examples:
 
 ### 市场命令
 
-Jarvis 会自动从 CLI-Anything 官方 GitHub 仓库拉取市场列表，无需手动 clone 仓库：
+Jarvis 支持 **官方市场**（CLI-Anything GitHub 仓库）和 **自定义市场**（如 jarvis-harness-market）两个来源：
 
 ```text
-/cli_anything market              # 查看官方市场可用 harness
+/cli_anything market              # 查看市场可用 harness（官方 + 自定义）
 /cli_anything install blender     # 从官方仓库安装 Blender harness
+/cli_anything install wps         # 从自定义市场安装 WPS harness（自动 pip install）
 /cli_anything uninstall blender   # 卸载已安装 harness
 /cli_anything list                # 列出本地已安装 harness
 ```
 
 网络不可用时，命令会自动回退到本地 `../CLI-Anything-main` 仓库（如果存在）。
+
+### 自定义 Harness 市场
+
+通过配置 `market_url` / `market_local` 接入自定义市场（如 [jarvis-harness-market](https://github.com/aceFelix/jarvis-harness-market)）：
+
+```toml
+# ~/.jarvis/settings.toml
+[cli_anything]
+market_url = "https://raw.githubusercontent.com/aceFelix/jarvis-harness-market/main"
+market_local = "path/to/jarvis-harness-market"   # 本地回退路径
+```
+
+自定义市场的 harness 支持两种安装模式：
+
+| 模式 | 说明 | 安装行为 |
+|------|------|----------|
+| **pip 型**（推荐） | harness 是标准 Python 包，有 `setup.py` + `install_cmd` | 自动 `pip install` + 迁移 SKILL.md |
+| **目录型** | harness 是自包含目录，无 `install_cmd` | 整目录复制到 `~/.jarvis/cli_anything/<id>/` |
+
+pip 型 harness 安装后提供全局命令（如 `jarvis-harness-wps`），与官方 CLI-Anything harness 行为一致。
 
 ### 使用
 
@@ -721,6 +741,38 @@ Jarvis 会调用 `cli_anything__blender`，并在执行前询问你确认（默�
 - 所有 harness 工具默认 **ASK** 权限，执行前需要确认。
 - 不通过 shell 执行，避免命令注入。
 - 支持超时和强制终止（默认 120 秒）。
+
+---
+
+## 邮件发送
+
+Jarvis 可以通过 `SendEmail` 工具主动给用户发邮件，适用于提醒、摘要、报告转发等场景。
+
+### 配置
+
+在 `~/.jarvis/settings.toml` 中添加 `[email]` 表：
+
+```toml
+[email]
+enabled = true
+smtp_host = "smtp.163.com"
+smtp_port = 465
+smtp_user = "your_163_email@163.com"
+smtp_password = "your_authorization_code"   # 163 邮箱授权码，不是登录密码
+sender = "your_163_email@163.com"
+default_recipient = "13985465782@136.com"   # 用户未指定收件人时的默认地址
+```
+
+### 使用
+
+直接用自然语言告诉 Jarvis：
+
+```text
+> 发邮件提醒我今晚8点开会
+> 把这份总结发到我的邮箱，主题是今日工作摘要
+```
+
+Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件人、抄送、密送和本地附件。
 
 ---
 
