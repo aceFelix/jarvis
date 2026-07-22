@@ -23,6 +23,7 @@ class HarnessArg:
         required: 是否必填。
         enum: 可选的枚举值列表。
         default: 默认值。
+        positional: 为 True 时只传值不加 --name 前缀（用于 CLI 的位置参数，如 subcommand）。
     """
 
     name: str
@@ -31,6 +32,7 @@ class HarnessArg:
     required: bool = False
     enum: list[str] | None = None
     default: Any | None = None
+    positional: bool = False
 
 
 @dataclass

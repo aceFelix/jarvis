@@ -144,6 +144,7 @@ def parse_skill_md(path: Path) -> Harness:
                 required=bool(raw.get("required", False)),
                 enum=raw.get("enum"),
                 default=raw.get("default"),
+                positional=bool(raw.get("positional", False)),
             )
         )
 

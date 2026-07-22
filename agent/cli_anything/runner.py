@@ -28,8 +28,10 @@ _DEFAULT_TIMEOUT = 120.0
 
 # 允许作为 command 的白名单前缀（降低命令注入风险）
 # cli-anything-* 是由 CLI-Anything 生态安装的 harness 入口
+# jarvis-harness-* 是由 Jarvis 自定义市场安装的 harness 入口
 _ALLOWED_COMMAND_PREFIXES = (
-    "python", "node", "python3", "node.exe", "npm", "npx", "cli-anything-"
+    "python", "node", "python3", "node.exe", "npm", "npx",
+    "cli-anything-", "jarvis-harness-"
 )
 
 # 解释器类命令，如果只写了解释器，会自动拼接 harness 目录下的默认脚本
@@ -88,7 +90,14 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
         if isinstance(value, list):
             value = ",".join(str(v) for v in value)
 
-        result.append(f"--{arg.name}")
+        # 位置参数：只传值，不加 --name 前缀
+        if arg.positional:
+            result.append(str(value))
+            continue
+
+        # CLI 惯例：flag 用连字符，arg 名用下划线。如 output_path → --output-path
+        flag_name = arg.name.replace("_", "-")
+        result.append(f"--{flag_name}")
         result.append(str(value))
 
     # 拒绝未定义的参数（防止误传）
@@ -135,8 +144,8 @@ async def run_harness(
         if default_script.exists():
             cmd.append(str(default_script))
 
-    cmd.extend(harness_args)
-
+    # --harness-dir / --workdir 放在 harness_args 前面：
+    # harness CLI（如 jarvis-harness-wps）的 argparse 期望可选参数在子命令之前。
     if harness.dir_path is not None:
         cmd.append("--harness-dir")
         cmd.append(str(harness.dir_path))
@@ -144,6 +153,8 @@ async def run_harness(
     if workdir:
         cmd.append("--workdir")
         cmd.append(workdir)
+
+    cmd.extend(harness_args)
 
     logger.debug("执行 harness 命令: %s", " ".join(cmd))
 

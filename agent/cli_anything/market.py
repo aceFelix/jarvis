@@ -2,11 +2,11 @@
 
 提供已安装 harness 列表、市场可用列表、安装/卸载能力。
 
-支持多市场源：
-1. jarvis市场（jarvis官方的 GitHub 仓库，最优先）
-2. CLI-Anything 官方 GitHub 仓库
-3. 本地缓存
-4. 本地仓库目录（回退）
+支持多市场源（获取顺序）：
+1. jarvis自定义市场远程仓库
+2. CLI-Anything官方市场远程仓库
+3. jarvis自定义市场本地仓库
+4. CLI-Anything官方本地仓库
 
 同 id 的 harness，jarvis市场覆盖CLI-Anything官方。
 
@@ -158,10 +158,9 @@ def _load_registry(
 
     加载顺序（同 id 自定义覆盖官方）：
     1. jarvis自定义市场远程 registry.json
-    2. 官方 CLI-Anything 远程 registry.json
-    3. 本地缓存
-    4. 自定义市场本地 registry.json
-    5. 官方本地 CLI-Anything-main/registry.json
+    2. CLI-Anything官方远程 registry.json
+    3. jarvis自定义市场本地 registry.json
+    4. CLI-Anything官方本地 registry.json（含缓存）
 
     Args:
         path: 可选的本地 registry.json 路径。
@@ -174,28 +173,7 @@ def _load_registry(
     official_registry: dict[str, Any] = {}
     custom_registry: dict[str, Any] = {}
 
-    # --- 官方市场 ---
-    remote_official = _fetch_remote_registry()
-    if remote_official:
-        official_registry = remote_official
-    else:
-        # 回退缓存
-        cache = _cache_path(_REGISTRY_CACHE_FILE)
-        if _is_cache_valid(cache):
-            try:
-                official_registry = json.loads(cache.read_text(encoding="utf-8")) or {}
-            except Exception as e:
-                logger.warning("读取缓存 registry.json 失败: %s", e)
-        if not official_registry:
-            # 回退本地仓库
-            local_path = path or _market_repo() / "registry.json"
-            if local_path.is_file():
-                try:
-                    official_registry = json.loads(local_path.read_text(encoding="utf-8")) or {}
-                except Exception as e:
-                    logger.warning("读取本地 registry.json 失败: %s", e)
-
-    # --- jarvis自定义市场 ---
+    # --- ① jarvis自定义市场远程 ---
     if custom_market_url:
         remote_custom = _fetch_remote_registry(
             base_url=custom_market_url,
@@ -204,6 +182,12 @@ def _load_registry(
         if remote_custom:
             custom_registry = remote_custom
 
+    # --- ② CLI-Anything官方远程 ---
+    remote_official = _fetch_remote_registry()
+    if remote_official:
+        official_registry = remote_official
+
+    # --- ③ jarvis自定义市场本地 ---
     if not custom_registry and custom_market_local:
         custom_local = _custom_market_local_path(custom_market_local)
         if custom_local:
@@ -213,6 +197,22 @@ def _load_registry(
                     custom_registry = json.loads(custom_reg_file.read_text(encoding="utf-8")) or {}
                 except Exception as e:
                     logger.warning("读取jarvis自定义市场本地 registry.json 失败: %s", e)
+
+    # --- ④ CLI-Anything官方本地（含缓存） ---
+    if not official_registry:
+        cache = _cache_path(_REGISTRY_CACHE_FILE)
+        if _is_cache_valid(cache):
+            try:
+                official_registry = json.loads(cache.read_text(encoding="utf-8")) or {}
+            except Exception as e:
+                logger.warning("读取缓存 registry.json 失败: %s", e)
+        if not official_registry:
+            local_path = path or _market_repo() / "registry.json"
+            if local_path.is_file():
+                try:
+                    official_registry = json.loads(local_path.read_text(encoding="utf-8")) or {}
+                except Exception as e:
+                    logger.warning("读取本地 registry.json 失败: %s", e)
 
     # --- 合并（自定义覆盖官方） ---
     if not custom_registry:
@@ -443,18 +443,19 @@ def install_harness(
     target_dir = _DEFAULT_USER_HARNESS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 尝试远程下载 SKILL.md（自定义市场优先）
+    # 1. 尝试远程下载 SKILL.md
+    #    顺序：jarvis自定义市场远程 → CLI-Anything官方远程 → 自定义本地 → 官方本地
     source_skill_text: str | None = None
     source_skill_path: Path | None = None
 
     if skill_md_relative:
-        # 自定义市场远程
-        if is_custom and custom_market_url:
+        # ① jarvis自定义市场远程
+        if custom_market_url:
             source_skill_text = _fetch_remote_skill_md(skill_md_relative, base_url=custom_market_url)
             if source_skill_text:
                 logger.info("已从jarvis自定义市场远程下载 harness SKILL.md: %s", cid)
 
-        # 官方远程
+        # ② CLI-Anything官方远程
         if source_skill_text is None:
             source_skill_text = _fetch_remote_skill_md(skill_md_relative)
             if source_skill_text:
@@ -462,7 +463,7 @@ def install_harness(
 
     # 2. 远程失败则回退本地
     if source_skill_text is None:
-        # 自定义市场本地
+        # ③ jarvis自定义市场本地
         if custom_market_local:
             custom_local = _custom_market_local_path(custom_market_local)
             if custom_local and skill_md_relative:
@@ -470,7 +471,7 @@ def install_harness(
                 if local_skill.is_file():
                     source_skill_path = local_skill
 
-        # 官方本地
+        # ④ CLI-Anything官方本地
         if source_skill_path is None:
             market = _market_repo()
             source_dir = market / "skills" / f"cli-anything-{cid}"
