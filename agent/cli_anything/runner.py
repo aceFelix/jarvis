@@ -63,6 +63,7 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
     - 参数名转换为 ``--<name>`` 形式。
     - 布尔值 true 时只传标志（如 ``--force``），false 时忽略。
     - 列表用逗号分隔（后续可扩展为多次传入同一参数）。
+    - 字符串参数中的 Git Bash 路径（/e/...）自动转为 Windows 路径（E:\\...）。
     """
     result: list[str] = []
     provided = set()
@@ -83,12 +84,17 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
         # 布尔值特殊处理：true 传标志，false 不传
         if arg.type == "boolean":
             if value:
-                result.append(f"--{arg.name}")
+                flag = arg.name.replace("_", "-")
+                result.append(f"--{flag}")
             continue
 
         # 列表值用逗号连接
         if isinstance(value, list):
             value = ",".join(str(v) for v in value)
+
+        # 字符串值：自动转换 Git Bash 路径 → Windows 路径
+        if isinstance(value, str):
+            value = _normalize_path(value)
 
         # 位置参数：只传值，不加 --name 前缀
         if arg.positional:
@@ -100,12 +106,29 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
         result.append(f"--{flag_name}")
         result.append(str(value))
 
-    # 拒绝未定义的参数（防止误传）
+    # 未知参数不报错，仅记录日志——LLM 可能多传参数，不应导致执行失败
     unknown = set(kwargs.keys()) - provided - {"harness_dir", "workdir"}
     if unknown:
-        raise ValueError(f"未知参数: {sorted(unknown)}")
+        import logging
+        logging.getLogger(__name__).warning("忽略未知参数: %s", sorted(unknown))
 
     return result
+
+
+def _normalize_path(value: str) -> str:
+    """把 Git Bash 路径（/e/...）转为 Windows 路径（E:\\...）。
+
+    harness CLI 是 Windows 子进程，不认 Git Bash 路径。
+    LLM 在 system prompt 里被教用 /e/... 格式，传给 harness 时需要转换。
+    """
+    import re
+    # 匹配 /e/... /c/Users/... 等 Git Bash 路径
+    m = re.match(r'^/([a-zA-Z])/(.*)$', value)
+    if m:
+        drive = m.group(1).upper()
+        rest = m.group(2)
+        return f"{drive}:\\{rest.replace('/', '\\')}"
+    return value
 
 
 async def run_harness(

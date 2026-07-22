@@ -196,6 +196,11 @@ API Key 识别优先级：`DASHSCOPE_API_KEY` > `ANTHROPIC_API_KEY` > `OPENAI_AP
 - `Shift+Enter` 换行（Windows 终端自动转换）
 - `Ctrl+C` 中断当前回答
 
+> **桌面快捷方式**：安装后不会自动创建。如需桌面图标，运行：
+> ```bash
+> python -m agent.daemon.autostart desktop
+> ```
+
 ![Jarvis REPL](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=A+futuristic+terminal+interface+with+a+glowing+blue+JARVIS+logo,+showing+AI+assistant+conversation+with+syntax-highlighted+tool+calls+and+responses,+dark+theme,+cyberpunk+aesthetic&image_size=landscape_16_9)
 
 ---

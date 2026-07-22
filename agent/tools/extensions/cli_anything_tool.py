@@ -170,6 +170,18 @@ class CliAnythingTool(Tool):
         parts = [harness.description]
         if harness.when_to_use:
             parts.append(f"适用场景: {harness.when_to_use}")
+
+        # 显式列出参数，防止 LLM 猜错参数名
+        if harness.args:
+            arg_lines = []
+            for a in harness.args:
+                req = "必填" if a.required else "可选"
+                enum = f", 可选值: {a.enum}" if a.enum else ""
+                default = f", 默认: {a.default}" if a.default is not None else ""
+                pos = " (位置参数)" if a.positional else ""
+                arg_lines.append(f"  - {a.name} ({req}, {a.type}{pos}{enum}{default}): {a.description}")
+            parts.append("参数:\n" + "\n".join(arg_lines))
+
         if harness.examples:
             parts.append("示例: " + "; ".join(harness.examples))
         return "\n".join(parts)

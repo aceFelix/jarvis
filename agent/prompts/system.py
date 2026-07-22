@@ -116,6 +116,22 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
   ✅ `powershell -Command "npm install 2>&1"`
   ❌ `powershell -Command "$output = npm install 2>&1; Write-Output $output"`
 
+  **PowerShell 变量防吞**：
+  PowerShell 命令里的 `$` 变量会被 bash 当作 bash 变量展开。必须用单引号包裹整个 PowerShell 命令：
+  ✅ `powershell -Command '$sh = New-Object -ComObject WScript.Shell; $sh.CreateShortcut("...").TargetPath'`
+  ❌ `powershell -Command "$sh = New-Object ..."`  ← `$sh` 被 bash 吞掉变成空字符串
+
+  **截图纪律**：
+  - 不要在任务开始时"先看看屏幕"——直接用工具完成任务
+  - 只在需要视觉验证操作结果时才截图（如：点击按钮后确认弹窗、打开应用后确认窗口）
+  - 连续操作中间不需要反复截图
+
+  **CLI-Anything harness 路径**：
+  harness 工具的 `target`/`output_path` 等参数是 Windows 路径，不要用 Git Bash 格式（`/e/...`）。
+  runner 会自动转换，但最好直接传 Windows 格式：
+  ✅ `E:\\2.MyProjects\\...`
+  ❌ `/e/2.MyProjects/...`
+
 # MCP 外部服务工具
 
 你的工具列表中有 `mcp__` 前缀的工具，它们连接外部专业服务。**遇到以下场景必须优先使用 MCP 工具，而非浏览器搜索或自己猜测**：
