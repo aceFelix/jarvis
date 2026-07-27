@@ -1333,13 +1333,6 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 | [阿里云百炼平台](https://bailian.console.aliyun.com) | 实时语音对话 API（通义千问）服务端 |
 
 ---
-
-<div align="center">
-
-**「J.A.R.V.I.S. — 随时为您效劳，先生。」**
-
-</div>
-
 ---
 
 ## 联系作者
@@ -1354,6 +1347,13 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 <div align="center">
 
-**感谢您使用 J.A.R.V.I.S.**
+**感谢您使用 J.A.R.V.I.S.！**
 
 </div>
+
+<div align="center">
+
+**「J.A.R.V.I.S. — 随时为您效劳，先生。」**
+
+</div>
+
