@@ -1335,15 +1335,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 ---
 ---
 
-## 联系作者
-
-<div>
-
-| WeChat | X (Twitter) |
-|:---:|:---:|
-| <img src="assets/wechat-qr.png" alt="WeChat" width="50"/> | <img src="assets/x-qr.png" alt="X" width="50"/> |
-
-</div>
+## 感谢支持
 
 
 <div align="center">
@@ -1354,7 +1346,16 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 <div align="center">
 
-**「J.A.R.V.I.S. — 随时为您效劳，先生。」**
+**「J.A.R.V.I.S. ——— 随时为您效劳，先生。」**
+
+</div>
+
+
+<div>
+
+| WeChat | X (Twitter) |
+|:---:|:---:|
+| <img src="assets/wechat-qr.png" alt="WeChat" width="70"/> | <img src="assets/x-qr.png" alt="X" width="70"/> |
 
 </div>
 
