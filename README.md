@@ -1344,7 +1344,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 ## 联系作者
 
-<div align="center">
+<div>
 
 | WeChat | X (Twitter) |
 |:---:|:---:|
