@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" width="1000" height="320" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <!-- 背景径向渐变 -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="60%" stop-color="#050a12"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+
+    <!-- 核心辉光 -->
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="40%" stop-color="#00d4ff" stop-opacity="0.6"/>
+      <stop offset="80%" stop-color="#0077ff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#0077ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 环形辉光滤镜 -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="strongGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- 粒子光点 -->
+    <circle id="particle" r="2" fill="#80e8ff">
+      <animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" begin="0s"/>
+    </circle>
+  </defs>
+
+  <!-- 深色背景 -->
+  <rect width="100%" height="100%" fill="url(#bgGrad)"/>
+
+  <!-- 反应堆中心坐标：500, 160 -->
+  <g transform="translate(500, 160)">
+    <!-- 外圈粒子轨道 1 -->
+    <g>
+      <circle r="120" fill="none" stroke="#004466" stroke-width="1" stroke-opacity="0.25"/>
+      <circle r="120" fill="none" stroke="#00d4ff" stroke-width="2" stroke-dasharray="40 715" stroke-linecap="round" filter="url(#glow)">
+        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="12s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- 外圈粒子轨道 2 -->
+    <g>
+      <circle r="95" fill="none" stroke="#006699" stroke-width="1" stroke-opacity="0.3"/>
+      <circle r="95" fill="none" stroke="#66e0ff" stroke-width="2" stroke-dasharray="25 571" stroke-linecap="round" filter="url(#glow)">
+        <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="8s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- 反应堆核心外环 -->
+    <circle r="70" fill="none" stroke="#0088cc" stroke-width="3" stroke-opacity="0.6" filter="url(#glow)">
+      <animate attributeName="stroke-opacity" values="0.6;0.9;0.6" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="60" fill="none" stroke="#00bbee" stroke-width="5" stroke-opacity="0.8" filter="url(#glow)">
+      <animate attributeName="r" values="60;62;60" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="50" fill="none" stroke="#00d4ff" stroke-width="3" stroke-opacity="0.9" filter="url(#glow)"/>
+
+    <!-- 粒子点：沿轨道运动 -->
+    <g>
+      <circle r="3" fill="#ffffff" filter="url(#glow)">
+        <animateMotion path="M 0 -120 A 120 120 0 1 1 0 120 A 120 120 0 1 1 0 -120" dur="6s" repeatCount="indefinite" rotate="auto"/>
+      </circle>
+      <circle r="2.5" fill="#80e8ff" filter="url(#glow)">
+        <animateMotion path="M 0 95 A 95 95 0 1 0 0 -95 A 95 95 0 1 0 0 95" dur="4s" repeatCount="indefinite" rotate="auto"/>
+      </circle>
+      <circle r="2" fill="#ffffff" filter="url(#glow)">
+        <animateMotion path="M -70 0 A 70 70 0 1 1 70 0 A 70 70 0 1 1 -70 0" dur="3s" repeatCount="indefinite" rotate="auto"/>
+      </circle>
+    </g>
+
+    <!-- 核心发光 -->
+    <circle r="45" fill="url(#coreGlow)" filter="url(#strongGlow)">
+      <animate attributeName="r" values="45;48;45" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="35" fill="#00d4ff" fill-opacity="0.8" filter="url(#strongGlow)">
+      <animate attributeName="fill-opacity" values="0.7;0.95;0.7" dur="1.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="20" fill="#ffffff" fill-opacity="0.9" filter="url(#strongGlow)">
+      <animate attributeName="fill-opacity" values="0.85;1;0.85" dur="1s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- 标题文字 -->
+  <text x="50%" y="260" text-anchor="middle" font-family="Consolas, 'Courier New', monospace" font-size="72" font-weight="bold" fill="#e6f7ff" letter-spacing="8" filter="url(#strongGlow)">
+    J.A.R.V.I.S
+    <animate attributeName="fill-opacity" values="0.85;1;0.85" dur="3s" repeatCount="indefinite"/>
+  </text>
+  <text x="50%" y="290" text-anchor="middle" font-family="Consolas, 'Courier New', monospace" font-size="16" fill="#66d9ff" letter-spacing="3" opacity="0.85">
+    JUST A RATHER VERY INTELLIGENT SYSTEM
+  </text>
+
+  <!-- 装饰性粒子 -->
+  <g>
+    <circle cx="150" cy="80" r="1.5" fill="#00d4ff" opacity="0.7">
+      <animate attributeName="cy" values="80;60;80" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.7;0.2;0.7" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="850" cy="120" r="1.5" fill="#00d4ff" opacity="0.7">
+      <animate attributeName="cy" values="120;100;120" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.7;0.2;0.7" dur="5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="200" cy="240" r="1.5" fill="#00d4ff" opacity="0.7">
+      <animate attributeName="cx" values="200;220;200" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.7;0.2;0.7" dur="6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="800" cy="230" r="1.5" fill="#00d4ff" opacity="0.7">
+      <animate attributeName="cx" values="800;780;800" dur="5.5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.7;0.2;0.7" dur="5.5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
