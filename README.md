@@ -23,7 +23,7 @@
 >
 > 「随时为您效劳，先生。」
 
-一个为个人电脑打造的 AI Agent —— 致敬《钢铁侠》里的贾维斯，与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
+一个为个人电脑打造的 AI Agent —— 致敬《钢铁侠》里的贾维斯。与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
 
 ---
 
@@ -1113,7 +1113,7 @@ Jarvis 支持 **CLI-Anything官方市场**（CLI-Anything GitHub 仓库）和 **
 
 网络不可用时，命令会自动回退到本地 `../CLI-Anything-main` 仓库（如果存在）。
 
-### 自定义 Harness 市场
+### jarvis自定义 Harness 市场
 
 通过配置 `market_url` / `market_local` 接入自定义市场（如 [jarvis-harness-market](https://github.com/aceFelix/jarvis-harness-market)）：
 
@@ -1352,10 +1352,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 
 <div>
-
-| WeChat | X (Twitter) |
-|:---:|:---:|
-| <img src="assets/wechat-qr.png" alt="WeChat" width="70"/> | <img src="assets/x-qr.png" alt="X" width="70"/> |
-
+| 微信 | X (Twitter) | 抖音 |
+|:---:|:---:|:---:|
+| <img src="assets/wechat-qr.png" alt="微信" width="70"/> | <img src="assets/x-qr.png" alt="X" width="70"/> | <img src="assets/tiktok-qr.png" alt="抖音" width="70"/> |
 </div>
-
