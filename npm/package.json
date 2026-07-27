@@ -12,14 +12,14 @@
     "tool-use",
     "mcp"
   ],
-  "homepage": "https://github.com/yourname/J.A.R.V.I.S",
+  "homepage": "https://github.com/aceFelix/jarvis",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourname/J.A.R.V.I.S.git",
+    "url": "https://github.com/aceFelix/jarvis.git",
     "directory": "jarvis"
   },
   "license": "MIT",
-  "author": "yourname",
+  "author": "aceFelix",
   "bin": {
     "jarvis": "run.js"
   },

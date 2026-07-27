@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="assets/jarvis-reactor-header.svg" alt="J.A.R.V.I.S" width="100%"/>
+  <img src="assets/jarvis-reactor-header.svg" alt="J.A.R.V.I.S." width="100%"/>
 </div>
 
-# J.A.R.V.I.S
+# J.A.R.V.I.S.
 
 <div align="center">
 
@@ -14,7 +14,7 @@
 <a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
 <a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/%F0%9F%9B%A0%EF%B8%8F-Personal%20Project-9B59B6.svg" alt="Personal" /></a>
 <a href="#%E5%BC%80%E5%8F%91%E5%8F%82%E8%80%83"><img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F-Inspired%20by%20Iron%20Man-E23636.svg" alt="Iron Man" /></a>
-<a href="https://github.com/yourname/J.A.R.V.I.S"><img src="https://img.shields.io/github/stars/yourname/J.A.R.V.I.S?style=social" alt="GitHub stars" /></a>
+<a href="https://github.com/aceFelix/jarvis"><img src="https://img.shields.io/github/stars/aceFelix/jarvis?style=social" alt="GitHub stars" /></a>
 
 </div>
 
@@ -104,8 +104,8 @@ pip install jarvis-agent
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourname/J.A.R.V.I.S.git
-cd J.A.R.V.I.S/jarvis
+git clone https://github.com/aceFelix/jarvis.git
+cd jarvis
 
 # 安装核心包（开发模式）
 pip install -e .
@@ -1306,9 +1306,9 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ---
 
-## 免责声明
+## 反馈声明
 
-J.A.R.V.I.S 现阶段仍处于**开发与验证阶段**，功能尚未完全稳定。使用过程中可能会出现一些小 Bug，纯属本人疏忽未能验证完全，对此深表歉意。
+J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳定。使用过程中可能会出现一些小 Bug，纯属本人疏忽未能验证完全，对此深表歉意。
 
 如您在体验过程中遇到任何问题或体验不佳，欢迎通过以下方式反馈：
 
@@ -1320,7 +1320,7 @@ J.A.R.V.I.S 现阶段仍处于**开发与验证阶段**，功能尚未完全稳�
 
 ## 开发参考
 
-J.A.R.V.I.S 的设计与实现参考了以下优秀项目和资源：
+J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 | 项目 / 资源 | 说明 |
 |---|---|
@@ -1336,6 +1336,24 @@ J.A.R.V.I.S 的设计与实现参考了以下优秀项目和资源：
 
 <div align="center">
 
-**「J.A.R.V.I.S — 随时为您效劳，先生。」**
+**「J.A.R.V.I.S. — 随时为您效劳，先生。」**
+
+</div>
+
+---
+
+## 联系作者
+
+<div align="center">
+
+| WeChat | X (Twitter) |
+|:---:|:---:|
+| <img src="assets/wechat-qr.png" alt="WeChat" width="200"/> | <img src="assets/x-qr.png" alt="X" width="200"/> |
+
+</div>
+
+<div align="center">
+
+**感谢您使用 J.A.R.V.I.S.**
 
 </div>
