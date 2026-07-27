@@ -65,10 +65,12 @@ _LOCK_FILE = Path(".jarvis") / "voice.lock"
 _LOCK_TTL = 60  # 锁过期秒数（进程崩溃后的兜底）
 
 
-def acquire_voice_lock() -> bool:
-    """尝试获取语音独占锁。成功返回 True，失败返回 False 并返回占用者信息。
+def acquire_voice_lock() -> tuple[bool, str]:
+    """尝试获取语音独占锁。
 
-    调用方拿到 False 时应提示用户并放弃进入语音模式。
+    Returns:
+        (success, info) 元组。success=True 表示获取成功；
+        success=False 时 info 包含占用者信息或失败原因。
     """
     import signal
 
@@ -87,7 +89,7 @@ def acquire_voice_lock() -> bool:
                 # PID 存在且未过期 → 锁有效
                 now = __import__("time").time()
                 if now - ts < _LOCK_TTL:
-                    return False
+                    return False, f"PID {pid} 正在占用语音锁"
             except (ValueError, OSError):
                 # 文件损坏或 PID 不存在 → 锁已失效，覆盖
                 pass
@@ -96,9 +98,9 @@ def acquire_voice_lock() -> bool:
         pid = os.getpid()
         ts = __import__("time").time()
         lock_path.write_text(f"{pid},{ts}", encoding="utf-8")
-        return True
-    except Exception:
-        return True  # 锁文件写入失败不影响功能，放行
+        return True, ""
+    except Exception as e:
+        return True, f"锁文件异常但放行: {e}"  # 锁文件写入失败不影响功能，放行
 
 
 def release_voice_lock() -> None:

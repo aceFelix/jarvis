@@ -4,6 +4,7 @@
 - 默认 ASK（无 allow 规则时必须确认）
 - 命令分类（readonly/dangerous/unknown）由 permissions/shell_classifier.py 做
 - prepare_permission_matcher 解析命令前缀，让规则 "Bash(git *)" 能命中
+- P3-8 沙箱集成: 高风险命令自动在 Job Object 沙箱内执行
 
 v0.1 用 asyncio subprocess 执行，统一 stdout/stderr 合并输出，有超时。
 """
@@ -11,14 +12,43 @@ v0.1 用 asyncio subprocess 执行，统一 stdout/stderr 合并输出，有超�
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import platform
 from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
+from agent.core.sandbox.audit import SandboxAuditor
+from agent.core.sandbox.executor import SandboxConfig, SandboxExecutor
+from agent.core.sandbox.risk_scorer import RiskLevel, RiskScorer
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
 from agent.permissions.shell_classifier import get_command_head
+
+logger = logging.getLogger(__name__)
+
+# 模块级单例（懒初始化）
+_risk_scorer = RiskScorer()
+_sandbox_executor: SandboxExecutor | None = None
+_sandbox_auditor: SandboxAuditor | None = None
+
+
+def get_sandbox_executor(settings: Any = None) -> SandboxExecutor:
+    """获取沙箱执行器单例。"""
+    global _sandbox_executor
+    if _sandbox_executor is None:
+        config = SandboxConfig.from_settings(settings) if settings else SandboxConfig()
+        _sandbox_executor = SandboxExecutor(config)
+    return _sandbox_executor
+
+
+def get_sandbox_auditor(settings: Any = None) -> SandboxAuditor:
+    """获取沙箱审计器单例。"""
+    global _sandbox_auditor
+    if _sandbox_auditor is None:
+        enabled = getattr(settings, "sandbox_audit", True) if settings else True
+        _sandbox_auditor = SandboxAuditor(enabled=enabled)
+    return _sandbox_auditor
 
 
 class BashTool(Tool):
@@ -58,7 +88,7 @@ class BashTool(Tool):
         return self.is_read_only(args)
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
-        # 工具特判: 用分类器快速决定
+        # 工具特判: 用风险评分器 + 分类器快速决定
         from agent.permissions.shell_classifier import classify
         cmd = args.get("command", "")
         kind = classify(cmd)
@@ -66,6 +96,16 @@ class BashTool(Tool):
             return PermissionResult.deny(f"命令匹配危险模式: {cmd}")
         if kind == "readonly":
             return PermissionResult.allow("只读命令自动放行")
+
+        # P3-8 沙箱感知: 沙箱开启时，中等风险命令可自动放行
+        risk = _risk_scorer.score_command(cmd)
+        settings = ctx.settings
+        sandbox_enabled = getattr(settings, "sandbox_enabled", False) if settings else False
+        auto_allow_medium = getattr(settings, "sandbox_auto_allow_medium", True) if settings else True
+
+        if sandbox_enabled and auto_allow_medium and risk == RiskLevel.MEDIUM:
+            return PermissionResult.allow(f"沙箱已开启，中等风险命令自动放行（在沙箱内执行）")
+
         # unknown 一律 ASK（fail-closed）
         return PermissionResult.ask(f"需要确认命令: {cmd}")
 
@@ -91,8 +131,73 @@ class BashTool(Tool):
         # 工作目录：优先用 args["cwd"]，其次 ctx.workdir
         work_dir = args.get("cwd", "") or ctx.workdir
 
-        # Windows 上用 Git Bash（bash -c），而非 cmd /c
-        # Git Bash 支持 Unix 风格路径（/e/...）、管道、heredoc 等
+        # P3-8: 沙箱执行路径
+        settings = ctx.settings
+        sandbox_enabled = getattr(settings, "sandbox_enabled", False) if settings else False
+        risk = _risk_scorer.score_command(command)
+
+        if sandbox_enabled and risk.needs_sandbox:
+            return await self._call_sandboxed(command, work_dir, timeout, risk, ctx)
+
+        # 普通执行路径
+        return await self._call_normal(command, work_dir, timeout)
+
+    async def _call_sandboxed(
+        self, command: str, work_dir: str, timeout: int, risk: RiskLevel, ctx: ToolContext
+    ) -> ToolResult:
+        """在沙箱中执行命令。"""
+        executor = get_sandbox_executor(ctx.settings)
+        auditor = get_sandbox_auditor(ctx.settings)
+
+        # 高风险操作先做文件快照
+        snapshot_id = ""
+        if risk.needs_snapshot:
+            from agent.core.sandbox.file_guard import FileGuard
+            guard = FileGuard(
+                max_snapshots=getattr(ctx.settings, "sandbox_max_snapshots", 20) if ctx.settings else 20
+            )
+            snapshot_id = guard.snapshot(work_dir, reason=f"沙箱执行: {command[:60]}")
+            auditor.log_snapshot(snapshot_id, [work_dir], reason=command[:60])
+
+        result = await executor.run(command, cwd=work_dir, timeout=timeout)
+
+        # 审计记录
+        auditor.log_execution(
+            command=command,
+            risk_level=risk.name,
+            sandboxed=result.sandboxed,
+            exit_code=result.exit_code,
+            timed_out=result.timed_out,
+            resource_exceeded=result.resource_exceeded,
+            cwd=work_dir,
+        )
+
+        if result.error:
+            return ToolResult.error(f"[沙箱] {result.error}")
+
+        if result.timed_out:
+            return ToolResult.error(f"[沙箱] 命令超时（{timeout}秒）: {command[:80]}")
+
+        # 组装输出
+        parts = []
+        if result.stdout:
+            parts.append(result.stdout.rstrip())
+        if result.stderr:
+            parts.append(f"[stderr]\n{result.stderr.rstrip()}")
+        body = "\n\n".join(parts) if parts else "(无输出)"
+
+        sandbox_tag = "🛡️沙箱" if result.sandboxed else "普通"
+        header = f"[exit={result.exit_code} | {sandbox_tag} | 风险={risk.label} | cwd={work_dir}]\n"
+
+        if result.resource_exceeded:
+            header += "⚠️ 资源超限（内存/进程数），进程已被终止\n"
+
+        if result.exit_code != 0:
+            return ToolResult(data=header + body, is_error=True)
+        return ToolResult.ok(data=header + body)
+
+    async def _call_normal(self, command: str, work_dir: str, timeout: int) -> ToolResult:
+        """普通执行（无沙箱）。"""
         is_win = platform.system() == "Windows"
         if is_win:
             # 查找 Git Bash（优先用 PATH 里的 bash）

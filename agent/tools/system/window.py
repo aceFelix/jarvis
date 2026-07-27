@@ -247,6 +247,196 @@ class WindowCloseTool(Tool):
         return None
 
 
+class WindowRectTool(Tool):
+    """获取窗口矩形区域工具 —— 返回窗口的屏幕绝对坐标与尺寸。
+
+    P1 升级新增：为多窗口协调和窗口相对坐标点击提供基础数据。
+
+    @author aceFelix
+    """
+
+    name = "WindowRect"
+    description = (
+        "获取指定窗口的屏幕绝对坐标和尺寸（left, top, width, height）。"
+        "用于把窗口内相对坐标转换为屏幕绝对坐标。只读，自动放行。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "窗口标题（模糊匹配）"},
+            "exact": {"type": "boolean", "description": "是否精确匹配标题（默认 false 模糊）"},
+        },
+        "required": ["title"],
+    }
+    max_result_chars = 1_000
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.allow("只读操作")
+
+    def validate_input(self, args: dict[str, Any], ctx: ToolContext) -> ValidationResult:
+        if not args.get("title", "").strip():
+            return ValidationResult.fail("title 不能为空")
+        return ValidationResult.pass_()
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        try:
+            gw = _import_pygetwindow()
+        except ImportError as e:
+            return ToolResult.error(f"pygetwindow 未安装: {e}")
+
+        title = args["title"]
+        exact = bool(args.get("exact", False))
+
+        matches = _find_windows(gw, title, exact)
+        if not matches:
+            return ToolResult.error(f"没找到标题匹配 {title!r} 的窗口")
+
+        w = matches[0]
+        try:
+            rect = {
+                "left": int(w.left),
+                "top": int(w.top),
+                "width": int(w.width),
+                "height": int(w.height),
+                "right": int(w.right),
+                "bottom": int(w.bottom),
+                "title": w.title,
+            }
+        except Exception as e:
+            return ToolResult.error(f"获取窗口信息失败: {type(e).__name__}: {e}")
+
+        extra = f"（共匹配 {len(matches)} 个，返回第一个）" if len(matches) > 1 else ""
+        return ToolResult.ok(
+            f"窗口 {w.title!r} 矩形信息: {rect}{extra}"
+        )
+
+    def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
+        return f"获取窗口 {args.get('title')!r} 区域" if args else None
+
+
+class WindowClickTool(Tool):
+    """窗口内点击工具 —— 基于窗口相对坐标点击。
+
+    P1 升级新增：解决窗口移动后绝对坐标失效的问题。
+    先获取窗口绝对坐标，再把相对坐标转换为屏幕坐标后点击。
+
+    @author aceFelix
+    """
+
+    name = "WindowClick"
+    description = (
+        "在指定窗口内部按相对坐标点击。窗口标题模糊匹配，"
+        "x/y 是相对于窗口左上角的坐标。窗口移动后仍可正确点击。"
+        "默认会询问用户确认。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "窗口标题（模糊匹配）"},
+            "x": {"type": "integer", "description": "窗口内相对 x 坐标", "minimum": 0},
+            "y": {"type": "integer", "description": "窗口内相对 y 坐标", "minimum": 0},
+            "exact": {"type": "boolean", "description": "是否精确匹配标题（默认 false）"},
+            "button": {
+                "type": "string",
+                "enum": ["left", "right", "middle"],
+                "description": "鼠标按键，默认 left",
+            },
+            "clicks": {
+                "type": "integer",
+                "description": "点击次数，1=单击 2=双击",
+                "minimum": 1,
+                "maximum": 3,
+            },
+            "move_duration": {
+                "type": "number",
+                "description": "光标移动到目标的耗时秒数（默认 0.0 瞬移）",
+                "minimum": 0.0,
+                "maximum": 5.0,
+            },
+        },
+        "required": ["title", "x", "y"],
+    }
+    max_result_chars = 1_000
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        return False
+
+    def is_destructive(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.ask(
+            f"在窗口 {args.get('title')!r} 内点击 ({args.get('x')},{args.get('y')})"
+        )
+
+    def validate_input(self, args: dict[str, Any], ctx: ToolContext) -> ValidationResult:
+        if not args.get("title", "").strip():
+            return ValidationResult.fail("title 不能为空")
+        for key in ("x", "y"):
+            val = args.get(key)
+            try:
+                int(val)
+            except (TypeError, ValueError):
+                return ValidationResult.fail(f"{key} 必须是整数: {val!r}")
+        btn = args.get("button", "left")
+        if btn not in ("left", "right", "middle"):
+            return ValidationResult.fail(f"button 非法: {btn}")
+        return ValidationResult.pass_()
+
+    def prepare_permission_matcher(self, args: dict[str, Any]) -> PermissionMatcher | None:
+        return PermissionMatcher(
+            tool_name="WindowClick",
+            targets=[args.get("title", ""), f"{args.get('x')},{args.get('y')}"],
+        )
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        try:
+            gw = _import_pygetwindow()
+            import pyautogui  # type: ignore[import-untyped]
+        except ImportError as e:
+            return ToolResult.error(f"依赖未安装: {e}")
+
+        title = args["title"]
+        exact = bool(args.get("exact", False))
+        rel_x = int(args["x"])
+        rel_y = int(args["y"])
+        button = args.get("button", "left")
+        clicks = int(args.get("clicks", 1))
+        duration = float(args.get("move_duration", 0.0))
+
+        matches = _find_windows(gw, title, exact)
+        if not matches:
+            return ToolResult.error(f"没找到标题匹配 {title!r} 的窗口")
+
+        w = matches[0]
+        try:
+            if w.isMinimized:
+                w.restore()
+            abs_x = int(w.left) + rel_x
+            abs_y = int(w.top) + rel_y
+            pyautogui.click(x=abs_x, y=abs_y, button=button, clicks=clicks, duration=duration)
+        except pyautogui.FailSafeException:
+            return ToolResult.error("触发 FAILSAFE，已中止")
+        except Exception as e:
+            return ToolResult.error(f"窗口内点击失败: {type(e).__name__}: {e}")
+
+        return ToolResult.ok(
+            f"已在窗口 {w.title!r} 的相对坐标 ({rel_x},{rel_y}) "
+            f"对应屏幕坐标 ({abs_x},{abs_y}) 执行 {button}键 {clicks}次点击"
+        )
+
+    def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
+        if args:
+            return f"在窗口 {args.get('title')!r} 内点击 ({args.get('x')},{args.get('y')})"
+        return None
+
+
 class WindowMoveTool(Tool):
     name = "WindowMove"
     description = (

@@ -26,7 +26,10 @@ from agent.ui.realtime_window.process import (
     CMD_CLOSE,
     CMD_EMIT,
     CMD_HIDE,
+    CMD_MINIMIZE,
     CMD_SHOW,
+    EVT_END_SESSION,
+    EVT_WINDOW_RESTORED,
     _frontend_process_main,
 )
 
@@ -79,6 +82,7 @@ class RealtimeTalkWindow:
         self._on_close: Callable[[], None] | None = on_close
         self._standalone: bool = standalone
         self._command_queue: multiprocessing.Queue | None = None
+        self._response_queue: multiprocessing.Queue | None = None
         self._process: multiprocessing.Process | None = None
         self._config: dict[str, Any] = {}
 
@@ -108,9 +112,10 @@ class RealtimeTalkWindow:
 
         ctx = multiprocessing.get_context("spawn")
         self._command_queue = ctx.Queue()
+        self._response_queue = ctx.Queue()
         self._process = ctx.Process(
             target=_frontend_process_main,
-            args=(self._command_queue, self._config, self._standalone),
+            args=(self._command_queue, self._config, self._standalone, self._response_queue),
             daemon=True,
         )
         self._process.start()
@@ -119,6 +124,29 @@ class RealtimeTalkWindow:
     def hide(self) -> None:
         """隐藏窗口（不结束子进程）。"""
         self._send_command(CMD_HIDE)
+
+    def minimize(self) -> None:
+        """最小化窗口到任务栏（不结束子进程）。
+
+        @author aceFelix
+        """
+        self._send_command(CMD_MINIMIZE)
+
+    def poll_response(self) -> list[dict[str, Any]]:
+        """轮询子进程发来的事件（如 end_session / window_restored）。
+
+        父进程应定期调用此方法检查子进程事件。
+        @author aceFelix
+        """
+        items: list[dict[str, Any]] = []
+        if self._response_queue is None:
+            return items
+        try:
+            while True:
+                items.append(self._response_queue.get_nowait())
+        except Exception:
+            pass
+        return items
 
     def _notify_close(self) -> None:
         """通知窗口已被要求关闭（不真正结束子进程，仅触发 on_close 回调）。
@@ -147,6 +175,7 @@ class RealtimeTalkWindow:
                 pass
             self._process = None
         self._command_queue = None
+        self._response_queue = None
         self.reset_singleton()
 
     def emit(self, event_type: str, payload: Any) -> None:

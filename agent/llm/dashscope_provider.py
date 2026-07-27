@@ -295,11 +295,21 @@ class DashScopeProvider(LLMProvider):
                         )
                         return
 
-                    # usage
+                    # usage（含缓存命中统计）
                     if resp.usage:
+                        u = resp.usage
+                        # DashScope 原生 SDK 缓存字段：
+                        # - prompt_cache_hit_tokens: 命中缓存的 token 数
+                        # - prompt_tokens_details.cached_tokens: OpenAI 兼容格式
+                        cached = (
+                            u.get("prompt_cache_hit_tokens", 0)
+                            or (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+                            or 0
+                        )
                         final_usage = Usage(
-                            input_tokens=resp.usage.get("input_tokens", 0),
-                            output_tokens=resp.usage.get("output_tokens", 0),
+                            input_tokens=u.get("input_tokens", 0),
+                            output_tokens=u.get("output_tokens", 0),
+                            cache_read_tokens=cached,
                         )
 
                     choices = resp.output.choices if resp.output else []

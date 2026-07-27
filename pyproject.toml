@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-agent"
-version = "0.1.2"
+version = "2.0.1"
 description = "J.A.R.V.I.S — 你的钢铁侠同款桌面 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 30+ 内置工具、MCP 生态接入、多模型动态切换。"
 readme = "README.md"
 license = { text = "MIT" }
@@ -59,6 +59,10 @@ voice = [
     "dashscope>=1.20.0",
     # 音频播放/录音（跨平台，Linux 需 portaudio19-dev，macOS 需 brew install portaudio）
     "pyaudio>=0.2.14",
+    # 实时双工语音回声消除（WebRTC AEC3，消除扬声器回声防 AI 自言自语）
+    "aec-audio-processing>=1.0.0",
+    # AEC 重采样依赖
+    "numpy>=1.24.0",
 ]
 daemon = [
     # 常驻模式：系统托盘（跨平台，macOS 用 AppKit，Linux 需 GTK）
@@ -76,6 +80,12 @@ realtime_ui = [
     # Windows 上需要 Edge WebView2 Runtime（Win10/11 通常已预装）
     "pywebview>=5.0",
 ]
+wechat = [
+    # 微信 ClawBot 接入（iLink Bot API HTTP 客户端）
+    "aiohttp>=3.9.0",
+    # 终端二维码渲染（与 /connect-phone 共用）
+    "qrcode>=7.4.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -92,6 +102,7 @@ all = [
     "jarvis-agent[voice]",
     "jarvis-agent[daemon]",
     "jarvis-agent[realtime_ui]",
+    "jarvis-agent[wechat]",
 ]
 
 [project.scripts]

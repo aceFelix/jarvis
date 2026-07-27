@@ -240,6 +240,60 @@ class CancelScheduleTool(Tool):
             )
 
 
+class AcknowledgeReminderTool(Tool):
+    """确认一个提醒（停止升级重复通知）。"""
+
+    name = "AcknowledgeReminder"
+    description = (
+        "确认一个已触发的提醒，告诉贾维斯'我知道了'。"
+        "确认后贾维斯不会重复提醒。"
+        "用于用户说'知道了''收到''好的'等确认场景。"
+        "需要提供任务ID（可用 ListSchedule 查询）。"
+        "如果不指定 task_id，则确认最近触发的未确认提醒。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "要确认的任务ID。留空则确认最近触发的未确认提醒。",
+            }
+        },
+    }
+    max_result_chars = 1000
+
+    def __init__(self, scheduler: Scheduler) -> None:
+        self._scheduler = scheduler
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        return False
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.allow("确认提醒")
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        task_id = args.get("task_id", "").strip()
+
+        if task_id:
+            # 指定了 task_id
+            if self._scheduler.acknowledge(task_id):
+                return ToolResult(data=f"✓ 已确认提醒 {task_id}，不再重复通知")
+            else:
+                return ToolResult.error(f"未找到任务 {task_id}")
+        else:
+            # 未指定，确认最近的未确认提醒
+            unacked = self._scheduler.get_unacknowledged_fired()
+            if not unacked:
+                return ToolResult(data="当前没有未确认的提醒。")
+            # 确认最近触发的
+            latest = unacked[-1]
+            self._scheduler.acknowledge(latest.id)
+            return ToolResult(data=f"✓ 已确认提醒「{latest.content}」，不再重复通知")
+
+
 # ---------------------------------------------------------------------------
 # 注册函数
 # ---------------------------------------------------------------------------
@@ -255,7 +309,7 @@ def register_schedule_tools(registry, scheduler: Scheduler) -> int:
     Returns: 注册的工具数。
     """
     count = 0
-    for tool_cls in [ScheduleReminderTool, ListScheduleTool, CancelScheduleTool]:
+    for tool_cls in [ScheduleReminderTool, ListScheduleTool, CancelScheduleTool, AcknowledgeReminderTool]:
         name = tool_cls.name
         if name in registry:
             continue

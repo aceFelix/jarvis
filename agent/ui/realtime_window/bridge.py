@@ -57,8 +57,12 @@ class WebviewRealtimeTalkUI(RealtimeTalkUI):
         self._window.emit("user_transcript", text)
 
     def on_ai_transcript(self, text: str) -> None:
-        """转发 AI 转录文本。"""
+        """转发 AI 转录文本（完整）。"""
         self._window.emit("ai_transcript", text)
+
+    def on_ai_transcript_delta(self, text: str) -> None:
+        """转发 AI 转录文本增量（流式）。"""
+        self._window.emit("ai_transcript_delta", text)
 
     def is_running(self) -> bool:
         """窗口未关闭即认为 UI 仍在运行。"""

@@ -70,6 +70,7 @@ def discover_harnesses(
     Returns:
         解析成功的 Harness 列表。用户级与项目级 harness 都会加载，
         后者可覆盖前者（相同 id 时后者生效）。
+        被禁用的 harness 会被跳过（状态由 cli_anything.market 管理）。
     """
     roots: list[Path] = []
     if root_dir is not None:
@@ -79,6 +80,9 @@ def discover_harnesses(
         project_root = _project_harness_root_dir(workdir)
         if project_root is not None and project_root.exists():
             roots.append(project_root)
+
+    # 加载禁用列表（由 cli_anything.market 管理）
+    disabled_ids = _load_disabled_ids()
 
     results: list[Harness] = []
     seen_ids: set[str] = set()
@@ -93,6 +97,10 @@ def discover_harnesses(
                 continue
             try:
                 harness = parse_skill_md(skill_path)
+                # 跳过被禁用的 harness
+                if harness.id in disabled_ids:
+                    logger.debug("跳过被禁用的 harness: %s", harness.id)
+                    continue
                 harness.dir_path = subdir
                 # 项目级 harness 覆盖用户级同名 harness
                 if harness.id in seen_ids:
@@ -102,6 +110,25 @@ def discover_harnesses(
             except Exception as e:
                 logger.warning("解析 harness 失败 %s: %s", skill_path, e)
     return results
+
+
+def _load_disabled_ids() -> set[str]:
+    """从 harness 禁用状态文件加载被禁用的 harness ID 集合。
+
+    状态文件位置：~/.jarvis/cli_anything/disabled.json
+
+    @author aceFelix
+    """
+    try:
+        import json
+
+        state_file = Path.home() / ".jarvis" / "cli_anything" / "disabled.json"
+        if state_file.exists():
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            return set(data.get("disabled", []))
+    except Exception:
+        pass
+    return set()
 
 
 def parse_skill_md(path: Path) -> Harness:

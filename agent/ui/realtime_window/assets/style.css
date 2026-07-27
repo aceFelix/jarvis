@@ -182,3 +182,13 @@ html, body {
 #close-btn:hover {
     background: rgba(255, 107, 53, 0.35);
 }
+
+/* 恢复对话按钮样式 */
+#close-btn.resume {
+    background: rgba(82, 196, 26, 0.2);
+    border-color: rgba(82, 196, 26, 0.6);
+}
+
+#close-btn.resume:hover {
+    background: rgba(82, 196, 26, 0.35);
+}

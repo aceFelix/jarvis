@@ -192,8 +192,8 @@ def build_default_registry() -> ToolRegistry:
     from agent.tools.file_ops.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
     from agent.tools.location import LocationTool
+    from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_tool import SendEmailTool
-    from agent.tools.extensions.marketplace_tool import MarketSearchTool
     from agent.tools.web.web import WebFetchTool, WebSearchTool
 
     registry = ToolRegistry()
@@ -204,12 +204,12 @@ def build_default_registry() -> ToolRegistry:
     registry.register(GlobTool())
     registry.register(GrepTool())
     registry.register(LocationTool())
-    registry.register(MarketSearchTool())
     registry.register(TodoWriteTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
     registry.register(SendEmailTool())
+    registry.register(DevServerTool())
 
     # 阶段二: GUI 工具（可选，依赖 pyautogui/pygetwindow，缺失则跳过）
     _register_gui_tools(registry)
@@ -353,6 +353,15 @@ def register_team_tools(
             registry.register(TaskStopTool())
             count += 5
 
+    # TeamStatus 工具（需要 task_list 提供任务统计）
+    try:
+        from agent.tools.collaboration.team_status import TeamStatusTool
+    except ImportError:
+        pass
+    else:
+        registry.register(TeamStatusTool(team_mgr=team_mgr, task_list=task_list))
+        count += 1
+
     return count
 
 
@@ -394,33 +403,47 @@ def register_lsp_tool(registry: ToolRegistry) -> int:
 def _register_gui_tools(registry: ToolRegistry) -> None:
     """注册 GUI 操作工具。依赖未安装时静默跳过，不影响基础工具。
 
-    阶段二新增: 鼠标 / 键盘 / 屏幕 / 窗口 共 11 个工具。
+    阶段二: 鼠标 / 键盘 / 屏幕 / 窗口 共 11 个工具。
+    P1 增强: 新增拖拽、等待、窗口相对坐标点击、视觉定位，共 15 个工具。
     """
     try:
-        from agent.tools.system.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
+        from agent.tools.system.mouse import (
+            MouseClickTool,
+            MouseDragTool,
+            MouseMoveTool,
+            MouseScrollTool,
+        )
         from agent.tools.system.keyboard import TypeTextTool, KeyTapTool
-        from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool
+        from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool, WaitForTool
         from agent.tools.system.window import (
             WindowListTool,
             WindowFocusTool,
             WindowCloseTool,
             WindowMoveTool,
+            WindowRectTool,
+            WindowClickTool,
         )
+        from agent.tools.system.gui_vision import VisualClickTool
     except ImportError:
         # pyautogui/pygetwindow 未安装，GUI 工具不可用
         return
 
     registry.register(MouseClickTool())
+    registry.register(MouseDragTool())
     registry.register(MouseMoveTool())
     registry.register(MouseScrollTool())
     registry.register(TypeTextTool())
     registry.register(KeyTapTool())
     registry.register(GetScreenSizeTool())
     registry.register(ScreenShotTool())
+    registry.register(WaitForTool())
     registry.register(WindowListTool())
     registry.register(WindowFocusTool())
     registry.register(WindowCloseTool())
     registry.register(WindowMoveTool())
+    registry.register(WindowRectTool())
+    registry.register(WindowClickTool())
+    registry.register(VisualClickTool())
 
 
 def _register_browser_tools(registry: ToolRegistry) -> None:

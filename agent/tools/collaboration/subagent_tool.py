@@ -28,6 +28,7 @@ from typing import Any, Optional
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
+from agent.collaboration.mailbox import make_task_completed, write_mailbox
 from agent.collaboration.subagent import (
     BUILTIN_AGENTS,
     AgentDefinition,
@@ -35,7 +36,9 @@ from agent.collaboration.subagent import (
     _build_sub_registry,
     _build_sub_system_prompt,
     run_subagent,
+    run_subagents_parallel,
 )
+from agent.collaboration.teammate_registry import get_teammate_registry
 from agent.core.tool import JSONSchema, Tool
 from agent.permissions.modes import PermissionMode
 
@@ -92,6 +95,30 @@ class SubagentTool(Tool):
                     "默认用当前活跃团队。"
                 ),
             },
+            "tasks": {
+                "type": "array",
+                "description": "批量同步子代理任务列表。提供时忽略顶层 prompt/agent_type，每个元素独立执行。",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "子任务描述。",
+                        },
+                        "agent_type": {
+                            "type": "string",
+                            "description": "子代理类型。默认 general。",
+                            "enum": ["explorer", "researcher", "coder", "general"],
+                            "default": "general",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "任务简短描述。可选。",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            },
         },
         "required": ["prompt"],
     }
@@ -121,6 +148,9 @@ class SubagentTool(Tool):
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         if args is None:
             return "派生子代理"
+        tasks = args.get("tasks")
+        if isinstance(tasks, list) and tasks:
+            return f"批量派生 {len(tasks)} 个子代理"
         agent_type = args.get("agent_type", "general")
         bg = args.get("run_in_background", False)
         prefix = "派生队友" if bg else "派生子代理"
@@ -129,6 +159,14 @@ class SubagentTool(Tool):
         return f"{prefix} {agent_type}: {preview}"
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        if self._provider is None:
+            return ToolResult.error("Agent 工具未注入 provider，无法派生")
+
+        # 批量同步子代理模式
+        tasks = args.get("tasks")
+        if isinstance(tasks, list) and tasks:
+            return await self._run_batch(tasks, ctx)
+
         prompt = args.get("prompt", "").strip()
         if not prompt:
             return ToolResult.error("prompt 不能为空")
@@ -138,9 +176,6 @@ class SubagentTool(Tool):
         if agent_def is None:
             available = ", ".join(BUILTIN_AGENTS.keys())
             return ToolResult.error(f"未知 agent_type: {agent_type}（可选: {available}）")
-
-        if self._provider is None:
-            return ToolResult.error("Agent 工具未注入 provider，无法派生")
 
         run_bg = args.get("run_in_background", False)
 
@@ -184,6 +219,54 @@ class SubagentTool(Tool):
             )
 
         return ToolResult(data=report)
+
+    async def _run_batch(
+        self, tasks: list[dict[str, Any]], ctx: ToolContext,
+    ) -> ToolResult:
+        """批量并行执行多个同步子代理任务。"""
+        mode_str = ctx.permission_mode or "yolo"
+        try:
+            permission_mode = PermissionMode(mode_str)
+        except ValueError:
+            permission_mode = self._permission_mode
+
+        job_list: list[tuple[AgentDefinition, str]] = []
+        for idx, task in enumerate(tasks):
+            prompt = task.get("prompt", "").strip()
+            if not prompt:
+                return ToolResult.error(f"tasks[{idx}].prompt 不能为空")
+            agent_type = task.get("agent_type", "general")
+            agent_def = BUILTIN_AGENTS.get(agent_type)
+            if agent_def is None:
+                available = ", ".join(BUILTIN_AGENTS.keys())
+                return ToolResult.error(
+                    f"tasks[{idx}] 未知 agent_type: {agent_type}（可选: {available}）"
+                )
+            job_list.append((agent_def, prompt))
+
+        results = await run_subagents_parallel(
+            job_list,
+            provider=self._provider,
+            workdir=ctx.workdir,
+            permission_mode=permission_mode,
+            parent_ui=ctx.ui,
+        )
+
+        lines = [f"批量子代理结果（共 {len(results)} 个）:"]
+        for idx, result in enumerate(results):
+            if result.success:
+                lines.append(
+                    f"\n--- 子代理 {idx + 1} ---\n"
+                    f"{result.report}\n"
+                    f"[迭代 {result.iterations} 轮, 工具调用 {result.tool_calls} 次]"
+                )
+            else:
+                lines.append(
+                    f"\n--- 子代理 {idx + 1} ---\n"
+                    f"执行失败: {result.error}"
+                )
+
+        return ToolResult(data="\n".join(lines))
 
     # ---- 背景队友 ----
 
@@ -265,16 +348,31 @@ class SubagentTool(Tool):
             model=agent_def.model,
         )
 
+        # 设置 TaskList 生命周期回调：任务完成时通知 leader 和相关队友
+        if self._task_list is not None:
+            def _on_task_completed(task: Any) -> None:
+                try:
+                    write_mailbox(
+                        "team-lead",
+                        make_task_completed(
+                            from_name=name,
+                            task_id=task.id,
+                            status=task.status,
+                            summary=f"{name} 完成任务 #{task.id}: {task.subject}",
+                        ),
+                        team_name,
+                    )
+                except Exception:
+                    pass
+
+            self._task_list.set_hooks(on_completed=_on_task_completed)
+
+        # 注册到进程内注册表，供 TaskStop 查找
+        registry = get_teammate_registry()
+        registry.register(team_name, name, runner)
+
         # 后台启动
         bg_task = await runner.start(prompt, parent_ui=ctx.ui)
-
-        # 注册到 TaskStopTool（如果有）
-        try:
-            from .task_stop import TaskStopTool
-            import sys
-            # 通过 ctx.extra 或全局单例注册
-        except ImportError:
-            pass
 
         return ToolResult(data=(
             f"队友 '{name}' 已在团队 '{team_name}' 中启动（后台运行）。\n"
@@ -282,5 +380,6 @@ class SubagentTool(Tool):
             f"- 状态: 正在执行初始任务...\n"
             f"- 用 SendMessage 向 {name} 发送后续指令\n"
             f"- 用 TaskList 查看团队任务\n"
+            f"- 用 TaskStop 终止该队友\n"
             f"- 用 SendMessage shutdown_request 让队友退出"
         ))

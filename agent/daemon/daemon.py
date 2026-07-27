@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from typing import Any, Callable
 
 from agent.config.settings import Settings
@@ -311,6 +312,14 @@ def _has_keyboard() -> bool:
         return False
 
 
+def _has_pynput() -> bool:
+    try:
+        import pynput  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _has_pystray() -> bool:
     try:
         import pystray  # noqa: F401
@@ -321,49 +330,136 @@ def _has_pystray() -> bool:
 
 
 class HotkeyListener:
-    """全局热键监听器（基于 keyboard 库）。
+    """全局热键监听器（跨平台）。
 
-    注册一个热键组合，按下时触发回调。在独立线程运行。
-    keyboard 库在 Windows 上需要管理员权限才能注册部分全局热键，
-    权限不足时 add_hotkey 会静默失败（不抛异常但不生效）。
+    平台策略：
+    - Windows: 优先使用原生 RegisterHotKey（NativeHotkeyListener），
+      回退到 keyboard 库。
+    - macOS: 使用 pynput（不需要 root，只需辅助功能权限），
+      回退到 keyboard 库（需 root）。
+    - Linux: 使用 keyboard 库（需 root 或 input 组权限）。
     """
 
     def __init__(self, hotkey: str, on_trigger: Callable[[], None]) -> None:
         self._hotkey = hotkey
         self._on_trigger = on_trigger
         self._started = False
+        self._backend: str = ""  # "native" / "pynput" / "keyboard"
+        self._listener: Any = None  # pynput listener 对象
 
     @property
     def available(self) -> bool:
+        if _is_macos():
+            return _has_pynput() or _has_keyboard()
         return _has_keyboard()
 
     def start(self) -> bool:
         """启动热键监听。成功返回 True。"""
         if not self.available or self._started:
             return self._started
+
+        # macOS: 优先 pynput（不需 root）
+        if _is_macos() and _has_pynput():
+            if self._start_pynput():
+                return True
+
+        # 回退到 keyboard 库
+        if _has_keyboard():
+            try:
+                import keyboard
+                keyboard.add_hotkey(self._hotkey, self._on_trigger, suppress=False)
+                self._started = True
+                self._backend = "keyboard"
+                return True
+            except Exception:
+                pass
+        return False
+
+    def _start_pynput(self) -> bool:
+        """macOS: 用 pynput 监听全局热键。
+
+        pynput 解析热键字符串（如 "ctrl+shift+j"）并监听按键组合。
+        需要辅助功能权限（系统设置 → 隐私与安全性 → 辅助功能）。
+        """
         try:
-            import keyboard
-            keyboard.add_hotkey(self._hotkey, self._on_trigger, suppress=False)
+            from pynput import keyboard as pynput_kb
+
+            # 解析热键字符串为 pynput 的 HotKey 格式
+            hotkey_str = self._hotkey.lower().replace(" ", "")
+            # pynput HotKey.parse 支持 "<ctrl>+<shift>+j" 格式
+            # 将 "ctrl+shift+j" 转换为 "<ctrl>+<shift>+j"
+            parts = hotkey_str.split("+")
+            parsed_parts = []
+            for p in parts:
+                # 修饰键加尖括号
+                if p in ("ctrl", "shift", "alt", "cmd", "command", "super", "win"):
+                    parsed_parts.append(f"<{p}>")
+                else:
+                    parsed_parts.append(p)
+            pynput_hotkey_str = "+".join(parsed_parts)
+
+            def _on_activate():
+                self._on_trigger()
+
+            hotkey_obj = pynput_kb.HotKey(
+                pynput_kb.HotKey.parse(pynput_hotkey_str),
+                _on_activate,
+            )
+
+            def _on_press(key):
+                hotkey_obj.press(self._normalize_key(key))
+
+            def _on_release(key):
+                hotkey_obj.release(self._normalize_key(key))
+
+            listener = pynput_kb.Listener(
+                on_press=_on_press,
+                on_release=_on_release,
+            )
+            listener.daemon = True
+            listener.start()
+
+            self._listener = listener
             self._started = True
+            self._backend = "pynput"
             return True
         except Exception:
             return False
 
+    @staticmethod
+    def _normalize_key(key):
+        """将 pynput 的 Key/KeyCode 规范化为 HotKey 可识别的格式。"""
+        from pynput import keyboard as pynput_kb
+        try:
+            # 特殊键（ctrl/shift/alt/cmd）直接返回
+            return key
+        except Exception:
+            return key
+
     def stop(self) -> None:
         if not self._started:
             return
-        try:
-            import keyboard
-            keyboard.remove_all_hotkeys()
-        except Exception:
-            pass
+        if self._backend == "pynput" and self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+        elif self._backend == "keyboard":
+            try:
+                import keyboard
+                keyboard.remove_all_hotkeys()
+            except Exception:
+                pass
         self._started = False
+        self._backend = ""
 
 
 class TrayIcon:
     """系统托盘图标（基于 pystray + PIL）。
 
-    在独立线程运行，提供右键菜单: 语音对话 / 文本对话 / 退出。
+    在独立线程运行，提供右键菜单: 语音对话 / 实时聊天 / 文本对话 / 退出。
+    三个交互模式（语音/实时/文本）为互斥关系，选中一个时自动关闭其余两个。
     菜单项点击通过回调通知主进程。
     """
 
@@ -372,7 +468,7 @@ class TrayIcon:
         on_voice: Callable[[], None],
         on_text: Callable[[], None],
         on_quit: Callable[[], None],
-        voice_enabled_getter: Callable[[], bool],
+        voice_active_getter: Callable[[], bool],
         voice_toggle: Callable[[], None],
         realtime_enabled_getter: Callable[[], bool],
         realtime_toggle: Callable[[], None],
@@ -380,7 +476,7 @@ class TrayIcon:
         self._on_voice = on_voice
         self._on_text = on_text
         self._on_quit = on_quit
-        self._voice_enabled_getter = voice_enabled_getter
+        self._voice_active_getter = voice_active_getter
         self._voice_toggle = voice_toggle
         self._realtime_enabled_getter = realtime_enabled_getter
         self._realtime_toggle = realtime_toggle
@@ -420,17 +516,24 @@ class TrayIcon:
             image = self._make_image()
             menu = pystray.Menu(
                 pystray.MenuItem(
-                    lambda item: "语音对话" if self._voice_enabled_getter() else "语音对话：已关闭",
+                    lambda item: "语音对话" if self._voice_active_getter() else "语音对话：已关闭",
                     self._handle_voice,
-                    checked=lambda item: self._voice_enabled_getter(),
+                    checked=lambda item: self._voice_active_getter(),
+                    radio=True,
                     default=True,
                 ),
                 pystray.MenuItem(
                     lambda item: "实时聊天" if self._realtime_enabled_getter() else "实时聊天：已关闭",
                     self._handle_realtime_talk,
                     checked=lambda item: self._realtime_enabled_getter(),
+                    radio=True,
                 ),
-                pystray.MenuItem("文本对话", self._handle_text),
+                pystray.MenuItem(
+                    "文本对话",
+                    self._handle_text,
+                    checked=lambda item: False,
+                    radio=True,
+                ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("退出贾维斯", self._handle_quit),
             )
@@ -470,16 +573,13 @@ class TrayIcon:
     def _handle_voice(self, item=None) -> None:
         """处理托盘「语音对话」项点击。
 
-        点击勾选菜单项时切换开关状态:
-        - 开启 → 清除 pause_event，voice_loop 自动恢复监听
-        - 关闭 → 设置 pause_event，voice_loop 停止监听
-        不需要显式调用 _trigger_voice，pause_event 是 voice_loop 的
-        直接控制信号。
+        三个模式互斥：开启语音对话前会先关闭实时聊天。
+        如果语音对话已经在运行，则关闭它。
         """
         try:
             self._voice_toggle()
             self.update_menu()
-            if self._voice_enabled_getter():
+            if self._voice_active_getter():
                 self.notify("J.A.R.V.I.S", "语音对话已开启")
             else:
                 self.notify("J.A.R.V.I.S", "语音对话已关闭")
@@ -492,8 +592,8 @@ class TrayIcon:
     def _handle_realtime_talk(self, item=None) -> None:
         """处理托盘「实时聊天」项点击。
 
-        切换开关状态并通知 daemon 启动/停止实时双工语音对话子进程。
-        开启时持久化配置并启动独立进程；关闭时终止进程并更新配置。
+        三个模式互斥：开启实时聊天前会先关闭语音对话。
+        如果实时聊天已经在运行，则关闭它。
 
         @author aceFelix
         """
@@ -511,6 +611,10 @@ class TrayIcon:
                 pass
 
     def _handle_text(self, *_args) -> None:
+        """处理托盘「文本对话」项点击。
+
+        文本对话为一次性动作：先关闭语音对话和实时聊天，再弹出文本终端。
+        """
         try:
             self._on_text()
         except Exception as e:
@@ -560,9 +664,13 @@ class JarvisDaemon:
         # 实时聊天窗口：daemon 生命周期内单例，同一进程内通过 pywebview 承载
         self._realtime_talk_window: Any = None
         self._realtime_talk_thread: threading.Thread | None = None
-        # 语音开关状态: 用文件作为跨进程 SSOT，self._voice_enabled 仅作内存缓存
-        from agent.daemon.voice_state import is_voice_enabled
-        self._voice_enabled = is_voice_enabled()
+        self._realtime_talk_task: Any = None  # 当前 asyncio Task，用于取消会话
+        # 语音对话会话状态：daemon 启动后默认不进入语音对话，仅托盘/热键触发
+        # 旧逻辑：默认进入 voice_loop（语音随时待命）
+        # 新逻辑：默认关闭，用户点击托盘「语音对话」才启动
+        self._voice_session_active = False
+        self._voice_session_thread: threading.Thread | None = None
+        self._voice_session_stop_event = threading.Event()
         # 实时聊天开关状态：从配置读取，托盘切换后持久化到 settings.toml
         self._realtime_talk_enabled = bool(getattr(settings, "realtime_talk_auto_start", False))
 
@@ -573,8 +681,8 @@ class JarvisDaemon:
             on_voice=self._trigger_voice,
             on_text=self._trigger_text,
             on_quit=self._trigger_quit,
-            voice_enabled_getter=lambda: self._read_voice_enabled(),
-            voice_toggle=self._toggle_voice_enabled,
+            voice_active_getter=lambda: self._voice_session_active,
+            voice_toggle=self._toggle_voice_session,
             realtime_enabled_getter=lambda: self._read_realtime_talk_enabled(),
             realtime_toggle=self._toggle_realtime_talk,
         )
@@ -593,11 +701,7 @@ class JarvisDaemon:
         tray_status = "托盘图标已就绪" if self._tray.available else "托盘不可用（需 pip install pystray）"
         ui.info(f"   {hotkey_status}")
         ui.info(f"   {tray_status}")
-        if self._voice_enabled:
-            ui.info("   默认进入语音对话 · 说「退下」待机 · 说「贾维斯」唤醒")
-            ui.info("   托盘右键「语音对话」可关闭语音模式")
-        else:
-            ui.info("   语音对话已关闭 · 仅通过托盘/热键唤起交互")
+        ui.info("   语音对话已关闭 · 点击托盘「语音对话」或按热键唤起")
 
         if self._realtime_talk_enabled:
             ui.info("   实时聊天默认开启 · 启动后会自动打开实时语音对话窗口")
@@ -620,8 +724,10 @@ class JarvisDaemon:
                 ui.info("✓ 系统托盘图标已启动")
             else:
                 ui.warn("托盘图标启动失败")
-                if sys.platform == "win32":
+                if _is_windows():
                     ui.warn("  请安装 Windows 托盘依赖: pip install pywin32")
+                elif _is_macos():
+                    ui.warn("  macOS 托盘需要 pystray + Pillow: pip install pystray Pillow")
                 self._daemon_log("托盘启动失败，请检查依赖")
 
         if not self._hotkey.available and not self._tray.available:
@@ -631,6 +737,23 @@ class JarvisDaemon:
         self._scheduler.start()
         if self._scheduler.list_pending():
             ui.info(f"⏰ 已加载 {len(self._scheduler.list_pending())} 个待触发提醒")
+
+        # P2-3 主动提醒系统：启动主动感知引擎
+        self._proactive.start()
+        if self._settings.briefing_enabled:
+            ui.info(f"📋 主动提醒已启动（每日简报 {self._settings.briefing_time}）")
+        if self._settings.deadline_enabled:
+            active_deadlines = self._deadline_tracker.list_active()
+            if active_deadlines:
+                ui.info(f"📌 已加载 {len(active_deadlines)} 个活跃截止日期")
+        if self._settings.calendar_enabled and self._calendar_source.available:
+            ui.info("📆 日历集成已启用")
+
+        # 记录磁盘使用率（用于趋势预测）
+        try:
+            self._monitor.record_disk_usage()
+        except Exception:
+            pass
 
         if self._monitor.start():
             ui.info("📡 系统资源监控已启动（CPU/内存/磁盘）")
@@ -652,15 +775,9 @@ class JarvisDaemon:
         except Exception:
             pass
 
-        # 启动后根据语音开关决定是否默认进入语音对话模式。
-        # voice_loop 内置 待机⇄对话 循环：说「退下」进待机，说「贾维斯」唤醒。
-        # 这里只需触发一次，voice_loop 会自己管理后续的待机/唤醒状态。
-        if self._voice_enabled:
-            ui.info("🎙️ 即将进入语音对话模式（说「退下」可进入待机）")
-            self._wake_mode = "voice"
-            self._wake_event.set()
-        else:
-            ui.info("🔇 语音对话已关闭，保持后台待命")
+        # 启动后默认不进入语音对话模式（用户需求：只有托盘开启时才启动）。
+        # 语音对话会话通过托盘「语音对话」或热键手动触发。
+        ui.info("🔇 语音对话已关闭，点击托盘「语音对话」或按热键唤起")
 
         # 启动后根据实时聊天开关决定是否默认启动实时语音对话子进程。
         # 实时对话在独立进程中运行，不阻塞 daemon 主循环，用户按 ESC 退出。
@@ -670,7 +787,6 @@ class JarvisDaemon:
             threading.Timer(1.0, self._start_realtime_talk).start()
         else:
             ui.info("🔇 实时聊天默认关闭，保持后台待命")
-
 
         # daemon 主循环
         try:
@@ -725,8 +841,46 @@ class JarvisDaemon:
                 disk_threshold=settings.monitor_disk_threshold,
                 check_interval=settings.monitor_check_interval,
                 alert_cooldown=settings.monitor_alert_cooldown,
+                # P2-3 增强
+                disk_trend_days=settings.monitor_disk_trend_days,
+                high_cpu_duration=settings.monitor_high_cpu_duration,
+                work_break_interval=settings.monitor_work_break_interval,
             ),
             on_alert=self._on_monitor_alert,
+        )
+
+        # P2-3 主动提醒系统：截止日期追踪 + 日历数据源 + 主动感知引擎
+        from agent.core.daemon.deadline import DeadlineTracker
+        from agent.tools.extensions.deadline_tool import register_deadline_tools
+        self._deadline_tracker = DeadlineTracker()
+        register_deadline_tools(self._registry, self._deadline_tracker)
+
+        from agent.core.daemon.calendar_source import CalendarSource, CalendarConfig
+        self._calendar_source = CalendarSource(
+            config=CalendarConfig(
+                enabled=settings.calendar_enabled,
+                backend=settings.calendar_backend,
+                ics_path=settings.calendar_ics_path,
+                ics_url=settings.calendar_ics_url,
+                remind_minutes_before=settings.calendar_remind_minutes_before,
+            )
+        )
+
+        from agent.core.daemon.proactive import ProactiveEngine, ProactiveConfig
+        self._proactive = ProactiveEngine(
+            scheduler=self._scheduler,
+            config=ProactiveConfig(
+                briefing_enabled=settings.briefing_enabled,
+                briefing_time=settings.briefing_time,
+                deadline_enabled=settings.deadline_enabled,
+                deadline_check_time=settings.deadline_check_time,
+                calendar_enabled=settings.calendar_enabled,
+                calendar_remind_minutes_before=settings.calendar_remind_minutes_before,
+            ),
+            deadline_tracker=self._deadline_tracker,
+            calendar_source=self._calendar_source if settings.calendar_enabled else None,
+            monitor=self._monitor,
+            on_notify=self._on_proactive_notify,
         )
 
         checker = _build_checker(settings)
@@ -774,39 +928,86 @@ class JarvisDaemon:
         except Exception:
             pass
 
-    def _toggle_voice_enabled(self) -> None:
-        """切换托盘语音对话开关状态（默认开启）。
+    def _toggle_voice_session(self) -> None:
+        """切换托盘「语音对话」会话状态。
 
-        关闭时写 voice_state 文件 → voice_loop 检测后进入待机（类似说"退下"），
-        不再主动对话，但仍听唤醒词"贾维斯"。
-        开启时写 voice_state 文件 → voice_loop 恢复正常对话。
-
-        使用文件而非 threading.Event 作为跨进程信号源:
-        - daemon 以 DETACHED_PROCESS 子进程运行，voice_loop 阻塞主线程
-        - pystray 回调运行在独立线程，threading.Event 跨线程理论上可用
-          但跨进程无效，且未来如拆子进程架构更不适用
-        - 文件是单一可信源（SSOT），跨平台、跨进程、跨线程均可读
+        如果当前没有语音会话在运行，则关闭实时聊天（互斥）并启动新会话；
+        如果当前已有语音会话在运行，则干净地停止它。
 
         @author aceFelix
         """
-        from agent.daemon.voice_state import is_voice_enabled, set_voice_enabled
-        self._voice_enabled = not is_voice_enabled()
-        set_voice_enabled(self._voice_enabled)
+        self._daemon_log("[toggle_voice_session] active=%s", self._voice_session_active)
+        if self._voice_session_active:
+            self._stop_voice_session()
+            return
+
+        # 启动语音会话前，关闭实时聊天（互斥）
+        if self._realtime_talk_enabled:
+            self._realtime_talk_enabled = False
+            try:
+                from agent.config.settings import save_realtime_talk_auto_start
+                save_realtime_talk_auto_start(False)
+            except Exception as e:
+                self._daemon_log("保存实时聊天配置失败: %s", e)
+            self._stop_realtime_talk()
+
+        # 启动新的语音会话线程
+        self._voice_session_active = True
+        from agent.daemon.voice_state import set_voice_enabled
+        set_voice_enabled(True)
         ui = self._ui
         if ui:
-            if self._voice_enabled:
-                ui.info("🎙️ 语音对话已开启（随时待命）")
-            else:
-                ui.info('🔇 语音对话已关闭（进入待机，说"贾维斯"唤醒）')
+            ui.info("🎙️ 语音对话已启动")
+        self._voice_session_stop_event.clear()
+        self._voice_session_thread = threading.Thread(
+            target=self._run_voice_session, daemon=True
+        )
+        self._voice_session_thread.start()
+        self._daemon_log("[toggle_voice_session] 语音会话线程已启动")
 
-    def _read_voice_enabled(self) -> bool:
-        """读取语音开关最新状态（从文件，跨进程 SSOT）。
+    def _stop_voice_session(self) -> None:
+        """干净地停止当前语音对话会话。
+
+        通过 stop_event 通知 voice_loop 退出，并中断当前录音/推理。
 
         @author aceFelix
         """
-        from agent.daemon.voice_state import is_voice_enabled
-        self._voice_enabled = is_voice_enabled()
-        return self._voice_enabled
+        if not self._voice_session_active:
+            return
+        ui = self._ui
+        if ui:
+            ui.info("🔇 正在停止语音对话...")
+        self._voice_session_stop_event.set()
+        # 中断当前录音/推理，让 voice_loop 尽快退出
+        try:
+            from agent.voice import stt as stt_module
+            stt_module._request_stop()
+        except Exception:
+            pass
+        try:
+            if self._ctx is not None:
+                self._ctx.abort_event.set()
+        except Exception:
+            pass
+        thread = self._voice_session_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=3.0)
+        self._voice_session_active = False
+        from agent.daemon.voice_state import set_voice_enabled
+        set_voice_enabled(False)
+        if ui:
+            ui.info("🔇 语音对话已停止")
+        try:
+            self._tray.update_menu()
+        except Exception:
+            pass
+
+    def _read_voice_active(self) -> bool:
+        """读取语音对话会话是否活跃。
+
+        @author aceFelix
+        """
+        return self._voice_session_active
 
     def _read_realtime_talk_enabled(self) -> bool:
         """读取实时聊天开关最新状态（内存缓存）。
@@ -832,6 +1033,9 @@ class JarvisDaemon:
 
         ui = self._ui
         if self._realtime_talk_enabled:
+            # 互斥：开启实时聊天前停止语音会话
+            if self._voice_session_active:
+                self._stop_voice_session()
             if ui:
                 ui.info("🎙️ 实时聊天已开启")
             self._start_realtime_talk()
@@ -839,10 +1043,23 @@ class JarvisDaemon:
             if ui:
                 ui.info("🔇 实时聊天已关闭")
             self._stop_realtime_talk()
+        # 刷新托盘菜单让状态立刻生效
+        self._refresh_tray_menu()
 
     def _is_realtime_talk_running(self) -> bool:
         """检查实时聊天后台线程是否仍在运行。"""
         return self._realtime_talk_thread is not None and self._realtime_talk_thread.is_alive()
+
+    def _refresh_tray_menu(self) -> None:
+        """通知 pystray 刷新托盘菜单，让状态变化立刻可见。"""
+        if self._tray is None or not self._tray.available:
+            return
+        try:
+            icon = self._tray._icon
+            if icon is not None and hasattr(icon, "update_menu"):
+                icon.update_menu()
+        except Exception:
+            pass
 
     def _start_realtime_talk(self) -> None:
         """启动实时双工语音对话窗口。
@@ -873,22 +1090,139 @@ class JarvisDaemon:
 
         self._realtime_talk_window.show()
 
+        # 确保事件监听线程在运行（检测“结束”按钮和窗口恢复）
+        self._start_realtime_response_watcher()
+
         if self._is_realtime_talk_running():
             if self._tray and self._tray.available:
                 self._tray.notify("J.A.R.V.I.S", "实时聊天窗口已唤起")
             return
 
-        self._realtime_talk_thread = threading.Thread(
-            target=self._run_realtime_talk_in_thread,
-            daemon=True,
-        )
-        self._realtime_talk_thread.start()
+        self._start_realtime_session()
 
         ui = self._ui
         if ui:
             ui.info("🎙️ 已启动实时聊天窗口")
         if self._tray and self._tray.available:
             self._tray.notify("J.A.R.V.I.S", "实时聊天已启动")
+
+    def _start_realtime_session(self) -> None:
+        """启动一个新的 RealtimeTalk 会话线程。
+
+        @author aceFelix
+        """
+        if self._is_realtime_talk_running():
+            return
+        self._realtime_talk_thread = threading.Thread(
+            target=self._run_realtime_talk_in_thread,
+            daemon=True,
+        )
+        self._realtime_talk_thread.start()
+
+    def _start_realtime_response_watcher(self) -> None:
+        """启动子进程事件监听线程。
+
+        定期轮询子进程发来的事件：
+        - end_session：用户点击“结束”按钮，停止当前会话
+        - window_restored：用户从任务栏恢复窗口，自动启动新会话
+
+        @author aceFelix
+        """
+        if getattr(self, "_rt_watcher_alive", False):
+            return
+        self._rt_watcher_alive = True
+
+        def _watcher():
+            from agent.ui.realtime_window.process import (
+                EVT_END_SESSION,
+                EVT_WINDOW_CLOSED,
+                EVT_WINDOW_RESTORED,
+            )
+            try:
+                while self._rt_watcher_alive and self._realtime_talk_enabled:
+                    window = self._realtime_talk_window
+                    if window is None:
+                        time.sleep(0.5)
+                        continue
+                    # 兜底：子进程已自行退出（用户点 X），但事件没送达
+                    try:
+                        if not window.is_open:
+                            self._daemon_log("实时聊天: 检测到窗口子进程已退出")
+                            try:
+                                from agent.config.settings import save_realtime_talk_auto_start
+                                save_realtime_talk_auto_start(False)
+                            except Exception:
+                                pass
+                            # 立即取消当前会话任务
+                            task = getattr(self, "_realtime_talk_task", None)
+                            if task is not None and not task.done():
+                                try:
+                                    task.cancel()
+                                except Exception:
+                                    pass
+                            rt = getattr(self, "_current_rt", None)
+                            if rt is not None:
+                                rt._running = False
+                            self._realtime_talk_enabled = False
+                            self._realtime_talk_window = None
+                            self._refresh_tray_menu()
+                            break
+                    except Exception as e:
+                        self._daemon_log("实时聊天: 检测窗口状态时出错: %s", e)
+                    try:
+                        events = window.poll_response()
+                        for evt in events:
+                            event_type = evt.get("event", "")
+                            if event_type == EVT_END_SESSION:
+                                # 用户点击“结束”：停止当前会话
+                                self._daemon_log("实时聊天: 用户点击结束，停止会话")
+                                task = getattr(self, "_realtime_talk_task", None)
+                                if task is not None and not task.done():
+                                    try:
+                                        task.cancel()
+                                    except Exception:
+                                        pass
+                                rt = getattr(self, "_current_rt", None)
+                                if rt is not None:
+                                    rt._running = False
+                            elif event_type == EVT_WINDOW_RESTORED:
+                                # 用户从任务栏恢复窗口：自动启动新会话
+                                if not self._is_realtime_talk_running():
+                                    self._daemon_log("实时聊天: 窗口恢复，启动新会话")
+                                    self._start_realtime_session()
+                            elif event_type == EVT_WINDOW_CLOSED:
+                                # 用户点击 X 关闭窗口：彻底关闭实时聊天
+                                self._daemon_log("实时聊天: 窗口被关闭，彻底停止")
+                                task = getattr(self, "_realtime_talk_task", None)
+                                if task is not None and not task.done():
+                                    try:
+                                        task.cancel()
+                                    except Exception:
+                                        pass
+                                rt = getattr(self, "_current_rt", None)
+                                if rt is not None:
+                                    rt._running = False
+                                # 切换托盘状态为关闭并持久化
+                                self._realtime_talk_enabled = False
+                                try:
+                                    from agent.config.settings import save_realtime_talk_auto_start
+                                    save_realtime_talk_auto_start(False)
+                                except Exception:
+                                    pass
+                                # 清理窗口引用（子进程已自行退出）
+                                self._realtime_talk_window = None
+                                # 刷新托盘菜单，确保状态立刻同步
+                                self._refresh_tray_menu()
+                    except Exception as e:
+                        self._daemon_log("实时聊天: watcher 处理事件异常: %s", e)
+                    time.sleep(0.3)
+            except Exception as e:
+                self._daemon_log("实时聊天: watcher 线程异常退出: %s", e)
+            finally:
+                self._rt_watcher_alive = False
+
+        t = threading.Thread(target=_watcher, daemon=True)
+        t.start()
 
     def _run_realtime_talk_in_thread(self) -> None:
         """在独立线程中运行 RealtimeTalk 的 asyncio 事件循环。"""
@@ -920,12 +1254,41 @@ class JarvisDaemon:
             return
 
         ui = WebviewRealtimeTalkUI(window, loop=asyncio.get_running_loop())
+
+        # 动态注入当前时间，让实时聊天能准确回答时间/日期问题
+        _weekdays = "一二三四五六日"
+        _now = datetime.now()
+        _time_ctx = _now.strftime(f"%Y年%m月%d日 %H:%M 星期{_weekdays[_now.weekday()]}")
+        _instructions = (
+            "你是贾维斯，先生的全能管家。用简洁自然的口语回复，"
+            "不要输出思考过程。保持对话流畅自然。"
+            f"\n当前时间：{_time_ctx}。如被问到时间，以此为准。"
+            "\n【地域性查询规则】涉及天气、新闻、本地服务、附近推荐等地域性查询时，"
+            "如果你不知道先生当前所在城市，必须先询问先生所在地，不要自行假设任何城市。"
+            "\n【回复长度规则】每次回复控制在3-5句话以内，不要长篇大论。"
+            "如果用户要求长内容（讲故事、讲笑话、详细解释、长篇分析等），"
+            "先说第一段（不超过5句），说完后问'要我继续吗？'，"
+            "等先生回应后再说下一段，以此类推。"
+            "\n当先生说\"退下\"、\"贾维斯退下\"、\"结束对话\"、\"再见\"、\"拜拜\"、\"没事了\"等表示结束的话时，"
+            "调用 end_conversation 工具结束对话。"
+        )
+
         rt = RealtimeTalk(
             api_key=api_key,
             model=getattr(self._settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
             voice=getattr(self._settings, "realtime_voice", "longanqian"),
+            instructions=_instructions,
             ws_url=getattr(self._settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+            workdir=getattr(self._settings, "workdir", "") or os.getcwd(),
         )
+        self._current_rt = rt  # 供 response_watcher 访问以停止会话
+
+        # 新会话开始时清空前端聊天记录并通知 UI
+        try:
+            window.emit("clear_chat", None)
+            window.emit("session_started", None)
+        except Exception:
+            pass
 
         # 窗口关闭时同步停止 RealtimeTalk
         def _on_close() -> None:
@@ -936,11 +1299,28 @@ class JarvisDaemon:
         window._on_close = lambda: (_on_close(), original_on_close() if original_on_close else None)
 
         try:
-            await rt.run(ui)
+            self._realtime_talk_task = asyncio.create_task(rt.run(ui))
+            try:
+                await self._realtime_talk_task
+            except asyncio.CancelledError:
+                # 用户主动结束/关闭窗口，正常退出
+                pass
         except Exception as e:
             window.emit("error", f"实时聊天异常: {e}")
         finally:
+            self._realtime_talk_task = None
             window._on_close = original_on_close
+            self._current_rt = None
+            # 通知 UI 会话已结束，显示“恢复对话”按钮（窗口保持打开）
+            try:
+                window.emit("status", "standby")
+            except Exception:
+                pass
+            try:
+                window.emit("session_ended", None)
+            except Exception:
+                pass
+            self._daemon_log("实时聊天会话已结束，等待恢复")
 
     def _on_realtime_window_closed(self) -> None:
         """实时聊天窗口被关闭时的回调。
@@ -948,10 +1328,16 @@ class JarvisDaemon:
         由 RealtimeTalkWindow 在用户点击关闭按钮时调用，
         通知 daemon 更新托盘菜单状态（不销毁窗口实例）。
         """
-        # 托盘菜单的勾选状态由 _realtime_talk_enabled 控制；
-        # 如果当前是开启状态且窗口被用户手动关闭，则视为临时关闭。
-        # 这里不修改 _realtime_talk_enabled，保持配置不变。
         self._daemon_log("实时聊天窗口已关闭")
+        # 窗口已关闭，同步托盘状态为关闭
+        if self._realtime_talk_enabled:
+            self._realtime_talk_enabled = False
+            try:
+                from agent.config.settings import save_realtime_talk_auto_start
+                save_realtime_talk_auto_start(False)
+            except Exception:
+                pass
+            self._refresh_tray_menu()
 
     def _stop_realtime_talk(self) -> None:
         """停止实时聊天窗口。
@@ -961,10 +1347,20 @@ class JarvisDaemon:
 
         @author aceFelix
         """
+        # 停止事件监听线程
+        self._rt_watcher_alive = False
+
+        # 取消当前正在运行的会话任务（如果有）
+        task = getattr(self, "_realtime_talk_task", None)
+        if task is not None and not task.done():
+            try:
+                task.cancel()
+            except Exception:
+                pass
+
         if self._realtime_talk_window is not None:
             try:
                 # 通知 RealtimeTalk 停止（如果还在运行）
-                # _realtime_talk_loop 中已把窗口关闭回调关联到 rt._running
                 self._realtime_talk_window._notify_close()
                 # 隐藏窗口
                 self._realtime_talk_window.hide()
@@ -977,27 +1373,45 @@ class JarvisDaemon:
             except Exception as e:
                 self._daemon_log("等待实时聊天线程结束失败: %s", e)
         self._realtime_talk_thread = None
+        self._current_rt = None
 
     def _trigger_voice(self) -> None:
         """热键/托盘触发语音对话。
 
-        如果语音模式被关闭（文件状态为 false），提示用户并忽略触发。
-        如果语音已在运行中，仅托盘通知"已在语音模式"。
+        新逻辑：语音对话默认不启动，热键/托盘点击时启动一次语音会话。
+        如果当前已有语音会话在运行，仅托盘通知"已在语音模式"。
+        如果实时聊天正在运行，先停止它（互斥）。
         """
-        if not self._read_voice_enabled():
+        if self._voice_session_active:
             if self._tray and self._tray.available:
-                self._tray.notify("J.A.R.V.I.S", "语音对话已关闭，右键托盘菜单开启")
+                self._tray.notify("J.A.R.V.I.S", "已在语音对话模式中")
             return
-        # 语音已在运行中（daemon 启动即进入语音模式）
-        if self._tray and self._tray.available:
-            self._tray.notify("J.A.R.V.I.S", "已在语音对话模式中")
+
+        # 互斥：停止实时聊天
+        if self._realtime_talk_enabled:
+            self._realtime_talk_enabled = False
+            try:
+                from agent.config.settings import save_realtime_talk_auto_start
+                save_realtime_talk_auto_start(False)
+            except Exception as e:
+                self._daemon_log("保存实时聊天配置失败: %s", e)
+            self._stop_realtime_talk()
+
+        self._toggle_voice_session()
 
     def _on_schedule_fire(self, task) -> None:
         """定时任务到期回调：托盘通知 + 语音播报。
 
         在 Scheduler 后台线程触发。语音播报通过 TTS 异步播放，
         不阻塞调度器。如果贾维斯正在对话中，仅托盘通知不打断。
+
+        P2-3: ProactiveEngine 注册的任务由引擎自己处理（生成简报/检查截止日期）。
         """
+        # P2-3: ProactiveEngine 任务分发
+        if self._proactive.is_proactive_task(task):
+            self._proactive.handle_task_fire(task)
+            return
+
         ui = self._ui
         if ui:
             ui.info(f"⏰ 定时提醒: {task.content}")
@@ -1023,6 +1437,49 @@ class JarvisDaemon:
                             voice=self._settings.tts_voice,
                         )
                         tts.speak(f"先生，提醒您：{task.content}")
+                    except Exception:
+                        pass
+                _t.Thread(target=_speak, daemon=True).start()
+        except Exception:
+            pass
+
+    def _on_proactive_notify(self, message: str) -> None:
+        """主动感知引擎通知回调：托盘通知 + 语音播报。
+
+        用于每日简报、截止日期提醒、日历事件提醒等。
+        与普通提醒相同的播报通道，但内容更丰富。
+        """
+        ui = self._ui
+        if ui:
+            # 取第一行作为日志摘要
+            first_line = message.split("\n")[0][:60]
+            ui.info(f"📋 {first_line}")
+
+        # 托盘通知（用第一行作为摘要）
+        try:
+            if self._tray and self._tray.available:
+                summary = message.split("\n")[0][:100]
+                self._tray.notify("贾维斯主动提醒", summary)
+        except Exception:
+            pass
+
+        # 语音播报（仅待机时）
+        try:
+            if not self._wake_event.is_set():
+                import threading as _t
+                def _speak():
+                    try:
+                        from agent.voice.tts import CosyVoiceTTS
+                        tts = CosyVoiceTTS(
+                            api_key=self._settings.api_key,
+                            model=self._settings.tts_model,
+                            voice=self._settings.tts_voice,
+                        )
+                        # 简报较长，只播报前 200 字
+                        speak_text = message[:200]
+                        if len(message) > 200:
+                            speak_text += "……详细内容请查看托盘通知。"
+                        tts.speak(speak_text)
                     except Exception:
                         pass
                 _t.Thread(target=_speak, daemon=True).start()
@@ -1110,15 +1567,26 @@ class JarvisDaemon:
     def _trigger_text(self) -> None:
         """托盘触发文本对话。
 
-        daemon 启动后主循环被 _run_voice_session() 内的 voice_loop 永久阻塞
-        （stt.listen() 占住主线程），_wake_event 机制对文本对话无效。
-        因此必须绕过事件循环，直接暂停语音 + spawn 终端（与 _trigger_quit
-        绕过 _quit_event 直接 os._exit 同理）。
+        文本对话与语音/实时互斥：触发前先停止语音会话和实时聊天，
+        再弹出文本终端。
         """
         self._daemon_log("[trigger_text] 触发, is_detached=%s", _is_detached())
+        # 互斥：停止语音会话
+        if self._voice_session_active:
+            self._stop_voice_session()
+        # 互斥：停止实时聊天
+        if self._realtime_talk_enabled:
+            self._realtime_talk_enabled = False
+            try:
+                from agent.config.settings import save_realtime_talk_auto_start
+                save_realtime_talk_auto_start(False)
+            except Exception as e:
+                self._daemon_log("保存实时聊天配置失败: %s", e)
+            self._stop_realtime_talk()
+
         if _is_detached():
-            # 暂停语音 → 弹出终端窗口
-            self._daemon_log("[trigger_text] 暂停语音，弹出文本终端")
+            # 弹出终端窗口
+            self._daemon_log("[trigger_text] 弹出文本终端")
             self._spawn_text_terminal()
         else:
             # 前台模式（--with-tray）：走事件循环
@@ -1142,22 +1610,36 @@ class JarvisDaemon:
         - 文件为 true → 正常对话
         - 文件为 false → 进入待机（只听唤醒词"贾维斯"）
 
+        通过 ``self._voice_session_stop_event`` 可以从托盘/热键干净地停止会话。
+
         @author aceFelix
         """
         ui = self._ui
         assert ui is not None and self._loop is not None and self._ctx is not None
 
+        self._voice_session_active = True
+        self._voice_session_stop_event.clear()
+        self._daemon_log("[_run_voice_session] 语音会话开始")
         try:
             from agent.voice.voice_loop import voice_loop
             asyncio.run(voice_loop(
                 ui, self._settings, self._loop, self._ctx,
                 daemon_mode=True,
+                stop_event=self._voice_session_stop_event,
             ))
         except ImportError as e:
             ui.error(f"语音模块不可用: {e}")
+            self._daemon_log("[_run_voice_session] 语音模块导入失败: %s", e)
         except Exception as e:
             ui.error(f"语音会话异常: {type(e).__name__}: {e}")
+            self._daemon_log("[_run_voice_session] 语音会话异常: %s: %s", type(e).__name__, e)
         finally:
+            self._daemon_log("[_run_voice_session] 语音会话结束")
+            self._voice_session_active = False
+            try:
+                self._tray.update_menu()
+            except Exception:
+                pass
             # 语音会话结束后增量保存
             try:
                 from agent.main import _auto_save
@@ -1408,6 +1890,8 @@ class JarvisDaemon:
                            verbose=False)
             except Exception:
                 pass
+        # 停止语音会话
+        self._stop_voice_session()
         # 停止实时聊天并销毁窗口，避免 daemon 退出后残留 GUI
         self._stop_realtime_talk()
         if self._realtime_talk_window is not None:
@@ -1416,6 +1900,7 @@ class JarvisDaemon:
             except Exception:
                 pass
             self._realtime_talk_window = None
+        # 先停热键/托盘，避免清理期间重复触发
         self._hotkey.stop()
         self._tray.stop()
         # 停止视觉监控（释放摄像头）

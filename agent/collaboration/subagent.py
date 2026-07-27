@@ -1,6 +1,6 @@
 """子代理协作 —— 让主 agent 派生子 agent 并行处理子任务。
 
-阶段五第二刀。致敬 Claude Code 的 AgentTool + LocalAgentTask 架构，
+阶段五第二刀。
 
 核心概念:
 1. **AgentDefinition**: 子 agent 的"人格定义"——system prompt、允许的工具集、
@@ -350,7 +350,13 @@ async def run_subagent(
     # 1. 构建子 agent 的工具集 + 权限校验器 + 编排器
     sub_registry = _build_sub_registry(agent_def.allowed_tools)
     sub_checker = PermissionChecker(rules=RuleSet(), mode=permission_mode)
-    sub_orchestrator = ToolOrchestrator(registry=sub_registry, permission_checker=sub_checker)
+    from agent.core.error_recovery import ToolRecoveryExecutor
+    sub_recovery = ToolRecoveryExecutor(global_enabled=True)
+    sub_orchestrator = ToolOrchestrator(
+        registry=sub_registry,
+        permission_checker=sub_checker,
+        recovery_executor=sub_recovery,
+    )
 
     # 2. 组装 system prompt
     sub_system = _build_sub_system_prompt(agent_def, workdir)

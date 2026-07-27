@@ -114,7 +114,9 @@ class MouseClickTool(Tool):
         except pyautogui.FailSafeException:
             return ToolResult.error("触发 FAILSAFE（光标触达左上角），已中止")
         except Exception as e:
-            return ToolResult.error(f"点击失败: {type(e).__name__}: {e}")
+            from agent.tools.system import macos_permission_hint
+            hint = macos_permission_hint("鼠标点击")
+            return ToolResult.error(f"点击失败: {type(e).__name__}: {e}{hint}")
 
         return ToolResult.ok(
             f"已在 ({x},{y}) 执行 {button}键 {clicks}次点击"
@@ -124,6 +126,142 @@ class MouseClickTool(Tool):
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         if args:
             return f"点击 ({args.get('x')},{args.get('y')})"
+        return None
+
+
+class MouseDragTool(Tool):
+    """鼠标拖拽工具 —— 从一个坐标拖到另一个坐标。
+
+    P1 升级新增：支持拖拽文件、滑块、调整窗口大小等场景。
+    通过 pyautogui 的 mouseDown / moveTo / mouseUp 组合实现。
+
+    @author aceFelix
+    """
+
+    name = "MouseDrag"
+    description = (
+        "在屏幕上从一个坐标拖拽到另一个坐标。用于拖动文件、滑块、"
+        "调整窗口大小等。默认会询问用户确认。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "start_x": {
+                "type": "integer",
+                "description": "拖拽起点 x 坐标",
+                "minimum": 0,
+            },
+            "start_y": {
+                "type": "integer",
+                "description": "拖拽起点 y 坐标",
+                "minimum": 0,
+            },
+            "end_x": {
+                "type": "integer",
+                "description": "拖拽终点 x 坐标",
+                "minimum": 0,
+            },
+            "end_y": {
+                "type": "integer",
+                "description": "拖拽终点 y 坐标",
+                "minimum": 0,
+            },
+            "button": {
+                "type": "string",
+                "enum": ["left", "right", "middle"],
+                "description": "拖拽用的鼠标按键，默认 left",
+            },
+            "duration": {
+                "type": "number",
+                "description": "拖拽过程耗时秒数（默认 0.5）",
+                "minimum": 0.0,
+                "maximum": 5.0,
+            },
+        },
+        "required": ["start_x", "start_y", "end_x", "end_y"],
+    }
+    max_result_chars = 1_000
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        # GUI 操作不并行
+        return False
+
+    def is_destructive(self, args: dict[str, Any]) -> bool:
+        # 拖拽可能触发移动/删除等副作用
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.ask(
+            f"拖拽从 ({args.get('start_x')},{args.get('start_y')}) "
+            f"到 ({args.get('end_x')},{args.get('end_y')})"
+        )
+
+    def validate_input(self, args: dict[str, Any], ctx: ToolContext) -> ValidationResult:
+        for key in ("start_x", "start_y", "end_x", "end_y"):
+            val = args.get(key)
+            try:
+                int(val)
+            except (TypeError, ValueError):
+                return ValidationResult.fail(f"{key} 必须是整数: {val!r}")
+        btn = args.get("button", "left")
+        if btn not in ("left", "right", "middle"):
+            return ValidationResult.fail(f"button 非法: {btn}")
+        return ValidationResult.pass_()
+
+    def prepare_permission_matcher(self, args: dict[str, Any]) -> PermissionMatcher | None:
+        return PermissionMatcher(
+            tool_name="MouseDrag",
+            targets=[
+                f"{args.get('start_x')},{args.get('start_y')}",
+                f"{args.get('end_x')},{args.get('end_y')}",
+            ],
+        )
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        try:
+            pyautogui = _import_pyautogui()
+        except ImportError as e:
+            return ToolResult.error(f"pyautogui 未安装: {e}")
+
+        start_x = int(args["start_x"])
+        start_y = int(args["start_y"])
+        end_x = int(args["end_x"])
+        end_y = int(args["end_y"])
+        button = args.get("button", "left")
+        duration = float(args.get("duration", 0.5))
+
+        try:
+            pyautogui.moveTo(start_x, start_y)
+            pyautogui.mouseDown(button=button)
+            pyautogui.moveTo(end_x, end_y, duration=duration)
+            pyautogui.mouseUp(button=button)
+        except pyautogui.FailSafeException:
+            # 即使触发 FAILSAFE 也要确保鼠标松开，避免状态残留
+            try:
+                pyautogui.mouseUp(button=button)
+            except Exception:
+                pass
+            return ToolResult.error("触发 FAILSAFE（光标触达左上角），已中止")
+        except Exception as e:
+            try:
+                pyautogui.mouseUp(button=button)
+            except Exception:
+                pass
+            from agent.tools.system import macos_permission_hint
+            hint = macos_permission_hint("鼠标拖拽")
+            return ToolResult.error(f"拖拽失败: {type(e).__name__}: {e}{hint}")
+
+        return ToolResult.ok(
+            f"已从 ({start_x},{start_y}) 拖拽到 ({end_x},{end_y})，"
+            f"使用 {button} 键，耗时 {duration}s"
+        )
+
+    def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
+        if args:
+            return (
+                f"拖拽 ({args.get('start_x')},{args.get('start_y')}) "
+                f"-> ({args.get('end_x')},{args.get('end_y')})"
+            )
         return None
 
 

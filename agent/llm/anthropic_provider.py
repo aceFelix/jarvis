@@ -183,9 +183,19 @@ class AnthropicProvider(LLMProvider):
             for t in tools
         ]
 
+        # ---- Prompt Caching: 在 system 和 tools 上标记 cache_control 断点 ----
+        # Anthropic 缓存前缀匹配：system + tools 是每次请求最稳定的前缀，
+        # 标记后服务端会缓存这部分的 KV，后续请求命中时 input token 费用降 90%。
+        system_blocks: list[dict[str, Any]] = [
+            {"type": "text", "text": full_system, "cache_control": {"type": "ephemeral"}}
+        ]
+        # 在最后一个 tool 上标记断点（tools 整体作为前缀的一部分被缓存）
+        if tool_defs:
+            tool_defs[-1]["cache_control"] = {"type": "ephemeral"}
+
         request_kwargs: dict[str, Any] = {
             "model": model or self.default_model,
-            "system": full_system,
+            "system": system_blocks,
             "messages": api_msgs,
             "max_tokens": max_tokens,
         }
@@ -260,9 +270,12 @@ class AnthropicProvider(LLMProvider):
                 # 获取 usage（不依赖 final message 的 content）
                 try:
                     final = await stream.get_final_message()
+                    u = final.usage
                     usage = Usage(
-                        input_tokens=final.usage.input_tokens,
-                        output_tokens=final.usage.output_tokens,
+                        input_tokens=u.input_tokens,
+                        output_tokens=u.output_tokens,
+                        cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
+                        cache_creation_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
                     )
                     stop_reason = final.stop_reason or "stop"
                 except Exception:

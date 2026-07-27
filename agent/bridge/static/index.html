@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<!-- 移动端适配 + PWA 元数据（支持添加到主屏幕） -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<title>JARVIS Bridge</title>
+<style>
+/* ============ 全局变量：暗色主题（方舟反应炉配色） ============ */
+:root {
+  --bg: #0a0e1a;
+  --bg-elevated: #131826;
+  --bg-input: #1a2030;
+  --border: #2a3245;
+  --text: #e4e6eb;
+  --text-muted: #8b94a7;
+  --accent: #00d4ff;
+  --accent-dim: #007a99;
+  --user-bubble: linear-gradient(135deg, #1e3a5f, #2a5a8f);
+  --assistant-bubble: #131826;
+  --error: #ff5252;
+  --warn: #ffb74d;
+  --info: #4fc3f7;
+  --thinking: #6b7a99;
+  --ok: #4ade80;
+  --radius: 14px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ 布局 ============ */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  padding-top: var(--safe-top);
+}
+
+/* 顶栏：标题 + 连接状态 */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+}
+.brand .arc {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  box-shadow: 0 0 10px var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
+
+.status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-muted);
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--error);
+  transition: background .3s;
+}
+.dot.connecting { background: var(--warn); animation: blink 1s infinite; }
+.dot.connected { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* 消息区 */
+main {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 12px 8px;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+.msg {
+  margin-bottom: 14px;
+  animation: fadeIn .25s ease;
+}
+@keyframes fadeIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
+
+/* 用户消息：右对齐气泡 */
+.msg.user { display: flex; justify-content: flex-end; }
+.msg.user .bubble {
+  max-width: 82%;
+  background: var(--user-bubble);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  word-wrap: break-word; word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 助手消息：左对齐气泡 */
+.msg.assistant .bubble {
+  background: var(--assistant-bubble);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
+  border-radius: var(--radius) var(--radius) var(--radius) 4px;
+  word-wrap: break-word; word-break: break-word;
+}
+.msg.assistant .bubble .cursor {
+  display: inline-block;
+  width: 7px; height: 15px;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 1s infinite;
+}
+
+/* 思考链：暗淡斜体 */
+.msg.thinking .bubble {
+  color: var(--thinking);
+  font-style: italic;
+  font-size: 13px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* Markdown 渲染 */
+.bubble p { margin: 0 0 8px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble strong { color: #fff; font-weight: 600; }
+.block-code {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  color: #c9d1d9;
+}
+.inline-code {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+/* 工具调用卡片 */
+.tool {
+  margin: 8px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.tool-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.tool-head .tag {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: #fff;
+}
+.tool-head .name { font-weight: 600; color: var(--accent); }
+.tool-head .arrow { margin-left: auto; color: var(--text-muted); transition: transform .2s; font-size: 10px; }
+.tool.open .arrow { transform: rotate(90deg); }
+.tool-body {
+  display: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 240px; overflow-y: auto;
+}
+.tool.open .tool-body { display: block; }
+.tool.result-error { border-left-color: var(--error); }
+.tool.result-error .name { color: var(--error); }
+
+/* 状态行：info / warn / error */
+.status-line {
+  font-size: 12.5px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  border-radius: 6px;
+  display: flex; align-items: flex-start; gap: 6px;
+}
+.status-line .icon { flex-shrink: 0; font-weight: 700; }
+.status-line.info { background: rgba(79,195,247,.08); color: var(--info); }
+.status-line.warn { background: rgba(255,183,77,.08); color: var(--warn); }
+.status-line.error { background: rgba(255,82,82,.08); color: var(--error); }
+
+/* 空状态 */
+.empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+  font-size: 13px;
+}
+.empty .big { font-size: 40px; margin-bottom: 8px; opacity: .5; }
+
+/* ============ 输入区 ============ */
+footer {
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  padding: 10px 12px calc(10px + var(--safe-bottom));
+}
+.input-row {
+  display: flex; align-items: flex-end; gap: 8px;
+}
+textarea {
+  flex: 1;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  resize: none;
+  max-height: 120px;
+  min-height: 40px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color .2s;
+}
+textarea:focus { border-color: var(--accent); }
+textarea::placeholder { color: var(--text-muted); }
+
+button {
+  border: none;
+  border-radius: 50%;
+  width: 40px; height: 40px;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+button:active { transform: scale(.92); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+.btn-send { background: var(--accent); color: #000; }
+.btn-abort { background: var(--error); color: #fff; }
+.btn-send:disabled { background: var(--border); color: var(--text-muted); }
+
+/* ============ 连接遮罩（未连接时） ============ */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,14,26,.96);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 24px;
+  z-index: 100;
+  text-align: center;
+}
+.overlay.hide { display: none; }
+.overlay h1 {
+  font-size: 22px;
+  margin-bottom: 6px;
+  background: linear-gradient(135deg, var(--accent), #6e8ff5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.overlay p { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+.overlay input {
+  width: 100%; max-width: 320px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+  text-align: center;
+  outline: none;
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+.overlay input:focus { border-color: var(--accent); }
+.overlay button.connect-btn {
+  width: auto; height: auto;
+  border-radius: 10px;
+  padding: 12px 32px;
+  background: var(--accent);
+  color: #000;
+  font-size: 15px;
+  font-weight: 600;
+}
+.hint { font-size: 11px; color: var(--text-muted); margin-top: 16px; line-height: 1.6; }
+
+/* 滚动条 */
+main::-webkit-scrollbar { width: 4px; }
+main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span class="arc"></span>JARVIS</div>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="status-text">未连接</span>
+    </div>
+  </header>
+
+  <main id="messages">
+    <div class="empty" id="empty">
+      <div class="big">⬡</div>
+      <div>已连接到 JARVIS，开始对话吧</div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="input-row">
+      <textarea id="input" rows="1" placeholder="输入消息…  (Enter 发送 / Shift+Enter 换行)" disabled></textarea>
+      <button class="btn-abort" id="btn-abort" title="中断" style="display:none">■</button>
+      <button class="btn-send" id="btn-send" title="发送" disabled>↑</button>
+    </div>
+  </footer>
+</div>
+
+<!-- 连接遮罩：输入 token -->
+<div class="overlay" id="overlay">
+  <h1>JARVIS Bridge</h1>
+  <p>跨设备协同 · 手机继续电脑上的对话</p>
+  <input type="text" id="token-input" placeholder="输入访问 Token" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="connect-btn" id="btn-connect">连接</button>
+  <div class="hint">
+    提示：直接在电脑端打开的地址后加上 <code style="color:var(--accent)">?token=xxx</code> 可自动填充<br>
+    手机需与电脑在同一局域网
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ * JARVIS Bridge PWA —— 手机端聊天界面
+ *
+ * 通信协议：
+ *   发送: {"type": "message", "text": "..."}  /  {"type": "abort"}
+ *   接收: {"event": "assistant_text|tool_use|tool_result|info|warn|error|done", "data": ...}
+ *
+ * @author aceFelix
+ * ============================================================ */
+
+(function () {
+  'use strict';
+
+  // ---- DOM ----
+  const $ = (id) => document.getElementById(id);
+  const messagesEl = $('messages');
+  const inputEl = $('input');
+  const btnSend = $('btn-send');
+  const btnAbort = $('btn-abort');
+  const btnConnect = $('btn-connect');
+  const overlay = $('overlay');
+  const tokenInput = $('token-input');
+  const dot = $('dot');
+  const statusText = $('status-text');
+  const emptyEl = $('empty');
+
+  // ---- 状态 ----
+  let ws = null;
+  let wsPort = 8766;            // WS 端口，从 /api/config 获取
+  let streaming = false;        // 是否正在接收回复
+  let assistantBuffer = '';     // 当前助手消息的文本缓冲（流式累积）
+  let assistantBubbleEl = null; // 当前助手消息气泡 DOM
+  let thinkingEl = null;        // 当前思考链 DOM
+
+  // ---- 工具函数 ----
+
+  /** HTML 转义，防注入 */
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /** 极简 Markdown 渲染：代码块 / 行内代码 / 粗体 / 斜体 / 换行 */
+  function renderMarkdown(text) {
+    let html = escapeHtml(text);
+    // 围栏代码块 ```lang\n...```
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, function (m, lang, code) {
+      return '<pre class="block-code"><code>' + code.replace(/\n$/, '') + '</code></pre>';
+    });
+    // 行内代码
+    html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    // 粗体
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 斜体（避免和粗体冲突）
+    html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    // 换行：连续两个换行→段落，单个换行→<br>
+    html = html.split(/\n{2,}/).map(function (p) {
+      return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+    }).join('');
+    return html;
+  }
+
+  /** 滚动到底部 */
+  function scrollBottom() {
+    requestAnimationFrame(function () {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+  }
+
+  /** 设置连接状态 */
+  function setStatus(state, text) {
+    dot.className = 'dot ' + state;
+    statusText.textContent = text;
+  }
+
+  /** 隐藏空状态 */
+  function hideEmpty() {
+    if (emptyEl) emptyEl.style.display = 'none';
+  }
+
+  /** 追加一条用户消息 */
+  function appendUser(text) {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'msg user';
+    div.innerHTML = '<div class="bubble"></div>';
+    div.querySelector('.bubble').textContent = text;
+    messagesEl.appendChild(div);
+    scrollBottom();
+  }
+
+  /** 新建一条助手消息气泡（流式累积用） */
+  function newAssistantBubble() {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'msg assistant';
+    div.innerHTML = '<div class="bubble"><span class="cursor"></span></div>';
+    messagesEl.appendChild(div);
+    assistantBubbleEl = div.querySelector('.bubble');
+    assistantBuffer = '';
+    return assistantBubbleEl;
+  }
+
+  /** 把缓冲区渲染进当前助手气泡 */
+  function flushAssistant() {
+    if (!assistantBubbleEl) return;
+    // 保留光标
+    const html = renderMarkdown(assistantBuffer);
+    assistantBubbleEl.innerHTML = html + '<span class="cursor"></span>';
+    scrollBottom();
+  }
+
+  /** 结束当前助手消息（移除光标） */
+  function finalizeAssistant() {
+    if (assistantBubbleEl) {
+      assistantBubbleEl.innerHTML = renderMarkdown(assistantBuffer);
+      assistantBubbleEl = null;
+    }
+    assistantBuffer = '';
+    if (thinkingEl) { thinkingEl = null; }
+  }
+
+  /** 新建思考链气泡 */
+  function newThinkingBubble() {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'msg thinking';
+    div.innerHTML = '<div class="bubble"></div>';
+    messagesEl.appendChild(div);
+    thinkingEl = div.querySelector('.bubble');
+    return thinkingEl;
+  }
+
+  /** 追加思考链增量 */
+  function appendThinking(text) {
+    if (!thinkingEl) newThinkingBubble();
+    thinkingEl.textContent += text;
+    scrollBottom();
+  }
+
+  /** 追加工具调用卡片（默认折叠，不直接显示 JSON 输入） */
+  function appendToolUse(data) {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'tool';
+    div.dataset.toolId = data.id || '';
+    const inputStr = (() => {
+      try { return JSON.stringify(data.input, null, 2); } catch (e) { return String(data.input); }
+    })();
+    div.innerHTML =
+      '<div class="tool-head">' +
+        '<span class="tag">工具</span>' +
+        '<span class="name"></span>' +
+        '<span class="arrow">▶</span>' +
+      '</div>' +
+      '<div class="tool-body" style="display:none"></div>';
+    div.querySelector('.name').textContent = data.name || '?';
+    div.querySelector('.tool-body').textContent = '输入:\n' + inputStr;
+    // 点击展开/收起
+    div.querySelector('.tool-head').addEventListener('click', function () {
+      const body = div.querySelector('.tool-body');
+      div.classList.toggle('open');
+      body.style.display = div.classList.contains('open') ? 'block' : 'none';
+    });
+    messagesEl.appendChild(div);
+    scrollBottom();
+  }
+
+  /** 给已存在的工具调用补充结果（仍默认折叠） */
+  function appendToolResult(data) {
+    let toolEl = null;
+    if (data.id) {
+      toolEl = messagesEl.querySelector('.tool[data-tool-id="' + CSS.escape(data.id) + '"]');
+    }
+    if (!toolEl) {
+      // 没找到对应调用，直接新建一个结果卡片
+      toolEl = document.createElement('div');
+      toolEl.className = 'tool' + (data.is_error ? ' result-error' : '');
+      toolEl.innerHTML = '<div class="tool-head"><span class="tag">结果</span><span class="name"></span><span class="arrow">▶</span></div><div class="tool-body" style="display:none"></div>';
+      toolEl.querySelector('.name').textContent = data.name || '?';
+      toolEl.querySelector('.tool-head').addEventListener('click', function () {
+        const body = toolEl.querySelector('.tool-body');
+        toolEl.classList.toggle('open');
+        body.style.display = toolEl.classList.contains('open') ? 'block' : 'none';
+      });
+      messagesEl.appendChild(toolEl);
+    } else if (data.is_error) {
+      toolEl.classList.add('result-error');
+    }
+    // 追加结果到 body
+    const body = toolEl.querySelector('.tool-body');
+    const label = data.is_error ? '错误结果' : '结果';
+    const sep = body.textContent ? '\n\n' : '';
+    body.textContent = body.textContent + sep + label + ':\n' + (data.content || '');
+    // 默认保持折叠，只有错误时自动展开
+    if (data.is_error) {
+      toolEl.classList.add('open');
+      body.style.display = 'block';
+    }
+    scrollBottom();
+  }
+
+  /** 追加状态行 */
+  function appendStatus(type, text) {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'status-line ' + type;
+    const icons = { info: 'ℹ', warn: '⚠', error: '✕' };
+    div.innerHTML = '<span class="icon">' + (icons[type] || '•') + '</span><span></span>';
+    div.querySelector('span:last-child').textContent = text;
+    messagesEl.appendChild(div);
+    scrollBottom();
+  }
+
+  // ---- 输入框自适应高度 ----
+  function autoGrow() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+  }
+
+  // ---- 连接管理 ----
+
+  /** 从 /api/config 获取 WS 端口 */
+  async function fetchConfig() {
+    try {
+      const r = await fetch('/api/config');
+      const c = await r.json();
+      if (c && c.ws_port) wsPort = c.ws_port;
+    } catch (e) {
+      // 取不到就用默认 8766
+      wsPort = 8766;
+    }
+  }
+
+  /** 建立 WebSocket 连接 */
+  async function connect(token) {
+    setStatus('connecting', '连接中…');
+    await fetchConfig();
+    const host = location.hostname;
+    const url = 'ws://' + host + ':' + wsPort + '/?token=' + encodeURIComponent(token);
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      setStatus('', '连接失败');
+      return false;
+    }
+
+    ws.onopen = function () {
+      setStatus('connected', '已连接');
+      overlay.classList.add('hide');
+      inputEl.disabled = false;
+      btnSend.disabled = false;
+      inputEl.focus();
+    };
+
+    ws.onmessage = function (ev) {
+      handleEvent(ev.data);
+    };
+
+    ws.onclose = function () {
+      setStatus('', '已断开');
+      inputEl.disabled = true;
+      btnSend.disabled = true;
+      btnAbort.style.display = 'none';
+      setStreaming(false);
+      // 连接断开时显示遮罩，允许重连
+      overlay.classList.remove('hide');
+      tokenInput.value = token;
+      tokenInput.focus();
+    };
+
+    ws.onerror = function () {
+      setStatus('', '连接错误');
+    };
+    return true;
+  }
+
+  /** 处理收到的 WS 事件 */
+  function handleEvent(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    const ev = msg.event;
+    const data = msg.data;
+
+    switch (ev) {
+      case 'user_message':
+        // 手机端自己发的消息已在发送时本地显示（from=phone），忽略避免重复
+        // 电脑端发的消息（from=desktop）需要在手机端显示
+        if (data && data.from === 'desktop' && data.text) {
+          appendUser(data.text + ' [电脑]');
+        }
+        break;
+      case 'assistant_text':
+        if (!assistantBubbleEl) newAssistantBubble();
+        assistantBuffer += data;
+        flushAssistant();
+        setStreaming(true);
+        break;
+      case 'assistant_thinking':
+        appendThinking(data);
+        break;
+      case 'tool_use':
+        // 工具调用开始前，先把助手文本收尾
+        finalizeAssistant();
+        appendToolUse(data);
+        setStreaming(true);
+        break;
+      case 'tool_result':
+        appendToolResult(data);
+        break;
+      case 'info':
+        appendStatus('info', data);
+        break;
+      case 'warn':
+        appendStatus('warn', data);
+        break;
+      case 'error':
+        appendStatus('error', data);
+        break;
+      case 'ask_user':
+        appendStatus('warn', 'JARVIS 想询问：' + data + '（手机端暂不支持交互式询问）');
+        break;
+      case 'done':
+        finalizeAssistant();
+        setStreaming(false);
+        break;
+      default:
+        // 未知事件忽略
+        break;
+    }
+  }
+
+  /** 切换流式状态：控制中断按钮显示 */
+  function setStreaming(on) {
+    streaming = on;
+    btnAbort.style.display = on ? 'flex' : 'none';
+    btnSend.disabled = on ? true : (ws && ws.readyState === 1 ? false : true);
+  }
+
+  /** 发送消息 */
+  function sendMessage() {
+    const text = inputEl.value.trim();
+    if (!text || !ws || ws.readyState !== 1) return;
+    appendUser(text);
+    ws.send(JSON.stringify({ type: 'message', text: text }));
+    inputEl.value = '';
+    autoGrow();
+    setStreaming(true);
+  }
+
+  /** 中断当前回复 */
+  function abort() {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'abort' }));
+    appendStatus('info', '已发送中断信号');
+  }
+
+  // ---- 事件绑定 ----
+
+  // 连接按钮
+  btnConnect.addEventListener('click', function () {
+    const token = tokenInput.value.trim();
+    if (!token) { tokenInput.focus(); return; }
+    connect(token);
+  });
+  tokenInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') btnConnect.click();
+  });
+
+  // 发送按钮
+  btnSend.addEventListener('click', sendMessage);
+  // 中断按钮
+  btnAbort.addEventListener('click', abort);
+
+  // 输入框：Enter 发送，Shift+Enter 换行
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  inputEl.addEventListener('input', autoGrow);
+
+  // ---- 初始化：URL 参数 ?token=xxx 自动填充并连接 ----
+  (function init() {
+    const params = new URLSearchParams(location.search);
+    const t = params.get('token');
+    if (t) {
+      tokenInput.value = t;
+      connect(t);
+    } else {
+      tokenInput.focus();
+    }
+  })();
+})();
+</script>
+</body>
+</html>

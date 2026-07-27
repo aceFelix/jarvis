@@ -58,6 +58,10 @@ class ScheduleTask:
             "cancelled"=已取消。
         created_at: 创建时间（ISO 字符串）。
         note: 备注（可选，LLM 可附加说明）。
+        acknowledged: 用户是否已确认此提醒（P2-3 提醒升级机制）。
+        escalate_count: 已升级（重复通知）次数。
+        max_escalate: 最大升级次数（超过后停止重复通知，避免轰炸）。
+        last_fired_at: 上次触发时间（ISO 字符串，用于计算升级间隔）。
     """
 
     id: str = ""
@@ -67,6 +71,11 @@ class ScheduleTask:
     status: str = "pending"  # pending / fired / cancelled
     created_at: str = ""
     note: str = ""
+    # P2-3 提醒升级/确认机制
+    acknowledged: bool = False
+    escalate_count: int = 0
+    max_escalate: int = 3
+    last_fired_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -81,6 +90,10 @@ class ScheduleTask:
             status=d.get("status", "pending"),
             created_at=d.get("created_at", ""),
             note=d.get("note", ""),
+            acknowledged=d.get("acknowledged", False),
+            escalate_count=d.get("escalate_count", 0),
+            max_escalate=d.get("max_escalate", 3),
+            last_fired_at=d.get("last_fired_at", ""),
         )
 
     @property
@@ -211,6 +224,25 @@ class Scheduler:
         with self._lock:
             return list(self._tasks)
 
+    def acknowledge(self, task_id: str) -> bool:
+        """确认一个提醒任务（停止升级重复通知）。返回是否找到。"""
+        with self._lock:
+            for t in self._tasks:
+                if t.id == task_id:
+                    t.acknowledged = True
+                    self._save()
+                    return True
+        return False
+
+    def get_unacknowledged_fired(self) -> list[ScheduleTask]:
+        """获取已触发但未确认的任务（用于升级检查）。"""
+        with self._lock:
+            return [
+                t for t in self._tasks
+                if t.status == "fired" and not t.acknowledged
+                and t.escalate_count < t.max_escalate
+            ]
+
     def clear_completed(self, keep_recent: int = 50) -> int:
         """清理已触发/已取消的任务，保留最近 keep_recent 条记录。
 
@@ -270,6 +302,11 @@ class Scheduler:
             else:
                 # 一次性任务：标记已触发
                 task.status = "fired"
+            # 记录触发时间（用于升级间隔计算）
+            task.last_fired_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            # 重置确认状态（重复任务每次触发都需要重新确认）
+            task.acknowledged = False
+            task.escalate_count = 0
             self._save()
 
         # 触发回调（锁外执行，避免回调里操作任务死锁）

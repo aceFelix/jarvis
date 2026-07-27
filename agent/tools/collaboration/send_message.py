@@ -19,6 +19,8 @@ from agent.collaboration.mailbox import (
     TeammateMessage,
     broadcast_mailbox,
     make_broadcast,
+    make_permission_request,
+    make_permission_response,
     make_plain_message,
     make_shutdown_request,
     make_shutdown_response,
@@ -40,7 +42,9 @@ class SendMessageTool(Tool):
         "- broadcast: 向所有队友广播（谨慎使用，如紧急通知）\n"
         "- shutdown_request: 请求队友关闭\n"
         "- shutdown_response: 接收关机请求后的响应\n"
-        "- plan_approval_response: 审批/驳回队友的计划"
+        "- plan_approval_response: 审批/驳回队友的计划\n"
+        "- permission_request: 请求执行某操作的权限（teammate → leader）\n"
+        "- permission_response: 回复权限请求（leader → teammate）"
     )
     input_schema: JSONSchema = {
         "type": "object",
@@ -48,7 +52,7 @@ class SendMessageTool(Tool):
             "type": {
                 "type": "string",
                 "description": "消息类型",
-                "enum": ["message", "broadcast", "shutdown_request", "shutdown_response", "plan_approval_response"],
+                "enum": ["message", "broadcast", "shutdown_request", "shutdown_response", "plan_approval_response", "permission_request", "permission_response"],
                 "default": "message",
             },
             "recipient": {
@@ -65,11 +69,23 @@ class SendMessageTool(Tool):
             },
             "request_id": {
                 "type": "string",
-                "description": "请求 ID（shutdown_response/plan_approval_response 时必需）。从收到的请求消息中获取。",
+                "description": "请求 ID（shutdown_response/plan_approval_response/permission_response 时必需）。从收到的请求消息中获取。",
             },
             "approve": {
                 "type": "boolean",
-                "description": "是否批准（shutdown_response/plan_approval_response 时必需）。",
+                "description": "是否批准（shutdown_response/plan_approval_response/permission_response 时必需）。",
+            },
+            "action": {
+                "type": "string",
+                "description": "操作描述（permission_request 时用）。",
+            },
+            "tool": {
+                "type": "string",
+                "description": "涉及的工具名（permission_request 时用）。",
+            },
+            "args": {
+                "type": "object",
+                "description": "工具参数（permission_request 时用）。",
             },
         },
         "required": ["type"],
@@ -114,6 +130,16 @@ class SendMessageTool(Tool):
 
             elif msg_type == "plan_approval_response":
                 return await self._handle_plan_response(
+                    team_name, recipient, content, args
+                )
+
+            elif msg_type == "permission_request":
+                return await self._handle_permission_request(
+                    team_name, recipient, args
+                )
+
+            elif msg_type == "permission_response":
+                return await self._handle_permission_response(
                     team_name, recipient, content, args
                 )
 
@@ -238,3 +264,53 @@ class SendMessageTool(Tool):
 
         action = "审批通过" if args.get("approve", True) else "驳回"
         return ToolResult(data=f"{action}了 {recipient} 的计划")
+
+    async def _handle_permission_request(
+        self, team_name: str, recipient: str, args: dict
+    ) -> ToolResult:
+        if not recipient:
+            return ToolResult.error("recipient 不能为空")
+
+        team = self._mgr.load(team_name)
+        if team is None:
+            return ToolResult.error(f"团队 '{team_name}' 不存在")
+
+        member = team.get_member(recipient)
+        if member is None:
+            return ToolResult.error(f"成员 '{recipient}' 不存在")
+
+        action = args.get("action", "")
+        tool = args.get("tool", "")
+        tool_args = args.get("args")
+        msg = make_permission_request(
+            from_name=TEAM_LEAD_NAME,
+            action=action,
+            tool=tool,
+            args=tool_args,
+        )
+        write_mailbox(recipient, msg, team_name)
+
+        return ToolResult(
+            data=f"已向 {recipient} 发送权限请求 (request_id={msg.request_id}): {action}"
+        )
+
+    async def _handle_permission_response(
+        self, team_name: str, recipient: str, reason: str, args: dict
+    ) -> ToolResult:
+        if not recipient:
+            return ToolResult.error("recipient 不能为空")
+        request_id = args.get("request_id", "")
+        if not request_id:
+            return ToolResult.error("request_id 不能为空（从收到的 permission_request 中获取）")
+        approve = args.get("approve", True)
+
+        msg = make_permission_response(
+            from_name=TEAM_LEAD_NAME,
+            request_id=request_id,
+            approve=approve,
+            reason=reason,
+        )
+        write_mailbox(recipient, msg, team_name)
+
+        action = "批准" if approve else "拒绝"
+        return ToolResult(data=f"{action}了 {recipient} 的权限请求")

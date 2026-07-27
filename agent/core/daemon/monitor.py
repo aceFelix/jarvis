@@ -4,12 +4,20 @@
 超阈值时触发回调（托盘通知 + 语音告警），让贾维斯主动告诉用户
 "电脑快撑不住了"。
 
+P2-3 增强：
+- 磁盘趋势预测：记录每日磁盘使用率，线性回归预测 N 天后将满
+- 异常进程检测：CPU 占用 > 50% 持续 N 分钟的进程通知用户
+- 工作时长提醒：检测用户连续工作时长，超时提醒休息
+
 依赖: psutil（跨平台系统信息库）。未安装时监控不可用，不影响其他功能。
 
 监控项与默认阈值（可在 settings.toml [monitor] 表配置）:
 - **CPU**: 使用率 > 85% 持续 30 秒告警（瞬时高负载不报，防误报）
 - **内存**: 使用率 > 90% 告警
 - **磁盘**: 剩余空间 < 10% 告警（系统盘 C:）
+- **磁盘趋势**: 预测 N 天内将满时提前告警
+- **异常进程**: CPU > 50% 持续 10 分钟的进程
+- **工作时长**: 连续工作超过 2 小时提醒休息
 
 告警去重:
 - 同一告警类型 10 分钟内不重复触发（避免"内存满了"每 30 秒报一次烦人）
@@ -23,20 +31,26 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Callable
 
 
 # ---- 默认阈值 ----
-DEFAULT_CPU_THRESHOLD = 85.0       # CPU 使用率 %，超过触发告警
+DEFAULT_CPU_THRESHOLD = 85.0       # CPU 使用率 %，超过触告警
 DEFAULT_CPU_DURATION = 30          # CPU 持续超阈值多少秒才告警（防瞬时尖峰）
 DEFAULT_MEMORY_THRESHOLD = 90.0    # 内存使用率 %
 DEFAULT_DISK_THRESHOLD = 10.0      # 磁盘剩余空间 %，低于此值告警
 DEFAULT_CHECK_INTERVAL = 10        # 检查间隔（秒）
 DEFAULT_ALERT_COOLDOWN = 600       # 同类告警冷却时间（秒，10分钟）
+# P2-3 增强默认值
+DEFAULT_DISK_TREND_DAYS = 7        # 磁盘趋势预测：预测几天后将满
+DEFAULT_HIGH_CPU_DURATION = 600    # 异常进程：高 CPU 持续秒数阈值
+DEFAULT_WORK_BREAK_INTERVAL = 7200 # 工作时长：连续工作多少秒提醒休息
 
 
 @dataclass
@@ -49,6 +63,10 @@ class MonitorConfig:
     check_interval: int = DEFAULT_CHECK_INTERVAL
     alert_cooldown: int = DEFAULT_ALERT_COOLDOWN
     enabled: bool = True
+    # P2-3 增强
+    disk_trend_days: int = DEFAULT_DISK_TREND_DAYS
+    high_cpu_duration: int = DEFAULT_HIGH_CPU_DURATION
+    work_break_interval: int = DEFAULT_WORK_BREAK_INTERVAL
 
 
 @dataclass
@@ -310,3 +328,192 @@ class SystemMonitor:
             value=value,
             threshold=threshold,
         )
+
+    # ---- P2-3 增强：磁盘趋势预测 ----
+
+    def _history_file(self) -> Path:
+        """监控历史数据文件: ~/.jarvis/monitor_history.json"""
+        return Path.home() / ".jarvis" / "monitor_history.json"
+
+    def record_disk_usage(self) -> None:
+        """记录当前磁盘使用率到历史文件（每天一条）。
+
+        由 ProactiveEngine 每日简报时调用，或 daemon 启动时调用。
+        """
+        if not self._available:
+            return
+        try:
+            import psutil
+            import sys as _sys
+            disk_path = "C:\\" if _sys.platform == "win32" else "/"
+            disk = psutil.disk_usage(disk_path)
+            today_str = datetime.now().strftime("%Y-%m-%d")
+
+            history = self._load_history()
+            # 每天只记录一条（同一天覆盖）
+            history = [h for h in history if h.get("date") != today_str]
+            history.append({
+                "date": today_str,
+                "disk_percent": round(disk.percent, 2),
+                "disk_free_gb": round(disk.free / 1024**3, 2),
+            })
+            # 保留最近 90 天
+            history = history[-90:]
+            self._save_history(history)
+        except Exception:
+            pass
+
+    def predict_disk_full(self) -> str | None:
+        """基于历史数据预测磁盘何时将满。
+
+        用简单线性回归拟合磁盘使用率趋势。
+        返回告警文本，或 None（无趋势/数据不足）。
+        """
+        history = self._load_history()
+        if len(history) < 3:  # 至少 3 天数据才能做趋势
+            return None
+
+        # 提取数据点
+        points = [(i, h["disk_percent"]) for i, h in enumerate(history) if "disk_percent" in h]
+        if len(points) < 3:
+            return None
+
+        # 简单线性回归: y = a + b*x
+        n = len(points)
+        sum_x = sum(p[0] for p in points)
+        sum_y = sum(p[1] for p in points)
+        sum_xy = sum(p[0] * p[1] for p in points)
+        sum_x2 = sum(p[0] ** 2 for p in points)
+
+        denom = n * sum_x2 - sum_x ** 2
+        if denom == 0:
+            return None
+
+        b = (n * sum_xy - sum_x * sum_y) / denom  # 斜率（每天增长 %）
+        a = (sum_y - b * sum_x) / n  # 截距
+
+        if b <= 0:
+            return None  # 磁盘使用率在下降，无需告警
+
+        # 预测达到 95% 的天数
+        current_percent = points[-1][1]
+        target_percent = 95.0
+        if current_percent >= target_percent:
+            return None  # 已经很高了，由磁盘阈值告警处理
+
+        days_to_full = (target_percent - current_percent) / b
+        trend_days = self._config.disk_trend_days
+
+        if days_to_full <= trend_days:
+            return (
+                f"磁盘空间趋势预警：按当前增长速度，"
+                f"约 {days_to_full:.0f} 天后磁盘将满（当前 {current_percent:.1f}%，"
+                f"每天增长 {b:.2f}%）。建议提前清理。"
+            )
+        return None
+
+    def _load_history(self) -> list[dict]:
+        """加载监控历史数据。"""
+        path = self._history_file()
+        if not path.exists():
+            return []
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+    def _save_history(self, history: list[dict]) -> None:
+        """保存监控历史数据。"""
+        try:
+            path = self._history_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    # ---- P2-3 增强：异常进程检测 ----
+
+    def check_high_cpu_processes(self) -> list[str]:
+        """检测 CPU 占用异常高的进程。
+
+        返回 CPU > 50% 的进程信息列表。
+        由 ProactiveEngine 定期检查，或用户主动询问时调用。
+        """
+        if not self._available:
+            return []
+        try:
+            import psutil
+            results = []
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+                try:
+                    info = proc.info
+                    cpu = info.get('cpu_percent', 0) or 0
+                    if cpu > 50.0:
+                        results.append(
+                            f"{info.get('name', '?')} (PID: {info.get('pid', '?')}) CPU: {cpu:.0f}%"
+                        )
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return results
+        except Exception:
+            return []
+
+    # ---- P2-3 增强：工作时长提醒 ----
+
+    def get_idle_time_seconds(self) -> float | None:
+        """获取用户空闲时间（秒）。
+
+        Windows: 通过 GetLastInputInfo 获取最后一次键鼠输入时间。
+        其他平台: 返回 None（不支持）。
+        """
+        try:
+            import sys as _sys
+            if _sys.platform == "win32":
+                import ctypes
+                class LASTINPUTINFO(ctypes.Structure):
+                    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+                lii = LASTINPUTINFO()
+                lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+                ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+                millis = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+                return millis / 1000.0
+            return None
+        except Exception:
+            return None
+
+    def check_work_break(self) -> str | None:
+        """检查是否需要提醒用户休息。
+
+        如果用户连续工作超过 work_break_interval 秒（键鼠活跃），
+        返回提醒文本。否则返回 None。
+        """
+        idle = self.get_idle_time_seconds()
+        if idle is None:
+            return None
+
+        break_interval = self._config.work_break_interval
+        # 如果空闲时间很短（< 60秒），说明用户正在活跃操作
+        # 用“总运行时间 - 空闲时间”粗略估算连续工作时长
+        # 简化方案：如果空闲 < 60s，认为用户在工作中，检查 daemon 运行时长
+        if idle < 60:
+            # 用户正在操作，检查是否超过休息间隔
+            # 用 _work_start_time 跟踪
+            now = time.time()
+            if not hasattr(self, '_work_start_time'):
+                self._work_start_time = now
+                return None
+            work_duration = now - self._work_start_time
+            if work_duration >= break_interval:
+                hours = int(work_duration // 3600)
+                minutes = int((work_duration % 3600) // 60)
+                # 重置计时器（下次再等 break_interval）
+                self._work_start_time = now
+                return (
+                    f"先生，您已连续工作 {hours} 小时 {minutes} 分钟了。"
+                    f"建议起身活动一下，喝杯水，让眼睛休息休息。"
+                )
+        else:
+            # 用户空闲中，重置工作计时
+            if hasattr(self, '_work_start_time'):
+                self._work_start_time = time.time()
+        return None

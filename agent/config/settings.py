@@ -104,8 +104,13 @@ class Settings:
     realtime_voice: str = "longanqian"
     realtime_talk_auto_start: bool = False
 
+    # P3-1 跨设备协同（手机通过 PWA 连接）
+    bridge_http_port: int = 8765
+    bridge_ws_port: int = 8766
+    bridge_token: str = ""
+
     # UI（启动动画）
-    # 启动时播放 JARVIS 蓝色方舟反应炉粒子动画（致敬 Claude Code 启动动画）。
+    # 启动时播放 JARVIS 蓝色方舟反应炉粒子动画。
     # 终端太窄/太矮/非 TTY 时自动跳过，回退到简单横幅。--no-boot 也可关闭。
     boot_animation: bool = True
 
@@ -130,11 +135,19 @@ class Settings:
     # 启动时连接 ~/.jarvis/mcp.json 配置的 MCP server，注册其工具
     enable_mcp: bool = True
 
+    # 工具错误自愈（P0：维度 5 工具执行稳定性）
+    # 工具调用失败时自动分类、重试、降级、询问用户，而不是直接抛错给 LLM。
+    enable_tool_self_healing: bool = True  # 总开关
+    tool_retry_max: int = 3                # 默认最大重试次数
+    tool_retry_backoff_base: float = 1.0   # 指数退避基数（秒）
+    tool_retry_backoff_max: float = 30.0   # 最大退避时间（秒）
+
     # 插件市场（阶段五第五刀）
     # /plugin search/install/uninstall 管理插件。安装的插件 skills
     # 写入 ~/.jarvis/skills/，MCP 配置合并到 ~/.jarvis/mcp.json。
     enable_plugins: bool = True
-    plugin_marketplace: str = ""
+    plugin_marketplace: str = ""           # 远程 marketplace.json URL
+    plugin_market_local: str = ""          # 本地插件市场目录（绝对或相对路径）
 
     # CLI-Anything 自定义市场
     # 自定义 harness 市场源（优先远程，回退本地）。
@@ -162,8 +175,15 @@ class Settings:
 
     # 常驻模式（阶段五第一刀）
     # jarvis --daemon 后台常驻，热键/托盘唤起
-    daemon_hotkey: str = "ctrl+shift+j"   # 全局热键（keyboard 库格式）
-    daemon_tray: bool = True               # 是否启用系统托盘图标
+    daemon_hotkey: str = "ctrl+shift+j"        # 全局热键（keyboard 库格式）
+    daemon_hotkey_native: bool = True            # Windows 优先使用 RegisterHotKey（更快）
+    daemon_hotkey_debounce_ms: int = 200         # 热键去抖毫秒，防双击触发
+    daemon_text_terminal_warm: bool = False      # 预启动隐藏文本终端（极速唤起，但常驻内存）
+    daemon_tray: bool = True                     # 是否启用系统托盘图标
+
+    # 快速启动模式（P1-2 热键响应优化）
+    # --quick 时启用，用于跳过可选初始化、延迟加载 harness
+    quick_start: bool = False
 
     # 主动感知（阶段五第三刀）
     # 系统资源监控：CPU/内存/磁盘超阈值时托盘通知+语音告警。
@@ -174,6 +194,38 @@ class Settings:
     monitor_disk_threshold: float = 10.0   # 磁盘剩余 %，低于告警
     monitor_check_interval: int = 10       # 检查间隔（秒）
     monitor_alert_cooldown: int = 600      # 同类告警冷却（秒）
+    # P2-3 监控增强
+    monitor_disk_trend_days: int = 7       # 磁盘趋势预测：预测几天后将满
+    monitor_high_cpu_duration: int = 600   # 异常进程：高 CPU 持续秒数阈值
+    monitor_work_break_interval: int = 7200  # 工作时长：连续工作多少秒提醒休息
+
+    # 主动提醒系统（P2-3）
+    # 每日简报：每天定时播报今日概览（提醒/节假日/系统状态/截止日期/日程）
+    briefing_enabled: bool = True
+    briefing_time: str = "08:30"           # 每日简报时间（HH:MM）
+    # 截止日期追踪：注册 deadline，分级提醒（7/3/1/0 天 + 逾期每天）
+    deadline_enabled: bool = True
+    deadline_check_time: str = "09:00"     # 每日检查截止日期的时间
+    # 日历集成：读取 Outlook/ICS 日历事件，提前提醒
+    calendar_enabled: bool = False
+    calendar_backend: str = "auto"         # auto / outlook / ics
+    calendar_ics_path: str = ""            # 本地 .ics 文件路径
+    calendar_ics_url: str = ""             # 远程 .ics 订阅 URL
+    calendar_remind_minutes_before: int = 30  # 事件前多少分钟提醒
+
+    # 安全沙箱（P3-8）
+    # 高风险操作在隔离环境中运行，防止误操作破坏系统。
+    # 基于 Windows Job Object 限制进程资源（内存/CPU/进程数）。
+    sandbox_enabled: bool = False
+    sandbox_max_memory_mb: int = 512       # 沙箱内最大内存（MB）
+    sandbox_max_cpu_seconds: int = 60      # 沙箱内最大 CPU 时间（秒）
+    sandbox_max_processes: int = 10        # 沙箱内最大子进程数
+    sandbox_timeout: int = 120             # 沙箱命令总超时（秒）
+    sandbox_block_network: bool = False    # 是否阻断沙箱内网络访问
+    sandbox_auto_allow_medium: bool = True # 沙箱开启时自动放行中等风险命令
+    sandbox_excluded_commands: list = field(default_factory=list)  # 不走沙箱的命令
+    sandbox_audit: bool = True             # 是否记录沙箱审计日志
+    sandbox_max_snapshots: int = 20        # 文件快照最大保留数
 
     def with_overrides(self, **kwargs: object) -> "Settings":
         """返回一个用 kwargs 覆盖部分字段的新 Settings（None 值不覆盖）。"""
@@ -243,6 +295,15 @@ def load_settings(workdir: str | None = None) -> Settings:
                 s.permissions_file = str(candidate)
                 break
 
+    # 6. 解析本地市场目录的相对路径
+    # plugin_market_local / harness_market_local 允许相对于 workdir 或 jarvis 项目根目录
+    for field_name in ("plugin_market_local", "harness_market_local"):
+        raw = getattr(s, field_name, "")
+        if raw:
+            resolved = _resolve_local_path(raw, cwd, _pkg_root)
+            if resolved:
+                s = s.with_overrides(**{field_name: str(resolved)})
+
     # last_model 是用户上次手动切换的模型，优先级高于 config 文件中的 model。
     # 若 last_model 是自定义模型，同时恢复其 base_url/api_key/provider_type，
     # 这样启动时 _build_provider 构造的就是自定义模型的 provider，
@@ -276,6 +337,29 @@ def load_settings(workdir: str | None = None) -> Settings:
     return s
 
 
+def _resolve_local_path(raw: str, cwd: Path, pkg_root: Path) -> Path | None:
+    """解析本地市场目录路径。
+
+    优先按原样（绝对路径直接使用），否则相对于 cwd 解析；
+    若 cwd 解析后的路径不存在，则回退到相对于 jarvis 项目根目录解析。
+
+    Returns:
+        解析后的绝对路径；若均不存在则返回 cwd 下的解析结果（让用户看到原路径）。
+
+    @author aceFelix
+    """
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    candidate = (cwd / raw).resolve()
+    if candidate.exists():
+        return candidate
+    fallback = (pkg_root / raw).resolve()
+    if fallback.exists():
+        return fallback
+    return candidate
+
+
 def _apply_toml(s: Settings, data: dict) -> Settings:
     """把 TOML 顶层字段映射到 Settings。
 
@@ -296,17 +380,21 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "voice_max_seconds",
         "realtime_ws_url", "realtime_model", "realtime_voice",
         "realtime_talk_auto_start",
+        "bridge_http_port", "bridge_ws_port", "bridge_token",
         "boot_animation",
         "context_compaction", "compaction_threshold", "keep_recent_messages",
         "auto_resume_session", "long_term_memory",
         "enable_skills",
         "enable_mcp",
-        "enable_plugins", "plugin_marketplace",
+        "enable_plugins", "plugin_marketplace", "plugin_market_local",
         "harness_market_url", "harness_market_local",
+        "enable_tool_self_healing", "tool_retry_max",
+        "tool_retry_backoff_base", "tool_retry_backoff_max",
         "enable_lsp",
         "enable_thinking", "thinking_budget",
         "vendor_fallback",
-        "daemon_hotkey", "daemon_tray",
+        "daemon_hotkey", "daemon_hotkey_native", "daemon_hotkey_debounce_ms",
+        "daemon_text_terminal_warm", "daemon_tray",
     ):
         if key in data:
             updates[key] = data[key]
@@ -356,6 +444,16 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in rt_table:
                 updates[field] = rt_table[sub_key]
+    # [bridge] 表 → bridge_* 字段（P3-1 跨设备协同）
+    bridge_table = data.get("bridge", {})
+    if isinstance(bridge_table, dict):
+        for sub_key, field in (
+            ("http_port", "bridge_http_port"),
+            ("ws_port", "bridge_ws_port"),
+            ("token", "bridge_token"),
+        ):
+            if sub_key in bridge_table:
+                updates[field] = bridge_table[sub_key]
     # [ui] 表 → UI 字段
     ui_table = data.get("ui", {})
     if isinstance(ui_table, dict):
@@ -405,6 +503,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         for sub_key, field in (
             ("enable", "enable_plugins"),
             ("marketplace_url", "plugin_marketplace"),
+            ("marketplace_local", "plugin_market_local"),
         ):
             if sub_key in plugins_table:
                 updates[field] = plugins_table[sub_key]
@@ -448,7 +547,13 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
     if isinstance(daemon_table, dict):
         for sub_key, field in (
             ("hotkey", "daemon_hotkey"),
+            ("hotkey_native", "daemon_hotkey_native"),
+            ("hotkey_debounce_ms", "daemon_hotkey_debounce_ms"),
+            ("text_terminal_warm", "daemon_text_terminal_warm"),
             ("tray", "daemon_tray"),
+            # P2-3 每日简报
+            ("briefing_enabled", "briefing_enabled"),
+            ("briefing_time", "briefing_time"),
         ):
             if sub_key in daemon_table:
                 updates[field] = daemon_table[sub_key]
@@ -463,9 +568,53 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("disk_threshold", "monitor_disk_threshold"),
             ("check_interval", "monitor_check_interval"),
             ("alert_cooldown", "monitor_alert_cooldown"),
+            # P2-3 增强
+            ("disk_trend_days", "monitor_disk_trend_days"),
+            ("high_cpu_duration", "monitor_high_cpu_duration"),
+            ("work_break_interval", "monitor_work_break_interval"),
         ):
             if sub_key in monitor_table:
                 updates[field] = monitor_table[sub_key]
+    # [deadline] 表 → 截止日期追踪字段
+    deadline_table = data.get("deadline", {})
+    if isinstance(deadline_table, dict):
+        for sub_key, field in (
+            ("enabled", "deadline_enabled"),
+            ("check_time", "deadline_check_time"),
+        ):
+            if sub_key in deadline_table:
+                updates[field] = deadline_table[sub_key]
+    # [calendar] 表 → 日历集成字段
+    calendar_table = data.get("calendar", {})
+    if isinstance(calendar_table, dict):
+        for sub_key, field in (
+            ("enabled", "calendar_enabled"),
+            ("backend", "calendar_backend"),
+            ("ics_path", "calendar_ics_path"),
+            ("ics_url", "calendar_ics_url"),
+            ("remind_minutes_before", "calendar_remind_minutes_before"),
+        ):
+            if sub_key in calendar_table:
+                updates[field] = calendar_table[sub_key]
+    # [sandbox] 表 → 安全沙箱字段（P3-8）
+    sandbox_table = data.get("sandbox", {})
+    if isinstance(sandbox_table, dict):
+        for sub_key, field in (
+            ("enabled", "sandbox_enabled"),
+            ("max_memory_mb", "sandbox_max_memory_mb"),
+            ("max_cpu_seconds", "sandbox_max_cpu_seconds"),
+            ("max_processes", "sandbox_max_processes"),
+            ("timeout", "sandbox_timeout"),
+            ("block_network", "sandbox_block_network"),
+            ("auto_allow_medium", "sandbox_auto_allow_medium"),
+            ("audit", "sandbox_audit"),
+            ("max_snapshots", "sandbox_max_snapshots"),
+        ):
+            if sub_key in sandbox_table:
+                updates[field] = sandbox_table[sub_key]
+        # excluded_commands 是数组
+        if "excluded_commands" in sandbox_table:
+            updates["sandbox_excluded_commands"] = list(sandbox_table["excluded_commands"])
     # [llm] 表 → models 列表 + 自定义模型配置
     llm_table = data.get("llm", {})
     if isinstance(llm_table, dict):

@@ -87,50 +87,42 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 - **FileWrite**: 整文件写入。仅用于新建文件或完全重写。
   **大文件策略**：如果内容超过 300 行，先写文件骨架（HTML 框架 + CSS），
   再用 FileEdit 分段追加 body 内容。一次性写超长内容会被 max_tokens 截断导致失败。
-  **路径格式**：用相对路径（如 `hangzhou.html`）或完整 Windows 路径（`E:\\...`），
-  不要用 Git Bash 路径（`/e/...`）。
 - **Glob**: 按通配符找文件（如 `**/*.py`）。
 - **Grep**: 在文件内容里搜正则。
 - **LSP**: 代码智能。跳转定义/查引用/类型信息/文档符号/调用层次。写代码前先用 documentSymbol 了解结构，修改前用 findReferences 看影响范围，不确定类型时用 hover。
-- **Bash**: 执行 shell 命令（Windows 上走 Git Bash，bash -c）。只读命令自动放行，写类命令会询问用户。
-  支持 `cwd` 参数指定工作目录（如 `"E:\\\\project"`）。
 
-  **路径铁律（Windows 上 Bash 已切换为 Git Bash，以下规则严格执行）**：
-  - 命令中必须用**正斜杠**路径：`/e/J.A.R.V.I.S_Work/...`（不要用反斜杠）
-  - 最佳实践：用 `cd <相对路径> && <命令>` 结构，避免绝对路径
-    ✅ `cd jarvis-website && npm install`
-    ✅ `ls /e/J.A.R.V.I.S_Work/jarvis-work/`
-    ❌ `ls E:\\J.A.R.V.I.S_Work\\...`
-    ❌ `dir E:\\...`
-  - 不要用 Git Bash 不认识的 Windows 命令：用 `ls` 不用 `dir`，用 `cat` 不用 `type`
-  - mkdir 创建多级目录：`mkdir -p /e/path/to/dir`（Unix 风格）
+  **路径格式铁律**（不同工具用不同路径格式）：
+  - **Bash 工具**：用 Git Bash 路径 `/e/...`（bash -c 执行）
+  - **FileRead / FileEdit / FileWrite / Glob / Grep**：用 Windows 路径 `E:\\...` 或相对路径
+  - 不要混用：Glob 传 `/e/...` 会返回空结果，FileEdit 传 `/e/...` 会报文件不存在
+  - ✅ `FileRead("E:\\project\\src\\App.jsx")`
+  - ✅ `FileRead("src/App.jsx")`（相对 workdir）
+  - ❌ `FileRead("/e/project/src/App.jsx")`（Git Bash 路径，文件工具不认）
 
-  **交互式 CLI 命令（npm create / npx create-* / vue create 等）**：
-  这些命令会弹交互提示导致卡死。必须加非交互标志：
-  - npm create / npx create-vite → `npx create-vite@latest <name> --template react`（不要漏 `--template`）
-  - 如果已经卡住了：不要重试同一命令，直接手动创建目录和文件（FileWrite）
-  - npm init / npm create 的其他变体 → 加 `--yes` 或 `-y`
+- **Bash**: 执行 shell 命令。只读命令自动放行，写类命令会询问用户。
+  支持 `cwd` 参数指定工作目录。平台相关的 Shell 规范和路径规则见下方「平台操作规范」。
 
-  **PowerShell 输出捕获**：
-  不要用 `$output = <cmd> 2>&1` 这种变量赋值来捕获输出——会吞输出。直接写命令：
-  ✅ `powershell -Command "npm install 2>&1"`
-  ❌ `powershell -Command "$output = npm install 2>&1; Write-Output $output"`
+# 开发服务器
 
-  **PowerShell 变量防吞**：
-  PowerShell 命令里的 `$` 变量会被 bash 当作 bash 变量展开。必须用单引号包裹整个 PowerShell 命令：
-  ✅ `powershell -Command '$sh = New-Object -ComObject WScript.Shell; $sh.CreateShortcut("...").TargetPath'`
-  ❌ `powershell -Command "$sh = New-Object ..."`  ← `$sh` 被 bash 吞掉变成空字符串
+用户说"帮我启动这个项目""跑一下前端""启动开发服务器"时，**直接调用 DevServer 工具**，不要先用 Glob/FileRead 查看项目结构——DevServer 内部已自动识别项目类型。
 
-  **截图纪律**：
-  - 不要在任务开始时"先看看屏幕"——直接用工具完成任务
-  - 只在需要视觉验证操作结果时才截图（如：点击按钮后确认弹窗、打开应用后确认窗口）
-  - 连续操作中间不需要反复截图
+- **DevServer**: 自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目，处理端口占用、后台进程、日志输出，返回访问 URL。
+  - `project_dir`: 项目目录（相对或绝对路径，默认当前目录）
+  - `port`: 指定端口（可选，被占用时自动递增）
+  - `command`: 自定义启动命令（可选）
+  - 返回: project_type / pid / port / url / log_file
+- 只有 DevServer 识别失败时，才改用 Bash 启动。
 
-  **CLI-Anything harness 路径**：
-  harness 工具的 `target`/`output_path` 等参数是 Windows 路径，不要用 Git Bash 格式（`/e/...`）。
-  runner 会自动转换，但最好直接传 Windows 格式：
-  ✅ `E:\\2.MyProjects\\...`
-  ❌ `/e/2.MyProjects/...`
+  **HMR 热更新规则**（重要）：
+  - Vite / Next.js / Webpack dev server 都有 HMR（热模块替换）
+  - **文件保存后浏览器自动刷新**，不需要手动重启 dev server 或刷新浏览器
+  - 修改代码后直接告诉用户"已修改，浏览器会自动刷新"，不要尝试手动刷新
+  - 只有修改配置文件（vite.config.js / tailwind.config.js 等）时才需要重启 dev server
+
+  **网页验证规则**：
+  - 验证网页效果用内置的 `BrowserNavigate` + `BrowserScreenshot` 工具
+  - 不要用外部 CLI（如 `playwright-cli`）——没装且不必要
+  - 如果用户已经打开了浏览器在看页面，不需要再截图验证——直接相信 HMR 已刷新
 
 # MCP 外部服务工具
 
@@ -149,26 +141,35 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 
 # 电脑操作
 
-你配备了鼠标、键盘、屏幕、窗口工具，可以直接操作用户的电脑 GUI。这是强大但危险的能力，务必遵守:
+你配备了鼠标、键盘、屏幕、窗口、视觉定位工具，可以直接操作用户的电脑 GUI。这是强大但危险的能力，务必遵守:
 
 1. **先看再动**: 操作前先 ScreenShot 看清屏幕，或 WindowList 了解窗口布局，不要盲点坐标。
 2. **坐标原点左上角**: 屏幕坐标 (0,0) 在左上角，x 向右增，y 向下增。用 GetScreenSize 确认范围。
 3. **操作前说明**: 每次点击/输入/关窗口前，先用一句话说明你要做什么、为什么，让用户确认时心里有数。
 4. **小步验证**: 完成一步就截图验证结果，不要连续盲操作。
 5. **中文输入**: TypeText 对中文走剪贴板粘贴，会覆盖原剪贴板内容，操作前提醒用户。
+6. **多窗口协调**: 操作某个应用窗口时，先用 WindowFocus 激活它，再用 WindowRect 获取窗口绝对坐标，
+   然后用 WindowClick（窗口相对坐标）或 ScreenShot(region=窗口区域) 操作，避免窗口移动导致坐标偏移。
+7. **等待加载**: 点击后如果界面还没变化，不要立刻再点，先用 WaitFor 等按钮/弹窗出现，或等 ScreenShot 确认状态。
+8. **视觉定位优先**: 图标/按钮位置不固定时，优先用 VisualClick 传入目标小图定位点击，而不是写死坐标。
 
 电脑操作工具（只读的自动放行，会改状态的一律需用户确认）:
 - **GetScreenSize**: 查屏幕分辨率。
 - **ScreenShot**: 截图并直接回传给你（多模态），你能真正看到屏幕内容，据此判断该点哪、输入啥。
 - **WindowList**: 列出所有窗口（标题/位置/状态）。
-- **MouseClick**: 点击坐标（可左/右/中键，可双击）。
+- **WindowRect**: 获取窗口屏幕绝对坐标和尺寸。
+- **MouseClick**: 点击屏幕绝对坐标（可左/右/中键，可双击）。
+- **MouseDrag**: 从一个坐标拖拽到另一个坐标（文件、滑块、调整大小）。
 - **MouseMove**: 移动光标（不点击）。
 - **MouseScroll**: 滚轮（正向上，负向下）。
 - **TypeText**: 输入文字（ASCII 打字，中文粘贴）。
-- **KeyTap**: 按键/组合键（如 ["ctrl","s"]）。
+- **KeyTap**: 按键/组合键（如 ["ctrl","s"]）。右键菜单弹出后可用方向键 + Enter 选择。
 - **WindowFocus**: 按标题激活窗口。
 - **WindowClose**: 按标题关闭窗口。
 - **WindowMove**: 移动/调整窗口。
+- **WindowClick**: 在指定窗口内部按相对坐标点击（窗口移动后仍准确）。
+- **WaitFor**: 等待屏幕/区域出现目标图片或画面变化。
+- **VisualClick**: 用模板匹配找图标/按钮并自动点击。
 
 # 浏览器操作
 
@@ -419,13 +420,182 @@ _NO_THINKING_SECTION = """\
 
 
 def _env_section(workdir: str) -> str:
-    """环境信息小节。"""
+    """环境信息小节。
+
+    时间戳精度降到日期级别，避免每秒变化破坏跨会话的 system prompt 前缀缓存。
+    """
     return (
         f"# 环境\n\n"
         f"- 操作系统: {platform.system()} {platform.release()} ({platform.machine()})\n"
         f"- 工作目录: {Path(workdir).resolve()}\n"
-        f"- 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"- 当前日期: {datetime.now().strftime('%Y-%m-%d')}\n"
     )
+
+
+def _platform_section() -> str:
+    """根据 platform.system() 动态生成平台操作规范。
+
+    不同平台的 Shell、路径、权限模型差异很大，
+    动态生成可避免向 macOS/Linux 用户发送 Windows 规则（反之亦然）。
+    """
+    system = platform.system()  # Windows / Darwin / Linux
+
+    if system == "Windows":
+        return _PLATFORM_WINDOWS
+    elif system == "Darwin":
+        return _PLATFORM_MACOS
+    else:
+        return _PLATFORM_LINUX
+
+
+_PLATFORM_WINDOWS = """\
+# 平台操作规范（Windows）
+
+## Shell 与路径
+
+Bash 工具在 Windows 上使用 **Git Bash**（bash -c），支持 Unix 风格命令。
+
+**路径铁律**：
+- 命令中必须用**正斜杠**路径：`/e/J.A.R.V.I.S_Work/...`（不要用反斜杠）
+- 最佳实践：用 `cd <相对路径> && <命令>` 结构，避免绝对路径
+  ✅ `cd jarvis-website && npm install`
+  ✅ `ls /e/J.A.R.V.I.S_Work/jarvis-work/`
+  ❌ `ls E:\\J.A.R.V.I.S_Work\\...`
+  ❌ `dir E:\\...`
+- 不要用 Git Bash 不认识的 Windows 命令：用 `ls` 不用 `dir`，用 `cat` 不用 `type`
+- mkdir 创建多级目录：`mkdir -p /e/path/to/dir`（Unix 风格）
+
+**交互式 CLI 命令**（npm create / npx create-* / vue create 等）：
+这些命令会弹交互提示导致卡死。必须加非交互标志：
+- npm create / npx create-vite → `npx create-vite@latest <name> --template react`
+- 如果已经卡住了：不要重试，直接手动创建目录和文件（FileWrite）
+- npm init / npm create 的其他变体 → 加 `--yes` 或 `-y`
+
+**PowerShell 输出捕获**：
+不要用 `$output = <cmd> 2>&1` 变量赋值捕获输出——会吞输出。直接写命令：
+✅ `powershell -Command "npm install 2>&1"`
+❌ `powershell -Command "$output = npm install 2>&1; Write-Output $output"`
+
+**PowerShell 变量防吞**：
+PowerShell 命令里的 `$` 变量会被 bash 当作 bash 变量展开。必须用单引号包裹：
+✅ `powershell -Command '$sh = New-Object -ComObject WScript.Shell; ...'`
+❌ `powershell -Command "$sh = New-Object ..."`
+
+**CLI-Anything harness 路径**：
+harness 工具的 `target`/`output_path` 等参数用 Windows 路径格式：
+✅ `E:\\2.MyProjects\\...`
+❌ `/e/2.MyProjects/...`
+
+## 截图纪律
+
+- 不要在任务开始时"先看看屏幕"——直接用工具完成任务
+- 只在需要视觉验证操作结果时才截图
+- 连续操作中间不需要反复截图
+
+## GUI 操作注意事项
+
+- pyautogui / pygetwindow 在 Windows 上开箱即用，无额外权限要求
+- 全局热键基于 keyboard 库，部分热键需管理员权限
+- 系统托盘基于 pystray + pywin32
+"""
+
+_PLATFORM_MACOS = """\
+# 平台操作规范（macOS）
+
+## Shell 与路径
+
+Bash 工具直接使用系统 `/bin/bash`（或 `/bin/zsh`），原生 Unix 环境。
+
+**路径规则**：
+- 使用标准 Unix 路径：`/Users/<username>/Projects/...`
+- 支持 `~` 家目录缩写
+- 最佳实践：用 `cd <相对路径> && <命令>` 结构
+  ✅ `cd ~/Projects/my-app && npm install`
+  ✅ `ls /Users/ace/Documents/`
+- mkdir 创建多级目录：`mkdir -p /path/to/dir`
+
+**交互式 CLI 命令**（npm create / npx create-* / vue create 等）：
+这些命令会弹交互提示导致卡死。必须加非交互标志：
+- npm create / npx create-vite → `npx create-vite@latest <name> --template react`
+- 如果已经卡住了：不要重试，直接手动创建目录和文件（FileWrite）
+- npm init / npm create 的其他变体 → 加 `--yes` 或 `-y`
+
+## 截图纪律
+
+- 不要在任务开始时"先看看屏幕"——直接用工具完成任务
+- 只在需要视觉验证操作结果时才截图
+- 连续操作中间不需要反复截图
+
+## GUI 操作注意事项（重要）
+
+macOS 对 GUI 自动化有严格的权限控制：
+
+1. **辅助功能权限**：pyautogui 控制鼠标/键盘需要「系统设置 → 隐私与安全性 → 辅助功能」中授权终端应用（Terminal.app / iTerm2）。
+   未授权时 pyautogui 会静默失败或报错。
+2. **屏幕录制权限**：截图（ScreenShot）需要「系统设置 → 隐私与安全性 → 屏幕录制」中授权。
+   未授权时截图返回空白/黑屏。
+3. **pygetwindow**：窗口管理在 macOS 上功能有限（无法获取所有窗口属性），部分操作可能失败。
+4. **全局热键**：基于 pynput 库，需要辅助功能权限。
+5. **系统托盘**：基于 pystray（macOS 使用 AppKit 后端），正常工作。
+
+如果 GUI 操作失败，先提示用户检查上述权限设置。
+
+## macOS 特有命令
+
+- 打开应用：`open -a "Application Name"`
+- 打开文件：`open /path/to/file`
+- 剪贴板：`pbcopy` / `pbpaste`
+- 通知：`osascript -e 'display notification "msg" with title "title"'`
+- 查找进程：`pgrep -f "process_name"`
+"""
+
+_PLATFORM_LINUX = """\
+# 平台操作规范（Linux）
+
+## Shell 与路径
+
+Bash 工具直接使用系统 `/bin/bash`，原生 Unix 环境。
+
+**路径规则**：
+- 使用标准 Unix 路径：`/home/<username>/projects/...`
+- 支持 `~` 家目录缩写
+- 最佳实践：用 `cd <相对路径> && <命令>` 结构
+  ✅ `cd ~/projects/my-app && npm install`
+  ✅ `ls /home/ace/Documents/`
+- mkdir 创建多级目录：`mkdir -p /path/to/dir`
+
+**交互式 CLI 命令**（npm create / npx create-* / vue create 等）：
+这些命令会弹交互提示导致卡死。必须加非交互标志：
+- npm create / npx create-vite → `npx create-vite@latest <name> --template react`
+- 如果已经卡住了：不要重试，直接手动创建目录和文件（FileWrite）
+- npm init / npm create 的其他变体 → 加 `--yes` 或 `-y`
+
+## 截图纪律
+
+- 不要在任务开始时"先看看屏幕"——直接用工具完成任务
+- 只在需要视觉验证操作结果时才截图
+- 连续操作中间不需要反复截图
+
+## GUI 操作注意事项
+
+Linux 上 GUI 自动化依赖 X11/Wayland：
+
+1. **X11 vs Wayland**：pyautogui 仅支持 X11。Wayland 会话下需切换到 X11 或使用 XWayland。
+2. **DISPLAY 环境变量**：无头服务器（无 DISPLAY）时 GUI 工具不可用。
+3. **pygetwindow**：Linux 上支持有限，需要 X11 + python-xlib。
+4. **全局热键**：基于 keyboard 库，需要 root 权限或 input 组权限。
+5. **系统托盘**：需要 AppIndicator（部分桌面环境不支持）。
+
+如果 GUI 操作失败，可能是无头环境或 Wayland 会话，建议用命令行替代。
+
+## Linux 特有命令
+
+- 包管理：`apt`/`dnf`/`pacman`（视发行版）
+- 服务管理：`systemctl start/stop/status <service>`
+- 剪贴板：`xclip` / `xsel`（X11）或 `wl-copy`/`wl-paste`（Wayland）
+- 通知：`notify-send "title" "msg"`
+- 查找进程：`pgrep -f "process_name"`
+"""
 
 
 def _tools_section(registry: ToolRegistry) -> str:
@@ -495,6 +665,7 @@ def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking
             f"# 会话记忆\n\n{session_mem}" if session_mem else "",
             skills_section(workdir),
             _env_section(workdir),
+            _platform_section(),
             _cli_anything_section(registry),
             _tools_section(registry),
         ]

@@ -285,9 +285,15 @@ class OpenAIProvider(LLMProvider):
             finish_reason = "stop"
             async for chunk in stream:
                 if chunk.usage:
+                    # 读取缓存命中统计（OpenAI/DashScope 兼容）
+                    cached = 0
+                    details = getattr(chunk.usage, "prompt_tokens_details", None)
+                    if details:
+                        cached = getattr(details, "cached_tokens", 0) or 0
                     final_usage = Usage(
                         input_tokens=chunk.usage.prompt_tokens,
                         output_tokens=chunk.usage.completion_tokens,
+                        cache_read_tokens=cached,
                     )
                 if not chunk.choices:
                     continue

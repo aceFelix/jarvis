@@ -711,6 +711,7 @@ async def voice_loop(
     pause_event: threading.Event | None = None,
     *,
     daemon_mode: bool = False,
+    stop_event: threading.Event | None = None,
 ) -> None:
     """进入语音模式。对话 ⇄ 待机 循环，直到 Ctrl+C 彻底退出。
 
@@ -735,6 +736,8 @@ async def voice_loop(
         文件是跨进程单一可信源（SSOT）。
 
     pause_event: 已废弃，保留参数仅为向后兼容，内部不再使用。
+    stop_event: 外部停止信号。daemon 托盘停止语音会话时设置，
+        voice_loop 在循环关键点检查并干净退出。
 
     @author aceFelix
     """
@@ -778,6 +781,7 @@ async def voice_loop(
 
     ui.info("=" * 56)
     ui.info("🎙️  语音对话模式已开启")
+    _voice_log("[voice_loop] 语音对话循环启动 (daemon_mode=%s)", daemon_mode)
     ui.info(f"   STT: {settings.stt_model}")
     ui.info(f"   TTS: {settings.tts_model} / {settings.tts_voice}")
     hints = []
@@ -797,9 +801,11 @@ async def voice_loop(
     # ---- 跨进程语音互斥锁 ----
     # 防止 CLI /talk 和 daemon 托盘同时开语音模式导致麦克风冲突。
     from agent.daemon.voice_state import acquire_voice_lock, release_voice_lock, is_voice_enabled
-    if not acquire_voice_lock():
-        ui.error("🎙️ 语音模式已被另一个 jarvis 进程占用")
+    lock_ok, lock_info = acquire_voice_lock()
+    if not lock_ok:
+        ui.error(f"🎙️ 语音模式已被另一个 jarvis 进程占用: {lock_info}")
         ui.error("   请先关闭另一个 jarvis 的语音模式后再试")
+        _voice_log("[voice_loop] 获取语音锁失败: %s", lock_info)
         return
 
     tts_fail_count = 0
@@ -837,24 +843,39 @@ async def voice_loop(
     # 注册 Ctrl+C 信号处理器：Windows 上 pyaudio stream.read() 阻塞时
     # KeyboardInterrupt 无法被 Python asyncio 捕获（C 扩展阻塞）。
     # 用 signal handler 触发 stt._request_stop() 来非阻塞地中断录音循环。
+    # 注意：signal.signal 只能在主线程调用，daemon 托盘语音会话运行在线程中，
+    # 因此非主线程时跳过信号注册，依赖 stop_event / ESC watcher 退出。
     from agent.voice import stt as stt_module
-    def _on_sigint(sig, frame):
-        stt_module._request_stop()
-    prev_sigint = __import__("signal").signal(__import__("signal").SIGINT, _on_sigint)
+    _in_main_thread = threading.current_thread() == threading.main_thread()
+    prev_sigint = None
+    if _in_main_thread:
+        def _on_sigint(sig, frame):
+            stt_module._request_stop()
+        prev_sigint = __import__("signal").signal(__import__("signal").SIGINT, _on_sigint)
 
     try:
         in_dialog = True  # True=对话阶段, False=待机阶段
         while True:
+            if stop_event and stop_event.is_set():
+                _voice_log("[voice_loop] 收到外部停止信号，退出语音循环")
+                ui.info("🔇 语音会话已停止")
+                break
+
             if daemon_mode:
                 # ---- 语音开关检查（仅 daemon 模式；CLI /talk 跳过）----
                 voice_now = is_voice_enabled()
-                if not voice_now:
+                if not voice_now or (stop_event and stop_event.is_set()):
                     if voice_was_enabled:
                         _voice_log("[voice_loop] 语音开关已关闭，进入待机")
                         ui.info("🔇 语音对话已关闭（进入待机，说「贾维斯」仍可唤醒）")
                         in_dialog = False
                     text = await _standby_round(ui, settings, stt)
+                    if stop_event and stop_event.is_set():
+                        break
                     if text and _contains_any(text, _WAKE_WORDS):
+                        # 如果 stop_event 已设置，不应再恢复对话
+                        if stop_event and stop_event.is_set():
+                            break
                         ui.info("🔊 唤醒，回到对话模式（语音开关仍为关闭，可随时说「退下」）")
                         in_dialog = True
                     voice_was_enabled = voice_now
@@ -870,7 +891,11 @@ async def voice_loop(
                 # 对话阶段：连续多轮，直到用户说退下
                 cont = True
                 while cont:
+                    if stop_event and stop_event.is_set():
+                        break
                     cont = await _voice_loop_round(ui, settings, loop, ctx, tts, stt)
+                    if stop_event and stop_event.is_set():
+                        break
                     # ESC 打断了 stt.listen() → cont 仍然为 True 但 _stop_flag 已置位
                     if cont and stt_module._is_stopped():
                         # 用户在对话阶段按 ESC：打断 → 清标志 → 回到聆听（继续该阶段）
@@ -889,16 +914,22 @@ async def voice_loop(
                         ctx.tts_degraded_shown = True
                     ctx.tts_ok = True
                 # _voice_loop_round 返回 False = 用户退下，切到待机
+                if stop_event and stop_event.is_set():
+                    break
                 in_dialog = False
                 ui.info("💤 待机中，说「贾维斯」唤醒我")
             else:
                 # 待机阶段：循环短录，等唤醒词
                 text = await _standby_round(ui, settings, stt)
+                if stop_event and stop_event.is_set():
+                    break
                 # ESC 在待机阶段按 → 退出语音模式
                 if stt_module._is_stopped():
                     ui.info("\n🛑 ESC 退出语音模式")
                     break
                 if text and _contains_any(text, _WAKE_WORDS):
+                    if stop_event and stop_event.is_set():
+                        break
                     ui.info("🔊 唤醒，回到对话模式")
                     in_dialog = True
                 # 不含唤醒词则静默继续待机（不打印识别内容，避免刷屏）
@@ -915,9 +946,10 @@ async def voice_loop(
             stt_module._reset_stop()
         except Exception:
             pass
-        # 恢复信号处理器
+        # 恢复信号处理器（仅主线程注册过才恢复）
         try:
-            __import__("signal").signal(__import__("signal").SIGINT, prev_sigint)
+            if _in_main_thread and prev_sigint is not None:
+                __import__("signal").signal(__import__("signal").SIGINT, prev_sigint)
         except Exception:
             pass
         # 恢复思考模式 + 清理 TTS + 释放语音互斥锁
@@ -933,4 +965,5 @@ async def voice_loop(
             release_voice_lock()
         except Exception:
             pass
+        _voice_log("[voice_loop] 语音对话循环退出")
         ui.info("已回到文本模式（输入 /help 查看命令）")

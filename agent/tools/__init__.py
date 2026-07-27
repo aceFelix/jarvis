@@ -1,6 +1,7 @@
 """内置工具集合。
 v0.1 实现 8 个核心工具 + 阶段二新增的
-GUI 工具（鼠标/键盘/屏幕/窗口）+ 浏览器工具（导航/截图/点击/输入/取文本/关闭），
+GUI 工具（鼠标/键盘/屏幕/窗口）+ P1 增强的 GUI 工具（拖拽/等待/窗口相对坐标/视觉定位）
++ 浏览器工具（导航/截图/点击/输入/取文本/关闭），
 覆盖"对话 + 文件 + 命令 + 用户交互 + 电脑操作 + 网页操作"。
 
 每个工具文件一个 class，继承 agent.core.tool.Tool，注册到 build_default_registry()。
@@ -16,7 +17,6 @@ from agent.tools.file_ops.glob import GlobTool
 from agent.tools.file_ops.grep import GrepTool
 from agent.tools.todo import TodoWriteTool
 from agent.tools.location import LocationTool
-from agent.tools.extensions.marketplace_tool import MarketSearchTool
 from agent.tools.web.web import WebFetchTool, WebSearchTool
 
 __all__ = [
@@ -28,7 +28,6 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "LocationTool",
-    "MarketSearchTool",
     "TodoWriteTool",
     "WebFetchTool",
     "WebSearchTool",
@@ -36,28 +35,41 @@ __all__ = [
 
 # GUI 工具可选导入（依赖未安装时不影响基础工具）
 try:
-    from agent.tools.system.mouse import MouseClickTool, MouseMoveTool, MouseScrollTool
+    from agent.tools.system.mouse import (
+        MouseClickTool,
+        MouseDragTool,
+        MouseMoveTool,
+        MouseScrollTool,
+    )
     from agent.tools.system.keyboard import TypeTextTool, KeyTapTool
-    from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool
+    from agent.tools.system.screen import GetScreenSizeTool, ScreenShotTool, WaitForTool
     from agent.tools.system.window import (
         WindowListTool,
         WindowFocusTool,
         WindowCloseTool,
         WindowMoveTool,
+        WindowRectTool,
+        WindowClickTool,
     )
+    from agent.tools.system.gui_vision import VisualClickTool
 
     __all__ += [
         "MouseClickTool",
+        "MouseDragTool",
         "MouseMoveTool",
         "MouseScrollTool",
         "TypeTextTool",
         "KeyTapTool",
         "GetScreenSizeTool",
         "ScreenShotTool",
+        "WaitForTool",
         "WindowListTool",
         "WindowFocusTool",
         "WindowCloseTool",
         "WindowMoveTool",
+        "WindowRectTool",
+        "WindowClickTool",
+        "VisualClickTool",
     ]
 except ImportError:
     pass

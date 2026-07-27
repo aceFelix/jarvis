@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.core.context import ToolContext
+from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
 from agent.core.result import PermissionBehavior, PermissionResult
 from agent.core.tool import Tool, ToolRegistry
@@ -41,10 +42,12 @@ class ToolOrchestrator:
         registry: ToolRegistry,
         permission_checker: PermissionChecker,
         max_concurrency: int = 5,
+        recovery_executor: ToolRecoveryExecutor | None = None,
     ) -> None:
         self._registry = registry
         self._checker = permission_checker
         self._max_concurrency = max_concurrency
+        self._recovery = recovery_executor
 
     async def execute_calls(
         self,
@@ -233,27 +236,25 @@ class ToolOrchestrator:
         except Exception:
             effective_input = tu.input  # 钩子系统异常时不阻塞工具执行
 
-        try:
-            result = await tool.call(effective_input, ctx)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            # 工具抛异常: 转成 is_error 的 tool_result，不让单点失败炸掉整个批次
-            # ---- Hook: error ----
-            try:
-                from agent.core.hooks import get_hooks, HookEvent
-                await get_hooks().trigger(HookEvent.ERROR, {
-                    "tool_name": tool.name,
-                    "error": e,
-                    "tool_use_id": tu.id,
-                })
-            except Exception:
-                pass
-            return ToolResultContent(
-                tool_use_id=tu.id,
-                content=f"工具执行异常: {type(e).__name__}: {e}",
-                is_error=True,
+        # ---- 工具错误自愈 ----
+        # 优先用 RecoveryExecutor 包装 call，失败时自动重试/降级/询问用户
+        # 如果未配置 recovery 或自愈关闭，直接调用原始 call
+        if self._recovery and self._recovery.is_enabled():
+            recovery_result = await self._recovery.execute(
+                tool_name=tool.name,
+                call_fn=tool.call,
+                args=effective_input,
+                ctx=ctx,
+                tool_is_read_only=tool.is_read_only(effective_input),
             )
+            result = recovery_result.final_result
+        else:
+            try:
+                result = await tool.call(effective_input, ctx)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                result = ToolResult.error(f"工具执行异常: {type(e).__name__}: {e}")
 
         # 序列化结果给 LLM
         data = result.data

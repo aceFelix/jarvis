@@ -40,14 +40,18 @@ class TeammateMessage:
         type: 消息类型标识。
         from_name: 发送者名。
         timestamp: ISO 时间戳。
-        text: 消息文本（plain/broadcast 类型用）。
+        text: 消息文本（plain/broadcast/plan 类型用）。
         summary: 简短摘要（5-10 词，UI 展示用）。
         read: 是否已读。
-        request_id: 请求 ID（shutdown/plan 类型用）。
-        approve: 批准标志（shutdown_response 类型用）。
-        task_id: 关联任务 ID（task_assignment 类型用）。
-        task_subject: 任务标题（task_assignment 类型用）。
+        request_id: 请求 ID（shutdown/plan/permission 类型用）。
+        approve: 批准标志（shutdown_response/plan_approval_response/permission_response 类型用）。
+        task_id: 关联任务 ID（task_assignment/task_claimed/task_completed/heartbeat 类型用）。
+        task_subject: 任务标题（task_assignment/task_claimed 类型用）。
         color: 发送者颜色（UI 用）。
+        action: 请求的操作描述（permission_request 类型用）。
+        tool: 涉及的工具名（permission_request 类型用）。
+        args: 工具参数快照（permission_request 类型用）。
+        status: 状态/结果（task_completed/heartbeat 类型用）。
         data: 自由扩展数据。
     """
     type: str = "plain"  # plain | broadcast | idle_notification | shutdown_request | ...
@@ -61,6 +65,10 @@ class TeammateMessage:
     task_id: str = ""
     task_subject: str = ""
     color: Optional[str] = None
+    action: str = ""  # permission_request 用
+    tool: str = ""  # permission_request 用
+    args: Optional[dict] = None  # permission_request 用
+    status: str = ""  # task_completed / heartbeat 用
     data: Optional[dict] = None
 
     def to_dict(self) -> dict:
@@ -83,12 +91,44 @@ class TeammateMessage:
             d["taskSubject"] = self.task_subject
         if self.color:
             d["color"] = self.color
+        if self.action:
+            d["action"] = self.action
+        if self.tool:
+            d["tool"] = self.tool
+        if self.args is not None:
+            d["args"] = self.args
+        if self.status:
+            d["status"] = self.status
         if self.data:
             d["data"] = self.data
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> TeammateMessage:
+        """从字典构造消息；未知字段收敛到 data 中以保持前向兼容。"""
+        known_keys = {
+            "type",
+            "from",
+            "timestamp",
+            "text",
+            "summary",
+            "read",
+            "requestId",
+            "approve",
+            "taskId",
+            "taskSubject",
+            "color",
+            "action",
+            "tool",
+            "args",
+            "status",
+            "data",
+        }
+        data = d.get("data") or {}
+        for key, value in d.items():
+            if key not in known_keys:
+                data[key] = value
+
         return cls(
             type=d.get("type", "plain"),
             from_name=d.get("from", ""),
@@ -101,7 +141,11 @@ class TeammateMessage:
             task_id=d.get("taskId", ""),
             task_subject=d.get("taskSubject", ""),
             color=d.get("color"),
-            data=d.get("data"),
+            action=d.get("action", ""),
+            tool=d.get("tool", ""),
+            args=d.get("args"),
+            status=d.get("status", ""),
+            data=data if data else None,
         )
 
 
@@ -242,6 +286,91 @@ def make_task_assignment(
         text=task_description,
         task_id=task_id,
         task_subject=task_subject,
+    )
+
+
+def make_permission_request(
+    from_name: str,
+    action: str,
+    tool: str,
+    args: Optional[dict] = None,
+    request_id: str = "",
+) -> TeammateMessage:
+    """构造权限请求消息（teammate 向 leader 申请执行某操作）。"""
+    return TeammateMessage(
+        type="permission_request",
+        from_name=from_name,
+        timestamp=_now_iso(),
+        action=action,
+        tool=tool,
+        args=args,
+        request_id=request_id or _generate_request_id(),
+    )
+
+
+def make_permission_response(
+    from_name: str,
+    request_id: str,
+    approve: bool,
+    reason: str = "",
+) -> TeammateMessage:
+    """构造权限响应消息（leader 回复 teammate 的权限请求）。"""
+    return TeammateMessage(
+        type="permission_response",
+        from_name=from_name,
+        timestamp=_now_iso(),
+        text=reason,
+        request_id=request_id,
+        approve=approve,
+    )
+
+
+def make_task_claimed(
+    from_name: str,
+    task_id: str,
+    task_subject: str,
+    color: Optional[str] = None,
+) -> TeammateMessage:
+    """构造任务领取通知消息。"""
+    return TeammateMessage(
+        type="task_claimed",
+        from_name=from_name,
+        timestamp=_now_iso(),
+        task_id=task_id,
+        task_subject=task_subject,
+        color=color,
+    )
+
+
+def make_task_completed(
+    from_name: str,
+    task_id: str,
+    status: str = "completed",
+    summary: str = "",
+) -> TeammateMessage:
+    """构造任务完成通知消息。"""
+    return TeammateMessage(
+        type="task_completed",
+        from_name=from_name,
+        timestamp=_now_iso(),
+        task_id=task_id,
+        status=status,
+        summary=summary,
+    )
+
+
+def make_heartbeat(
+    from_name: str,
+    status: str = "idle",
+    task_id: str = "",
+) -> TeammateMessage:
+    """构造心跳消息。"""
+    return TeammateMessage(
+        type="heartbeat",
+        from_name=from_name,
+        timestamp=_now_iso(),
+        status=status,
+        task_id=task_id,
     )
 
 

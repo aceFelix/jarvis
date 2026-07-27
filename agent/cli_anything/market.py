@@ -671,3 +671,228 @@ def uninstall_harness(
         "message": f"已卸载 harness: {cid}（重启后生效）",
         "harness_id": cid,
     }
+
+
+# ---------------------------------------------------------------------------
+# harness 启用/禁用/创建/校验（与 Plugin 系统分离，各管各的）
+# ---------------------------------------------------------------------------
+
+_HARNESS_STATE_FILE = Path.home() / ".jarvis" / "cli_anything" / "disabled.json"
+
+
+def _load_harness_disabled_state() -> dict[str, Any]:
+    """加载 harness 禁用状态。"""
+    try:
+        if _HARNESS_STATE_FILE.exists():
+            return json.loads(_HARNESS_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"disabled": []}
+
+
+def _save_harness_disabled_state(state: dict[str, Any]) -> None:
+    """持久化 harness 禁用状态。"""
+    try:
+        _HARNESS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HARNESS_STATE_FILE.write_text(
+            json.dumps(state, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning("保存 harness 禁用状态失败: %s", e)
+
+
+def enable_harness(harness_id: str) -> dict[str, Any]:
+    """启用被禁用的 harness。
+
+    Returns:
+        {"success": bool, "message": str}
+
+    @author aceFelix
+    """
+    cid = _normalize_id(harness_id)
+    if not cid:
+        return {"success": False, "message": "harness ID 为空"}
+
+    state = _load_harness_disabled_state()
+    if cid not in state.get("disabled", []):
+        return {"success": True, "message": f"harness '{cid}' 已是启用状态。"}
+
+    state["disabled"] = [x for x in state["disabled"] if x != cid]
+    _save_harness_disabled_state(state)
+    return {"success": True, "message": f"harness '{cid}' 已启用。重启或 /reset 后生效。"}
+
+
+def disable_harness(harness_id: str) -> dict[str, Any]:
+    """禁用 harness（不卸载，仅停止加载）。
+
+    Returns:
+        {"success": bool, "message": str}
+
+    @author aceFelix
+    """
+    cid = _normalize_id(harness_id)
+    if not cid:
+        return {"success": False, "message": "harness ID 为空"}
+
+    state = _load_harness_disabled_state()
+    if cid in state.get("disabled", []):
+        return {"success": True, "message": f"harness '{cid}' 已是禁用状态。"}
+
+    state.setdefault("disabled", []).append(cid)
+    _save_harness_disabled_state(state)
+    return {"success": True, "message": f"harness '{cid}' 已禁用。重启或 /reset 后生效。"}
+
+
+def is_harness_disabled(harness_id: str) -> bool:
+    """检查 harness 是否被禁用。"""
+    cid = _normalize_id(harness_id)
+    if not cid:
+        return False
+    state = _load_harness_disabled_state()
+    return cid in state.get("disabled", [])
+
+
+def list_disabled_harnesses() -> list[str]:
+    """返回被禁用的 harness ID 列表。"""
+    state = _load_harness_disabled_state()
+    return state.get("disabled", [])
+
+
+def create_harness(
+    harness_id: str,
+    *,
+    display_name: str = "",
+    description: str = "",
+    output_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """创建 CLI-Anything harness 脚手架。
+
+    Args:
+        harness_id: harness ID（小写，用连字符分隔）。
+        display_name: 展示名。默认从 harness_id 生成。
+        description: 描述。
+        output_dir: 输出目录。默认为 ~/.jarvis/cli_anything/<id>/。
+
+    Returns:
+        {"success": bool, "message": str, "harness_id": str}
+
+    @author aceFelix
+    """
+    cid = _normalize_id(harness_id)
+    if not cid or not cid.replace("-", "").isalnum():
+        return {
+            "success": False,
+            "message": f"harness ID '{harness_id}' 不合法，只能包含字母、数字和连字符。",
+            "harness_id": "",
+        }
+
+    if output_dir:
+        target = Path(output_dir) / cid
+    else:
+        target = _DEFAULT_USER_HARNESS_DIR / cid
+    if target.exists():
+        return {"success": False, "message": f"目录已存在: {target}", "harness_id": cid}
+    target.mkdir(parents=True, exist_ok=True)
+
+    disp = display_name or cid.replace("-", " ").title()
+    desc = description or f"{disp} harness for Jarvis"
+    skill_md = f"""---
+name: {disp}
+id: {cid}
+description: {desc}
+when_to_use: {desc}
+trigger_words:
+  - {cid}
+command: cli-anything-{cid}
+args:
+  - name: subcommand
+    type: string
+    required: true
+    description: 要执行的子命令。参考 CLI-Anything 官方文档。
+  - name: json
+    type: boolean
+    required: false
+    default: true
+    description: 是否添加 --json 标志输出结构化 JSON。
+examples:
+  - cli-anything-{cid} --help
+---
+
+# {disp} Harness
+
+{desc}
+
+## 使用方式
+
+Jarvis 会把 ``subcommand`` 参数拼接在 ``cli-anything-{cid}`` 后面执行。
+
+例如：
+
+```bash
+cli-anything-{cid} --json <subcommand>
+```
+
+## 安装
+
+使用前需要先安装对应 harness 包：
+
+```bash
+pip install cli-anything-{cid}
+```
+"""
+    (target / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
+    readme = f"""# {disp} Harness
+
+{desc}
+
+## 使用方式
+
+在 Jarvis 中直接使用 `{cid}` 工具，或通过命令行执行：
+
+```bash
+cli-anything-{cid} --help
+```
+
+## 开发
+
+编辑 `SKILL.md` 修改 harness 配置。重启 Jarvis 或执行 `/reset` 后生效。
+"""
+    (target / "README.md").write_text(readme, encoding="utf-8")
+
+    return {"success": True, "message": str(target), "harness_id": cid}
+
+
+def validate_harness(path: str | Path) -> tuple[bool, list[str]]:
+    """校验 SKILL.md 是否合法。
+
+    Args:
+        path: harness 目录或 SKILL.md 文件路径。
+
+    Returns:
+        (True, []) 合法，(False, ["错误1", ...]) 不合法。
+
+    @author aceFelix
+    """
+    p = Path(path)
+    if p.is_dir():
+        skill_md = p / "SKILL.md"
+        if not skill_md.exists():
+            return False, [f"目录中未找到 SKILL.md: {p}"]
+        p = skill_md
+    elif not p.is_file():
+        return False, [f"路径不存在: {path}"]
+    elif p.name != "SKILL.md":
+        return False, [f"只支持 SKILL.md 文件: {p.name}"]
+
+    errors: list[str] = []
+    try:
+        from agent.cli_anything.loader import parse_skill_md
+        parse_skill_md(p)
+    except ValueError as e:
+        errors.append(str(e))
+    except Exception as e:
+        errors.append(f"解析失败: {e}")
+
+    return (len(errors) == 0), errors

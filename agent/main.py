@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def _jarvis_agen_finalizer(agen):
 
 sys.set_asyncgen_hooks(firstiter=_orig_firstiter, finalizer=_jarvis_agen_finalizer)
 
+from agent.bridge import get_bridge_server
 from agent.config.settings import Settings, load_settings
 from agent.core.context import ToolContext
 from agent.core.message import ImageContent, Message, TextContent
@@ -537,6 +539,13 @@ def _build_checker(settings: Settings) -> PermissionChecker:
     return PermissionChecker(rules=rules, mode=settings.permission_mode)
 
 
+def _build_recovery_executor(settings: Settings) -> "ToolRecoveryExecutor":
+    """构造工具错误自愈执行器。"""
+    from agent.core.error_recovery import ToolRecoveryExecutor
+
+    return ToolRecoveryExecutor(global_enabled=settings.enable_tool_self_healing)
+
+
 def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> ToolContext:
     return ToolContext(
         workdir=settings.workdir,
@@ -630,13 +639,34 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
     registry: ToolRegistry = build_default_registry()
 
     # 动态工具：CLI-Anything harness（~/.jarvis/cli_anything/ 与项目级 .jarvis/cli_anything/）
+    # quick_start 模式下后台异步加载，不阻塞 REPL prompt 出现
     from agent.core.tool import register_dynamic_tools
-    harness_count = register_dynamic_tools(registry, workdir=settings.workdir)
-    if harness_count > 0 and settings.verbose:
-        ui.info(f"✓ CLI-Anything harness 已注册（{harness_count} 个）")
+
+    def _register_harness_in_background() -> None:
+        try:
+            count = register_dynamic_tools(registry, workdir=settings.workdir)
+            if count > 0 and settings.verbose:
+                ui.info(f"✓ CLI-Anything harness 已注册（{count} 个）")
+        except Exception as e:
+            if settings.verbose:
+                ui.warn(f"harness 异步加载失败: {e}")
+
+    if settings.quick_start:
+        if settings.verbose:
+            ui.info("⚡ 快速启动模式：harness 工具后台异步加载")
+        threading.Thread(target=_register_harness_in_background, daemon=True).start()
+    else:
+        harness_count = register_dynamic_tools(registry, workdir=settings.workdir)
+        if harness_count > 0 and settings.verbose:
+            ui.info(f"✓ CLI-Anything harness 已注册（{harness_count} 个）")
 
     checker = _build_checker(settings)
-    orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
+    recovery = _build_recovery_executor(settings)
+    orchestrator = ToolOrchestrator(
+        registry=registry,
+        permission_checker=checker,
+        recovery_executor=recovery,
+    )
 
     # MCP 接入：连接配置的 server 并注册工具
     mcp_client = None
@@ -905,8 +935,13 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 new_mode = parse_mode(mode_str)
                 settings.permission_mode = new_mode
                 checker = _build_checker(settings)
+                recovery = _build_recovery_executor(settings)
                 # 重新装配 orchestrator 和 loop（checker 变了）
-                orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
+                orchestrator = ToolOrchestrator(
+                    registry=registry,
+                    permission_checker=checker,
+                    recovery_executor=recovery,
+                )
                 loop = QueryLoop(
                     provider=provider, registry=registry, orchestrator=orchestrator,
                     system=system_prompt, model=model,
@@ -999,6 +1034,24 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if cmd.startswith("/plugin search") or cmd.startswith("/plugin search "):
                 _plugin_search(ui, settings, stripped)
                 continue
+            if cmd.startswith("/plugin info "):
+                _plugin_info(ui, settings, stripped)
+                continue
+            if cmd in ("/plugin update", "/plugin updates"):
+                _plugin_check_updates(ui, settings)
+                continue
+            if cmd.startswith("/plugin enable "):
+                _plugin_enable(ui, settings, stripped)
+                continue
+            if cmd.startswith("/plugin disable "):
+                _plugin_disable(ui, settings, stripped)
+                continue
+            if cmd.startswith("/plugin create "):
+                _plugin_create(ui, settings, stripped)
+                continue
+            if cmd.startswith("/plugin validate "):
+                _plugin_validate(ui, settings, stripped)
+                continue
             if cmd in ("/agents",):
                 _show_agents(ui, team_mgr, task_list)
                 continue
@@ -1011,6 +1064,9 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if cmd in ("/tools",):
                 _print_tools(ui, registry)
                 continue
+            if cmd == "/server" or cmd.startswith("/server "):
+                await _server_start(ui, settings, registry, stripped)
+                continue
             if cmd in ("/cli_anything", "/cli_anything list", "/harnesses"):
                 _cli_anything_list(ui, workdir=settings.workdir)
                 continue
@@ -1022,6 +1078,18 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 continue
             if cmd.startswith("/cli_anything uninstall "):
                 _cli_anything_uninstall(ui, settings, registry, stripped)
+                continue
+            if cmd.startswith("/cli_anything enable "):
+                _cli_anything_enable(ui, stripped)
+                continue
+            if cmd.startswith("/cli_anything disable "):
+                _cli_anything_disable(ui, stripped)
+                continue
+            if cmd.startswith("/cli_anything create "):
+                _cli_anything_create(ui, stripped)
+                continue
+            if cmd.startswith("/cli_anything validate "):
+                _cli_anything_validate(ui, stripped)
                 continue
             if cmd in ("/plan",):
                 await _toggle_plan(ui, settings, ctx)
@@ -1060,6 +1128,15 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 continue
             if cmd == "/talk":
                 await _realtime_talk(ui, settings)
+                continue
+            if cmd in ("/connect-phone", "/phone"):
+                await _connect_phone(ui, settings, loop, ctx)
+                continue
+            if cmd in ("/connect-wechat", "/wechat"):
+                await _connect_wechat(ui, settings, loop, ctx)
+                continue
+            if cmd == "/disconnect-wechat":
+                _disconnect_wechat(ui)
                 continue
             if cmd == "/models":
                 # 终端内联选择器：含内置模型 + 自定义模型 + 添加按钮
@@ -1200,12 +1277,37 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
         # ---- 普通对话 ----
         try:
             pending = _auto_attach_clipboard_image(ctx, ui)
-            stats = await loop.run(stripped, ctx, images=pending)
+
+            # P3-1 跨设备协同：电脑端发消息时同步到手机端
+            bridge_server = get_bridge_server()
+            original_ui = ctx.ui
+            broadcast_ui = None
+            if bridge_server is not None:
+                from agent.bridge.ui import BroadcastUI
+
+                broadcast_ui = BroadcastUI(desktop_ui=ui, bridge=bridge_server)
+                ctx.ui = broadcast_ui
+                bridge_server.broadcast("user_message", {"text": stripped, "from": "desktop"})
+
+            try:
+                if bridge_server is not None:
+                    # 在主线程 loop 加锁执行 query，与手机端 query 串行化
+                    # run_query 内部用 threading.Lock 保证共享 messages 不被并发修改
+                    stats = await bridge_server.run_query(stripped, ctx, images=pending)
+                else:
+                    stats = await loop.run(stripped, ctx, images=pending)
+            finally:
+                # 恢复原始 UI，并通知手机端本轮结束
+                if broadcast_ui is not None:
+                    ctx.ui = original_ui
+                    broadcast_ui.finish()
+
             if settings.verbose:
+                _cache_hint = f" cache={stats.usage.cache_read_tokens}" if stats.usage.cache_read_tokens else ""
                 ui.info(
                     f"[iterations={stats.iterations} tool_calls={stats.tool_calls} "
                     f"reason={stats.stopped_reason} "
-                    f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}]"
+                    f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}{_cache_hint}]"
                 )
             # 每轮对话后增量保存（防窗口被强杀丢失记忆）
             _dialog_count += 1
@@ -1456,6 +1558,17 @@ def _print_help(ui: RichCLI) -> None:
         "  /skills      列出已加载的技能包\n"
         "  /mcp         查看 MCP server 连接状态\n"
         "  /tools       列出可用工具\n"
+        "  /server [目录] [--port N] [--command \"cmd\"] 启动开发服务器（Vite/Next/...）\n"
+        "  /plugin                 列出已安装插件（Plugin 系统）\n"
+        "  /plugin search [关键词]  搜索 Plugin 系统市场\n"
+        "  /plugin install <名称>   安装 Plugin 系统的插件\n"
+        "  /plugin uninstall <名称> 卸载 Plugin 系统的插件\n"
+        "  /plugin info <名称>      查看 Plugin 插件详情\n"
+        "  /plugin update           检查 Plugin 插件更新\n"
+        "  /plugin enable <名称>    启用被禁用的插件（通用）\n"
+        "  /plugin disable <名称>   禁用插件，不卸载（通用）\n"
+        "  /plugin create <名称>    创建新插件脚手架（--type harness|plugin）\n"
+        "  /plugin validate <路径>  校验 plugin.json / SKILL.md（通用）\n"
         "  /cli_anything list    列出已安装 CLI-Anything harness\n"
         "  /cli_anything market  列出市场可用 harness\n"
         "  /cli_anything install <id>  安装 harness\n"
@@ -1467,6 +1580,9 @@ def _print_help(ui: RichCLI) -> None:
         "  /say <text>  用语音朗读一段文字\n"
         "  /listen      录音并识别成文字（麦克风→文字）\n"
         "  /voice       进入语音对话模式（连续听→想→说，说「退出」结束）\n"
+        "  /connect-phone  手机扫码连接 JARVIS（共享当前会话，手机端 PLAN 模式）\n"
+        "  /connect-wechat 微信扫码连接 JARVIS（通过微信 ClawBot 对话）\n"
+        "  /disconnect-wechat 断开微信 ClawBot 连接\n"
     )
     if ui._console:
         ui._console.print(help_text)
@@ -1667,6 +1783,54 @@ def _doctor(ui: RichCLI, settings: Settings, provider, model: str, messages: lis
         ["对话轮数", "(请用 /cost 查看)"],
     ]
     render_table(sess_rows, headers=["项", "值"], title="当前会话")
+
+    # 7. 工具错误自愈统计
+    _doctor_recovery(ui, settings)
+
+
+def _doctor_recovery(ui: RichCLI, settings: Settings) -> None:
+    """/doctor 子面板：展示工具错误自愈统计与建议。"""
+    from agent.core.error_recovery import RecoveryTelemetry, _CATEGORY_REASONS
+
+    telemetry = RecoveryTelemetry()
+    summary = telemetry.get_summary()
+    ui.info("工具错误自愈")
+    state_rows = [
+        ["总开关", "开启" if settings.enable_tool_self_healing else "关闭"],
+        ["最大重试", str(settings.tool_retry_max)],
+        ["退避基数", f"{settings.tool_retry_backoff_base}s"],
+        ["最大退避", f"{settings.tool_retry_backoff_max}s"],
+        ["历史事件", str(summary["total_incidents"])],
+        ["已自愈", str(summary["resolved"])],
+        ["未恢复", str(summary["unresolved"])],
+    ]
+    from agent.ui.markdown_renderer import render_table
+
+    render_table(state_rows, headers=["项", "值"], title="自愈配置")
+
+    if summary["by_category"]:
+        cat_rows = [
+            [_CATEGORY_REASONS.get(cat, cat), str(cnt)]
+            for cat, cnt in sorted(summary["by_category"].items(), key=lambda x: -x[1])
+        ]
+        render_table(cat_rows, headers=["错误类型", "次数"], title="错误分布")
+        top = telemetry.top_category()
+        if top:
+            ui.warn(f"高频错误类型: {_CATEGORY_REASONS.get(top, top)}，建议检查相关依赖/网络/配置")
+
+    recent = telemetry.get_recent(5)
+    if recent:
+        recent_rows = [
+            [
+                i.tool_name,
+                _CATEGORY_REASONS.get(i.category.value, i.category.value),
+                "成功" if i.resolved else "失败",
+                str(i.attempts),
+                i.message,
+            ]
+            for i in recent
+        ]
+        render_table(recent_rows, headers=["工具", "错误", "结果", "重试", "说明"], title="最近 5 次自愈")
 
 
 def _compact(ui: RichCLI, loop: QueryLoop, ctx: ToolContext) -> None:
@@ -2016,14 +2180,17 @@ def _show_plugins(ui: RichCLI, settings: Settings) -> None:
 
 
 def _plugin_install(ui: RichCLI, settings: Settings, stripped: str) -> None:
-    """/plugin install <name>"""
+    """/plugin install <name> — 安装 Plugin 系统的插件。"""
     parts = stripped.split(None, 2)
     if len(parts) < 3:
         ui.warn("用法: /plugin install <插件名>")
         return
     name = parts[2].strip()
     from agent.core.extensions.plugins import PluginManager
-    pm = PluginManager(settings.plugin_marketplace)
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
     ui.info(f"正在安装插件: {name} ...")
     ok, msg = pm.install(name)
     if ok:
@@ -2034,14 +2201,17 @@ def _plugin_install(ui: RichCLI, settings: Settings, stripped: str) -> None:
 
 
 def _plugin_uninstall(ui: RichCLI, settings: Settings, stripped: str) -> None:
-    """/plugin uninstall <name>"""
+    """/plugin uninstall <name> — 卸载 Plugin 系统的插件。"""
     parts = stripped.split(None, 2)
     if len(parts) < 3:
         ui.warn("用法: /plugin uninstall <插件名>")
         return
     name = parts[2].strip()
     from agent.core.extensions.plugins import PluginManager
-    pm = PluginManager(settings.plugin_marketplace)
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
     ok, msg = pm.uninstall(name)
     if ok:
         ui.info(f"插件 '{name}' 已卸载。")
@@ -2050,11 +2220,14 @@ def _plugin_uninstall(ui: RichCLI, settings: Settings, stripped: str) -> None:
 
 
 def _plugin_search(ui: RichCLI, settings: Settings, stripped: str) -> None:
-    """/plugin search [keyword]"""
+    """/plugin search [keyword] — 搜索 Plugin 系统的市场（远程 + 本地）。"""
     parts = stripped.split(None, 2)
     keyword = parts[2].strip() if len(parts) > 2 else ""
     from agent.core.extensions.plugins import PluginManager
-    pm = PluginManager(settings.plugin_marketplace)
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
     label = keyword if keyword else "全部"
     ui.info(f"搜索插件: {label} ...")
     try:
@@ -2071,19 +2244,470 @@ def _plugin_search(ui: RichCLI, settings: Settings, stripped: str) -> None:
         table.add_column("名称", style="cyan", no_wrap=True)
         table.add_column("版本", style="dim")
         table.add_column("描述")
-        table.add_column("作者")
+        table.add_column("来源")
         for p in results:
+            source_label = "本地" if p.get("_is_local") else "远程"
             table.add_row(
                 p.get("name", "?"),
                 p.get("version", "?"),
                 p.get("description", ""),
-                p.get("author", ""),
+                source_label,
             )
         ui._console.print(table)
     else:
         for p in results:
-            ui.info(f"  {p['name']} v{p['version']} - {p.get('description', '')}")
-    ui.info("使用 /plugin install <名称> 安装")
+            source_label = "本地" if p.get("_is_local") else "远程"
+            ui.info(f"  {p['name']} v{p['version']} [{source_label}] - {p.get('description', '')}")
+    ui.info("使用 /plugin install <名称> 安装，/plugin info <名称> 查看详情")
+
+
+def _plugin_info(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin info <name> — 查看 Plugin 系统的插件详情。"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin info <插件名>")
+        return
+    name = parts[2].strip()
+    from agent.core.extensions.plugins import PluginManager
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    try:
+        results = pm.search(name)
+    except Exception as e:
+        ui.error(f"搜索失败: {e}")
+        return
+    # 精确匹配
+    plugin = None
+    for p in results:
+        if p.get("name") == name:
+            plugin = p
+            break
+    if plugin is None and results:
+        plugin = results[0]  # 模糊匹配第一个
+    if plugin is None:
+        ui.warn(f"未找到插件: {name}")
+        return
+
+    installed = pm.list_installed().get("plugins", {})
+    is_installed = name in installed
+    installed_ver = installed.get(name, {}).get("version", "") if is_installed else ""
+
+    lines = [
+        f"[bold]插件详情[/bold]",
+        f"  名称: {plugin.get('name', '?')}",
+        f"  描述: {plugin.get('description', '')}",
+        f"  版本: {plugin.get('version', '?')}",
+        f"  状态: {'已安装' + (' v' + installed_ver if installed_ver else '') if is_installed else '未安装'}",
+    ]
+    if plugin.get("author"):
+        lines.append(f"  作者: {plugin['author']}")
+    if plugin.get("category"):
+        lines.append(f"  分类: {plugin['category']}")
+    if plugin.get("tags"):
+        lines.append(f"  标签: {', '.join(plugin['tags'])}")
+    source = plugin.get("source", {})
+    if plugin.get("_is_local"):
+        lines.append(f"  来源: 本地 ({source.get('path', '')})")
+    elif source.get("repo"):
+        lines.append(f"  仓库: {source['repo']}")
+    lines.append(f"  安装: /plugin install {plugin.get('name', '')}")
+    if ui._console:
+        ui._console.print("\n".join(lines))
+    else:
+        ui.info("\n".join(lines))
+
+
+def _plugin_check_updates(ui: RichCLI, settings: Settings) -> None:
+    """/plugin update — 检查 Plugin 系统已安装插件的更新。"""
+    from agent.core.extensions.plugins import PluginManager
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    ui.info("正在检查插件更新 ...")
+    try:
+        installed = pm.list_installed().get("plugins", {})
+        market_plugins = {p.get("name", ""): p for p in pm.fetch_marketplace()}
+    except Exception as e:
+        ui.error(f"检查更新失败: {e}")
+        return
+
+    updates = []
+    for pname, entry in installed.items():
+        market_entry = market_plugins.get(pname)
+        if market_entry and market_entry.get("version"):
+            installed_ver = entry.get("version", "0.0.0")
+            market_ver = market_entry.get("version", "0.0.0")
+            if _compare_versions(market_ver, installed_ver) > 0:
+                updates.append((pname, installed_ver, market_ver))
+
+    if not updates:
+        ui.info("所有插件均为最新版本。")
+        return
+    if ui._console:
+        from rich.table import Table
+        table = Table(title="可更新插件", show_lines=False)
+        table.add_column("名称", style="cyan")
+        table.add_column("当前版本", style="dim")
+        table.add_column("最新版本", style="green")
+        for pname, cur, new in updates:
+            table.add_row(pname, cur, new)
+        ui._console.print(table)
+    else:
+        for pname, cur, new in updates:
+            ui.info(f"  {pname}: {cur} → {new}")
+    ui.info("使用 /plugin install <名称> 重新安装以更新")
+
+
+def _compare_versions(v1: str, v2: str) -> int:
+    """比较两个语义化版本号。
+
+    Returns:
+        1 if v1 > v2, -1 if v1 < v2, 0 if equal.
+
+    @author aceFelix
+    """
+    def parse(v: str) -> tuple[int, ...]:
+        parts = v.strip().split(".")
+        nums = []
+        for part in parts[:3]:
+            try:
+                nums.append(int(part))
+            except ValueError:
+                nums.append(0)
+        while len(nums) < 3:
+            nums.append(0)
+        return tuple(nums)
+
+    a, b = parse(v1), parse(v2)
+    if a > b:
+        return 1
+    if a < b:
+        return -1
+    return 0
+
+
+def _plugin_enable(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin enable <name> — 启用被禁用的 Plugin 插件。"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin enable <插件名>")
+        return
+    name = parts[2].strip()
+    from agent.core.extensions.plugins import PluginManager
+
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    ok, msg = pm.enable(name)
+    if ok:
+        ui.info(msg)
+    else:
+        ui.error(msg)
+
+
+def _plugin_disable(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin disable <name> — 禁用 Plugin 插件（不卸载）。"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin disable <插件名>")
+        return
+    name = parts[2].strip()
+    from agent.core.extensions.plugins import PluginManager
+
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    ok, msg = pm.disable(name)
+    if ok:
+        ui.info(msg)
+    else:
+        ui.error(msg)
+
+
+def _plugin_create(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin create <name> [--desc "描述"] [--dir <目录>] — 创建 Plugin 插件脚手架。"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin create <插件名> [--desc \"描述\"] [--dir <目录>]")
+        return
+    rest = parts[2].strip()
+
+    # 解析可选参数
+    description = ""
+    output_dir = ""
+
+    tokens = rest.split(None)
+    name = tokens[0] if tokens else ""
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--type" and i + 1 < len(tokens):
+            # /plugin create 只支持 plugin 类型；harness 请用 /cli_anything create
+            t = tokens[i + 1]
+            if t == "harness":
+                ui.warn("harness 脚手架请用 /cli_anything create <id>")
+                return
+            i += 2
+        elif tok == "--desc" and i + 1 < len(tokens):
+            # 描述可能带引号
+            desc_start = rest.find('"', rest.find("--desc"))
+            desc_end = rest.find('"', desc_start + 1) if desc_start != -1 else -1
+            if desc_start != -1 and desc_end != -1:
+                description = rest[desc_start + 1:desc_end]
+                i = len(tokens)  # 消耗剩余
+            else:
+                description = tokens[i + 1] if i + 1 < len(tokens) else ""
+                i += 2
+        elif tok == "--dir" and i + 1 < len(tokens):
+            output_dir = tokens[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if not name:
+        ui.warn("插件名不能为空")
+        return
+
+    from agent.core.extensions.plugins import PluginManager
+
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    ok, msg = pm.create_plugin(
+        name,
+        description=description,
+        output_dir=output_dir or None,
+    )
+    if ok:
+        ui.info(f"Plugin 插件脚手架已创建: {msg}")
+        ui.info("编辑生成的文件后，重启 Jarvis 或 /reset 即可加载。")
+    else:
+        ui.error(f"创建失败: {msg}")
+
+
+def _plugin_validate(ui: RichCLI, settings: Settings, stripped: str) -> None:
+    """/plugin validate <path> — 校验 plugin.json。"""
+    parts = stripped.split(None, 2)
+    if len(parts) < 3:
+        ui.warn("用法: /plugin validate <插件目录或 plugin.json 路径>")
+        return
+    path = parts[2].strip()
+    from agent.core.extensions.plugins import PluginManager
+
+    pm = PluginManager(
+        marketplace_url=settings.plugin_marketplace,
+        marketplace_local=settings.plugin_market_local,
+    )
+    ok, errors = pm.validate_plugin(path)
+    if ok:
+        ui.info(f"校验通过: {path}")
+    else:
+        ui.error("校验失败:")
+        for err in errors:
+            ui.error(f"  - {err}")
+
+
+def _cli_anything_enable(ui: RichCLI, stripped: str) -> None:
+    """/cli_anything enable <id> — 启用被禁用的 harness。"""
+    parts = stripped.split(None, 3)
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything enable <harness ID>")
+        return
+    harness_id = parts[2].strip()
+    from agent.cli_anything.market import enable_harness
+
+    result = enable_harness(harness_id)
+    if result["success"]:
+        ui.info(result["message"])
+    else:
+        ui.error(result["message"])
+
+
+def _cli_anything_disable(ui: RichCLI, stripped: str) -> None:
+    """/cli_anything disable <id> — 禁用 harness（不卸载）。"""
+    parts = stripped.split(None, 3)
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything disable <harness ID>")
+        return
+    harness_id = parts[2].strip()
+    from agent.cli_anything.market import disable_harness
+
+    result = disable_harness(harness_id)
+    if result["success"]:
+        ui.info(result["message"])
+    else:
+        ui.error(result["message"])
+
+
+def _cli_anything_create(ui: RichCLI, stripped: str) -> None:
+    """/cli_anything create <id> [--desc "描述"] [--dir <目录>] — 创建 harness 脚手架。"""
+    parts = stripped.split(None, 3)
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything create <harness ID> [--desc \"描述\"] [--dir <目录>]")
+        return
+    rest = parts[2].strip() if len(parts) > 2 else ""
+
+    description = ""
+    output_dir = ""
+
+    tokens = rest.split(None)
+    harness_id = tokens[0] if tokens else ""
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--desc" and i + 1 < len(tokens):
+            desc_start = rest.find('"', rest.find("--desc"))
+            desc_end = rest.find('"', desc_start + 1) if desc_start != -1 else -1
+            if desc_start != -1 and desc_end != -1:
+                description = rest[desc_start + 1:desc_end]
+                i = len(tokens)
+            else:
+                description = tokens[i + 1] if i + 1 < len(tokens) else ""
+                i += 2
+        elif tok == "--dir" and i + 1 < len(tokens):
+            output_dir = tokens[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if not harness_id:
+        ui.warn("harness ID 不能为空")
+        return
+
+    from agent.cli_anything.market import create_harness
+
+    result = create_harness(
+        harness_id,
+        description=description,
+        output_dir=output_dir or None,
+    )
+    if result["success"]:
+        ui.info(f"Harness 脚手架已创建: {result['message']}")
+        ui.info("编辑生成的 SKILL.md 后，重启 Jarvis 或 /reset 即可加载。")
+    else:
+        ui.error(f"创建失败: {result['message']}")
+
+
+def _cli_anything_validate(ui: RichCLI, stripped: str) -> None:
+    """/cli_anything validate <路径> — 校验 SKILL.md。"""
+    parts = stripped.split(None, 3)
+    if len(parts) < 3:
+        ui.warn("用法: /cli_anything validate <harness 目录或 SKILL.md 路径>")
+        return
+    path = parts[2].strip()
+    from agent.cli_anything.market import validate_harness
+
+    ok, errors = validate_harness(path)
+    if ok:
+        ui.info(f"校验通过: {path}")
+    else:
+        ui.error("校验失败:")
+        for err in errors:
+            ui.error(f"  - {err}")
+
+
+async def _server_start(
+    ui: RichCLI,
+    settings: Settings,
+    registry: "ToolRegistry",
+    stripped: str,
+) -> None:
+    """/server [目录] [--port 端口] [--command "命令"] — 启动开发服务器。
+
+    自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目。
+    端口被占用时会自动递增，日志写入 ~/.jarvis/dev_server_logs/。
+
+    @author aceFelix
+    """
+    import shlex
+
+    parts = stripped.split(None, 1)
+    rest = parts[1] if len(parts) > 1 else ""
+
+    project_dir = ""
+    port = None
+    command = ""
+    wait_seconds = 10
+
+    # 简单解析参数
+    tokens = shlex.split(rest) if rest else []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--port" and i + 1 < len(tokens):
+            try:
+                port = int(tokens[i + 1])
+            except ValueError:
+                ui.warn(f"端口号无效: {tokens[i + 1]}")
+                return
+            i += 2
+        elif tok == "--command" and i + 1 < len(tokens):
+            command = tokens[i + 1]
+            i += 2
+        elif tok == "--wait" and i + 1 < len(tokens):
+            try:
+                wait_seconds = int(tokens[i + 1])
+            except ValueError:
+                ui.warn(f"等待秒数无效: {tokens[i + 1]}")
+                return
+            i += 2
+        elif not tok.startswith("-") and not project_dir:
+            project_dir = tok
+            i += 1
+        else:
+            ui.warn(f"未知参数: {tok}")
+            return
+
+    args: dict[str, Any] = {
+        "project_dir": project_dir,
+        "port": port,
+        "command": command,
+        "wait_seconds": wait_seconds,
+    }
+
+    from agent.tools.extensions.dev_server_tool import DevServerTool
+
+    tool = DevServerTool()
+    # 构造最小 ToolContext
+    from agent.core.context import ToolContext
+
+    ctx = ToolContext(
+        ui=ui,
+        settings=settings,
+        workdir=settings.workdir,
+        messages=[],
+    )
+
+    perm = tool.check_permissions(args, ctx)
+    if perm.behavior.value == "ask":
+        ui.info(perm.message or "请求启动开发服务器")
+        # 简单确认
+        try:
+            ans = input("确认启动? (y/n): ").strip().lower()
+        except EOFError:
+            ans = "y"
+        if ans not in ("y", "yes", "是"):
+            ui.info("已取消")
+            return
+
+    ui.info(f"正在启动开发服务器: {project_dir or settings.workdir} ...")
+    try:
+        result = await tool.call(args, ctx)
+    except Exception as e:
+        ui.error(f"启动失败: {e}")
+        return
+
+    if result.is_error:
+        ui.error(f"启动失败:\n{result.data}")
+        return
+
+    ui.info(result.data)
 
 
 def _list_skills(ui: RichCLI, settings: Settings) -> None:
@@ -2157,10 +2781,11 @@ async def _dispatch_skill(
     try:
         stats = await loop.run(prompt, ctx)
         if settings.verbose:
+            _cache_hint = f" cache={stats.usage.cache_read_tokens}" if stats.usage.cache_read_tokens else ""
             ui.info(
                 f"[{matched.name}] iterations={stats.iterations} "
                 f"tool_calls={stats.tool_calls} "
-                f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}]"
+                f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}{_cache_hint}]"
             )
     except Exception as e:
         ui.error(f"技能执行出错: {type(e).__name__}: {e}")
@@ -2454,6 +3079,216 @@ async def _voice_mode(ui: RichCLI, settings: Settings, loop: QueryLoop, ctx: Too
     await voice_loop(ui, settings, loop, ctx)
 
 
+async def _connect_phone(
+    ui: RichCLI, settings: Settings, loop: QueryLoop, ctx: ToolContext
+) -> None:
+    """/connect-phone 命令 —— 生成二维码，让手机扫码连接 JARVIS。
+
+    手机通过 Web PWA 与当前 REPL 会话建立 WebSocket 连接。
+    手机和电脑共享同一会话历史（messages 共享），手机端默认 PLAN 权限模式。
+
+    依赖：qrcode 库用于生成终端 ASCII 二维码，未安装时提示手动安装。
+
+    @author aceFelix
+    """
+    try:
+        from agent.bridge import start_bridge_in_thread, stop_bridge
+    except ImportError as e:
+        ui.error(f"跨设备协同模块不可用: {e}")
+        return
+
+    try:
+        import qrcode  # type: ignore[import-not-found]
+    except ImportError:
+        ui.error("缺少 qrcode 库，请运行: pip install qrcode")
+        ui.info("安装后即可用 /connect-phone 生成二维码扫码连接")
+        return
+
+    # 停止已有的 bridge（端口占用或重新生成 token）
+    stop_bridge()
+
+    server = start_bridge_in_thread(
+        query_loop=loop,
+        ctx=ctx,
+        http_port=getattr(settings, "bridge_http_port", 8765),
+        ws_port=getattr(settings, "bridge_ws_port", 8766),
+        token=getattr(settings, "bridge_token", ""),
+        workdir=settings.workdir,
+    )
+
+    url = server.url
+
+    ui.info("🌐 跨设备协同已启动")
+    ui.info(f"   手机访问: {url}")
+    ui.info("   手机和电脑需在同一局域网（Wi-Fi）")
+
+    # 生成并打印紧凑 ASCII 二维码（高度减半，适配终端）
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=1,
+            border=1,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        matrix = qr.modules
+        rows = len(matrix)
+        cols = len(matrix[0]) if rows else 0
+        lines = []
+        # 使用 Unicode 半块字符：两行合并为一行，高度减半
+        # █ 全黑、▀ 上黑下白、▄ 上白下黑、  全白
+        for r in range(0, rows, 2):
+            top = matrix[r]
+            bottom = matrix[r + 1] if r + 1 < rows else [False] * cols
+            line = ""
+            for c in range(cols):
+                t = top[c]
+                b = bottom[c]
+                if t and b:
+                    line += "█"
+                elif t and not b:
+                    line += "▀"
+                elif not t and b:
+                    line += "▄"
+                else:
+                    line += " "
+            lines.append(line)
+        ui.info("\n" + "\n".join(lines))
+    except Exception as e:
+        ui.warn(f"二维码生成失败: {e}")
+
+    ui.info("提示: 手机扫码或手动访问上方 URL 即可开始对话")
+    ui.info("      输入 /connect-phone 可重新生成二维码")
+
+
+async def _connect_wechat(
+    ui: RichCLI, settings: Settings, loop: Any, ctx: Any
+) -> None:
+    """/connect-wechat 命令 —— 微信扫码连接 JARVIS（通过 ClawBot）。
+
+    通过腾讯 iLink Bot API 接入微信 ClawBot：
+    1. 获取二维码 → 终端渲染 ASCII QR
+    2. 微信扫码确认 → 拿到 bot_token
+    3. 后台长轮询接收微信消息 → QueryLoop 处理 → 回复到微信
+
+    依赖：aiohttp（HTTP 客户端）、qrcode（终端二维码渲染）。
+
+    @author aceFelix
+    """
+    try:
+        import aiohttp  # noqa: F401
+    except ImportError:
+        ui.error("缺少 aiohttp 库，请运行: pip install aiohttp")
+        ui.info("安装后即可用 /connect-wechat 扫码连接微信")
+        return
+
+    try:
+        from agent.wechat import start_wechat_in_thread, start_wechat_loop, stop_wechat
+    except ImportError as e:
+        ui.error(f"微信模块不可用: {e}")
+        return
+
+    # 停止已有的微信连接
+    stop_wechat()
+
+    bridge = start_wechat_in_thread(
+        query_loop=loop,
+        ctx=ctx,
+        ui=ui,
+        workdir=settings.workdir,
+        main_loop=asyncio.get_running_loop(),
+    )
+
+    ui.info("📱 微信 ClawBot 连接中...")
+
+    # 二维码渲染回调
+    def _render_qr(qrcode_url: str) -> None:
+        ui.info(f"扫码地址: {qrcode_url}")
+        try:
+            import qrcode as _qr
+
+            qr = _qr.QRCode(
+                version=1,
+                error_correction=_qr.constants.ERROR_CORRECT_M,
+                box_size=1,
+                border=1,
+            )
+            qr.add_data(qrcode_url)
+            qr.make(fit=True)
+            matrix = qr.modules
+            rows = len(matrix)
+            cols = len(matrix[0]) if rows else 0
+            lines = []
+            for r in range(0, rows, 2):
+                top = matrix[r]
+                bottom = matrix[r + 1] if r + 1 < rows else [False] * cols
+                line = ""
+                for c in range(cols):
+                    t = top[c]
+                    b = bottom[c]
+                    if t and b:
+                        line += "█"
+                    elif t and not b:
+                        line += "▀"
+                    elif not t and b:
+                        line += "▄"
+                    else:
+                        line += " "
+                lines.append(line)
+            ui.info("\n" + "\n".join(lines))
+        except ImportError:
+            ui.info("提示: 安装 qrcode 库可在终端显示二维码 (pip install qrcode)")
+        except Exception as e:
+            ui.warn(f"二维码渲染失败: {e}")
+
+    # 配对码回调（终端输入）
+    def _verify_input(retry: bool) -> str:
+        prompt = "配对码不匹配，请重新输入: " if retry else "请输入手机微信显示的数字配对码: "
+        try:
+            return input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    # 执行登录（在当前 asyncio loop 中）
+    success = await bridge.login(
+        verify_callback=_verify_input,
+        qrcode_callback=_render_qr,
+    )
+
+    if not success:
+        ui.error("微信登录失败，请重试")
+        stop_wechat()
+        return
+
+    # 登录成功，启动消息循环线程
+    start_wechat_loop()
+
+    ui.info("✅ 微信已连接！")
+    ui.info("   在微信中找到 ClawBot 发消息即可与贾维斯对话")
+    ui.info("   输入 /disconnect-wechat 可断开连接")
+    ui.info("   连接有效期 24 小时，到期前会提醒重新扫码")
+
+
+def _disconnect_wechat(ui: RichCLI) -> None:
+    """/disconnect-wechat 命令 —— 断开微信 ClawBot 连接。
+
+    @author aceFelix
+    """
+    try:
+        from agent.wechat import get_wechat_bridge, stop_wechat
+    except ImportError:
+        ui.error("微信模块不可用")
+        return
+
+    if get_wechat_bridge() is None:
+        ui.info("当前没有微信连接")
+        return
+
+    stop_wechat()
+    ui.info("微信 ClawBot 已断开")
+
+
 async def _realtime_talk(
     ui: RichCLI, settings: Settings, *, use_window: bool = True
 ) -> None:
@@ -2493,6 +3328,7 @@ async def _realtime_talk(
         "model": getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
         "voice": getattr(settings, "realtime_voice", "longanqian"),
         "ws_url": getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+        "workdir": getattr(settings, "workdir", "") or os.getcwd(),
     }
 
     has_window = False
@@ -2556,6 +3392,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-boot",
         action="store_true",
         help="跳过启动动画（直接显示横幅）",
+    )
+    p.add_argument(
+        "--quick",
+        action="store_true",
+        help="快速启动：跳过 boot animation / MCP / LSP，延迟加载 harness（热键唤起用）",
     )
     p.add_argument(
         "--with-tray",
@@ -2639,7 +3480,12 @@ async def repl_headless(settings: Settings) -> int:
     register_dynamic_tools(registry, workdir=settings.workdir)
 
     checker = _build_checker(settings)
-    orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
+    recovery = _build_recovery_executor(settings)
+    orchestrator = ToolOrchestrator(
+        registry=registry,
+        permission_checker=checker,
+        recovery_executor=recovery,
+    )
 
     # MCP
     mcp_client = None
@@ -2746,7 +3592,12 @@ def _run_acp(settings: Settings) -> int:
     register_dynamic_tools(registry, workdir=settings.workdir)
 
     checker = _build_checker(settings)
-    orchestrator = ToolOrchestrator(registry=registry, permission_checker=checker)
+    recovery = _build_recovery_executor(settings)
+    orchestrator = ToolOrchestrator(
+        registry=registry,
+        permission_checker=checker,
+        recovery_executor=recovery,
+    )
 
     # MCP（ACP 模式跳过：MCP 子进程输出会污染 stdout JSON-RPC，且连接超时导致启动失败）
     # 如需要 MCP 工具，在 jarvis daemon 模式下连接，IM 通过 ACP 复用 daemon 内的 MCP 连接。
@@ -2816,6 +3667,11 @@ def main(argv: list[str] | None = None) -> int:
         overrides["debug"] = True
     if args.no_boot:
         overrides["boot_animation"] = False
+    if args.quick:
+        overrides["boot_animation"] = False
+        overrides["enable_mcp"] = False
+        overrides["enable_lsp"] = False
+        overrides["quick_start"] = True
     settings = settings.with_overrides(**overrides)
 
     # 切到工作目录（不存在则自动创建）
@@ -2858,7 +3714,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             # fork 失败（Linux 或无 pythonw.exe），回退到前台运行
             if not _is_detached():
-                print("⚠ 后台启动不可用，回退到前台模式", file=sys.stderr)
+                import platform as _pf
+                if _pf.system() == "Linux":
+                    print("ℹ Linux 不支持后台分离模式，以前台模式运行 daemon", file=sys.stderr)
+                    print("  提示: Linux 用户可直接用 `python -m agent.main` 进入 REPL 模式", file=sys.stderr)
+                else:
+                    print("⚠ 后台启动不可用，回退到前台模式", file=sys.stderr)
         try:
             from agent.daemon import JarvisDaemon
         except ImportError as e:

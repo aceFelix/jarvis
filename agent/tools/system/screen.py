@@ -19,6 +19,7 @@ import base64
 import io
 import platform
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,9 @@ class GetScreenSizeTool(Tool):
             size = pyautogui.size()  # Size(width, height)
             w, h = int(size.width), int(size.height)
         except Exception as e:
-            return ToolResult.error(f"获取分辨率失败: {type(e).__name__}: {e}")
+            from agent.tools.system import macos_permission_hint
+            hint = macos_permission_hint("获取屏幕信息")
+            return ToolResult.error(f"获取分辨率失败: {type(e).__name__}: {e}{hint}")
 
         return ToolResult.ok(
             f"主屏幕分辨率: {w} x {h}\n"
@@ -161,7 +164,9 @@ class ScreenShotTool(Tool):
             img = pyautogui.screenshot(region=region_tuple)
             img.save(str(save_path), format="PNG")
         except Exception as e:
-            return ToolResult.error(f"截图失败: {type(e).__name__}: {e}")
+            from agent.tools.system import macos_permission_hint
+            hint = macos_permission_hint("屏幕截图")
+            return ToolResult.error(f"截图失败: {type(e).__name__}: {e}{hint}")
 
         w, h = img.size
         scope = "局部" if region else "全屏"
@@ -225,3 +230,202 @@ class ScreenShotTool(Tool):
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         return "截图" + ("（局部）" if args and args.get("region") else "（全屏）")
+
+
+class WaitForTool(Tool):
+    """等待屏幕目标出现工具 —— 基于模板匹配或像素变化。
+
+    P1 升级新增：解决页面/弹窗/按钮加载时的盲目重试问题。
+    支持两种模式：
+    1. 传入 template_path：在屏幕或指定区域内轮询模板匹配。
+    2. 不传 template_path：等待指定区域画面发生变化（差异像素超过阈值）。
+
+    @author aceFelix
+    """
+
+    name = "WaitFor"
+    description = (
+        "等待屏幕上的目标出现。可传入模板图片路径，在屏幕或指定区域内轮询查找；"
+        "也可不传模板，等待指定区域画面发生变化。常用于等待按钮、弹窗、加载完成等。"
+        "只读操作，自动放行。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "template_path": {
+                "type": "string",
+                "description": "模板图片路径（不填则等待像素变化）",
+            },
+            "region": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "监控区域 [left, top, width, height]（不填=全屏）",
+                "minItems": 4,
+                "maxItems": 4,
+            },
+            "timeout": {
+                "type": "number",
+                "description": "最长等待秒数（默认 10）",
+                "minimum": 0.5,
+                "maximum": 60.0,
+            },
+            "interval": {
+                "type": "number",
+                "description": "轮询间隔秒数（默认 0.5）",
+                "minimum": 0.1,
+                "maximum": 5.0,
+            },
+            "confidence": {
+                "type": "number",
+                "description": "模板匹配置信度 0-1（默认 0.8）",
+                "minimum": 0.0,
+                "maximum": 1.0,
+            },
+        },
+    }
+    max_result_chars = 1_000
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.allow("只读操作")
+
+    def validate_input(self, args: dict[str, Any], ctx: ToolContext) -> ValidationResult:
+        region = args.get("region")
+        if region is not None:
+            if not (isinstance(region, list) and len(region) == 4):
+                return ValidationResult.fail("region 必须是长度 4 的整数数组 [left,top,width,height]")
+            if not all(isinstance(v, int) and v >= 0 for v in region[:2]):
+                return ValidationResult.fail("region 的 left/top 不能为负")
+            if not all(isinstance(v, int) and v > 0 for v in region[2:]):
+                return ValidationResult.fail("region 的 width/height 必须为正")
+        return ValidationResult.pass_()
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        try:
+            pyautogui = _import_pyautogui()
+        except ImportError as e:
+            return ToolResult.error(f"pyautogui 未安装: {e}")
+
+        template_path = args.get("template_path")
+        region = args.get("region")
+        region_tuple = tuple(region) if region else None
+        timeout = float(args.get("timeout", 10.0))
+        interval = float(args.get("interval", 0.5))
+        confidence = float(args.get("confidence", 0.8))
+
+        if template_path:
+            return self._wait_for_template(
+                pyautogui, template_path, region_tuple, timeout, interval, confidence
+            )
+        return self._wait_for_change(pyautogui, region_tuple, timeout, interval)
+
+    def _wait_for_template(
+        self,
+        pyautogui: Any,
+        template_path: str,
+        region: tuple[int, int, int, int] | None,
+        timeout: float,
+        interval: float,
+        confidence: float,
+    ) -> ToolResult:
+        """轮询等待模板图片出现在屏幕/区域内。"""
+        from pathlib import Path
+
+        if not Path(template_path).is_file():
+            return ToolResult.error(f"模板图片不存在: {template_path}")
+
+        start = time.monotonic()
+        attempts = 0
+        while time.monotonic() - start < timeout:
+            attempts += 1
+            try:
+                # pyautogui 0.9.54+ 支持 confidence 参数
+                box = pyautogui.locateOnScreen(
+                    template_path, region=region, confidence=confidence
+                )
+                if box is not None:
+                    center = pyautogui.center(box)
+                    return ToolResult.ok(
+                        f"找到目标，中心坐标: ({int(center.x)},{int(center.y)})，"
+                        f"匹配区域: ({box.left},{box.top},{box.width},{box.height})，"
+                        f"尝试次数: {attempts}"
+                    )
+            except TypeError:
+                # 旧版 pyautogui 不支持 confidence，回退到普通匹配
+                try:
+                    box = pyautogui.locateOnScreen(template_path, region=region)
+                    if box is not None:
+                        center = pyautogui.center(box)
+                        return ToolResult.ok(
+                            f"找到目标（未使用 confidence），中心坐标: "
+                            f"({int(center.x)},{int(center.y)})，尝试次数: {attempts}"
+                        )
+                except Exception as e:
+                    return ToolResult.error(f"模板匹配失败: {type(e).__name__}: {e}")
+            except Exception as e:
+                return ToolResult.error(f"模板匹配失败: {type(e).__name__}: {e}")
+
+            time.sleep(interval)
+
+        scope = f"区域 {region}" if region else "全屏"
+        return ToolResult.error(
+            f"等待超时（{timeout}s）：未在{scope}找到模板 {template_path}"
+        )
+
+    def _wait_for_change(
+        self,
+        pyautogui: Any,
+        region: tuple[int, int, int, int] | None,
+        timeout: float,
+        interval: float,
+    ) -> ToolResult:
+        """轮询等待屏幕/区域画面发生变化。
+
+        使用 PIL ImageChops 进行高效像素差异计算，
+        避免 Python 逐像素循环导致的性能问题。
+        @author aceFelix
+        """
+        from PIL import ImageChops
+
+        threshold_pixels = 100  # 差异像素超过此值认为发生变化
+        try:
+            baseline = pyautogui.screenshot(region=region)
+        except Exception as e:
+            return ToolResult.error(f"初始截图失败: {type(e).__name__}: {e}")
+
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            time.sleep(interval)
+            try:
+                current = pyautogui.screenshot(region=region)
+            except Exception as e:
+                return ToolResult.error(f"轮询截图失败: {type(e).__name__}: {e}")
+
+            if baseline.size != current.size:
+                return ToolResult.ok("监控区域尺寸发生变化，判定为变化")
+
+            # 高效差异计算：ImageChops.difference + getbbox 快速判断是否有变化
+            diff_img = ImageChops.difference(baseline, current)
+            bbox = diff_img.getbbox()
+            if bbox is not None:
+                # 有差异，进一步统计差异像素数
+                # convert("L") 转灰度后 point() 二值化，再 sum 统计非零像素
+                mask = diff_img.convert("L").point(lambda p: 1 if p > 10 else 0)
+                diff_count = sum(mask.getdata())
+                if diff_count >= threshold_pixels:
+                    return ToolResult.ok(
+                        f"监控区域画面发生变化，差异像素 {diff_count} >= {threshold_pixels}"
+                    )
+
+        scope = f"区域 {region}" if region else "全屏"
+        return ToolResult.error(f"等待超时（{timeout}s）：{scope} 画面未发生明显变化")
+
+    def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
+        if args and args.get("template_path"):
+            return f"等待目标 {args.get('template_path')} 出现"
+        return "等待屏幕画面变化"
