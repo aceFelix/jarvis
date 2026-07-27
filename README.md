@@ -213,8 +213,6 @@ API Key 识别优先级：`DASHSCOPE_API_KEY` > `ANTHROPIC_API_KEY` > `OPENAI_AP
 > python -m agent.daemon.autostart desktop
 > ```
 
-![Jarvis REPL](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=A+futuristic+terminal+interface+with+a+glowing+blue+JARVIS+logo,+showing+AI+assistant+conversation+with+syntax-highlighted+tool+calls+and+responses,+dark+theme,+cyberpunk+aesthetic&image_size=landscape_16_9)
-
 ---
 
 ## 配置指南
