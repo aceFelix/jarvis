@@ -4,15 +4,20 @@
 
 # J.A.R.V.I.S
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
-[![PyPI version](https://img.shields.io/pypi/v/jarvis-agent.svg)](https://pypi.org/project/jarvis-agent/)
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-API-4D6BFE.svg?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://www.deepseek.com)
-[![DashScope](https://img.shields.io/badge/DashScope-%E7%99%BE%E7%82%BC-FF6A00.svg?logo=alibabacloud&logoColor=white)](https://bailian.console.aliyun.com)
-[![Status](https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg)](#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E)
-[![Personal](https://img.shields.io/badge/%F0%9F%9B%A0%EF%B8%8F-Personal%20Project-9B59B6.svg)](#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E)
-[![Iron Man](https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F-Inspired%20by%20Iron%20Man-E23636.svg)](#%E5%BC%80%E5%8F%91%E5%8F%82%E8%80%83)
-[![GitHub stars](https://img.shields.io/github/stars/yourname/J.A.R.V.I.S?style=social)](https://github.com/yourname/J.A.R.V.I.S)
+<div align="center">
+
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+<a href="https://www.python.org/downloads/release/python-3130/"><img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13" /></a>
+<a href="https://pypi.org/project/jarvis-agent/"><img src="https://img.shields.io/pypi/v/jarvis-agent.svg" alt="PyPI version" /></a>
+<a href="https://www.deepseek.com"><img src="https://img.shields.io/badge/DeepSeek-API-4D6BFE.svg?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+" alt="DeepSeek" /></a>
+<a href="https://bailian.console.aliyun.com"><img src="https://img.shields.io/badge/DashScope-%E7%99%BE%E7%82%BC-FF6A00.svg?logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
+<a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
+<a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/%F0%9F%9B%A0%EF%B8%8F-Personal%20Project-9B59B6.svg" alt="Personal" /></a>
+<a href="#%E5%BC%80%E5%8F%91%E5%8F%82%E8%80%83"><img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F-Inspired%20by%20Iron%20Man-E23636.svg" alt="Iron Man" /></a>
+<a href="https://github.com/yourname/J.A.R.V.I.S"><img src="https://img.shields.io/github/stars/yourname/J.A.R.V.I.S?style=social" alt="GitHub stars" /></a>
+
+</div>
+
 
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 >
