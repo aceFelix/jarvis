@@ -1341,9 +1341,10 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 
 | WeChat | X (Twitter) |
 |:---:|:---:|
-| <img src="assets/wechat-qr.png" alt="WeChat" width="200"/> | <img src="assets/x-qr.png" alt="X" width="200"/> |
+| <img src="assets/wechat-qr.png" alt="WeChat" width="50"/> | <img src="assets/x-qr.png" alt="X" width="50"/> |
 
 </div>
+
 
 <div align="center">
 
