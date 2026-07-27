@@ -1351,7 +1351,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 </div>
 
 
-<div align="center">
+<div align="right">
 
 <table>
 <tr>
@@ -1360,9 +1360,9 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
   <td align="center">抖音</td>
 </tr>
 <tr>
-  <td><img src="assets/wechat-qr.png" alt="微信" width="120"/></td>
-  <td><img src="assets/x-qr.png" alt="X" width="120"/></td>
-  <td><img src="assets/tiktok-qr.png" alt="抖音" width="120"/></td>
+  <td><img src="assets/wechat-qr.png" alt="微信" width="57"/></td>
+  <td><img src="assets/x-qr.png" alt="X" width="57"/></td>
+  <td><img src="assets/tiktok-qr.png" alt="抖音" width="57"/></td>
 </tr>
 </table>
 
