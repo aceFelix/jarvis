@@ -128,7 +128,7 @@ jarvis
 
 ### 用 npm 安装
 
-如果你习惯 Node.js 生态，也可以通过 npm 一键安装（需要系统已安装 Python 3.11+）：
+通过 npm 一键安装（需要系统已安装 Python 3.11+）：
 
 ```bash
 npm install -g jarvis-agent
@@ -1349,8 +1349,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 **「J.A.R.V.I.S. ——— 随时为您效劳，先生。」**
 
 </div>
-</p>
-</p>
+
 <div>
 
 <table>

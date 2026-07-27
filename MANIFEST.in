@@ -1,2 +1,6 @@
 include LICENSE
 include README.md
+
+# 项目级配置：只打包公开模板和权限规则，不打包用户私有的 settings.toml
+include configs/settings.example.toml
+include configs/permissions.yaml

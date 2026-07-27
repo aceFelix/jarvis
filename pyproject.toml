@@ -115,6 +115,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["agent*"]
 
+[tool.setuptools.package-data]
+"agent" = ["ui/realtime_window/assets/*"]
+
+[tool.setuptools.data-files]
+"configs" = ["configs/settings.example.toml", "configs/permissions.yaml"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

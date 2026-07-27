@@ -262,6 +262,8 @@ def load_settings(workdir: str | None = None) -> Settings:
     s = Settings(workdir=str(cwd))
 
     # 2. 项目级 configs/settings.toml
+    # 发布场景下不打包用户私有的 settings.toml，只提供 settings.example.toml 作为默认模板。
+    # 因此查找顺序：settings.toml → settings.example.toml → 缺失则使用默认值。
     project_cfg = cwd / "configs" / "settings.toml"
     if not project_cfg.is_file():
         # workdir 不是项目根目录时（如 daemon --workdir 指定了别的工作目录），
@@ -269,6 +271,12 @@ def load_settings(workdir: str | None = None) -> Settings:
         pkg_cfg = _pkg_root / "configs" / "settings.toml"
         if pkg_cfg.is_file():
             project_cfg = pkg_cfg
+    if not project_cfg.is_file():
+        example_cfg = cwd / "configs" / "settings.example.toml"
+        if not example_cfg.is_file():
+            example_cfg = _pkg_root / "configs" / "settings.example.toml"
+        if example_cfg.is_file():
+            project_cfg = example_cfg
     s = _apply_toml(s, _read_toml(project_cfg))
 
     # 3. 用户级 ~/.jarvis/settings.toml（兼容 ~/.my-agent/）
