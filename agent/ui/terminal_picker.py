@@ -156,6 +156,168 @@ def pick_from_list(
     return result[0]
 
 
+def pick_from_grouped_list(
+    groups: list[tuple[str, list[tuple[str, str, str]]]],
+    *,
+    title: str = "选择",
+    current: str = "",
+    space_tags: set[str] | None = None,
+) -> str | None:
+    """在终端内弹出按分组显示的列表选择器。
+
+    每个分组有一个不可选的标题，分组内选项可上下移动选择。
+
+    Args:
+        groups: [(group_label, [(value, label, description), ...]), ...]
+        title: 顶部标题。
+        current: 当前值（高亮标注）。
+        space_tags: 空格键触发特殊操作的 value 集合（返回 "__SPACE__<value>"）。
+
+    Returns:
+        选中的 value；取消返回 None；命中 space_tags 时返回 "__SPACE__<value>"。
+
+    @author aceFelix
+    """
+    if not groups:
+        return None
+
+    try:
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import Layout, HSplit, Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+        from prompt_toolkit.styles import Style
+    except ImportError:
+        return None
+
+    # 扁平化：每个元素 (value, label, desc, group_index, is_header)
+    flat: list[tuple[str, str, str, int, bool]] = []
+    for gi, (group_name, items) in enumerate(groups):
+        flat.append(("", group_name, "", gi, True))
+        for val, label, desc in items:
+            flat.append((val, label, desc, gi, False))
+
+    # 可选项索引（跳过标题）
+    selectable = [i for i, item in enumerate(flat) if not item[4]]
+    if not selectable:
+        return None
+
+    # 预选当前项
+    selected_pos = [0]
+    for pos in selectable:
+        val = flat[pos][0]
+        if val == current:
+            selected_pos[0] = selectable.index(pos)
+            break
+
+    cancelled = [False]
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    def _up(event):
+        selected_pos[0] = (selected_pos[0] - 1) % len(selectable)
+
+    @kb.add("down")
+    def _down(event):
+        selected_pos[0] = (selected_pos[0] + 1) % len(selectable)
+
+    @kb.add("enter")
+    def _enter(event):
+        idx = selectable[selected_pos[0]]
+        event.app.exit(result=flat[idx][0])
+
+    @kb.add("space")
+    def _space(event):
+        idx = selectable[selected_pos[0]]
+        val = flat[idx][0]
+        if space_tags and val in space_tags:
+            event.app.exit(result=f"__SPACE__{val}")
+
+    @kb.add("escape")
+    @kb.add("c-c")
+    def _cancel(event):
+        cancelled[0] = True
+        event.app.exit(result=None)
+
+    @kb.add("home")
+    def _home(event):
+        selected_pos[0] = 0
+
+    @kb.add("end")
+    def _end(event):
+        selected_pos[0] = len(selectable) - 1
+
+    def _get_text():
+        hint = "↑↓ 移动  Enter 确认  Esc 取消"
+        if space_tags:
+            hint += "  Space 更多操作"
+        lines: list[tuple[str, str]] = [
+            ("", "\n"),
+            ("bold #5bc8ff", f"  ◆ {title}"),
+            ("dim", f"  ({hint})"),
+            ("", "\n\n"),
+        ]
+
+        for i, (val, label, desc, gi, is_header) in enumerate(flat):
+            if is_header:
+                lines.append(("bold #ffffff", f"  {label}"))
+                lines.append(("", "\n"))
+                continue
+
+            real_idx = selectable.index(i)
+            is_selected = real_idx == selected_pos[0]
+            is_current = val == current
+
+            if is_current and is_selected:
+                prefix = "    ●"
+                style = "bold #5bc8ff"
+            elif is_current:
+                prefix = "    ○"
+                style = "#5bc8ff"
+            elif is_selected:
+                prefix = "    ›"
+                style = "bold #ffffff"
+            else:
+                prefix = "     "
+                style = ""
+
+            # label 与 desc 横向对齐；当前标记直接跟在 desc 后面
+            current_tag = "  当前" if is_current else ""
+            lines.append((style, f"{prefix} {label:<28}"))
+            lines.append(("dim #888888", f"  {desc}{current_tag}"))
+            lines.append(("", "\n"))
+
+        lines.append(("", "\n"))
+        return lines
+
+    content = FormattedTextControl(_get_text)
+    root = HSplit([Window(content)])
+
+    style = Style.from_dict({
+        "window": "bg:#0a0e14",
+    })
+
+    app = Application(
+        layout=Layout(root),
+        key_bindings=kb,
+        style=style,
+        full_screen=True,
+    )
+
+    result: list[Any] = [None]
+
+    def _run() -> None:
+        result[0] = app.run()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_run).result()
+
+    if cancelled[0]:
+        return None
+    return result[0]
+
+
 def input_text(
     *,
     title: str = "输入",
@@ -272,7 +434,7 @@ def form_input(
     类似 Claude Code 的 Ink Form，支持三种字段类型:
     - text: 普通文本输入
     - password: 密码模式（输入显示为 *）
-    - select: 选择列表（← → 切换，不占额外屏幕）
+    - select: 选择列表（↑↓ 在列表项中移动，Tab 切换字段）
 
     Args:
         title: 表单标题
@@ -327,22 +489,32 @@ def form_input(
 
     @kb.add("down")
     def _down(event):
-        focused[0] = (focused[0] + 1) % len(field_state)
+        fs = field_state[focused[0]]
+        # select 字段展开时，↓ 在选项列表中移动；否则切换字段焦点
+        if fs["type"] == "select" and fs.get("options"):
+            fs["index"] = (fs["index"] + 1) % len(fs["options"])
+        else:
+            focused[0] = (focused[0] + 1) % len(field_state)
 
     @kb.add("up")
     def _up(event):
-        focused[0] = (focused[0] - 1) % len(field_state)
+        fs = field_state[focused[0]]
+        # select 字段展开时，↑ 在选项列表中移动；否则切换字段焦点
+        if fs["type"] == "select" and fs.get("options"):
+            fs["index"] = (fs["index"] - 1) % len(fs["options"])
+        else:
+            focused[0] = (focused[0] - 1) % len(field_state)
 
     @kb.add("left")
     def _left(event):
         fs = field_state[focused[0]]
-        if fs["type"] == "select" and fs["options"]:
+        if fs["type"] == "select" and fs.get("options"):
             fs["index"] = (fs["index"] - 1) % len(fs["options"])
 
     @kb.add("right")
     def _right(event):
         fs = field_state[focused[0]]
-        if fs["type"] == "select" and fs["options"]:
+        if fs["type"] == "select" and fs.get("options"):
             fs["index"] = (fs["index"] + 1) % len(fs["options"])
 
     @kb.add("backspace")
@@ -382,7 +554,7 @@ def form_input(
         lines: list[tuple[str, str]] = [
             ("", "\n"),
             ("bold #5bc8ff", f"  ◆ {title}"),
-            ("dim", "  (Tab 切换字段  Enter 下一项/提交  Esc 取消)"),
+            ("dim", "  (Tab 切换字段  ↑↓ 选择列表项  Enter 下一项/提交  Esc 取消)"),
             ("", "\n\n"),
         ]
         for i, fs in enumerate(field_state):
@@ -399,14 +571,20 @@ def form_input(
             if ftype == "select":
                 options = fs.get("options", [])
                 idx = fs.get("index", 0)
-                if options:
-                    label_text = options[idx][1] if idx < len(options) else "?"
-                    if is_focused:
-                        lines.append(("bold #ffffff", f"      ◀ {label_text} ▶"))
-                    else:
-                        lines.append(("dim #888888", f"      {label_text}"))
-                else:
+                if not options:
                     lines.append(("dim #444444", "      （无选项）"))
+                elif is_focused:
+                    # 焦点在 select 上时展开竖向列表，↑↓ 直接选择
+                    for j, (val, opt_label) in enumerate(options):
+                        if j == idx:
+                            lines.append(("bold #5bc8ff", f"      › {opt_label}"))
+                        else:
+                            lines.append(("dim #888888", f"        {opt_label}"))
+                        lines.append(("", "\n"))
+                else:
+                    # 非焦点时只显示当前选中值
+                    label_text = options[idx][1] if idx < len(options) else "?"
+                    lines.append(("dim #888888", f"      {label_text}"))
             else:
                 buf = fs["buffer"]
                 placeholder = fs.get("placeholder", "")

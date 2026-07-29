@@ -1,7 +1,7 @@
 [project]
 name = "jarvis-agent"
 version = "2.0.1"
-description = "J.A.R.V.I.S — 你的钢铁侠同款桌面 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 30+ 内置工具、MCP 生态接入、多模型动态切换。"
+description = "J.A.R.V.I.S. — 你的钢铁侠同款 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 50+ 内置工具、MCP 生态接入、多模型动态切换。"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -116,10 +116,7 @@ build-backend = "setuptools.build_meta"
 include = ["agent*"]
 
 [tool.setuptools.package-data]
-"agent" = ["ui/realtime_window/assets/*"]
-
-[tool.setuptools.data-files]
-"configs" = ["configs/settings.example.toml", "configs/permissions.yaml"]
+"agent" = ["configs/*.toml", "configs/*.yaml", "ui/realtime_window/assets/*"]
 
 [tool.ruff]
 line-length = 100

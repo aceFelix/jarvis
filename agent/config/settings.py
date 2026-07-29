@@ -263,7 +263,11 @@ def load_settings(workdir: str | None = None) -> Settings:
 
     # 2. 项目级 configs/settings.toml
     # 发布场景下不打包用户私有的 settings.toml，只提供 settings.example.toml 作为默认模板。
-    # 因此查找顺序：settings.toml → settings.example.toml → 缺失则使用默认值。
+    # 查找顺序：
+    #   1) <workdir>/configs/settings.toml（用户项目级覆盖）
+    #   2) <pkg_root>/configs/settings.toml（开发者本地配置）
+    #   3) <pkg_root>/agent/configs/settings.example.toml（发布版默认模板）
+    #   4) 缺失则使用 Settings 默认值
     project_cfg = cwd / "configs" / "settings.toml"
     if not project_cfg.is_file():
         # workdir 不是项目根目录时（如 daemon --workdir 指定了别的工作目录），
@@ -272,9 +276,9 @@ def load_settings(workdir: str | None = None) -> Settings:
         if pkg_cfg.is_file():
             project_cfg = pkg_cfg
     if not project_cfg.is_file():
-        example_cfg = cwd / "configs" / "settings.example.toml"
-        if not example_cfg.is_file():
-            example_cfg = _pkg_root / "configs" / "settings.example.toml"
+        # 发布 wheel 中 configs/ 不在 site-packages 根目录，
+        # 默认模板作为 agent 包的 package-data 放在 agent/configs/ 下。
+        example_cfg = _pkg_root / "agent" / "configs" / "settings.example.toml"
         if example_cfg.is_file():
             project_cfg = example_cfg
     s = _apply_toml(s, _read_toml(project_cfg))
@@ -296,8 +300,9 @@ def load_settings(workdir: str | None = None) -> Settings:
     s = _apply_env(s)
 
     # 5. 权限文件默认路径
+    # 查找顺序：workdir/configs → pkg_root/configs → pkg_root/agent/configs（发布版）
     if not s.permissions_file:
-        for candidate_dir in (cwd, _pkg_root):
+        for candidate_dir in (cwd, _pkg_root, _pkg_root / "agent"):
             candidate = candidate_dir / "configs" / "permissions.yaml"
             if candidate.exists():
                 s.permissions_file = str(candidate)

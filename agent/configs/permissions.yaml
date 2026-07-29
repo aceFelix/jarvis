@@ -1,0 +1,91 @@
+# 权限规则配置
+# 格式: pattern = "ToolName(spec)"  value = allow/deny/ask  source = enterprise/user/project/session
+#
+# spec 支持 fnmatch 通配符:
+#   Bash(git *)      -> 匹配以 git 开头的命令
+#   Read(src/**)     -> 匹配 src 下任意文件
+#   Write(~/.ssh/*)  -> 匹配 ~/.ssh 下的文件
+# 无 spec 的规则: Bash -> 匹配该工具任意调用
+#
+# 优先级: enterprise > user > project > session（同优先级 deny > ask > allow）
+# 注意: 硬编码的危险规则（rm -rf /、写 ~/.ssh 等）永远生效，无法被这里覆盖。
+
+rules:
+  # ---- 允许的只读 git 命令 ----
+  - pattern: "Bash(git status)"
+    value: allow
+    source: user
+  - pattern: "Bash(git diff)"
+    value: allow
+    source: user
+  - pattern: "Bash(git log)"
+    value: allow
+    source: user
+  - pattern: "Bash(git show)"
+    value: allow
+    source: user
+
+  # ---- 允许常见只读命令（也可不写，shell_classifier 会自动放行）----
+  - pattern: "Bash(ls)"
+    value: allow
+    source: user
+  - pattern: "Bash(cat)"
+    value: allow
+    source: user
+  - pattern: "Bash(pwd)"
+    value: allow
+    source: user
+
+  # ---- 项目内文件读写允许 ----
+  - pattern: "Read(*)"
+    value: allow
+    source: project
+  - pattern: "Glob(*)"
+    value: allow
+    source: project
+  - pattern: "Grep(*)"
+    value: allow
+    source: project
+
+  # ---- 危险操作强制询问 ----
+  - pattern: "Bash(git push*)"
+    value: ask
+    source: user
+  - pattern: "Bash(npm publish*)"
+    value: ask
+    source: user
+  - pattern: "Bash(pip install*)"
+    value: ask
+    source: user
+
+  # ---- 敏感目录写拒绝（与硬编码规则重复，这里显式声明便于理解）----
+  - pattern: "Write(~/.ssh/**)"
+    value: deny
+    source: enterprise
+  - pattern: "Write(~/.aws/**)"
+    value: deny
+    source: enterprise
+
+  # ---- GUI 工具（阶段二新增）----
+  # 说明: GUI 工具走工具特判，不依赖此处的 allow 规则:
+  #   - 只读工具 (GetScreenSize/ScreenShot/WindowList) 自动放行
+  #   - 写类工具 (MouseClick/MouseMove/MouseScroll/TypeText/KeyTap/
+  #               WindowFocus/WindowClose/WindowMove) 一律 ASK
+  # 由于权限合并取"更严格"侧，工具特判的 ASK 无法被此处 allow 覆盖，
+  # 即便 yolo 模式也需确认——这是"操作电脑"该有的安全边界。
+  # 如需强制拒绝某些危险操作，可在此 deny（deny 能压过 ASK）:
+  # - pattern: "WindowClose(*)"
+  #   value: deny
+  #   source: user
+  # - pattern: "KeyTap(alt+f4)"
+  #   value: deny
+  #   source: user
+
+  # ---- 浏览器工具（阶段二新增）----
+  # 说明: 同 GUI 工具，走工具特判:
+  #   - 只读工具 (BrowserScreenshot/BrowserGetText/BrowserClose) 自动放行
+  #   - 写类工具 (BrowserNavigate/BrowserClick/BrowserType) 一律 ASK
+  # 如需对特定域名放行 Navigate（如内网），可加 allow 规则:
+  # - pattern: "BrowserNavigate(https://intranet.*)"
+  #   value: allow
+  #   source: project

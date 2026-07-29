@@ -221,6 +221,12 @@ class OpenAIProvider(LLMProvider):
             return "zhipu"
         if "moonshot" in url_lower:
             return "moonshot"
+        if "minimax" in url_lower:
+            return "minimax"
+        if "xiaomimimo" in url_lower:
+            return "xiaomimimo"
+        if "generativelanguage" in url_lower or "googleapis" in url_lower:
+            return "google"
         if "siliconflow" in url_lower:
             return "siliconflow"
         # 其他未知的 OpenAI 兼容服务
@@ -260,7 +266,7 @@ class OpenAIProvider(LLMProvider):
         if temperature is not None:
             request_kwargs["temperature"] = temperature
 
-        # 深度思考——通过 extra_body 传递，不支持的服务会静默忽略
+        # 深度思考——仅对已知支持的服务发送对应参数。
         # 注意：qwen3 系列模型默认开启思考，必须显式传 enable_thinking=False 才能关闭
         thinking_on = self._enable_thinking and not getattr(self, '_force_no_thinking', False)
         extra = request_kwargs.setdefault("extra_body", {})
@@ -270,11 +276,21 @@ class OpenAIProvider(LLMProvider):
             if thinking_on:
                 # DeepSeek 思考强度默认 high，可通过 reasoning_effort 调整
                 request_kwargs.setdefault("reasoning_effort", "high")
-        else:
-            # 阿里云等 OpenAI 兼容接口使用 enable_thinking
+        elif self.name == "dashscope":
+            # 阿里云 DashScope OpenAI 兼容接口使用 enable_thinking
             extra["enable_thinking"] = thinking_on
             if thinking_on and self._thinking_budget > 0:
                 extra["thinking_budget"] = self._thinking_budget
+        elif self.name == "zhipu":
+            # 智谱 BigModel OpenAI 兼容接口使用 thinking.type 开关思考模式
+            # GLM-5.x 默认开启 thinking，关闭时必须显式传 disabled
+            extra["thinking"] = {"type": "enabled" if thinking_on else "disabled"}
+            if thinking_on:
+                # reasoning_effort 控制推理强度，仅 GLM-5.2 及以上支持
+                # 默认 high，在推理深度和响应速度之间取平衡；需要更深推理可设 max
+                request_kwargs.setdefault("reasoning_effort", "high")
+        # 其他 OpenAI 兼容服务（Moonshot、MiniMax、OpenAI、Anthropic 等）
+        # 不支持 enable_thinking/thinking_budget/thinking，不发送这些字段，避免 405/400 错误。
 
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}

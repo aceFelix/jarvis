@@ -48,9 +48,85 @@ from agent.core.query_loop import QueryLoop
 from agent.core.tool import ToolRegistry, build_default_registry
 from agent.permissions import PermissionChecker, parse_mode
 from agent.permissions.modes import PermissionMode
+
+# 模型厂商选项，用于 /models 添加/编辑模型表单。
+# value 会作为 provider/vendor 写入配置；label 为界面显示文本。
+_MODEL_VENDOR_OPTIONS: list[tuple[str, str]] = [
+    ("deepseek", "DeepSeek"),
+    ("dashscope", "阿里云 DashScope"),
+    ("zhipu", "智谱 BigModel"),
+    ("moonshot", "Moonshot AI"),
+    ("minimax", "MiniMax"),
+    ("xiaomimimo", "Xiaomi MIMO"),
+    ("google", "Google AI"),
+    ("openai", "OpenAI"),
+    ("anthropic", "Anthropic"),
+    ("other", "其他"),
+]
+
+# 厂商 value → 显示名，用于 /models 列表分组标题。
+_VENDOR_LABELS: dict[str, str] = {value: label for value, label in _MODEL_VENDOR_OPTIONS}
+
+
+def _infer_model_vendor(model_name: str, cfg: dict[str, Any] | None = None) -> str:
+    """推断模型所属厂商。
+
+    优先使用自定义模型配置中的 vendor 字段；
+    否则根据模型名前缀推断；无法推断时返回 "other"。
+
+    Args:
+        model_name: 模型名。
+        cfg: 自定义模型配置字典，可选。
+
+    Returns:
+        厂商 value（对应 _MODEL_VENDOR_OPTIONS 中的 value）。
+
+    @author aceFelix
+    """
+    if cfg and isinstance(cfg, dict):
+        vendor = cfg.get("vendor")
+        if vendor:
+            return vendor
+    name_lower = model_name.lower()
+    if name_lower.startswith("qwen"):
+        return "dashscope"
+    if name_lower.startswith("deepseek"):
+        return "deepseek"
+    if name_lower.startswith("glm"):
+        return "zhipu"
+    # MiniMax / Moonshot / OpenAI 等模型名通常与厂商名一致
+    for vendor, _ in _MODEL_VENDOR_OPTIONS:
+        if name_lower.startswith(vendor):
+            return vendor
+    return "other"
+
+
 from agent.permissions.rules import RuleSet, load_rules
 from agent.prompts.system import build_system_prompt
 from agent.ui.cli import RichCLI
+
+
+def _infer_base_url(vendor: str, api_format: str) -> str:
+    """根据厂商和接口协议推断默认 Base URL。
+
+    DashScope SDK 模式由 SDK 内部管理 endpoint，无需 base_url。
+    其他未知厂商返回空字符串，由用户手动填写。
+
+    @author aceFelix
+    """
+    if api_format == "dashscope":
+        return ""
+    urls = {
+        "deepseek": "https://api.deepseek.com",
+        "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+        "moonshot": "https://api.moonshot.cn/v1",
+        "minimax": "https://api.minimax.chat/v1",
+        "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "openai": "https://api.openai.com/v1",
+        "anthropic": "https://api.anthropic.com",
+    }
+    return urls.get(vendor, "")
 
 
 def _build_provider(settings: Settings, model_type: str = "multimodal"):
@@ -106,13 +182,7 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
         {
             "name": "模型厂商",
             "type": "select",
-            "options": [
-                ("deepseek", "DeepSeek"),
-                ("dashscope", "阿里云 DashScope"),
-                ("openai", "OpenAI"),
-                ("anthropic", "Anthropic"),
-                ("other", "其他"),
-            ],
+            "options": _MODEL_VENDOR_OPTIONS,
             "default": "deepseek",
         },
         {
@@ -167,6 +237,9 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
     provider_type = result["接口类型"]
     vendor = result.get("模型厂商", "deepseek") or "deepseek"
     base_url = (result.get("Base URL") or "").strip()
+    # Base URL 留空时按厂商自动推断，减少用户手动填写。
+    if not base_url:
+        base_url = _infer_base_url(vendor, provider_type)
     api_key = (result.get("API Key") or "").strip()
     model_type = result["模型类型"]
 
@@ -222,13 +295,7 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
     fields = [
         {
             "name": "模型厂商", "type": "select",
-            "options": [
-                ("deepseek", "DeepSeek"),
-                ("dashscope", "阿里云 DashScope"),
-                ("openai", "OpenAI"),
-                ("anthropic", "Anthropic"),
-                ("other", "其他"),
-            ],
+            "options": _MODEL_VENDOR_OPTIONS,
             "default": cfg.get("provider") or cfg.get("vendor", "deepseek"),
         },
         {"name": "模型名", "type": "text", "default": name},
@@ -260,16 +327,22 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
         ui.warn("模型名不能为空")
         return
 
+    new_vendor = result.get("模型厂商", "deepseek") or "deepseek"
+    new_api_format = result["接口类型"]
+    new_base_url = (result.get("Base URL") or "").strip()
+    # Base URL 留空时按厂商自动推断。
+    if not new_base_url:
+        new_base_url = _infer_base_url(new_vendor, new_api_format)
     new_config = {
         "name": new_name,
-        "provider": result.get("模型厂商", "deepseek") or "deepseek",
-        "api_format": result["接口类型"],
-        "base_url": (result.get("Base URL") or "").strip(),
+        "provider": new_vendor,
+        "api_format": new_api_format,
+        "base_url": new_base_url,
         "api_key": (result.get("API Key") or "").strip(),
         "model_type": result["模型类型"],
         # 保留旧字段名以兼容
-        "vendor": result.get("模型厂商", "deepseek") or "deepseek",
-        "provider_type": result["接口类型"],
+        "vendor": new_vendor,
+        "provider_type": new_api_format,
     }
 
     from agent.config.settings import save_custom_model
@@ -326,13 +399,7 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
     fields = [
         {
             "name": "模型厂商", "type": "select",
-            "options": [
-                ("dashscope", "阿里云 DashScope"),
-                ("deepseek", "DeepSeek"),
-                ("openai", "OpenAI"),
-                ("anthropic", "Anthropic"),
-                ("other", "其他"),
-            ],
+            "options": _MODEL_VENDOR_OPTIONS,
             "default": default_vendor,
         },
         {"name": "API Key", "type": "password", "default": default_api_key},
@@ -361,6 +428,9 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
     vendor = result.get("模型厂商", "dashscope") or "dashscope"
     api_fmt = result["接口类型"]
     base_url = (result.get("Base URL") or "").strip()
+    # Base URL 留空时按厂商自动推断。
+    if not base_url:
+        base_url = _infer_base_url(vendor, api_fmt)
     api_key = (result.get("API Key") or "").strip()
     model_type = result["模型类型"]
 
@@ -1139,29 +1209,34 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 _disconnect_wechat(ui)
                 continue
             if cmd == "/models":
-                # 终端内联选择器：含内置模型 + 自定义模型 + 添加按钮
+                # 终端内联选择器：按厂商分组显示内置模型 + 自定义模型 + 添加按钮
                 # 空格键在自定义模型上触发修改/删除
-                from agent.ui.terminal_picker import pick_from_list
+                from agent.ui.terminal_picker import pick_from_grouped_list
 
                 _ADD_MARKER = "__jarvis_add_model__"
 
                 while True:
-                    # 构建模型列表（内置 + 自定义）
                     # 内置模型若已有同名自定义覆盖配置，标记 ✎ 并用 custom 配置的描述
                     custom_names: set[str] = set()
                     builtin_names: set[str] = set(settings.models.keys())
-                    model_items = []
+                    # 按厂商分组暂存
+                    vendor_to_items: dict[str, list[tuple[str, str, str]]] = {
+                        v: [] for v, _ in _MODEL_VENDOR_OPTIONS
+                    }
+
                     for k, v in settings.models.items():
                         if k in settings.custom_models and isinstance(settings.custom_models[k], dict):
                             cfg = settings.custom_models[k]
                             mtype = cfg.get("model_type", "multimodal")
                             prefix = "[文本]" if mtype == "text" else "[多模态]"
                             desc = f"{prefix} {v}  ✎ 已自定义配置"
-                            # 已被覆盖的内置模型同样支持空格键编辑/删除（允许_delete）
+                            # 已被覆盖的内置模型同样支持空格键编辑/删除
                             custom_names.add(k)
                         else:
+                            cfg = None
                             desc = v
-                        model_items.append((k, k, desc))
+                        vendor = _infer_model_vendor(k, cfg)
+                        vendor_to_items[vendor].append((k, k, desc))
                     for cname, cfg in settings.custom_models.items():
                         if not isinstance(cfg, dict):
                             continue
@@ -1171,16 +1246,27 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                         desc = cfg.get("name", cname)
                         mtype = cfg.get("model_type", "multimodal")
                         prefix = "[文本]" if mtype == "text" else "[多模态]"
-                        model_items.append((cname, cname, f"{prefix} {desc}"))
+                        vendor = _infer_model_vendor(cname, cfg)
+                        vendor_to_items[vendor].append((cname, cname, f"{prefix} {desc}"))
                         custom_names.add(cname)
-                    # 末尾追加「添加其他模型」
-                    model_items.append((_ADD_MARKER, "+ 添加其他模型", "添加新的自定义模型"))
+
+                    # 「添加其他模型」放到「其他」分组末尾
+                    vendor_to_items["other"].append(
+                        (_ADD_MARKER, "+ 添加其他模型", "添加新的自定义模型")
+                    )
+
+                    # 按 _MODEL_VENDOR_OPTIONS 顺序构建分组列表，跳过空分组
+                    grouped_items = [
+                        (_VENDOR_LABELS[v], vendor_to_items[v])
+                        for v, _ in _MODEL_VENDOR_OPTIONS
+                        if vendor_to_items[v]
+                    ]
 
                     # 所有模型都支持空格键操作（内置+自定义）
                     all_space_tags = builtin_names | custom_names
 
-                    picked = pick_from_list(
-                        model_items, title="选择模型", current=model,
+                    picked = pick_from_grouped_list(
+                        grouped_items, title="选择模型", current=model,
                         space_tags=all_space_tags,
                     )
 

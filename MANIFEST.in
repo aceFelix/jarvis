@@ -1,6 +1,7 @@
 include LICENSE
 include README.md
 
-# 项目级配置：只打包公开模板和权限规则，不打包用户私有的 settings.toml
-include configs/settings.example.toml
-include configs/permissions.yaml
+# 项目级配置模板作为 agent 包的 package-data 打包，
+# 根目录 configs/ 留给开发者本地私有配置，不进入分发包。
+include agent/configs/*.toml
+include agent/configs/*.yaml

@@ -1,0 +1,215 @@
+# jarvis 配置文件（示例模板）
+# 复制为 configs/settings.toml 并修改为你自己的配置。
+# 项目级配置。会被 ~/.jarvis/settings.toml 和环境变量覆盖。
+# 所有字段都可以省略（用默认值）。
+
+# ---- LLM ----
+# 默认接阿里云百炼 DashScope（OpenAI 兼容接口），用 qwen3.7-plus（带视觉）。
+# api_key 不写这里，走环境变量 DASHSCOPE_API_KEY。
+# provider = 模型提供商（vendor），仅显示用途
+# api_format = API 协议格式（openai / anthropic），控制用哪个 Provider 类
+provider = "dashscope"
+api_format = "openai"
+model = "qwen3.7-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = ""           # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
+# temperature = 0.7
+max_tokens = 20480
+# enable_thinking: 启用 qwen3.7-plus 原生深度思考（思维链），模型在回复前先输出 reasoning_content。
+# thinking_budget: 限制思考过程的 Token 上限（默认 800，0=不限制）。
+# 关闭思考: enable_thinking = false（或设环境变量 JARVIS_ENABLE_THINKING=0）。
+enable_thinking = true
+thinking_budget = 800
+
+# ---- 运行时 ----
+# workdir: 贾维斯默认工作目录。开发/文件操作/项目管理都在此目录下进行。
+# 可通过 --workdir 命令行参数临时覆盖。
+workdir = "./workspace"
+# permission_mode: default / plan / accept_edits / yolo
+permission_mode = "default"
+max_iterations = 50
+
+# ---- 权限规则文件 ----
+# permissions_file = "configs/permissions.yaml"
+
+# ---- 系统提示追加 ----
+# system_prompt_append = ""
+
+# ---- 调试 ----
+debug = false
+verbose = false
+
+# 可选模型列表（/model 命令列出并切换）。添加新模型只需往这里追加。
+# 也可以在 ~/.jarvis/settings.toml 里覆盖此列表。
+# 注意：[llm.models] 之后的顶层键都会被 TOML 解析进 llm.models。
+# 所以运行时/调试等顶层键必须放在 [llm.models] 前面。
+[llm.models]
+"qwen3.7-plus" = "通义千问 3.7 Plus（默认，带视觉）"
+"qwen3.6-plus" = "通义千问 3.6 Plus"
+"qwen3.6-flash" = "通义千问 3.6 Flash（快）"
+"qwen3.5-plus" = "通义千问 3.5 Plus"
+"qwen3.5-flash" = "通义千问 3.5 Flash（快）"
+
+# ---- 语音 ----
+# 基于 DashScope。复用 DASHSCOPE_API_KEY。
+# TTS: CosyVoice，音色 longanlang_v3；可用模型 cosyvoice-v3-flash(快)/v3-plus(好)/v3.5-plus(字级时间戳)
+# STT: 实时识别推荐 paraformer-realtime-v2 / fun-asr-realtime；非实时 fun-asr-flash-* 不推荐用于 /voice
+[tts]
+model = "cosyvoice-v3-flash"
+voice = "longanlang_v3"
+volume = 50          # 0-100
+speech_rate = 1.0    # 0.5-2.0，1.0 正常语速
+pitch_rate = 1.0     # 0.5-2.0，1.0 正常音调
+
+[stt]
+# model 适配规则（create_stt 工厂自动选择后端）：
+#   - "qwen*"              → QwenASR（OmniRealtimeConversation，服务端 VAD，质量高，中英混合强）
+#   - "paraformer*"        → ParaformerSTT（Recognition WebSocket，客户端 VAD，轻量快）
+#   - "fun-asr-realtime"   → ParaformerSTT（同为 Recognition 实时识别后端）
+#   - "fun-asr-flash-*"    → FunASRFlashSTT（HTTP POST 文件上传，非实时，/voice 体验差）
+# 切换后端只需改这一行
+model = "qwen3-asr-flash-realtime"
+max_seconds = 15         # 单次录音最长秒数（防卡死）
+silence_seconds = 1.5    # 连续静音多少秒视为说完（Paraformer 客户端 VAD / Qwen 服务端 VAD 均用此值）
+silence_threshold = 500  # RMS 静音阈值（仅 Paraformer 客户端 VAD 用；Qwen 用服务端 VAD 忽略此值）
+
+[voice]
+# barge_in: 语音打断——播报中开口说话自动打断。
+# 默认关闭——watcher 开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows 上会 segfault。
+barge_in = false
+# barge_in_key: 键盘打断——播报中按 ESC 立即停止播报，切回聆听。
+# 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。想换键改 voice_loop.py _KeyBargeInWatcher 默认 key。
+barge_in_key = true
+
+[ui]
+# 启动动画：JARVIS 蓝色方舟反应炉粒子动效（致敬 钢铁侠）。
+# 终端太窄/太矮/非 TTY 时自动跳过。也可用 --no-boot 或 JARVIS_BOOT_ANIMATION=0 关闭。
+boot_animation = true
+
+[context]
+# 上下文压缩：对话历史超阈值时自动摘要旧消息，保留最近 N 条原消息。
+# 防止 token 爆炸 + 撞模型上下文窗口。
+# 也可用 /compact 命令手动触发，JARVIS_CONTEXT_COMPACTION=0 关闭。
+compaction = true
+compaction_threshold = 8000   # 估算 token 超此值触发（粗估 4 字符/token）
+keep_recent_messages = 6       # 压缩时保留最近 N 条原消息（含当前轮）
+
+[memory]
+# 记忆持久化：会话存盘/恢复 + 长期记忆注入 system prompt。
+# /save /load /sessions 管理会话；/memory 查看长期记忆文件。
+# 长期记忆: ~/.jarvis/MEMORY.md（用户级）+ <workdir>/.jarvis/MEMORY.md（项目级）
+auto_resume_session = true     # 启动时自动恢复最近会话（退出时自动保存到 auto-latest）
+long_term_memory = true         # 启动时加载长期记忆注入 system prompt
+
+[skills]
+# Skill 系统：加载技能包注入 system prompt。
+# 目录: ~/.jarvis/skills/<name>/SKILL.md（用户级）+ <workdir>/.jarvis/skills/<name>/SKILL.md（项目级）
+# SKILL.md 含 frontmatter（name/description/when_to_use/trigger_words）+ Markdown 指令正文
+# /skills 命令列出已加载技能包
+enable = true
+
+[mcp]
+# MCP 接入：连接 ~/.jarvis/mcp.json 配置的 MCP server，注册其工具进 ToolRegistry。
+# 工具名格式 mcp__<server>__<tool>，默认 ASK 权限（外部进程，yolo 可放宽）。
+# 依赖: pip install mcp（未安装时优雅跳过）。/mcp 命令查看连接状态。
+enable = true
+
+[cli_anything]
+# CLI-Anything harness 市场配置（可选）。
+# 市场加载顺序：market_url 远程 → CLI-Anything 官方 GitHub → market_local 本地回退。
+# market_url: 自定义市场的 GitHub raw 前缀，
+#   如 https://raw.githubusercontent.com/user/jarvis-harness-market/main
+# market_local: 本地市场仓库路径，绝对路径或相对于 jarvis 项目目录。
+market_url = ""
+market_local = ""
+
+[email]
+# 邮件发送（SendEmail 工具）。enabled=false 时工具直接返回错误。
+# smtp_password 通常填邮箱授权码（如 163/QQ），不是登录密码。
+enabled = false
+smtp_host = "smtp.163.com"
+smtp_port = 465
+# smtp_user = "your_163_email@163.com"      # 发件邮箱账号
+# smtp_password = "your_authorization_code" # 邮箱授权码
+# sender = "your_163_email@163.com"         # 发件人显示地址（默认与 smtp_user 相同）
+# default_recipient = "your_163_email@163.com" # 默认收件人（用户未指定 to 时使用）
+
+[lsp]
+# LSP 代码智能（对标 Claude Code）
+# 安装: pip install python-lsp-server（Python）| npm install -g typescript-language-server（JS/TS）
+# 未配置/server 不可用时静默跳过
+enable = true
+[lsp.servers.python]
+command = "python-lsp-server"
+args = []
+extensions = ["py"]
+
+[daemon]
+# 常驻模式：jarvis --daemon 后台待命，热键/托盘唤起。
+# 依赖: pip install keyboard pystray（缺一个不影响另一个，均缺则仅语音唤醒词可用）。
+# 开机自启: 运行 `jarvis --daemon` 的快捷方式放入 shell:startup 文件夹。
+hotkey = "ctrl+shift+j"        # 全局热键（keyboard 库格式，如 "ctrl+shift+j"）
+hotkey_native = true            # Windows 优先使用 RegisterHotKey（比 keyboard 库更快）
+hotkey_debounce_ms = 200        # 热键去抖毫秒，防双击触发
+text_terminal_warm = false      # 预启动隐藏文本终端：热键唤起到可输入 < 500ms（但常驻内存）
+tray = true                     # 是否启用系统托盘图标
+# P2-3 每日简报：每天定时播报今日概览（提醒/节假日/系统状态/截止日期/日程）
+briefing_enabled = true
+briefing_time = "08:30"         # 简报时间（HH:MM）
+
+[bridge]
+# P3-1 跨设备协同：手机通过 PWA 网页与电脑端 JARVIS 对话。
+# 在 JARVIS 终端输入 /connect-phone 启动，终端会显示二维码和访问地址。
+# 手机和电脑需在同一局域网，或通过内网穿透从外网访问。
+# 权限隔离：手机端默认 PLAN 模式（只读），写操作需手机端确认。
+http_port = 8765               # HTTP 端口（PWA 页面 + 图片上传）
+ws_port = 8766                 # WebSocket 端口（实时通信）
+token = ""                     # 认证 token，留空则自动生成（每次 /connect-phone 变化）
+
+[monitor]
+# 系统资源监控：CPU/内存/磁盘超阈值时托盘通知+语音告警。
+# 依赖: pip install psutil。未装时监控静默不可用，不影响其他功能。
+enabled = true
+cpu_threshold = 85.0       # CPU 使用率 %，超过持续 30s 告警
+memory_threshold = 90.0    # 内存使用率 %
+disk_threshold = 10.0      # 磁盘剩余 %，低于此值告警
+check_interval = 10        # 检查间隔（秒）
+alert_cooldown = 600       # 同类告警冷却（秒，10分钟内不重复）
+# P2-3 增强
+disk_trend_days = 7        # 磁盘趋势预测：预测几天后将满时提前告警
+high_cpu_duration = 600    # 异常进程：CPU > 50% 持续多少秒通知用户
+work_break_interval = 7200 # 工作时长：连续工作多少秒提醒休息（2小时）
+
+[deadline]
+# 截止日期追踪（P2-3）：注册 deadline，分级提醒（7/3/1/0 天 + 逾期每天）。
+# 用户对贾维斯说"下周五之前交报告"→ agent 调 AddDeadline 工具注册。
+# 每天 check_time 检查所有活跃截止日期，命中提醒天数则播报。
+enabled = true
+check_time = "09:00"       # 每日检查截止日期的时间
+
+[calendar]
+# 日历集成（P2-3）：读取 Outlook/ICS 日历事件，在简报中展示 + 提前提醒。
+# backend: auto=优先Outlook回退ICS / outlook=仅Outlook COM / ics=仅ICS文件
+# ics_path: 本地 .ics 文件路径（从任意日历应用导出）
+# ics_url: 远程 .ics 订阅 URL（Google Calendar/Nextcloud 等）
+enabled = false
+backend = "auto"
+ics_path = ""
+ics_url = ""
+remind_minutes_before = 30 # 事件前多少分钟提醒
+
+[sandbox]
+# 安全沙箱（P3-8）：高风险操作在隔离环境中运行，防止误操作破坏系统。
+# 基于 Windows Job Object 限制进程资源（内存/CPU/进程数）。
+# 开启后，中等风险命令自动在沙箱内执行（无需用户确认）；
+# 高风险命令强制沙箱 + 文件快照保护；极高风险仍需用户确认。
+enabled = false
+max_memory_mb = 512        # 沙箱内最大内存（MB）
+max_cpu_seconds = 60       # 沙箱内最大 CPU 时间（秒）
+max_processes = 10         # 沙箱内最大子进程数（防 fork bomb）
+timeout = 120              # 沙箱命令总超时（秒）
+block_network = false      # 是否阻断沙箱内网络访问
+auto_allow_medium = true   # 沙箱开启时自动放行中等风险命令
+audit = true               # 记录沙箱审计日志（~/.jarvis/sandbox_audit.jsonl）
+max_snapshots = 20         # 文件快照最大保留数
+excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
