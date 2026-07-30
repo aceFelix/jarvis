@@ -127,7 +127,8 @@ def _normalize_path(value: str) -> str:
     if m:
         drive = m.group(1).upper()
         rest = m.group(2)
-        return f"{drive}:\\{rest.replace('/', '\\')}"
+        rest_replaced = rest.replace('/', '\\')
+        return f"{drive}:\\{rest_replaced}"
     return value
 
 
