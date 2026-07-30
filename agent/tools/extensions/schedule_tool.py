@@ -314,7 +314,9 @@ def register_schedule_tools(registry, scheduler: Scheduler) -> int:
         if name in registry:
             continue
         try:
-            registry.register(tool_cls(scheduler))
+            tool = tool_cls(scheduler)
+            tool.deferred = True  # 日程工具延迟加载
+            registry.register(tool)
             count += 1
         except Exception:
             pass

@@ -227,6 +227,12 @@ class Settings:
     sandbox_audit: bool = True             # 是否记录沙箱审计日志
     sandbox_max_snapshots: int = 20        # 文件快照最大保留数
 
+    # 工具延迟加载（参考 Claude Code deferred tool loading）
+    # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
+    # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
+    tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）
+    tools_chat_detection: bool = True      # 纯聊天零工具检测
+
     def with_overrides(self, **kwargs: object) -> "Settings":
         """返回一个用 kwargs 覆盖部分字段的新 Settings（None 值不覆盖）。"""
         data = {k: v for k, v in kwargs.items() if v is not None}
@@ -239,7 +245,11 @@ def _read_toml(path: Path) -> dict:
         return {}
     try:
         with path.open("rb") as f:
-            return tomllib.load(f)
+            raw = f.read()
+        # 兼容 Windows 编辑器/PowerShell 写入的 UTF-8 BOM
+        if raw.startswith(b"\xef\xbb\xbf"):
+            raw = raw[3:]
+        return tomllib.loads(raw.decode("utf-8"))
     except Exception:
         return {}
 
@@ -297,7 +307,8 @@ def load_settings(workdir: str | None = None) -> Settings:
     s = _apply_toml(s, _read_toml(user_cfg))
 
     # 4. 环境变量
-    s = _apply_env(s)
+    from agent.config.env import apply_env_overrides
+    s = apply_env_overrides(s)
 
     # 5. 权限文件默认路径
     # 查找顺序：workdir/configs → pkg_root/configs → pkg_root/agent/configs（发布版）
@@ -628,6 +639,15 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         # excluded_commands 是数组
         if "excluded_commands" in sandbox_table:
             updates["sandbox_excluded_commands"] = list(sandbox_table["excluded_commands"])
+    # [tools] 表 → 工具延迟加载字段
+    tools_table = data.get("tools", {})
+    if isinstance(tools_table, dict):
+        for sub_key, field in (
+            ("deferred_loading", "tools_deferred_loading"),
+            ("chat_detection", "tools_chat_detection"),
+        ):
+            if sub_key in tools_table:
+                updates[field] = tools_table[sub_key]
     # [llm] 表 → models 列表 + 自定义模型配置
     llm_table = data.get("llm", {})
     if isinstance(llm_table, dict):
@@ -650,204 +670,5 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
     return s.with_overrides(**updates)
 
 
-def _apply_env(s: Settings) -> Settings:
-    """环境变量覆盖。JARVIS_PROVIDER / JARVIS_MODEL / 等（兼容 MY_AGENT_*）。"""
-    updates: dict[str, object] = {}
-
-    def _env(*names: str) -> str | None:
-        for n in names:
-            v = os.environ.get(n)
-            if v:
-                return v
-        return None
-
-    provider = _env("JARVIS_PROVIDER", "MY_AGENT_PROVIDER")
-    if provider:
-        updates["provider"] = provider
-    model = _env("JARVIS_MODEL", "MY_AGENT_MODEL")
-    if model:
-        updates["model"] = model
-
-    # 常见 LLM API key 环境变量直通
-    # 顺序: 先认各家专属变量（DASHSCOPE_API_KEY / ANTHROPIC_API_KEY），
-    # 再认通用变量（OPENAI_API_KEY / JARVIS_API_KEY / MY_AGENT_API_KEY）。
-    # 实时语音/多模态等 DashScope 专属能力需要独立的 dashscope_api_key。
-    dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
-    if dashscope_key and not s.dashscope_api_key:
-        updates["dashscope_api_key"] = dashscope_key
-    if not s.api_key:
-        for key_env in (
-            "DASHSCOPE_API_KEY",    # 阿里云百炼 DashScope
-            "ANTHROPIC_API_KEY",     # Anthropic Claude
-            "OPENAI_API_KEY",        # OpenAI 官方及兼容服务
-            "JARVIS_API_KEY",        # 通用兜底（新名）
-            "MY_AGENT_API_KEY",      # 通用兜底（兼容旧名）
-        ):
-            kv = os.environ.get(key_env)
-            if kv:
-                updates["api_key"] = kv
-                break
-
-    base_url = _env("JARVIS_BASE_URL", "MY_AGENT_BASE_URL")
-    if base_url:
-        updates["base_url"] = base_url
-
-    mode = _env("JARVIS_PERMISSION_MODE", "MY_AGENT_PERMISSION_MODE")
-    if mode:
-        updates["permission_mode"] = parse_mode(mode)
-
-    debug = _env("JARVIS_DEBUG", "MY_AGENT_DEBUG")
-    if debug:
-        updates["debug"] = debug.lower() in ("1", "true", "yes")
-
-    boot = _env("JARVIS_BOOT_ANIMATION")
-    if boot:
-        updates["boot_animation"] = boot.lower() in ("1", "true", "yes")
-
-    compaction = _env("JARVIS_CONTEXT_COMPACTION")
-    if compaction:
-        updates["context_compaction"] = compaction.lower() in ("1", "true", "yes")
-
-    return s.with_overrides(**updates) if updates else s
-
-
-def save_custom_model(name: str, config: dict[str, str]) -> bool:
-    """保存自定义模型到 ~/.jarvis/settings.toml 的 [llm.custom_models] 节。
-
-    如果模型已存在则更新，否则追加。支持 name/base_url/api_key/provider_type/model_type。
-    返回 True 表示保存成功。
-    """
-    import re
-
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    if not toml_path.exists():
-        return False
-
-    content = toml_path.read_text(encoding="utf-8")
-
-    # 构建新子表条目
-    entry = f'''
-[llm.custom_models."{name}"]
-name = "{name}"
-base_url = "{config.get('base_url', '')}"
-api_key = "{config.get('api_key', '')}"
-provider_type = "{config.get('provider_type', 'openai')}"
-model_type = "{config.get('model_type', 'multimodal')}"
-vendor = "{config.get('vendor', 'dashscope')}"
-'''
-
-    marker = f'[llm.custom_models."{name}"]'
-    if marker in content:
-        # 已存在 → 替换旧段
-        start = content.index(marker)
-        rest = content[start + len(marker):]
-        m = re.search(r'\n\[', rest)
-        if m:
-            end = start + len(marker) + m.start()
-            # 跳过末尾的空行
-            while end < len(content) and content[end] == '\n':
-                end += 1
-            content = content[:start].rstrip() + "\n" + entry.strip() + "\n" + content[end:]
-        else:
-            content = content[:start].rstrip() + "\n" + entry.strip()
-    else:
-        # 不存在 → 追加
-        if "[llm.custom_models" not in content:
-            # 首次添加，确保有节头注释
-            content = content.rstrip() + "\n\n# 自定义模型（通过 /models 添加）\n"
-        content = content.rstrip() + "\n" + entry.strip() + "\n"
-
-    toml_path.write_text(content, encoding="utf-8")
-    return True
-
-
-def save_last_model(model_name: str) -> bool:
-    """保存最近使用的模型到 ~/.jarvis/settings.toml 顶层 last_model 字段。
-
-    last_model 和 model/provider/base_url 一样是顶层字段（不在 [llm] 节内），
-    这样 _apply_toml 才能正确读取。
-    下次启动时若未指定 --model，会自动恢复此模型。
-    返回 True 表示保存成功。
-    """
-    import re
-
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    toml_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not toml_path.exists():
-        toml_path.write_text(f'last_model = "{model_name}"\n', encoding="utf-8")
-        return True
-
-    content = toml_path.read_text(encoding="utf-8")
-
-    # last_model 是顶层字段，必须在任何 [...] 节头之前
-    # 策略：找到第一个 [...] 节头位置，在该位置之前操作顶层字段
-    first_section = re.search(r'^\[', content, re.MULTILINE)
-    top_end = first_section.start() if first_section else len(content)
-    top_part = content[:top_end]
-    rest_part = content[top_end:]
-
-    # 在顶层部分查找/更新/插入 last_model
-    if re.search(r'^last_model\s*=', top_part, re.MULTILINE):
-        # 替换已有值
-        new_top = re.sub(
-            r'^last_model\s*=.*$',
-            f'last_model = "{model_name}"',
-            top_part,
-            flags=re.MULTILINE,
-        )
-    else:
-        # 插入：优先放在 model = 行后面，否则放在顶层末尾
-        model_line = re.search(r'^model\s*=.*$', top_part, re.MULTILINE)
-        if model_line:
-            insert_at = model_line.end()
-            new_top = top_part[:insert_at] + f'\nlast_model = "{model_name}"' + top_part[insert_at:]
-        else:
-            new_top = top_part.rstrip() + f'\nlast_model = "{model_name}"\n'
-
-    content = new_top + rest_part
-    toml_path.write_text(content, encoding="utf-8")
-    return True
-
-
-def save_realtime_talk_auto_start(enabled: bool) -> bool:
-    """保存实时语音对话自动启动开关到 ~/.jarvis/settings.toml 的 [realtime_talk] 节。
-
-    返回 True 表示保存成功。
-    """
-    import re
-
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    toml_path.parent.mkdir(parents=True, exist_ok=True)
-
-    value = "true" if enabled else "false"
-    if not toml_path.exists():
-        toml_path.write_text(f"[realtime_talk]\nauto_start = {value}\n", encoding="utf-8")
-        return True
-
-    content = toml_path.read_text(encoding="utf-8")
-
-    # 定位或创建 [realtime_talk] 节
-    section_match = re.search(r'^\[realtime_talk\]\s*$', content, re.MULTILINE)
-    if section_match:
-        section_start = section_match.end()
-        next_section = re.search(r'^\[', content[section_start + 1:], re.MULTILINE)
-        section_end = section_start + 1 + (next_section.start() if next_section else len(content[section_start + 1:]))
-        section = content[section_start + 1:section_start + 1 + section_end - (section_start + 1)]
-
-        if re.search(r'^auto_start\s*=', section, re.MULTILINE):
-            new_section = re.sub(
-                r'^auto_start\s*=.*$',
-                f"auto_start = {value}",
-                section,
-                flags=re.MULTILINE,
-            )
-        else:
-            new_section = section.rstrip() + f"\nauto_start = {value}\n"
-
-        content = content[:section_start + 1] + new_section + content[section_start + 1 + section_end - (section_start + 1):]
-    else:
-        content = content.rstrip() + f"\n\n[realtime_talk]\nauto_start = {value}\n"
-
-    toml_path.write_text(content, encoding="utf-8")
-    return True
+# ── 以下函数已拆分到独立模块，此处保留重导出以兼容现有导入 ──
+from agent.config.model_registry import save_custom_model, save_last_model, save_realtime_talk_auto_start  # noqa: E402, F401

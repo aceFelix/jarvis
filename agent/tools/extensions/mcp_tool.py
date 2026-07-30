@@ -19,7 +19,10 @@ class MCPToolWrapper(Tool):
 
     工具名格式: mcp__<server>__<tool>（避免与内置工具冲突，且可溯源）。
     权限: 默认 ASK（MCP server 是外部进程，调用应让用户知晓）。
+    延迟加载: MCP 工具全部标记为 deferred，通过 ToolSearch 按需发现。
     """
+
+    deferred = True  # MCP 工具默认延迟加载
 
     def __init__(self, client: MCPClient, tool_def: McpToolDef) -> None:
         self._client = client

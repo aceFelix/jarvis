@@ -40,6 +40,7 @@ def discover_and_register(
     registered = 0
     for harness in harnesses:
         tool = CliAnythingTool(harness)
+        tool.deferred = True  # harness 工具延迟加载，通过 ToolSearch 按需发现
         if tool.name in registry:
             logger.debug("harness 已存在，跳过: %s", tool.name)
             continue
@@ -51,4 +52,6 @@ def discover_and_register(
 
 def register_harness_tool(registry: "ToolRegistry", harness: Harness) -> None:
     """把单个 harness 注册为 Tool。"""
-    registry.register(CliAnythingTool(harness))
+    tool = CliAnythingTool(harness)
+    tool.deferred = True  # harness 工具延迟加载，通过 ToolSearch 按需发现
+    registry.register(tool)

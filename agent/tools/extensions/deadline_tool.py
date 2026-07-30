@@ -303,7 +303,9 @@ def register_deadline_tools(registry, tracker: DeadlineTracker) -> int:
         if name in registry:
             continue
         try:
-            registry.register(tool_cls(tracker))
+            tool = tool_cls(tracker)
+            tool.deferred = True  # 截止日期工具延迟加载
+            registry.register(tool)
             count += 1
         except Exception:
             pass

@@ -44,6 +44,10 @@ class Tool(abc.ABC):
     # 对应原 maxResultSizeChars。设为 float('inf') 表示永不落盘。
     max_result_chars: int = 20_000
 
+    # 是否延迟加载。True = 不随每次请求发送完整 schema，
+    # 需通过 ToolSearchTool 发现后才能调用。参考 Claude Code deferred tool loading。
+    deferred: bool = False
+
     @abc.abstractmethod
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """执行工具。必须返回 ToolResult，不可直接抛业务错误（用 ToolResult.error）。"""
@@ -170,6 +174,14 @@ class ToolRegistry:
     def all(self) -> list[Tool]:
         return list(self._tools.values())
 
+    def all_core(self) -> list[Tool]:
+        """始终携带的核心工具（deferred=False）。"""
+        return [t for t in self._tools.values() if not t.deferred]
+
+    def all_deferred(self) -> list[Tool]:
+        """延迟加载的工具池（deferred=True）。"""
+        return [t for t in self._tools.values() if t.deferred]
+
     def __len__(self) -> int:
         return len(self._tools)
 
@@ -282,12 +294,14 @@ def register_subagent_tool(
             return False  # 已注册
 
         mode = permission_mode or PermissionMode.YOLO
-        registry.register(SubagentTool(
+        subagent = SubagentTool(
             provider=provider,
             permission_mode=mode,
             team_mgr=team_mgr,
             task_list=task_list,
-        ))
+        )
+        subagent.deferred = True  # 子代理工具延迟加载，通过 ToolSearch 按需发现
+        registry.register(subagent)
         # 保留旧名作为别名（只加 alias，不加 _tools 避免重复 tool 对象）
         if "Subagent" not in registry:
             registry._aliases["Subagent"] = "Agent"
@@ -322,8 +336,12 @@ def register_team_tools(
     except ImportError:
         pass
     else:
-        registry.register(TeamCreateTool(team_mgr=team_mgr))
-        registry.register(TeamDeleteTool(team_mgr=team_mgr))
+        t1 = TeamCreateTool(team_mgr=team_mgr)
+        t1.deferred = True  # 团队协作工具延迟加载
+        t2 = TeamDeleteTool(team_mgr=team_mgr)
+        t2.deferred = True
+        registry.register(t1)
+        registry.register(t2)
         count += 2
 
     # SendMessage 工具
@@ -332,7 +350,9 @@ def register_team_tools(
     except ImportError:
         pass
     else:
-        registry.register(SendMessageTool(team_mgr=team_mgr))
+        t = SendMessageTool(team_mgr=team_mgr)
+        t.deferred = True  # 团队协作工具延迟加载
+        registry.register(t)
         count += 1
 
     # Task 工具（需要 task_list）
@@ -346,11 +366,21 @@ def register_team_tools(
         except ImportError:
             pass
         else:
-            registry.register(TaskCreateTool(task_list=task_list))
-            registry.register(TaskGetTool(task_list=task_list))
-            registry.register(TaskListTool(task_list=task_list))
-            registry.register(TaskUpdateTool(task_list=task_list))
-            registry.register(TaskStopTool())
+            t1 = TaskCreateTool(task_list=task_list)
+            t1.deferred = True  # 任务管理工具延迟加载
+            t2 = TaskGetTool(task_list=task_list)
+            t2.deferred = True
+            t3 = TaskListTool(task_list=task_list)
+            t3.deferred = True
+            t4 = TaskUpdateTool(task_list=task_list)
+            t4.deferred = True
+            t5 = TaskStopTool()
+            t5.deferred = True
+            registry.register(t1)
+            registry.register(t2)
+            registry.register(t3)
+            registry.register(t4)
+            registry.register(t5)
             count += 5
 
     # TeamStatus 工具（需要 task_list 提供任务统计）
@@ -359,7 +389,9 @@ def register_team_tools(
     except ImportError:
         pass
     else:
-        registry.register(TeamStatusTool(team_mgr=team_mgr, task_list=task_list))
+        t = TeamStatusTool(team_mgr=team_mgr, task_list=task_list)
+        t.deferred = True  # 团队协作工具延迟加载
+        registry.register(t)
         count += 1
 
     return count
@@ -374,8 +406,12 @@ def register_plan_tools(registry: ToolRegistry) -> int:
     except ImportError:
         pass
     else:
-        registry.register(EnterPlanModeTool())
-        registry.register(ExitPlanModeTool())
+        t1 = EnterPlanModeTool()
+        t1.deferred = True
+        t2 = ExitPlanModeTool()
+        t2.deferred = True
+        registry.register(t1)
+        registry.register(t2)
         count += 2
     return count
 
@@ -396,7 +432,9 @@ def register_lsp_tool(registry: ToolRegistry) -> int:
     except ImportError:
         return 0
 
-    registry.register(LSPTool())
+    tool = LSPTool()
+    tool.deferred = True
+    registry.register(tool)
     return 1
 
 
@@ -428,22 +466,17 @@ def _register_gui_tools(registry: ToolRegistry) -> None:
         # pyautogui/pygetwindow 未安装，GUI 工具不可用
         return
 
-    registry.register(MouseClickTool())
-    registry.register(MouseDragTool())
-    registry.register(MouseMoveTool())
-    registry.register(MouseScrollTool())
-    registry.register(TypeTextTool())
-    registry.register(KeyTapTool())
-    registry.register(GetScreenSizeTool())
-    registry.register(ScreenShotTool())
-    registry.register(WaitForTool())
-    registry.register(WindowListTool())
-    registry.register(WindowFocusTool())
-    registry.register(WindowCloseTool())
-    registry.register(WindowMoveTool())
-    registry.register(WindowRectTool())
-    registry.register(WindowClickTool())
-    registry.register(VisualClickTool())
+    gui_tools = [
+        MouseClickTool(), MouseDragTool(), MouseMoveTool(), MouseScrollTool(),
+        TypeTextTool(), KeyTapTool(),
+        GetScreenSizeTool(), ScreenShotTool(), WaitForTool(),
+        WindowListTool(), WindowFocusTool(), WindowCloseTool(),
+        WindowMoveTool(), WindowRectTool(), WindowClickTool(),
+        VisualClickTool(),
+    ]
+    for t in gui_tools:
+        t.deferred = True
+        registry.register(t)
 
 
 def _register_browser_tools(registry: ToolRegistry) -> None:
@@ -465,12 +498,13 @@ def _register_browser_tools(registry: ToolRegistry) -> None:
         # playwright 未安装，浏览器工具不可用
         return
 
-    registry.register(BrowserNavigateTool())
-    registry.register(BrowserScreenshotTool())
-    registry.register(BrowserClickTool())
-    registry.register(BrowserTypeTool())
-    registry.register(BrowserGetTextTool())
-    registry.register(BrowserCloseTool())
+    browser_tools = [
+        BrowserNavigateTool(), BrowserScreenshotTool(), BrowserClickTool(),
+        BrowserTypeTool(), BrowserGetTextTool(), BrowserCloseTool(),
+    ]
+    for t in browser_tools:
+        t.deferred = True
+        registry.register(t)
 
 
 def _register_camera_tools(registry: ToolRegistry) -> None:
@@ -491,5 +525,7 @@ def _register_camera_tools(registry: ToolRegistry) -> None:
     except ImportError:
         return
 
-    registry.register(CameraShotTool())
-    registry.register(ListCamerasTool())
+    cam_tools = [CameraShotTool(), ListCamerasTool()]
+    for t in cam_tools:
+        t.deferred = True
+        registry.register(t)

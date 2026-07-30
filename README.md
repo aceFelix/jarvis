@@ -228,7 +228,7 @@ Jarvis 使用三层配置合并：
 ```toml
 # ---- LLM ----
 provider = "dashscope"          # 模型提供商
-api_format = "openai"           # 协议格式（openai / anthropic）
+api_format = "openai"           # 协议格式（openai / anthropic / dashscope / zai）
 model = "qwen3.7-plus"          # 默认模型（多模态视觉）
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_tokens = 20480              # 单次输出最大 Token
@@ -457,13 +457,14 @@ SKILL.md 包含：
 
 ### 添加自定义模型
 
-通过 `/models` 命令交互式添加自定义模型，支持三种接口类型：
+通过 `/models` 命令交互式添加自定义模型，支持四种接口类型：
 
 | 接口类型 | 适用模型 | 说明 |
 |---|---|---|
 | **OpenAI 兼容** | DeepSeek / GPT-4o / 各类兼容服务 | 标准 OpenAI API 格式 |
 | **Anthropic 兼容** | Claude 系列 | Anthropic Messages API 格式 |
 | **DashScope SDK** | qwen 系列原生协议 | 支持 MultiModalConversation 和 Generation 双端点 |
+| **智谱 ZhipuAi SDK** | GLM 系列原生协议 | 绕过 OpenAI 兼容层，获得更稳定的响应 |
 
 配置会自动保存到 `~/.jarvis/settings.toml` 的 `[llm.custom_models]` 中，重启后保持。
 
@@ -475,6 +476,12 @@ api_format = "openai"
 base_url = "https://api.deepseek.com/v1"
 api_key = "sk-your-deepseek-key"
 model_type = "text"              # "text" 纯文本 / "vision" 多模态
+
+[llm.custom_models."glm-4.7-flash"]
+provider = "zhipu"
+api_format = "zai"
+api_key = "sk-your-zhipu-key"
+model_type = "text"              # GLM-4.7-flash 为纯文本模型
 ```
 
 ---
@@ -1237,6 +1244,7 @@ agent/
 │   ├── openai_provider.py    # OpenAI 兼容协议
 │   ├── anthropic_provider.py # Anthropic Messages API
 │   ├── dashscope_provider.py # DashScope SDK 原生协议
+│   ├── zai_provider.py       # 智谱 ZhipuAi SDK 原生协议
 │   └── mock.py        # Mock Provider（测试用）
 ├── ui/                # 用户界面
 │   ├── cli.py         # Rich 终端 REPL + 命令补全

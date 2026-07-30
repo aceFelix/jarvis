@@ -219,6 +219,10 @@ class DashScopeProvider(LLMProvider):
     def is_thinking_enabled(self) -> bool:
         return self._enable_thinking and not self._force_no_thinking
 
+    def set_model_type(self, model_type: str) -> None:
+        """动态切换模型类型（multimodal / text）。"""
+        self._model_type = model_type
+
     async def stream(
         self,
         *,
@@ -254,7 +258,8 @@ class DashScopeProvider(LLMProvider):
             for t in tools
         ]
 
-        # 思考模式：enable_thinking 控制（DashScope SDK 官方参数）
+        # 思考模式 —— 配置表驱动（dashscope_sdk: top_level enable_thinking）
+        from agent.llm.thinking import THINKING_CONFIGS, apply_thinking
         thinking_on = self._enable_thinking and not self._force_no_thinking
 
         call_kwargs: dict[str, Any] = {
@@ -263,14 +268,15 @@ class DashScopeProvider(LLMProvider):
             "max_tokens": max_tokens,
             "stream": True,
             "result_format": "message",
-            "enable_thinking": thinking_on,
         }
         if tool_schemas:
             call_kwargs["tools"] = tool_schemas
         if temperature is not None:
             call_kwargs["temperature"] = temperature
-        if thinking_on and self._thinking_budget > 0:
-            call_kwargs["thinking_budget"] = self._thinking_budget
+
+        cfg = THINKING_CONFIGS.get("dashscope_sdk")
+        if cfg:
+            apply_thinking(call_kwargs, cfg, thinking_on, self._thinking_budget)
 
         # dashscope SDK 是同步的，用线程+Queue 桥接到 async
         queue: asyncio.Queue[Any] = asyncio.Queue()

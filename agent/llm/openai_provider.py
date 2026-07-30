@@ -72,6 +72,10 @@ def _messages_to_openai(
             entry: dict[str, Any] = {"role": "assistant"}
             if content_text:
                 entry["content"] = content_text
+            elif tool_calls:
+                # OpenAI 规范要求 assistant message with tool_calls 的 content 字段存在且为 null；
+                # 智谱 GLM 等兼容接口在字段缺失时可能挂起或报错。
+                entry["content"] = None
             if tool_calls:
                 entry["tool_calls"] = tool_calls
             out.append(entry)
@@ -111,28 +115,19 @@ def _messages_to_openai(
                     if skip_images:
                         # 纯文本模型：用文字描述替代图片
                         img_count = len(b.images)
-                        content_list = [
-                            {"type": "text",
-                             "text": b.content + f"\n[附带 {img_count} 张图片（当前为纯文本模型，图片已省略）]"}
-                        ]
+                        tool_content = (
+                            b.content + f"\n[附带 {img_count} 张图片（当前为纯文本模型，图片已省略）]"
+                        )
                     else:
-                        content_list: list[dict[str, Any]] = [
-                            {"type": "text", "text": b.content}
-                        ]
-                        for img in b.images:
-                            content_list.append(
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{img.media_type};base64,{img.data}"
-                                    },
-                                }
-                            )
+                        # OpenAI 规范要求 role="tool" 的 content 为 string；
+                        # 智谱 GLM 等兼容接口在收到 list 类型 content 时可能挂起或报错。
+                        # 先把图片描述以文本形式附加，后续如需视觉 tool_result 再追加独立 user 消息。
+                        tool_content = b.content + f"\n[附带 {len(b.images)} 张图片]"
                     out.append(
                         {
                             "role": "tool",
                             "tool_call_id": b.tool_use_id,
-                            "content": content_list,
+                            "content": tool_content,
                         }
                     )
                 else:
@@ -179,7 +174,7 @@ class OpenAIProvider(LLMProvider):
         self._force_no_thinking = False
         # 根据 base_url 推断实际后端名
         self._display_name = self._derive_name(self._base_url)
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = {"timeout": 180.0}
         if api_key:
             kwargs["api_key"] = api_key
         if base_url:
@@ -206,31 +201,21 @@ class OpenAIProvider(LLMProvider):
         """返回当前思考模式是否开启（综合两个标志判断）。"""
         return self._enable_thinking and not self._force_no_thinking
 
+    def set_model_type(self, model_type: str) -> None:
+        """动态切换模型类型（multimodal / text）。
+
+        切换模型时可能复用同一个 provider 实例，但需要改变图片处理方式。
+        """
+        self._model_type = model_type
+
     @staticmethod
     def _derive_name(base_url: str) -> str:
-        if not base_url:
-            return "openai"
-        url_lower = base_url.lower()
-        if "dashscope" in url_lower:
-            return "dashscope"
-        if "deepseek" in url_lower:
-            return "deepseek"
-        if "api.openai.com" in url_lower:
-            return "openai"
-        if "open.bigmodel.cn" in url_lower:
-            return "zhipu"
-        if "moonshot" in url_lower:
-            return "moonshot"
-        if "minimax" in url_lower:
-            return "minimax"
-        if "xiaomimimo" in url_lower:
-            return "xiaomimimo"
-        if "generativelanguage" in url_lower or "googleapis" in url_lower:
-            return "google"
-        if "siliconflow" in url_lower:
-            return "siliconflow"
-        # 其他未知的 OpenAI 兼容服务
-        return "openai_compatible"
+        """根据 base_url 自动检测厂商名 —— 配置表驱动。
+
+        新增厂商只需在 PROVIDER_REGISTRY 加 url_patterns，无需修改此方法。
+        """
+        from agent.llm.provider_registry import lookup_by_url
+        return lookup_by_url(base_url)
 
     async def stream(
         self,
@@ -266,31 +251,14 @@ class OpenAIProvider(LLMProvider):
         if temperature is not None:
             request_kwargs["temperature"] = temperature
 
-        # 深度思考——仅对已知支持的服务发送对应参数。
-        # 注意：qwen3 系列模型默认开启思考，必须显式传 enable_thinking=False 才能关闭
+        # 深度思考 —— 配置表驱动，新增厂商只需在 THINKING_CONFIGS 加一行
+        # 此前通过 if-else 硬编码各厂商的思考参数差异，
+        # 现在由 apply_thinking() 根据厂商名查表统一注入。
+        from agent.llm.thinking import THINKING_CONFIGS, apply_thinking
         thinking_on = self._enable_thinking and not getattr(self, '_force_no_thinking', False)
-        extra = request_kwargs.setdefault("extra_body", {})
-        if self.name == "deepseek":
-            # DeepSeek 官方 API 使用 thinking.type 开关思考模式
-            extra["thinking"] = {"type": "enabled" if thinking_on else "disabled"}
-            if thinking_on:
-                # DeepSeek 思考强度默认 high，可通过 reasoning_effort 调整
-                request_kwargs.setdefault("reasoning_effort", "high")
-        elif self.name == "dashscope":
-            # 阿里云 DashScope OpenAI 兼容接口使用 enable_thinking
-            extra["enable_thinking"] = thinking_on
-            if thinking_on and self._thinking_budget > 0:
-                extra["thinking_budget"] = self._thinking_budget
-        elif self.name == "zhipu":
-            # 智谱 BigModel OpenAI 兼容接口使用 thinking.type 开关思考模式
-            # GLM-5.x 默认开启 thinking，关闭时必须显式传 disabled
-            extra["thinking"] = {"type": "enabled" if thinking_on else "disabled"}
-            if thinking_on:
-                # reasoning_effort 控制推理强度，仅 GLM-5.2 及以上支持
-                # 默认 high，在推理深度和响应速度之间取平衡；需要更深推理可设 max
-                request_kwargs.setdefault("reasoning_effort", "high")
-        # 其他 OpenAI 兼容服务（Moonshot、MiniMax、OpenAI、Anthropic 等）
-        # 不支持 enable_thinking/thinking_budget/thinking，不发送这些字段，避免 405/400 错误。
+        cfg = THINKING_CONFIGS.get(self.name)
+        if cfg:
+            apply_thinking(request_kwargs, cfg, thinking_on, self._thinking_budget)
 
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}

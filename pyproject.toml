@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "anthropic>=0.39.0",
     "openai>=1.50.0",
+    "zai-sdk>=0.2.2",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "rich>=13.7.0",

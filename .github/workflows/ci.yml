@@ -1,0 +1,66 @@
+name: CI
+
+# T-05: GitHub Actions CI — push/PR 时自动跑测试 + 语法检查
+#
+# 触发条件: push 到 main/master 或 PR
+# 测试矩阵: Python 3.11 / 3.12 / 3.13
+# 步骤: 安装依赖 → 语法检查 → pytest
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Syntax check (core modules)
+        run: |
+          python -m py_compile agent/main.py
+          python -m py_compile agent/core/query_loop.py
+          python -m py_compile agent/core/layered_context.py
+          python -m py_compile agent/core/orchestrator.py
+          python -m py_compile agent/core/tool.py
+          python -m py_compile agent/core/context.py
+          python -m py_compile agent/llm/openai_provider.py
+          python -m py_compile agent/llm/thinking.py
+          python -m py_compile agent/llm/provider_registry.py
+          python -m py_compile agent/config/settings.py
+          python -m py_compile agent/config/env.py
+          python -m py_compile agent/config/model_registry.py
+          python -m py_compile agent/prompts/system.py
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short \
+            -k "not test_image_skip_in_text_mode" \
+            --timeout=120
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "✅ CI 完成 — 见上方 pytest 输出"

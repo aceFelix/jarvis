@@ -98,6 +98,8 @@ class QueryLoop:
         keep_recent_messages: int = DEFAULT_KEEP_RECENT,
         vendor_fallback: str = "",
         custom_models: dict | None = None,
+        deferred_loading: bool = True,
+        chat_detection: bool = True,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -119,6 +121,10 @@ class QueryLoop:
         # 避免故障转移后思考模式被意外恢复（语音模式下必须保持关闭）。
         # None 表示不强制，使用 provider 默认状态。
         self._thinking_override: bool | None = None
+        # 工具延迟加载开关（参考 Claude Code deferred tool loading）
+        self._deferred_loading = deferred_loading
+        # 纯聊天零工具检测开关
+        self._chat_detection = chat_detection
 
     def set_thinking_enabled(self, enabled: bool | None) -> None:
         """统一开关思考模式，同时同步到当前 provider。
@@ -191,52 +197,27 @@ class QueryLoop:
             content_blocks.extend(images)
         ctx.messages.append(Message(role="user", content=content_blocks))
 
-        # 动态水位线压缩：根据当前 token 水位应用不同策略
+        # ── 分层上下文：冻结前缀 + 滑动窗口（缓存友好）──
+        # 原水位线方案原地篡改历史消息 → 破坏 LLM 前缀缓存。
+        # LayeredContext 将压缩后的摘要锁定为"冻结区"永不修改，
+        # 后续请求前缀稳定 → 缓存持续命中。
+        from agent.core.layered_context import LayeredContext
+        layered = LayeredContext(ctx.messages)
+
         if self._enable_compaction:
-            tokens = estimate_tokens(ctx.messages)
-            water = tokens / self._compaction_threshold if self._compaction_threshold else 0
-
-            # 水位 30% → 激进压缩（只保留最近 2 条）
-            if water >= 0.3 and len(ctx.messages) > 2:
-                try:
-                    result = await compact_messages(
-                        provider=self._provider, model=self._model,
-                        messages=ctx.messages, keep_recent=2,
-                        on_progress=ctx.ui.info if ctx.ui else None,
-                        task_budget_remaining=self._task_budget_remaining,
-                    )
-                    if result.messages_summarized > 0:
-                        ctx.messages[:] = result.new_messages
-                        _restored = restore_recent_files(ctx)
-                        _mem = update_session_memory(ctx.workdir, result)
-                        if ctx.ui: ctx.ui.info(f"激进压缩完成（水位 {water:.0%}，保留 2 条，回灌 {_restored} 文件）")
-                except Exception as e:
-                    if ctx.ui: ctx.ui.warn(f"压缩失败: {e}")
-
-            # 水位 60% → 工具结果折叠（旧 tool result 缩成一行）
-            elif water >= 0.6:
-                _collapse_old_tool_results(ctx.messages, keep_recent=4)
-                if ctx.ui and ctx.verbose: ctx.ui.info(f"工具结果折叠完成（水位 {water:.0%}）")
-
-            # 水位 90% → 标准摘要压缩
-            elif water >= 0.8:
-                try:
-                    result = await compact_messages(
-                        provider=self._provider, model=self._model,
-                        messages=ctx.messages, keep_recent=self._keep_recent_messages,
-                        on_progress=ctx.ui.info if ctx.ui else None,
-                        task_budget_remaining=self._task_budget_remaining,
-                    )
-                    if result.messages_summarized > 0:
-                        ctx.messages[:] = result.new_messages
-                        _restored = restore_recent_files(ctx)
-                        _mem = update_session_memory(ctx.workdir, result)
-                        if ctx.ui: ctx.ui.info(f"上下文压缩完成（水位 {water:.0%}，回灌 {_restored} 文件）")
-                except Exception as e:
-                    if ctx.ui: ctx.ui.warn(f"压缩失败: {e}")
-
-        # 图片淘汰：在迭代循环前一次性处理，避免循环内原地篡改破坏前缀缓存
-        _evict_old_images(ctx.messages)
+            # 冻结：活跃窗口超阈值 → 一次性压缩 + 锁定前缀
+            frozen = await layered.freeze_if_needed(
+                self._provider, self._model,
+                window_limit=self._compaction_threshold,
+                keep_recent=self._keep_recent_messages,
+                on_progress=ctx.ui.info if ctx.ui else None,
+            )
+            if frozen and ctx.ui:
+                ctx.ui.info(f"上下文冻结完成（活跃 {layered.active_tokens()} → 总计 {layered.total_tokens()} tokens）")
+            # 工具结果折叠（仅活跃窗口，不影响冻结区）
+            layered.collapse_old_tool_results(keep_recent=4)
+            # 图片淘汰（仅活跃窗口，不影响冻结区）
+            layered.evict_old_images()
 
         for iteration in range(self._max_iterations):
             if ctx.abort_event.is_set():
@@ -245,33 +226,33 @@ class QueryLoop:
 
             stats.iterations = iteration + 1
 
+            # 给 LLM 发送分层上下文的冻结快照（冻结区永不改 → 缓存友好）
+            ctx.messages = layered.messages
+
             try:
                 assistant_msg, stop_event = await self._stream_once(ctx)
+            except asyncio.CancelledError:
+                # 用户 Ctrl+C 中断 LLM 流式输出
+                stats.stopped_reason = "aborted"
+                ctx.abort_event.set()
+                break
             except ProviderError as e:
-                # 反应式压缩：API 报 context too long → 自动压缩后重试
+                # 反应式压缩：API 报 context too long → 强制压缩后重试
                 error_str = str(e).lower()
                 if self._enable_compaction and any(
                     kw in error_str for kw in ("prompt_too_long", "context_length", "reduce length", "too long")
                 ):
-                    try:
-                        result = await compact_messages(
-                            provider=self._provider, model=self._model,
-                            messages=ctx.messages, keep_recent=self._keep_recent_messages,
-                            on_progress=ctx.ui.info if ctx.ui else None,
-                            task_budget_remaining=self._task_budget_remaining,
-                        )
-                        if result.messages_summarized > 0:
-                            ctx.messages[:] = result.new_messages
-                            _restored = restore_recent_files(ctx)
-                            if ctx.ui:
-                                ctx.ui.warn(
-                                    f"上下文过长，已自动压缩后重试"
-                                    f"（{result.pre_compact_tokens}→{result.post_compact_tokens} tokens，回灌{_restored}文件）"
-                                )
-                            continue  # 重试本轮
-                    except Exception as compress_err:
+                    # 使用 LayeredContext 的反应式压缩（冻结前缀不变）
+                    if await layered.compact_reactive(
+                        self._provider, self._model,
+                        keep_recent=self._keep_recent_messages,
+                    ):
                         if ctx.ui:
-                            ctx.ui.error(f"反应式压缩失败: {compress_err}")
+                            ctx.ui.warn(
+                                f"上下文过长，已自动压缩后重试"
+                                f"（{layered.total_tokens()} tokens）"
+                            )
+                        continue  # 重试本轮
                 # Provider 故障转移：尝试切到备选厂商
                 if self._try_failover():
                     if ctx.ui:
@@ -284,17 +265,23 @@ class QueryLoop:
                 stats.stopped_reason = "provider_error"
                 break
 
-            ctx.messages.append(assistant_msg)
+            # 过滤空 assistant 消息
+            if not assistant_msg.content:
+                if ctx.ui:
+                    ctx.ui.error("模型返回了空回复，未加入对话历史")
+                stats.stopped_reason = "empty_response"
+                break
+
+            # 追加到分层上下文（而非 ctx.messages）
+            layered.append(assistant_msg)
             if isinstance(stop_event, Stop):
                 stats.usage = stop_event.usage
 
-            # 输出截断恢复：stop_reason="length" → 自动续写
-            # 模型生成大文件时可能被 max_tokens 截断，工具调用 JSON 不完整。
-            # 检测到后追加"请继续"消息，让模型从中断处续写。
+            # 输出截断恢复
             if isinstance(stop_event, Stop) and stop_event.reason == "length":
                 if ctx.ui:
                     ctx.ui.warn("⚠ 输出被截断（max_tokens），自动续写...")
-                ctx.messages.append(Message(
+                layered.append(Message(
                     role="user",
                     content=[TextContent(text="[输出被截断，请从中断处继续，不要重复已输出的内容]")],
                 ))
@@ -311,20 +298,23 @@ class QueryLoop:
             try:
                 tool_results = await self._orchestrator.execute_calls(tool_uses, ctx)
             except asyncio.CancelledError:
+                # 用户 Ctrl+C → 不再 re-raise，优雅退出本轮
                 stats.stopped_reason = "aborted"
-                raise
+                ctx.abort_event.set()
+                break
 
-            # 把工具结果作为新 user 消息回灌
-            ctx.messages.append(
+            # 工具结果追加到分层上下文
+            layered.append(
                 Message(role="user", content=list(tool_results))
             )
-            
+
             # Phase 1: 多 Agent 团队——自动检查队友邮箱
-            # 队友 idle/finished 后通过 mailbox 通知 leader，
-            # 这里自动读取邮箱并注入到对话中，leader 下一轮就能看到。
+            # _inject_teammate_notifications 直接改 ctx.messages，同步到 layered
             _inject_teammate_notifications(ctx)
-            
-            # 继续下一轮，让模型看到工具结果
+            # 检查 ctx.messages 是否被注入额外消息（比 layered.messages 多）
+            if len(ctx.messages) > len(layered.messages):
+                for extra in ctx.messages[len(layered.messages):]:
+                    layered.append(extra)
         else:
             # for-else: 达到 max_iterations 仍未结束
             stats.stopped_reason = "max_iterations"
@@ -334,6 +324,9 @@ class QueryLoop:
                 )
 
         # ---- Hook: assistant_response ----
+        # 同步 ctx.messages 到分层上下文的最新快照（hooks 读 ctx.messages）
+        ctx.messages = layered.messages
+
         # 取最后一条 assistant 消息的文本作为响应
         try:
             from agent.core.hooks import get_hooks, HookEvent
@@ -357,7 +350,10 @@ class QueryLoop:
 
         return stats
 
-    async def _stream_once(self, ctx: ToolContext) -> tuple[Message, LLMEvent | None]:
+    async def _stream_once(
+        self, ctx: ToolContext,
+        messages: list[Message] | None = None,
+    ) -> tuple[Message, LLMEvent | None]:
         """调用一次 LLM 流式接口，累积成 assistant Message。
 
         处理顺序:
@@ -365,8 +361,14 @@ class QueryLoop:
         2. TextDelta → 累积为 TextContent（正式回复）
         3. ToolCall → 累积为 ToolUseContent（工具调用）
 
+        Args:
+            ctx: 工具上下文
+            messages: 可选的消息列表（None 则用 ctx.messages）。
+                      LayeredContext 场景下传入快照，避免原地篡改破坏缓存。
+
         返回 (assistant_message, 最后一个事件)。
         """
+        msgs = messages if messages is not None else ctx.messages
         content_blocks: list[TextContent | ThinkingContent | ToolUseContent] = []
         thinking_buf = ""
         text_buf = ""
@@ -383,13 +385,13 @@ class QueryLoop:
             if thinking_buf:
                 content_blocks.append(ThinkingContent(text=thinking_buf))
 
-        tool_defs = self._build_tool_defs()
+        tool_defs = self._build_tool_defs(ctx)
 
         try:
             async for event in self._provider.stream(
                 model=self._model,
                 system=self._system,
-                messages=ctx.messages,
+                messages=msgs,
                 tools=tool_defs,
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
@@ -430,7 +432,7 @@ class QueryLoop:
             _flush_thinking()
             _flush_text()
             if content_blocks:
-                ctx.messages.append(Message(role="assistant", content=content_blocks))
+                msgs.append(Message(role="assistant", content=content_blocks))
             raise
 
         _flush_thinking()
@@ -455,10 +457,13 @@ class QueryLoop:
                     from agent.main import _build_provider
 
                     # 用自定义模型的配置重建 provider
-                    settings = Settings(provider=cfg.get("provider_type", "openai"))
+                    # 优先使用新的 api_format 字段，兼容旧的 provider_type
+                    api_fmt = cfg.get("api_format") or cfg.get("provider_type", "openai")
+                    settings = Settings(provider=api_fmt)
                     custom_settings = replace(
                         settings,
-                        provider=cfg.get("provider_type", "openai"),
+                        provider=api_fmt,
+                        api_format=api_fmt,
                         base_url=cfg.get("base_url", ""),
                         api_key=cfg.get("api_key", ""),
                     )
@@ -473,18 +478,106 @@ class QueryLoop:
 
         return False
 
-    def _build_tool_defs(self) -> list[ToolDef]:
-        """把注册表里的工具转成给 LLM 的 ToolDef。"""
-        defs: list[ToolDef] = []
-        for tool in self._registry.all():
-            defs.append(
-                ToolDef(
+    def _build_tool_defs(self, ctx: ToolContext | None = None) -> list[ToolDef]:
+        """把注册表里的工具转成给 LLM 的 ToolDef。
+
+        延迟加载模式（参考 Claude Code）：
+        - 核心工具（deferred=False）始终携带
+        - 延迟工具（deferred=True）仅在被 ToolSearch 发现后才携带完整 schema
+        - 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）
+        """
+        # 延迟加载关闭 → 回退到全量发送
+        if not self._deferred_loading:
+            defs: list[ToolDef] = []
+            for tool in self._registry.all():
+                defs.append(ToolDef(
                     name=tool.name,
                     description=tool.description,
                     input_schema=tool.input_schema,
-                )
-            )
+                ))
+            return defs
+
+        # 纯聊天检测：首轮 + 短消息 + 无动作意图 → 0 工具
+        if self._chat_detection and ctx is not None and self._is_chat_only(ctx):
+            return []
+
+        # 分组发送：核心工具 + 已发现的延迟工具
+        discovered: set[str] = set()
+        if ctx is not None:
+            discovered = ctx.extra.get("discovered_tools", set())
+
+        defs = []
+        for tool in self._registry.all():
+            if not tool.deferred:
+                # 核心工具: 始终携带
+                defs.append(ToolDef(
+                    name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                ))
+            elif tool.name in discovered:
+                # 已发现的延迟工具: 携带完整 schema
+                defs.append(ToolDef(
+                    name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                ))
+            # 未发现的延迟工具: 不发送
         return defs
+
+    def _is_chat_only(self, ctx: ToolContext) -> bool:
+        """纯聊天检测：保守策略，宁可多发不可漏发。
+
+        条件（全部满足才返回 True）：
+        - 用户消息 <= 20 字
+        - 不含动作关键词
+        - 对话历史中无工具调用记录
+        """
+        # 取最后一条 user 消息
+        last_user_text = ""
+        has_tool_use = False
+        for msg in reversed(ctx.messages):
+            if msg.role == "user" and not last_user_text:
+                for block in msg.content:
+                    if hasattr(block, "text"):
+                        last_user_text = block.text
+                        break
+            if msg.role == "assistant":
+                if msg.get_tool_uses():
+                    has_tool_use = True
+                    break
+
+        if has_tool_use:
+            return False
+
+        text = last_user_text.strip()
+        if len(text) > 20:
+            return False
+
+        # 动作关键词（中英文）：含任一则认为有工具意图
+        # 分两类: 动作词 (do keywords) + 信息查询词 (ask keywords)
+        # 策略: 保守，宁可多发不可漏发
+        action_keywords = (
+            # 动作词 — 明确要求执行操作
+            "帮我", "查", "搜", "打开", "写", "创建", "运行", "执行", "安装",
+            "删除", "修改", "编辑", "发送", "截图", "点击", "输入", "下载",
+            "上传", "连接", "启动", "停止", "关闭", "设置", "配置",
+            "help", "search", "open", "write", "create", "run", "exec",
+            "install", "delete", "edit", "send", "screenshot", "click",
+            "download", "upload", "connect", "start", "stop", "close",
+            "文件", "命令", "终端", "浏览器", "网页", "邮件", "日程", "提醒",
+            # 信息查询词 — 短问句可能需工具获取实时数据
+            "几点", "几号", "多少", "天气", "温度", "湿度", "时间", "日期",
+            "星期", "今天", "明天", "昨天", "今年", "版本", "日历",
+            "how", "what", "when", "who", "where", "which", "why",
+            "time", "date", "today", "weather", "version", "calendar",
+        )
+        text_lower = text.lower()
+        for kw in action_keywords:
+            if kw in text_lower:
+                return False
+
+        return True
 
 
 def _evict_old_images(messages: list) -> None:

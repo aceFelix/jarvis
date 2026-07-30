@@ -87,8 +87,9 @@ def _parse_ipapi(raw: str) -> dict[str, Any]:
 class LocationTool(Tool):
     name = "Location"
     description = (
-        "通过 IP 地址获取当前设备的近似地理位置（城市级精度）。"
-        "无需 GPS 或定位权限，基于公网 IP 反查。"
+        "获取当前设备的近似地理位置（城市级精度，基于公网 IP 反查）。"
+        "**何时使用**：任何需要知道用户所在位置的场景——"
+        "查天气、本地搜索、时区判断、附近服务推荐等。"
         "返回城市、地区、国家、经纬度、ISP 等信息。"
         "也可传入 IP 地址查询指定 IP 的位置。"
     )

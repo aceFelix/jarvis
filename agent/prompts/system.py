@@ -599,20 +599,39 @@ Linux 上 GUI 自动化依赖 X11/Wayland：
 
 
 def _tools_section(registry: ToolRegistry) -> str:
-    """可用工具列表（让模型知道有哪些工具，详细规范见 _BASE_PROMPT）。"""
+    """可用工具列表（让模型知道有哪些工具，详细规范见 _BASE_PROMPT）。
+
+    延迟加载模式下：核心工具列出完整描述，延迟工具仅列名字摘要。
+    """
+    core_tools = registry.all_core()
+    deferred_tools = registry.all_deferred()
+
     lines = []
-    for tool in registry.all():
-        # 描述取第一行，避免提示过长
+    # 核心工具：完整描述
+    for tool in core_tools:
         desc_first = tool.description.split("\n", 1)[0]
         lines.append(f"- **{tool.name}**: {desc_first}")
-    return "# 可用工具\n\n" + "\n".join(lines) + "\n"
+
+    section = "# 可用工具\n\n" + "\n".join(lines) + "\n"
+
+    # 延迟工具：仅名字摘要，提示用 ToolSearch 加载
+    if deferred_tools:
+        names = [t.name for t in deferred_tools]
+        section += (
+            "\n<available-deferred-tools>\n"
+            + ", ".join(names)
+            + "\n（以上为延迟加载工具，用 ToolSearch 搜索关键词加载完整定义后即可调用）\n"
+            "</available-deferred-tools>\n"
+        )
+
+    return section
 
 
 def _cli_anything_section(registry: ToolRegistry) -> str:
-    """CLI-Anything harness 能力说明。
+    """CLI-Anything harness 名字摘要。
 
-    从 registry 中找出所有 ``cli_anything__`` 前缀的工具，把 harness 的
-    能力、触发场景、示例单独汇总，让 LLM 明确何时调用。
+    只列名字不展开详细描述——详细用法交给 ToolSearch 按需加载，
+    避免 system prompt 膨胀破坏 LLM 前缀缓存。
     """
     harness_tools = [
         tool for tool in registry.all()
@@ -621,21 +640,25 @@ def _cli_anything_section(registry: ToolRegistry) -> str:
     if not harness_tools:
         return ""
 
-    lines = ["# CLI-Anything 外部软件控制", ""]
-    for tool in harness_tools:
-        lines.append(f"## {tool.name}")
-        # description 已包含 name/description/when_to_use/examples
-        for paragraph in tool.description.split("\n"):
-            if paragraph.strip():
-                lines.append(paragraph)
-        lines.append("")
-    return "\n".join(lines) + "\n"
+    names = [t.name for t in harness_tools]
+    return (
+        "# CLI-Anything 外部软件控制\n\n"
+        + ", ".join(names)
+        + "\n（以上为 CLI-Anything 外部软件控制工具，"
+        "用 ToolSearch 搜索关键词加载完整用法后即可调用）\n"
+    )
 
 
 def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking: bool = True) -> str:
     """组装完整系统提示。
 
     顺序: 基础原则 -> 长期记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
+
+    LLM 缓存友好设计：
+    - 所有子段均为静态常量或文件读取，同一会话内 system prompt 完全相同
+    - 日期精度降至日期级（strftime('%Y-%m-%d')），而非秒级 time.time()
+    - harness 描述精简为名字列表（ToolSearch 按需加载详细用法）
+    - 平台规范按 platform.system() 静态选择，不随请求变化
     """
     from agent.core.memory.store import memory_section
     from agent.core.extensions.skills import skills_section
