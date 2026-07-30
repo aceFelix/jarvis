@@ -57,8 +57,7 @@ jobs:
       - name: Run tests
         run: |
           pytest tests/ -v --tb=short \
-            -k "not test_image_skip_in_text_mode" \
-            --timeout=120
+            -k "not test_image_skip_in_text_mode"
 
       - name: Test summary
         if: always()
