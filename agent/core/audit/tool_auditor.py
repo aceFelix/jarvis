@@ -55,9 +55,14 @@ class ToolAuditor:
             self._log_path = Path(log_path)
         else:
             self._log_path = Path.home() / ".jarvis" / "tool_audit.jsonl"
-        self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._max_entries = max_entries
         self._enabled = enabled
+        # 目录创建失败（权限不足/只读文件系统）时降级为禁用，不抛异常——
+        # 审计是辅助功能，绝不能因日志目录问题炸掉主流程（CI 无 root 权限时曾触发）
+        try:
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            self._enabled = False
 
     @property
     def enabled(self) -> bool:

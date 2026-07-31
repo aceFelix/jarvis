@@ -8,6 +8,7 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from agent.core.audit.tool_auditor import ToolAuditor, get_tool_auditor
@@ -146,9 +147,15 @@ class TestToolAuditor:
             tmp.unlink(missing_ok=True)
 
     def test_get_recent_nonexistent_file(self) -> None:
-        """文件不存在返回空列表。"""
+        """目录无法创建时优雅降级（不抛异常），文件不存在返回空列表。"""
         auditor = ToolAuditor(log_path="/nonexistent/path/audit.jsonl")
         assert auditor.get_recent() == []
+
+    def test_uncreatable_dir_disables_auditor(self) -> None:
+        """目录创建失败（权限不足/只读）时自动禁用审计器。"""
+        with patch("agent.core.audit.tool_auditor.Path.mkdir", side_effect=PermissionError):
+            auditor = ToolAuditor(log_path="/any/path/audit.jsonl")
+            assert auditor.enabled is False
 
 
 class TestGetToolAuditor:
