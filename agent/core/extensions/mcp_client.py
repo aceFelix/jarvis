@@ -311,11 +311,25 @@ class MCPClient:
             return None
 
     async def connect_all(self, config: dict[str, dict[str, Any]]) -> dict[str, bool]:
-        """连接配置中的所有 server。返回 {server_name: 是否成功}。"""
-        results: dict[str, bool] = {}
-        for name, cfg in config.items():
+        """并发连接配置中的所有 server。返回 {server_name: 是否成功}。
+
+        P-01 改进：原串行 for 循环改为 asyncio.gather 并发连接，
+        7 个 MCP server 从串行 7×T 降到 max(T)，启动提速明显。
+
+        @author aceFelix
+        """
+        async def _connect_one(name: str, cfg: dict[str, Any]) -> tuple[str, bool]:
             conn = await self.connect(name, cfg)
-            results[name] = conn is not None
+            return name, conn is not None
+
+        tasks = [_connect_one(name, cfg) for name, cfg in config.items()]
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        results: dict[str, bool] = {}
+        for item in gathered:
+            if isinstance(item, BaseException):
+                continue  # 异常视为连接失败
+            name, ok = item
+            results[name] = ok
         return results
 
     def list_tools(self) -> list[McpToolDef]:

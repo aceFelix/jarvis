@@ -207,7 +207,12 @@ class ToolOrchestrator:
         return results
 
     async def _run_one(self, p: _PendingCall, ctx: ToolContext) -> ToolResultContent:
-        """执行单个工具调用，封装异常。"""
+        """执行单个工具调用，封装异常。
+
+        S-02 改进：记录所有工具调用的审计日志。
+        """
+        import time as _time
+        t0 = _time.time()
         tool = p.tool
         tu = p.tool_use
 
@@ -258,6 +263,22 @@ class ToolOrchestrator:
 
         # 序列化结果给 LLM
         data = result.data
+
+        # ── S-02 审计日志 ──
+        try:
+            from agent.core.audit.tool_auditor import get_tool_auditor
+            auditor = get_tool_auditor()
+            duration_ms = (_time.time() - t0) * 1000
+            auditor.log_call(
+                tool_name=tool.name,
+                args=dict(tu.input),
+                permission_mode=str(ctx.permission_mode),
+                duration_ms=duration_ms,
+                success=not result.is_error,
+                error_msg=str(result.data) if result.is_error else "",
+            )
+        except Exception:
+            pass  # 审计失败不影响工具执行
         if isinstance(data, str):
             content_str = data
         elif data is None:

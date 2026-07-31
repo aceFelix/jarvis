@@ -141,6 +141,28 @@ def _messages_to_openai(
     return out
 
 
+# ── P-02: 共享 httpx.AsyncClient，复用 HTTP 连接池 ──
+_shared_http_client: Any | None = None
+
+
+def _get_shared_http_client() -> Any:
+    """获取或创建共享的 httpx.AsyncClient。
+
+    所有 OpenAIProvider 实例共享同一个底层 HTTP 连接池，
+    避免每次切换模型都新建 TCP 连接。
+
+    @author aceFelix
+    """
+    global _shared_http_client
+    if _shared_http_client is None or _shared_http_client.is_closed:
+        import httpx
+        _shared_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(180.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=50),
+        )
+    return _shared_http_client
+
+
 class OpenAIProvider(LLMProvider):
     """OpenAI 兼容 provider。"""
 
@@ -179,6 +201,8 @@ class OpenAIProvider(LLMProvider):
             kwargs["api_key"] = api_key
         if base_url:
             kwargs["base_url"] = base_url
+        # P-02: 共享 HTTP 连接池，避免每次切换模型新建 TCP 连接
+        kwargs["http_client"] = _get_shared_http_client()
         self._client = AsyncOpenAI(**kwargs)
 
     @property

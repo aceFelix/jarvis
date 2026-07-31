@@ -695,6 +695,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="跳过启动动画（直接显示横幅）",
     )
     p.add_argument(
+        "--config-show",
+        action="store_true",
+        dest="config_show",
+        help="展示当前生效的完整配置（含多层合并结果 + MCP 状态）",
+    )
+    p.add_argument(
         "--quick",
         action="store_true",
         help="快速启动：跳过 boot animation / MCP / LSP，延迟加载 harness（热键唤起用）",
@@ -1011,6 +1017,15 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(run_init_cli(ui))
         except KeyboardInterrupt:
             pass
+        return 0
+
+    # 查看当前生效配置
+    if args.config_show:
+        from agent.ui.cli import RichCLI
+        ui = RichCLI(verbose=False, boot_animation=False)
+        provider = _build_provider(settings, model_type="text")
+        from agent.commands.handlers.config_commands import _show_config
+        _show_config(ui, settings, provider, mcp_client=None)
         return 0
 
     # 直接启动实时双工语音对话

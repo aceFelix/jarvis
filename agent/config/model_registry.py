@@ -67,6 +67,15 @@ def save_custom_model(name: str, config: dict[str, str]) -> bool:
         content = content.rstrip() + "\n" + entry.strip() + "\n"
 
     toml_path.write_text(content, encoding="utf-8")
+    # S-01: 同时尝试存储 API Key 到系统 keyring
+    api_key_val = config.get("api_key", "")
+    if api_key_val:
+        try:
+            from agent.config.keyring_store import store_api_key
+            vendor_name = config.get("vendor", config.get("provider_type", "openai"))
+            store_api_key(vendor_name, api_key_val)
+        except Exception:
+            pass
     return True
 
 

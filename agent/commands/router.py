@@ -76,6 +76,7 @@ from agent.commands.handlers.wechat_commands import (
     handle_connect_wechat,
     handle_disconnect_wechat,
 )
+from agent.commands.handlers.config_commands import handle_config_show
 from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
@@ -168,6 +169,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/harnesses": handle_cli_anything,
     "/cli_anything": handle_cli_anything,
     "/init": handle_init,
+    "/config": handle_config_show,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -195,6 +197,8 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/img ", handle_image),
     ("/say ", handle_say),
     ("/think ", handle_think),
+    ("/config ", handle_config_show),
+    ("/config", handle_config_show),
 ]
 
 

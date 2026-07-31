@@ -37,12 +37,15 @@
 - [核心概念](#核心概念)
   - [五层权限系统](#五层权限系统)
   - [上下文压缩](#上下文压缩)
+  - [工具延迟加载](#工具延迟加载)
   - [记忆系统](#记忆系统)
   - [Skill 技能包](#skill-技能包)
   - [MCP 集成](#mcp-集成)
 - [REPL 命令参考](#repl-命令参考)
 - [模型管理](#模型管理)
 - [深度思考模式](#深度思考模式)
+- [安全性](#安全性)
+- [性能优化](#性能优化)
 - [语音功能](#语音功能)
   - [语音对话 `/voice`](#语音对话-voice)
   - [实时双工 `/talk`](#实时双工-talk)
@@ -284,7 +287,7 @@ hotkey = "ctrl+shift+j"           # 全局热键
 tray = true                       # 系统托盘图标
 ```
 
-> 完整配置项参见 `configs/settings.toml`。
+> 📖 完整配置项参见 **[docs/configuration.md](docs/configuration.md)**；各厂商接入见 **[docs/providers.md](docs/providers.md)**；常见问题见 **[docs/troubleshooting.md](docs/troubleshooting.md)**。
 
 ---
 
@@ -527,6 +530,40 @@ model_type = "text"              # GLM-4.7-flash 为纯文本模型
   - 智谱 GLM：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
   - OpenAI / Moonshot 等不支持思考的厂商自动跳过
 - **语音模式**：自动关闭思考（降低首字延迟）
+
+---
+
+## 安全性
+
+### API Key 加密存储
+
+J.A.R.V.I.S 使用操作系统原生凭据管理器加密存储 API Key，替代 TOML 文件明文：
+
+- **Windows**：Windows Credential Manager（WinVaultKeyring）
+- **macOS**：Keychain
+- **Linux**：Secret Service / KWallet
+
+存储时优先写入 keyring，失败降级到 TOML 明文。读取时按 环境变量 → keyring → TOML 优先级查询。
+
+### 操作审计日志
+
+所有工具调用自动记录到 `~/.jarvis/tool_audit.jsonl`：工具名、参数、权限模式、耗时、成功/失败、写操作标记。yolo 模式下的 FileWrite / Bash / DeleteFile 等写操作特别标记。
+
+### 敏感字段脱敏
+
+`/config show`、`/doctor`、错误提示中所有 API Key 自动脱敏为 `sk-xxxx...xxxx`。
+
+---
+
+## 性能优化
+
+| 优化 | 说明 |
+|---|---|
+| MCP 连接并行化 | 7 个 server 并发连接，启动时间从 ΣT 降到 max(T) |
+| HTTP 连接池复用 | 所有 Provider 共享 httpx.AsyncClient，切换模型不重建 TCP 连接 |
+| 工具注册缓存 | `build_default_registry()` 结果由 `@lru_cache` 缓存，多处调用仅执行一次 |
+| 实时语音延迟加载 | 先连 WebSocket 显示"已连接"，MCP 工具后台加载完热更新 |
+| 工具延迟加载 | 14 核心工具始终携带，~80 延迟工具按需搜索，纯聊天零工具 |
 
 ---
 

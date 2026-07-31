@@ -153,6 +153,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/memory` | 查看长期记忆 |
 | `/mcp` | 查看 MCP 工具连接状态 |
 | `/doctor` | 系统诊断（自愈统计、配置检查） |
+| `/config show` | 查看当前生效的完整配置（LLM/语音/MCP/自定义模型等） |
 | `/server [目录]` | 一键启动开发服务器 |
 | `/connect-phone` | 跨设备协同（手机扫码连接当前会话） |
 | `/connect-wechat` | 微信扫码连接 JARVIS（通过 ClawBot 对话） |

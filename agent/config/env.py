@@ -61,6 +61,11 @@ def apply_env_overrides(s: "Settings") -> "Settings":
             if kv:
                 updates["api_key"] = kv
                 break
+        # S-01: 环境变量也没找到 → 尝试系统 keyring（Windows 凭据管理器等）
+        if "api_key" not in updates:
+            keyring_key = _try_keyring(s.provider)
+            if keyring_key:
+                updates["api_key"] = keyring_key
 
     base_url = _env("JARVIS_BASE_URL", "MY_AGENT_BASE_URL")
     if base_url:
@@ -84,3 +89,12 @@ def apply_env_overrides(s: "Settings") -> "Settings":
         updates["context_compaction"] = compaction.lower() in ("1", "true", "yes")
 
     return s.with_overrides(**updates) if updates else s
+
+
+def _try_keyring(provider: str) -> str | None:
+    """S-01: 尝试从系统 keyring 读取 API Key。"""
+    try:
+        from agent.config.keyring_store import load_api_key
+        return load_api_key(provider)
+    except Exception:
+        return None

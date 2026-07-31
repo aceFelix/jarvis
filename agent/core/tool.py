@@ -1,7 +1,7 @@
 """Tool 协议与工具注册中心。
 
 这是整个系统的心脏；
-核心设计思想（务必吃透）：
+核心设计思想（非常重要）：
 1. 工具是"带元数据 + 权限 + 执行 + 渲染"的对象，不是函数。
 2. fail-closed 原则：所有安全属性默认为"危险"侧，工具必须显式声明自己安全。
    - is_read_only 默认 False（默认假设会写）
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import abc
 import fnmatch
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -192,8 +193,15 @@ class ToolRegistry:
 def build_default_registry() -> ToolRegistry:
     """构造默认工具集。延迟 import 避免循环依赖。
 
+    P-03 改进：结果通过 @lru_cache 缓存，多次调用复用同一 Registry。
     工具内部不依赖 ToolRegistry，Registry 依赖工具，所以这里做装配点。
     """
+    return _build_default_registry_impl()
+
+
+@functools.lru_cache(maxsize=1)
+def _build_default_registry_impl() -> ToolRegistry:
+    """build_default_registry 的实际实现（缓存）。"""
     # 延迟 import: 工具模块 import 了 core 层，core 层不能反向 import 工具
     from agent.tools.ask_user import AskUserTool
     from agent.tools.bash import BashTool

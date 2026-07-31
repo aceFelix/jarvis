@@ -21,6 +21,7 @@ from agent.permissions.modes import PermissionMode
 from agent.prompts.system import build_system_prompt
 from agent.ui.cli import RichCLI
 from agent.ui.markdown_renderer import render_diff, render_table, render_tree, render_panel
+from agent.utils.mask import mask_key
 
 if TYPE_CHECKING:
     from agent.commands.router import CommandContext
@@ -47,6 +48,7 @@ def _print_help(ui: RichCLI) -> None:
         "  /rewind [n]  回退最近 n 条消息（默认 1）\n"
         "  /diff [path] 显示 git diff（工作区改动）\n"
         "  /doctor      系统诊断（环境/配置/日志/迁移状态）\n"
+        "  /config show 查看当前生效的完整配置（含 MCP 状态）\n"
         "  /save [name] 保存当前会话\n"
         "  /load [前缀]  前缀匹配加载会话（支持模糊输入）\n"
         "  /loads       列出并选择已保存会话\n"
@@ -369,7 +371,7 @@ def _doctor(ui: RichCLI, settings: Any, provider, model: str, messages: list[Mes
     user_cfg = Path.home() / ".jarvis" / "settings.toml"
     cfg_rows = [
         ["用户配置", "存在" if user_cfg.exists() else "不存在（用默认值）"],
-        ["API key", "已配置" if settings.api_key else "未配置"],
+        ["API key", mask_key(settings.api_key)],
         ["Base URL", settings.base_url or "(默认)"],
     ]
     render_table(cfg_rows, headers=["项", "状态"], title="配置")

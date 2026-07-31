@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from agent.utils.mask import mask_error_message
+
 
 class ErrorCategory(str, Enum):
     AUTH = "auth"              # 鉴权失败（API Key 无效/过期）
@@ -59,11 +61,11 @@ def classify(exc: Exception) -> ClassifiedError:
         exc: 原始异常（openai.APIError / HTTPError 等）
 
     Returns:
-        ClassifiedError，包含分类、用户消息和原始消息
+        ClassifiedError，包含分类、用户消息和原始消息（已脱敏）
 
     @author aceFelix
     """
-    raw = _extract_raw(exc)
+    raw = mask_error_message(_extract_raw(exc))
     raw_lower = raw.lower()
     status = getattr(exc, "status_code", 0) or 0
 

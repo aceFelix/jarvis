@@ -121,35 +121,25 @@ _VENDORS = [
 
 
 def _pick_vendor(ui: RichCLI) -> dict | None:
-    """交互式选择厂商。"""
+    """交互式选择厂商（↑↓ 箭头导航 + 输入字符实时筛选）。"""
+    from agent.ui.terminal_picker import pick_from_list
+
+    items = [
+        (v["key"], v["name"], f"{v['desc']}  |  {v['api_format_desc']}")
+        for v in _VENDORS
+    ]
+
     ui._console.print("\n[bold cyan]═══ J.A.R.V.I.S 首次配置 ═══[/bold cyan]\n")
-    ui._console.print("选择你的 LLM 厂商：\n")
+    ui._console.print("选择你的 LLM 厂商（↑↓ 移动，输入字符筛选，Enter 确认，Esc 取消）:\n")
 
-    for i, v in enumerate(_VENDORS, 1):
-        ui._console.print(
-            f"  [bold]{i}.[/bold] {v['name']}\n"
-            f"     {v['desc']}  |  API: {v['api_format_desc']}"
-        )
-
-    ui._console.print(f"\n  [dim]q. 退出配置[/dim]\n")
-
-    try:
-        choice = ui.ask_user(f"选择 [1-{len(_VENDORS)} 或 q]").strip()
-    except (EOFError, KeyboardInterrupt):
+    picked = pick_from_list(items, title="厂商选择")
+    if picked is None:
         return None
 
-    if choice.lower() in ("q", "quit", "exit"):
-        return None
-
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(_VENDORS):
-            return _VENDORS[idx]
-    except ValueError:
-        pass
-
-    ui.warn(f"无效选择，请输入 1-{len(_VENDORS)} 或 q")
-    return _pick_vendor(ui)
+    for v in _VENDORS:
+        if v["key"] == picked:
+            return v
+    return None
 
 
 def _ask_model(ui: RichCLI, vendor: dict) -> str:
@@ -164,15 +154,16 @@ def _ask_model(ui: RichCLI, vendor: dict) -> str:
 
 
 def _ask_model_type(ui: RichCLI) -> str:
-    """选择模型类型：纯文本 or 多模态。"""
+    """选择模型类型：纯文本 or 多模态（↑↓ 箭头导航）。"""
+    from agent.ui.terminal_picker import pick_from_list
+
     ui._console.print("\n[bold]模型类型:[/bold]")
-    ui._console.print("  1. 纯文本（text）—— 不支持图片输入")
-    ui._console.print("  2. 多模态（multimodal）—— 支持图片/视觉输入")
-    try:
-        choice = ui.ask_user("选择 [1-2，默认 1]: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return "text"
-    return "multimodal" if choice == "2" else "text"
+    items = [
+        ("text", "纯文本（text）", "不支持图片输入，适合对话和代码"),
+        ("multimodal", "多模态（multimodal）", "支持图片/视觉输入"),
+    ]
+    picked = pick_from_list(items, title="模型类型", current="text")
+    return picked if picked else "text"
 
 
 def _ask_api_key(ui: RichCLI, vendor: dict) -> str | None:
@@ -208,25 +199,34 @@ def _ask_custom(ui: RichCLI, vendor: dict) -> dict | None:
 
 
 async def _test_connection(vendor: dict, api_key: str) -> tuple[bool, str]:
-    """测试 API 连接：发一个最小请求验证 Key 有效。"""
+    """测试 API 连接：根据厂商 api_format 选择正确的 Provider 发请求。"""
     try:
-        from agent.llm.openai_provider import OpenAIProvider
+        from agent.llm.provider_registry import PROVIDER_REGISTRY
 
-        provider = OpenAIProvider(
-            api_key=api_key,
-            base_url=vendor.get("default_base_url") or None,
-            model=vendor.get("default_model") or None,
-            enable_thinking=False,
-            thinking_budget=0,
-            model_type="text",
-        )
+        api_fmt = vendor.get("api_format", "openai")
+        meta = PROVIDER_REGISTRY.get(api_fmt)
+        if meta is None:
+            return False, f"未知的 api_format: {api_fmt}"
+
+        # 构造参数：只传 api_key 和 base_url（有则传）
+        kwargs: dict = {"api_key": api_key}
+        base_url = vendor.get("default_base_url")
+        if base_url:
+            kwargs["base_url"] = base_url
+        # 其余参数用默认值
+        for key in ("model", "enable_thinking", "thinking_budget", "model_type"):
+            kwargs.setdefault(key, None)
+        kwargs["model_type"] = "text"
+        kwargs["enable_thinking"] = False
+
+        provider = meta.create(**kwargs)
 
         from agent.core.message import Message, TextContent
         msgs = [Message(role="user", content=[TextContent(text="hi")])]
 
-        # 发请求，获取第一个事件即表示连接成功
+        model_name = vendor["default_model"] or getattr(provider, "default_model", "")
         async for event in provider.stream(
-            model=vendor["default_model"] or provider.default_model,
+            model=model_name,
             system="",
             messages=msgs,
             tools=[],
@@ -317,13 +317,24 @@ def _save_config(vendor: dict, api_key: str, model_type: str = "text") -> Path:
     content = top_part + rest_part
 
     # ── 兜底：确保 provider/api_format 存在 ──
+    # 重新计算分割点（last_model 修改后内容长度可能变了）
+    first_section = re.search(r'^\[', content, re.MULTILINE)
+    top_end = first_section.start() if first_section else len(content)
     top_part = content[:top_end]
+    rest_part = content[top_end:]
     for field, value in (("provider", vendor["key"]), ("api_format", api_fmt)):
         if not re.search(rf'^{field}\s*=', top_part, re.MULTILINE):
             top_part = top_part.rstrip() + f'\n{field} = "{value}"\n'
     content = top_part + rest_part
 
     toml_path.write_text(content, encoding="utf-8")
+    # S-01: 尝试存储 API Key 到系统 keyring（透明加密，TOML 中的 api_key 作降级兜底）
+    if api_key:
+        try:
+            from agent.config.keyring_store import store_api_key
+            store_api_key(vendor["key"], api_key)
+        except Exception:
+            pass
     return toml_path
 
 
