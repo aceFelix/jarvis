@@ -7,8 +7,9 @@
 <div align="center">
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
-<a href="https://www.python.org/downloads/release/python-3130/"><img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13" /></a>
+<a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg" alt="Python 3.11-3.14" /></a>
 <a href="https://pypi.org/project/jarvis-agent/"><img src="https://img.shields.io/pypi/v/jarvis-agent.svg" alt="PyPI version" /></a>
+<a href="https://github.com/aceFelix/jarvis/actions"><img src="https://github.com/aceFelix/jarvis/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 <a href="https://www.deepseek.com"><img src="https://img.shields.io/badge/DeepSeek-API-4D6BFE.svg?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+" alt="DeepSeek" /></a>
 <a href="https://bailian.console.aliyun.com"><img src="https://img.shields.io/badge/DashScope-%E7%99%BE%E7%82%BC-FF6A00.svg?logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
 <a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
@@ -295,12 +296,12 @@ Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
 
 ### 上下文压缩
 
-当对话历史 Tokens 超过阈值（默认 8000）时，自动将旧消息摘要压缩，保留最近 N 条原始消息：
+采用**分层上下文管理**（冻结前缀 + 滑动窗口）——压缩后的摘要锁定为「冻结区」永不修改，后续请求前缀稳定 → LLM 缓存持续命中。
 
-- **水位策略**：≥30% 保留最近 2 条，≥80% 保留最近 6 条
-- **图片驱逐**：旧图片替换为文字占位符释放 Token
-- **工具结果折叠**：只保留最近 4 个工具结果
-- **容错重试**：遇到 Context Too Long 错误自动压缩后重试
+- **冻结策略**：活跃窗口 Token 超阈值（默认 8000）→ 一次性压缩 + 锁定前缀
+- **图片驱逐**：旧图片替换为文字占位符释放 Token（仅作用于活跃窗口）
+- **工具结果折叠**：旧工具结果缩成一行摘要（仅作用于活跃窗口）
+- **反应式压缩**：遇到 Context Too Long 错误自动压缩后重试
 - 手动触发：`/compact`
 
 ### 记忆系统
@@ -325,6 +326,17 @@ SKILL.md 包含：
 - **正文**：Markdown 格式的专业知识指令
 
 查看已加载技能：`/skills`
+
+### 工具延迟加载
+
+Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体积：
+
+- **核心工具**（14 个）：Bash / FileRead / FileEdit / WebSearch 等高频工具始终携带
+- **延迟工具**（~80 个）：MCP / GUI / 浏览器 / 摄像头 / 协作工具等仅发名字摘要
+- **ToolSearch**：模型需要延迟工具时搜索关键词加载完整 Schema，下轮即可调用
+- **纯聊天检测**：短问候（"你好"、"在吗"）发 0 工具，秒回
+
+> 参考 Claude Code deferred tool loading 机制，兼顾功能完整性与响应速度。
 
 ### MCP 集成
 
@@ -498,10 +510,12 @@ model_type = "text"              # GLM-4.7-flash 为纯文本模型
   thinking_budget = 800  # 思考过程 Token 上限
   ```
 - **环境变量**：`JARVIS_ENABLE_THINKING=0` 关闭
-- **模型适配**：
-  - Qwen 系列：通过 `enable_thinking` 参数控制
-  - DeepSeek 系列：通过 `thinking.type` 参数控制，支持 `reasoning_effort` 可调
-  - `/think off` 时自动过滤 `reasoning_content`，净化输出
+- **厂商适配**：采用 `ThinkingConfig` 配置表驱动，各厂商思考参数自动注入：
+  - Qwen / DashScope：`enable_thinking=True` + `thinking_budget`（extra_body）
+  - DeepSeek：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
+  - 智谱 GLM：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
+  - OpenAI / Moonshot 等不支持思考的厂商自动跳过
+- **语音模式**：自动关闭思考（降低首字延迟）
 
 ---
 
@@ -1199,6 +1213,7 @@ agent/
 ├── cli_anything/      # CLI-Anything harness 集成（包装任意软件为 CLI）
 ├── core/              # 核心运行时
 │   ├── query_loop.py  # 对话循环（REPL 驱动 + 语音对话流程）
+│   ├── layered_context.py # 分层上下文管理（冻结前缀 + 滑动窗口）
 │   ├── orchestrator.py # Agent 编排器（ReAct 循环）
 │   ├── tool.py        # Tool 协议定义
 │   ├── context.py     # 工具上下文 + UI 协议（RealtimeTalkUI）
@@ -1241,6 +1256,8 @@ agent/
 │   └── extensions/    # 扩展工具（LSP/市场/MCP代理/日程）
 ├── llm/               # LLM 抽象层
 │   ├── base.py        # 基础 Provider 接口
+│   ├── thinking.py    # ThinkingConfig 配置表（思考参数策略化）
+│   ├── provider_registry.py # ProviderMeta 厂商注册表（延迟导入 + URL 检测）
 │   ├── openai_provider.py    # OpenAI 兼容协议
 │   ├── anthropic_provider.py # Anthropic Messages API
 │   ├── dashscope_provider.py # DashScope SDK 原生协议
@@ -1282,13 +1299,40 @@ agent/
 │   ├── terminal_spawner.py # 终端窗口生成（warm 预启动）
 │   └── voice_state.py # 语音状态管理
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
+│   ├── settings.py    # Settings 数据类 + TOML 加载 + 字段映射
+│   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
+│   └── model_registry.py # 模型 TOML 持久化（save/load）
 └── prompts/           # 系统提示组装（动态思维模式/语音模式）
+
+tests/                 # 测试套件（214 个测试，覆盖 LLM/Config/Tools/Core）
+├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
+├── collaboration/     # 多 Agent 协作测试
+├── core/ tools/ daemon/ voice/ # 各模块单元测试
+├── test_command_router.py # 命令路由集成测试
+├── test_query_loop.py     # 上下文压缩/图片淘汰测试
+└── test_permissions.py    # 五层权限系统测试
+
+.github/workflows/     # GitHub Actions CI（自动测试 + 语法检查）
+└── ci.yml             # push/PR 触发，Python 3.11-3.14 矩阵
 
 npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g 安装）
 ├── package.json       # npm 包定义（bin 指向 run.js）
 ├── install.js         # postinstall：检测 Python + pip install jarvis-agent[all]
 └── run.js             # CLI 入口：转发参数给 jarvis 命令
 ```
+
+---
+
+## 测试与 CI
+
+项目配备 **214 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理等核心模块。
+
+```bash
+# 运行全部测试
+pytest tests/ -v
+```
+
+每次 push 或 PR 到 `main` 分支，**GitHub Actions 自动跑全量测试**（Python 3.11 / 3.12 / 3.13 / 3.14 矩阵），不通过不允许合并。
 
 ---
 

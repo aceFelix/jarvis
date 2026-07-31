@@ -30,16 +30,20 @@ def save_custom_model(name: str, config: dict[str, str]) -> bool:
 
     content = toml_path.read_text(encoding="utf-8")
 
-    # 构建新子表条目
-    entry = f'''
-[llm.custom_models."{name}"]
-name = "{name}"
-base_url = "{config.get('base_url', '')}"
-api_key = "{config.get('api_key', '')}"
-provider_type = "{config.get('provider_type', 'openai')}"
-model_type = "{config.get('model_type', 'multimodal')}"
-vendor = "{config.get('vendor', 'dashscope')}"
-'''
+    # 构建新子表条目（空 api_key/base_url 不写入，让环境变量提供）
+    entry_lines = [f'[llm.custom_models."{name}"]', f'name = "{name}"']
+    api_key_val = config.get("api_key", "")
+    if api_key_val:
+        entry_lines.append(f'api_key = "{api_key_val}"')
+    base_url_val = config.get("base_url", "")
+    if base_url_val:
+        entry_lines.append(f'base_url = "{base_url_val}"')
+    entry_lines += [
+        f'provider_type = "{config.get("provider_type", "openai")}"',
+        f'model_type = "{config.get("model_type", "multimodal")}"',
+        f'vendor = "{config.get("vendor", "dashscope")}"',
+    ]
+    entry = "\n".join(entry_lines)
 
     marker = f'[llm.custom_models."{name}"]'
     if marker in content:

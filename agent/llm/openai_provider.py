@@ -324,7 +324,9 @@ class OpenAIProvider(LLMProvider):
                 yield ToolCallEnd(id=entry["id"] or f"call_{name or 'unknown'}")
             yield Stop(reason=finish_reason or "stop", usage=final_usage)
         except Exception as e:
-            raise ProviderError(f"OpenAI API error: {e}") from e
+            from agent.llm.errors import classify
+            classified = classify(e)
+            raise ProviderError(classified.user_message) from e
 
     async def close(self) -> None:
         await self._client.close()
@@ -414,9 +416,9 @@ def _parse_tool_args(raw: str, tool_name: str | None = None) -> dict[str, Any]:
         return result
 
     # 全部失败：记录诊断信息
-    import sys
-    print(
-        f"[ACP:parse-fail] tool={tool_name or '?'} raw[{len(raw)}]={raw[:200]!r}",
-        file=sys.stderr, flush=True,
+    from agent.core.logging import get_logger
+    get_logger().debug(
+        "_parse_tool_args fallback: tool=%s raw_len=%d raw=%r",
+        tool_name or "?", len(raw), raw[:200],
     )
     return {}

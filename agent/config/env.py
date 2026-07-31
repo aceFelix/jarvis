@@ -45,9 +45,15 @@ def apply_env_overrides(s: "Settings") -> "Settings":
         updates["dashscope_api_key"] = dashscope_key
     if not s.api_key:
         for key_env in (
+            # 厂商专属变量（优先级最高）
             "DASHSCOPE_API_KEY",    # 阿里云百炼 DashScope
-            "ANTHROPIC_API_KEY",     # Anthropic Claude
-            "OPENAI_API_KEY",        # OpenAI 官方及兼容服务
+            "DEEPSEEK_API_KEY",     # DeepSeek
+            "ZAI_API_KEY",          # 智谱 AI (GLM)
+            "ANTHROPIC_API_KEY",    # Anthropic Claude
+            "KIMI_API_KEY",         # Moonshot (Kimi)
+            "MINIMAX_API_KEY",      # MiniMax
+            "MIMO_API_KEY",         # 小米 MiMo
+            "OPENAI_API_KEY",        # OpenAI 官方及兼容服务（通用兜底）
             "JARVIS_API_KEY",        # 通用兜底（新名）
             "MY_AGENT_API_KEY",      # 通用兜底（兼容旧名）
         ):

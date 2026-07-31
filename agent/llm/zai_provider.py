@@ -269,7 +269,8 @@ class ZaiProvider(LLMProvider):
                 if isinstance(item, Exception):
                     if isinstance(item, ProviderError):
                         raise item
-                    raise ProviderError(f"Zhipu AI API error: {item}") from item
+                    from agent.llm.errors import classify
+                    raise ProviderError(classify(item).user_message) from item
                 yield item
                 if isinstance(item, Stop):
                     break

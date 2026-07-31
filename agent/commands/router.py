@@ -71,6 +71,7 @@ from agent.commands.handlers.voice_commands import (
     handle_voice,
     handle_talk,
 )
+from agent.commands.handlers.init_command import handle_init
 from agent.commands.handlers.wechat_commands import (
     handle_connect_wechat,
     handle_disconnect_wechat,
@@ -166,6 +167,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/models": handle_models,
     "/harnesses": handle_cli_anything,
     "/cli_anything": handle_cli_anything,
+    "/init": handle_init,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）

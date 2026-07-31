@@ -284,7 +284,8 @@ class AnthropicProvider(LLMProvider):
 
                 yield Stop(reason=stop_reason, usage=usage)
         except Exception as e:
-            raise ProviderError(f"Anthropic API error: {e}") from e
+            from agent.llm.errors import classify
+            raise ProviderError(classify(e).user_message) from e
 
     async def close(self) -> None:
         await self._client.close()

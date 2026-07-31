@@ -489,8 +489,8 @@ def _switch_model(
                 settings,
                 provider=cfg.get("provider", api_fmt),
                 api_format=api_fmt,
-                base_url=cfg.get("base_url", settings.base_url),
-                api_key=cfg.get("api_key", settings.api_key),
+                base_url=cfg.get("base_url") or settings.base_url,
+                api_key=cfg.get("api_key") or settings.api_key,
             )
             new_provider = _build_provider(custom_settings, model_type=mtype)
         else:

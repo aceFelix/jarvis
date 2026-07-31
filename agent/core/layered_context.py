@@ -156,6 +156,8 @@ class LayeredContext:
             self._frozen_tokens = self._estimate_frozen()
             return True
         except Exception:
+            from agent.core.logging import get_logger
+            get_logger().warning("LayeredContext: freeze_if_needed failed", exc_info=True)
             return False
 
     async def compact_reactive(
@@ -192,6 +194,8 @@ class LayeredContext:
             self._frozen_tokens = self._estimate_frozen()
             return True
         except Exception:
+            from agent.core.logging import get_logger
+            get_logger().warning("LayeredContext: compact_reactive failed", exc_info=True)
             return False
 
     # ── 辅助 ──

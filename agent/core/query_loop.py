@@ -125,6 +125,8 @@ class QueryLoop:
         self._deferred_loading = deferred_loading
         # 纯聊天零工具检测开关
         self._chat_detection = chat_detection
+        # 网络错误重试计数（每轮 run() 只重试一次）
+        self._network_retried: bool = False
 
     def set_thinking_enabled(self, enabled: bool | None) -> None:
         """统一开关思考模式，同时同步到当前 provider。
@@ -177,6 +179,7 @@ class QueryLoop:
         传入的 images 会作为 user message 的 image content block 一并发给模型。
         """
         stats = QueryStats()
+        self._network_retried = False  # 每轮重置重试计数
 
         # ---- Hook: user_prompt ----
         # 钩子可以修改用户输入（modify_input 为字符串则替换）
@@ -189,7 +192,7 @@ class QueryLoop:
             if hook_result.modify_input is not None and isinstance(hook_result.modify_input, str):
                 user_text = hook_result.modify_input
         except Exception:
-            pass
+            pass  # 非关键异常，不影响主流程
 
         # 追加用户消息（文本 + 可选图片）
         content_blocks: list[ContentBlock] = [TextContent(text=user_text)]
@@ -235,6 +238,8 @@ class QueryLoop:
                 # 用户 Ctrl+C 中断 LLM 流式输出
                 stats.stopped_reason = "aborted"
                 ctx.abort_event.set()
+                # 重置 abort_event，否则后续 run() 第一行检查就 break
+                ctx.abort_event = asyncio.Event()
                 break
             except ProviderError as e:
                 # 反应式压缩：API 报 context too long → 强制压缩后重试
@@ -253,6 +258,13 @@ class QueryLoop:
                                 f"（{layered.total_tokens()} tokens）"
                             )
                         continue  # 重试本轮
+                # 网络错误：自动重试一次（1.5s 退避），最多重试 1 次
+                if "网络错误" in error_str and not self._network_retried:
+                    self._network_retried = True
+                    await asyncio.sleep(1.5)
+                    if ctx.ui:
+                        ctx.ui.warn("网络异常，自动重试中...")
+                    continue  # 重试本轮
                 # Provider 故障转移：尝试切到备选厂商
                 if self._try_failover():
                     if ctx.ui:
@@ -301,6 +313,7 @@ class QueryLoop:
                 # 用户 Ctrl+C → 不再 re-raise，优雅退出本轮
                 stats.stopped_reason = "aborted"
                 ctx.abort_event.set()
+                ctx.abort_event = asyncio.Event()  # 重置，否则后续 run() 直接跳过
                 break
 
             # 工具结果追加到分层上下文
@@ -346,7 +359,7 @@ class QueryLoop:
                     "ctx": ctx,
                 })
         except Exception:
-            pass
+            pass  # 非关键异常，不影响主流程
 
         return stats
 

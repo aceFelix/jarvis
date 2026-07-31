@@ -299,13 +299,13 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_api_error_raises_provider_error(self, provider: OpenAIProvider) -> None:
-        """API 调用失败应抛出 ProviderError。"""
+        """API 调用失败应抛出 ProviderError（含分类后的用户友好消息）。"""
         msgs = [Message(role="user", content=[TextContent(text="hello")])]
 
         mock_create = AsyncMock(side_effect=RuntimeError("Connection refused"))
         provider._client.chat.completions.create = mock_create
 
-        with pytest.raises(ProviderError, match="OpenAI API error"):
+        with pytest.raises(ProviderError, match="网络错误"):
             _ = [e async for e in provider.stream(
                 model="gpt-4o", system="sys", messages=msgs, tools=[], max_tokens=100
             )]

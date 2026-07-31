@@ -287,11 +287,15 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                     with ui._console.status(f"正在连接 {len(config)} 个 MCP server..."):
                         results = await mcp_client.connect_all(config)
                     connected = sum(1 for v in results.values() if v)
+                    failed_names = [name for name, ok in results.items() if not ok]
                     if connected:
                         count = register_dynamic_tools(registry, mcp_client)
-                        ui.info(f"MCP: {connected}/{len(config)} server 已连接，注册 {count} 个工具")
+                        msg = f"MCP: {connected}/{len(config)} server 已连接，注册 {count} 个工具"
+                        if failed_names:
+                            msg += f"（{', '.join(failed_names)} 连接失败，对应工具不可用）"
+                        ui.info(msg)
                     else:
-                        ui.warn(f"MCP: 所有 server 连接失败（{len(config)} 个配置）")
+                        ui.warn(f"MCP: 所有 server 连接失败（{', '.join(config.keys())}）")
             else:
                 ui.info("MCP SDK 未安装，跳过 MCP 接入（pip install mcp 启用）")
         except ImportError:
@@ -701,6 +705,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="前台 REPL 同时启动托盘图标（托盘退出=整体退出）",
     )
     p.add_argument(
+        "--init",
+        action="store_true",
+        help="交互式首次配置引导：选厂商→输Key→测试连接→保存",
+    )
+    p.add_argument(
         "--daemon",
         action="store_true",
         help="常驻模式：后台待命，热键/托盘唤起（阶段五）",
@@ -802,6 +811,9 @@ async def repl_headless(settings: Settings) -> int:
                     connected = sum(1 for v in results.values() if v)
                     if connected:
                         register_dynamic_tools(registry, mcp_client)
+                    failed_names = [name for name, ok in results.items() if not ok]
+                    if failed_names:
+                        ui.warn(f"MCP: {', '.join(failed_names)} 连接失败，对应工具不可用")
         except Exception:
             pass
 
@@ -989,6 +1001,17 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as e:
         print(f"无法进入工作目录 {settings.workdir}: {e}", file=sys.stderr)
         return 1
+
+    # 交互式首次配置
+    if args.init:
+        from agent.ui.cli import RichCLI
+        ui = RichCLI(verbose=False, boot_animation=False)
+        from agent.commands.handlers.init_command import run_init_cli
+        try:
+            asyncio.run(run_init_cli(ui))
+        except KeyboardInterrupt:
+            pass
+        return 0
 
     # 直接启动实时双工语音对话
     if args.talk:
