@@ -192,6 +192,16 @@ sudo dnf install portaudio-devel gtk3-devel
 
 ## 快速开始
 
+### 首次使用（推荐）
+
+```bash
+jarvis --init
+```
+交互式引导：选厂商 → 确认模型 → 选多模态/纯文本 → 输 Key → 自动测试连接 → 保存。
+支持 12 个 LLM 厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax 等）。
+
+### 手动配置
+
 ```bash
 # 默认接阿里云 DashScope（qwen3.7-plus，多模态视觉模型）
 export DASHSCOPE_API_KEY=sk-xxx
@@ -201,13 +211,13 @@ jarvis
 > Windows PowerShell 用 `$env:DASHSCOPE_API_KEY = "sk-xxx"` 设置环境变量。
 
 默认配置在 `configs/settings.toml`，环境变量 `JARVIS_*` 和 CLI 参数可覆盖。
-API Key 识别优先级：`DASHSCOPE_API_KEY` > `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `JARVIS_API_KEY`。
+各厂商专属环境变量：`DASHSCOPE_API_KEY` / `DEEPSEEK_API_KEY` / `ZAI_API_KEY` / `ANTHROPIC_API_KEY` / `KIMI_API_KEY` / `MINIMAX_API_KEY` / `MIMO_API_KEY`。
 
 启动后进入 REPL 终端界面，输入问题即可与 AI 对话：
 - 直接输入自然语言，AI 会自动调用工具完成任务
 - 输入 `/` 弹出命令列表，Tab 键自动补全
 - `Shift+Enter` 换行（Windows 终端自动转换）
-- `Ctrl+C` 中断当前回答
+- `Ctrl+C` **任意阶段中断**（LLM 流式输出中 / 工具执行中 / 思考中均可立即停止）
 
 > **桌面快捷方式**：安装后不会自动创建。如需桌面图标，运行：
 > ```bash
@@ -446,6 +456,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 
 | 命令 | 说明 |
 |---|---|
+| `/init` | 交互式首次配置引导（选厂商→输Key→测试→保存） |
 | `/doctor` | 查看自愈统计与系统诊断 |
 | `/server [目录]` | 一键启动前端开发服务器 |
 | `/connect-phone` | 跨设备协同（手机扫码连接当前会话） |

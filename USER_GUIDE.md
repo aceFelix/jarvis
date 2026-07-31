@@ -37,17 +37,21 @@ uv tool install "jarvis-agent[all]"
 npm install -g jarvis-agent
 ```
 
-### 2. 配置 API Key
+### 2. 初始化配置（推荐）
 
 ```bash
-# Linux / macOS
-export DASHSCOPE_API_KEY=sk-xxx
-
-# Windows PowerShell
-$env:DASHSCOPE_API_KEY = "sk-xxx"
+jarvis --init
 ```
 
-> 默认使用阿里云 DashScope（通义千问），也支持 OpenAI / Anthropic / DeepSeek 等。
+交互式引导：选择 LLM 厂商 → 确认模型名 → 选纯文本/多模态 → 输 API Key → 自动测试连接。
+支持 12 个厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax 等）。
+
+> 也可手动配置环境变量：
+> ```bash
+> export DASHSCOPE_API_KEY=sk-xxx  # Linux / macOS
+> $env:DASHSCOPE_API_KEY = "sk-xxx"  # Windows PowerShell
+> ```
+> 支持厂商专属变量：`DASHSCOPE_API_KEY` / `DEEPSEEK_API_KEY` / `ZAI_API_KEY` / `ANTHROPIC_API_KEY` / `KIMI_API_KEY` / `MINIMAX_API_KEY` / `MIMO_API_KEY`。
 
 ### 3. 启动
 
