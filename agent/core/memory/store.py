@@ -13,7 +13,7 @@
    - 启动时注入 system prompt，让模型知道"之前学到的"
    - 用户可通过 /memory 命令查看/编辑
 
-致敬 WorkBuddy 自己的三层记忆机制（cloud profile / user-level / workspace），
+致敬 WorkBuddy 的三层记忆机制（cloud profile / user-level / workspace），
 但大幅精简: 不做自动学习（用户手动维护 MEMORY.md），不做云同步。
 """
 

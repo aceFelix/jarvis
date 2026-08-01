@@ -68,8 +68,9 @@ from agent.commands.handlers.tool_commands import (
 )
 from agent.commands.handlers.voice_commands import (
     handle_listen,
-    handle_voice,
     handle_talk,
+    handle_tts_voice,
+    handle_voice,
 )
 from agent.commands.handlers.init_command import handle_init
 from agent.commands.handlers.wechat_commands import (
@@ -154,6 +155,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/mic": handle_listen,
     "/voice": handle_voice,
     "/talk": handle_talk,
+    "/tts-voice": handle_tts_voice,
     "/connect-phone": handle_connect_phone,
     "/phone": handle_connect_phone,
     "/connect-wechat": handle_connect_wechat,
@@ -189,6 +191,7 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/plugin validate ", handle_plugin),
     ("/cli_anything ", handle_cli_anything),
     ("/model ", handle_model),
+    ("/tts-voice ", handle_tts_voice),
     ("/rewind ", handle_rewind),
     ("/diff ", handle_diff),
     ("/server ", handle_server),

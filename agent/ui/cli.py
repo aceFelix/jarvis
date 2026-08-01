@@ -142,6 +142,7 @@ SLASH_COMMANDS = [
     ("/mic",        "录音并识别文字（/listen 别名）"),
     ("/voice",      "进入语音对话模式（连续听→想→说循环）"),
     ("/talk",       "进入实时双工语音对话（全双工，说话即可打断）"),
+    ("/tts-voice <前缀>", "选择 / 切换 / 添加 TTS 音色（DashScope）"),
     ("/connect-phone", "手机扫码连接 JARVIS（共享当前会话）"),
     ("/connect-wechat", "微信扫码连接 JARVIS（通过 ClawBot 在微信中对话）"),
     ("/disconnect-wechat", "断开微信 ClawBot 连接"),
@@ -221,6 +222,10 @@ class _SlashCompleter(Completer):
         # ---- /model <prefix> 子命令补全 ----
         if text_lower.startswith("/model ") or text_before_cursor.startswith("/model "):
             return self._complete_models(text_before_cursor)
+
+        # ---- /tts-voice <prefix> 子命令补全 ----
+        if text_lower.startswith("/tts-voice ") or text_before_cursor.startswith("/tts-voice "):
+            return self._complete_tts_voices(text_before_cursor)
 
         # ---- /load <prefix> 子命令补全 ----
         if text_lower.startswith("/load ") or text_before_cursor.startswith("/load "):
@@ -326,6 +331,42 @@ class _SlashCompleter(Completer):
 
         # 前缀过滤
         matches = [(n, d) for n, d in all_models if n.lower().startswith(prefix)]
+
+        results: list[Completion] = []
+        for name, desc in matches:
+            start_pos = -len(prefix) if prefix else 0
+            results.append(
+                Completion(
+                    text=name,
+                    start_position=start_pos,
+                    display=FormattedText([
+                        ("#5bc8ff", f"{name:<24}"),
+                        ("#888888", f"  {desc}"),
+                    ]),
+                )
+            )
+        return results
+
+    @staticmethod
+    def _complete_tts_voices(text: str) -> list[Completion]:
+        """补全 /tts-voice <prefix> 的 TTS 音色名（内置 + 自定义）。"""
+        prefix = text[len("/tts-voice "):].lower()
+
+        all_voices: list[tuple[str, str]] = []  # [(name, desc), ...]
+        try:
+            from agent.config.settings import load_settings
+            from agent.voice.tts_voices import all_tts_voices
+            settings = load_settings()
+            for name, cfg in all_tts_voices(settings).items():
+                desc = cfg.get("description", "")
+                all_voices.append((name, desc))
+                # 自定义音色 voice_id 与 name 不同时也收录，便于按 ID 补全
+                if cfg.get("voice_id") and cfg["voice_id"] != name:
+                    all_voices.append((cfg["voice_id"], desc))
+        except Exception:
+            pass
+
+        matches = [(n, d) for n, d in all_voices if n.lower().startswith(prefix)]
 
         results: list[Completion] = []
         for name, desc in matches:

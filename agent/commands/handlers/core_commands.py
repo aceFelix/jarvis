@@ -151,8 +151,8 @@ def handle_mode(ctx: "CommandContext", stripped: str) -> bool:
     new_mode = parse_mode(mode_str)
     settings.permission_mode = new_mode
 
-    # 延迟导入 main 中的构建函数，避免循环引用
-    from agent.main import _build_checker, _build_recovery_executor
+    # 延迟导入 bootstrap 中的构建函数，避免循环引用
+    from agent.bootstrap import _build_checker, _build_recovery_executor
 
     checker = _build_checker(settings)
     recovery = _build_recovery_executor(settings)

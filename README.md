@@ -132,7 +132,7 @@ jarvis
 
 ### 用 npm 安装
 
-通过 npm 一键安装（需要系统已安装 Python 3.11+）：
+通过 npm 一键安装：
 
 ```bash
 npm install -g jarvis-agent
@@ -201,7 +201,7 @@ sudo dnf install portaudio-devel gtk3-devel
 jarvis --init
 ```
 交互式引导：选厂商 → 确认模型 → 选多模态/纯文本 → 输 Key → 自动测试连接 → 保存。
-支持 12 个 LLM 厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax 等）。
+支持 11 个厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务）。
 
 ### 手动配置
 
@@ -255,9 +255,10 @@ max_iterations = 50              # 单轮最大工具调用次数
 # ---- 语音 ----
 [tts]
 model = "cosyvoice-v3-flash"     # TTS 模型（v3-flash/v3-plus/v3.5-plus）
-voice = "longanlang_v3"          # 音色
+voice = "longanlang_v3"          # 音色（/tts-voice 可切换）
 volume = 50                      # 音量 0-100
 speech_rate = 1.0                # 语速 0.5-2.0
+pitch_rate = 1.0                 # 音高 0.5-2.0
 
 [stt]
 # 三后端自动适配（根据 model 名）：
@@ -269,7 +270,11 @@ model = "qwen3-asr-flash-realtime"
 max_seconds = 15                  # 单次录音最长秒数
 silence_seconds = 1.5             # 静音检测秒数
 
-# ---- 实时双工语音 ----
+[voice]
+barge_in = false                  # 语音打断：播报中开口自动打断（默认关，避免 PyAudio 冲突）
+barge_in_key = true               # 键盘打断：播报中按 ESC 立即停止（默认开）
+
+# ---- 实时双工语音（用户级配置 ~/.jarvis/settings.toml）----
 [realtime_talk]
 model = "qwen-audio-3.0-realtime-flash"  # DashScope 实时语音模型
 voice = "longanqian"                      # 音色
@@ -287,7 +292,7 @@ hotkey = "ctrl+shift+j"           # 全局热键
 tray = true                       # 系统托盘图标
 ```
 
-> 📖 完整配置项参见 **[docs/configuration.md](docs/configuration.md)**；各厂商接入见 **[docs/providers.md](docs/providers.md)**；常见问题见 **[docs/troubleshooting.md](docs/troubleshooting.md)**。
+> 📖 完整配置项参见 **[config-docs/configuration.md](config-docs/configuration.md)**；各厂商接入见 **[config-docs/providers.md](config-docs/providers.md)**；语音配置见 **[config-docs/voice-setup.md](config-docs/voice-setup.md)**；常见问题见 **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**。
 
 ---
 
@@ -344,7 +349,7 @@ SKILL.md 包含：
 
 Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体积：
 
-- **核心工具**（14 个）：Bash / FileRead / FileEdit / WebSearch 等高频工具始终携带
+- **核心工具**（~15 个）：Bash / FileRead / FileEdit / WebSearch 等高频工具始终携带
 - **延迟工具**（~80 个）：MCP / GUI / 浏览器 / 摄像头 / 协作工具等仅发名字摘要
 - **ToolSearch**：模型需要延迟工具时搜索关键词加载完整 Schema，下轮即可调用
 - **纯聊天检测**：短问候（"你好"、"在吗"）发 0 工具，秒回
@@ -371,23 +376,27 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | 命令 | 说明 |
 |---|---|
 | `/help` `/h` | 查看所有命令帮助 |
-| `/exit` `/quit` | 退出贾维斯 |
+| `/exit` `/quit` `/q` | 退出贾维斯 |
 | `/reset` `/clear` | 清空对话历史，重新开始 |
 | `/compact` | 手动压缩上下文（摘要旧消息节省 Token） |
+| `/cost` | 显示本会话 token 用量与估算成本 |
+| `/context` | 查看上下文窗口使用情况（按角色分组统计消息数与 tokens） |
+| `/rewind [n]` | 回退最近 n 条消息（默认 1 条） |
+| `/diff [path]` | 显示工作目录的 git diff（可指定路径） |
 
 ### 模型管理
 
 | 命令 | 说明 |
 |---|---|
-| `/model <前缀>` | 前缀匹配切换模型（支持模糊输入） |
-| `/models` | 交互式模型管理（↑↓选择、Enter切换、空格编辑配置） |
+| `/model <前缀>` | 前缀匹配切换模型（支持模糊输入，多匹配时弹选择器） |
+| `/models` | 交互式模型管理（↑↓选择、Enter切换、空格编辑配置，按厂商分组） |
 | `/think` | 开关深度思考模式（`/think on` / `/think off`） |
 
 ### 权限控制
 
 | 命令 | 说明 |
 |---|---|
-| `/mode <模式>` | 切换权限模式（default / plan / accept_edits / yolo） |
+| `/mode <模式>` | 切换权限模式（default / plan / accept_edits / yolo，无参时弹选择器） |
 | `/tools` | 列出所有可用工具 |
 
 ### 会话管理
@@ -396,7 +405,8 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 |---|---|
 | `/save [名称]` | 保存当前会话 |
 | `/load <前缀>` | 前缀匹配加载已保存会话 |
-| `/sessions` `/loads` | 列出并交互选择已保存会话 |
+| `/loads` | 列出并交互选择已保存会话 |
+| `/sessions` `/ls-sessions` | 列出所有已保存会话 |
 
 ### 记忆与知识
 
@@ -411,6 +421,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 |---|---|
 | `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
 | `/talk` | 进入实时双工语音对话（全双工，说话即可打断） |
+| `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope） |
 | `/say <文本>` | TTS 朗读指定文字 |
 | `/listen` `/mic` | 录音并识别为文字 |
 
@@ -419,7 +430,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | 命令 | 说明 |
 |---|---|
 | `/image <路径>` `/img <路径>` | 添加本地图片到待发送列表 |
-| `/paste` `/p` | 添加剪贴板图片到待发送列表 |
+| `/paste` `/p` `/clipboard` | 添加剪贴板图片到待发送列表 |
 
 > 图片在下次发送消息时自动附带。支持格式：PNG / JPG / WEBP / BMP。自动缩放到最长边 1280px。
 
@@ -430,7 +441,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | `/agents` | 查看多 Agent 团队状态与成员 |
 | `/tasks` | 查看共享任务列表进度 |
 | `/plan` | 切换规划模式（进入/退出只读规划） |
-| `/plugin` | 列出已安装插件（Plugin 系统） |
+| `/plugin` `/plugins` | 列出已安装插件（Plugin 系统） |
 | `/plugin search [关键词]` | 搜索 Plugin 系统市场 |
 | `/plugin install <名称>` | 安装 Plugin 系统的插件 |
 | `/plugin uninstall <名称>` | 卸载 Plugin 系统的插件 |
@@ -440,7 +451,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | `/plugin disable <名称>` | 禁用 Plugin 插件，不卸载 |
 | `/plugin create <名称>` | 创建 Plugin 插件脚手架 |
 | `/plugin validate <路径>` | 校验 plugin.json 合法性 |
-| `/cli_anything` | 列出已安装 CLI-Anything harness |
+| `/cli_anything` `/harnesses` | 列出已安装 CLI-Anything harness |
 | `/cli_anything market` | 列出市场可用 harness |
 | `/cli_anything install <id>` | 安装指定 harness |
 | `/cli_anything uninstall <id>` | 卸载指定 harness |
@@ -461,11 +472,14 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 |---|---|
 | `/init` | 交互式首次配置引导（选厂商→输Key→测试→保存） |
 | `/doctor` | 查看自愈统计与系统诊断 |
+| `/config [show]` | 查看当前生效的完整配置（LLM/语音/权限/MCP/自定义模型等） |
 | `/server [目录]` | 一键启动前端开发服务器 |
-| `/connect-phone` | 跨设备协同（手机扫码连接当前会话） |
-| `/connect-wechat` | 微信扫码连接 JARVIS（通过 ClawBot 在微信中对话） |
+| `/connect-phone` `/phone` | 跨设备协同（手机扫码连接当前会话） |
+| `/connect-wechat` `/wechat` | 微信扫码连接 JARVIS（通过 ClawBot 在微信中对话） |
 | `/disconnect-wechat` | 断开微信 ClawBot 连接 |
 | `/verbose` | 开关详细输出（token 统计、缓存命中等） |
+
+> 已加载的 Skill 也可直接作为斜杠命令调用：`/<skill-name> [参数]`（动态技能分发）。
 
 ---
 
@@ -501,7 +515,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 api_format = "openai"
 base_url = "https://api.deepseek.com/v1"
 api_key = "sk-your-deepseek-key"
-model_type = "text"              # "text" 纯文本 / "vision" 多模态
+model_type = "text"              # "text" 纯文本 / "multimodal" 多模态
 
 [llm.custom_models."glm-4.7-flash"]
 provider = "zhipu"
@@ -523,7 +537,6 @@ model_type = "text"              # GLM-4.7-flash 为纯文本模型
   enable_thinking = true
   thinking_budget = 800  # 思考过程 Token 上限
   ```
-- **环境变量**：`JARVIS_ENABLE_THINKING=0` 关闭
 - **厂商适配**：采用 `ThinkingConfig` 配置表驱动，各厂商思考参数自动注入：
   - Qwen / DashScope：`enable_thinking=True` + `thinking_budget`（extra_body）
   - DeepSeek：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
@@ -598,7 +611,7 @@ Jarvis 提供两套独立的语音系统：
 - **语音输出**：两种 TTS 模式
   - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
   - **StreamTTSPlayer**：WebSocket 流式合成，LLM 逐句输出 → 即时合成播放，首句延迟 ~500ms
-  - 默认音色 `longanlang_v3`
+  - 默认音色 `longanlang_v3`；内置 7 个音色，`/tts-voice` 可切换或添加自定义音色
 - **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
 - **思考隔离**：思考过程只显示在终端面板，不进入 TTS
 - **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
@@ -1257,7 +1270,12 @@ Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件�
 ```
 agent/
 ├── main.py            # 入口（REPL / daemon / --talk 分发）
-├── acp.py             # Agent Communication Protocol
+├── bootstrap.py       # 装配工厂（provider / checker / recovery / context 构建）
+├── model_manager.py   # 模型切换与管理（/model /models 逻辑）
+├── session_manager.py # 会话自动保存 / 标题生成
+├── commands/          # 斜杠命令系统
+│   ├── router.py      # 命令路由（精确匹配 + 前缀匹配 + 动态技能分发）
+│   └── handlers/      # 各命令处理器（core/session/model/voice/media/plugin/collab...）
 ├── cli_anything/      # CLI-Anything harness 集成（包装任意软件为 CLI）
 ├── core/              # 核心运行时
 │   ├── query_loop.py  # 对话循环（REPL 驱动 + 语音对话流程）
@@ -1270,6 +1288,9 @@ agent/
 │   ├── hooks.py       # 钩子系统
 │   ├── diag.py        # 诊断日志
 │   ├── error_recovery.py # 工具错误自愈（分类/重试/降级/询问）
+│   ├── images.py     # 图片/剪贴板助手（/image /paste 加载与去重）
+│   ├── logging.py    # 日志
+│   ├── audit/        # 工具审计日志
 │   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日/截止日期/日历）
 │   ├── extensions/    # 外部扩展机制（MCP客户端/插件/Skill加载）
 │   ├── memory/        # 记忆持久化（上下文压缩/恢复/文件状态/存储）
@@ -1296,12 +1317,13 @@ agent/
 │   ├── ask_user.py    # 向用户提问
 │   ├── location.py    # IP 定位
 │   ├── todo.py        # 任务计划
+│   ├── tool_search.py # 延迟工具搜索（ToolSearch）
 │   ├── file_ops/      # 文件读写/编辑/搜索（glob/grep）
 │   ├── system/        # 系统操作（鼠标/键盘/屏幕/窗口）
 │   ├── web/           # 浏览器自动化 + 网络请求
 │   ├── vision/        # 摄像头拍照 + 视觉监控
-│   ├── collaboration/ # 多Agent协作工具（子代理/团队/任务）
-│   └── extensions/    # 扩展工具（LSP/市场/MCP代理/日程）
+│   ├── collaboration/ # 多Agent协作工具（子代理/团队/任务/计划）
+│   └── extensions/    # 扩展工具（LSP/市场/MCP代理/日程/邮箱/CLI-Anything）
 ├── llm/               # LLM 抽象层
 │   ├── base.py        # 基础 Provider 接口
 │   ├── thinking.py    # ThinkingConfig 配置表（思考参数策略化）
@@ -1324,14 +1346,18 @@ agent/
 │       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接（UI 协议实现）
 │       └── assets/    # HTML/JS/CSS（方舟反应炉动画 + 对话气泡）
 ├── voice/             # 语音引擎
-│   ├── tts.py         # CosyVoiceTTS（DashScope CosyVoice 合成）
+│   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
 │   ├── stt.py         # STT 三后端（QwenASR / ParaformerSTT / FunASRFlashSTT）
-│   ├── stream_tts.py  # StreamTTSPlayer（WebSocket 流式 TTS，逐句播放）
-│   ├── audio.py       # 音频工具（PyAudio 管理/音量计算）
+│   ├── stream_tts.py  # StreamTTSPlayer（句子级流式 TTS，逐句播放）
+│   ├── realtime_talk.py # /talk 全双工实时语音（WebSocket + AEC + Function Calling）
+│   ├── voice_loop.py  # /voice 语音对话循环（听→想→说 + 对话⇄待机状态机）
+│   ├── voice_config.py # 语音配置（关键词/唤醒词/待机参数/语音 system prompt）
+│   ├── tts_text.py    # TTS 文本清洗（markdown/<think>/工具标签剥离）
+│   ├── barge_in.py    # 打断监听器（ESC 键盘 / 麦克风能量 / 打断词）
+│   ├── tts_voices.py  # TTS 音色目录（/tts-voice 数据源）
+│   ├── audio.py       # PyAudio 全局单例（防 segfault）
 │   ├── aec.py         # AEC 回声消除（WebRTC AEC3，外放防自言自语）
-│   ├── client_vad.py  # 客户端 VAD（静音检测/语音活动判断）
-│   ├── voice_loop.py  # /voice 语音对话循环（STT→LLM→TTS，含流式 TTS）
-│   └── realtime_talk.py # /talk 全双工实时语音（WebSocket 直连 DashScope）
+│   └── client_vad.py  # 客户端 VAD（静音检测/语音活动判断）
 ├── bridge/            # 跨设备协同（P3-1）
 │   ├── server.py      # BridgeServer（HTTP 静态文件 + WebSocket 通信）
 │   ├── ui.py          # BridgeUI（UIProtocol 实现，事件转发到 WS）
@@ -1341,24 +1367,36 @@ agent/
 │   ├── server.py      # WeChatBridge（消息循环 + 单例管理 + 24h 重连）
 │   └── ui.py          # WeChatUI（UIProtocol 实现，收集回复文本）
 ├── daemon/            # 常驻模式
-│   ├── daemon.py      # 守护进程（后台分离/托盘/热键）
-│   ├── autostart.py   # 开机自启/桌面快捷方式
+│   ├── daemon.py      # 守护进程（后台分离/托盘/热键/主动服务）
+│   ├── tray.py        # 系统托盘
+│   ├── hotkey.py      # 全局热键（跨平台）
 │   ├── hotkey_native.py # Windows 原生 RegisterHotKey（更快响应）
+│   ├── sessions.py    # 语音会话管理（stop_event 中断）
+│   ├── realtime.py    # 实时聊天会话管理
+│   ├── autostart.py   # 开机自启/桌面快捷方式
 │   ├── terminal_spawner.py # 终端窗口生成（warm 预启动）
-│   └── voice_state.py # 语音状态管理
+│   ├── voice_state.py # 语音互斥锁与开关状态
+│   ├── notifications.py # 系统通知
+│   └── platform_utils.py # 跨平台工具
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
 │   ├── settings.py    # Settings 数据类 + TOML 加载 + 字段映射
 │   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
-│   └── model_registry.py # 模型 TOML 持久化（save/load）
-└── prompts/           # 系统提示组装（动态思维模式/语音模式）
+│   ├── keyring_store.py # API Key 加密存储（系统凭据管理器）
+│   ├── model_registry.py # 模型 TOML 持久化（save/load）
+│   └── migrations.py  # 配置迁移
+├── prompts/           # 系统提示组装（动态思维模式/语音模式）
+└── utils/             # 通用工具
+    └── mask.py        # API Key 脱敏
 
-tests/                 # 测试套件（214 个测试，覆盖 LLM/Config/Tools/Core）
+tests/                 # 测试套件（281 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── collaboration/     # 多 Agent 协作测试
 ├── core/ tools/ daemon/ voice/ # 各模块单元测试
 ├── test_command_router.py # 命令路由集成测试
 ├── test_query_loop.py     # 上下文压缩/图片淘汰测试
-└── test_permissions.py    # 五层权限系统测试
+├── test_permissions.py    # 五层权限系统测试
+├── test_p23_proactive.py  # 主动感知提醒测试
+└── test_p38_sandbox.py    # 安全沙箱测试
 
 .github/workflows/     # GitHub Actions CI（自动测试 + 语法检查）
 └── ci.yml             # push/PR 触发，Python 3.11-3.14 矩阵
@@ -1373,7 +1411,7 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **214 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理等核心模块。
+项目配备 **281 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理等核心模块。
 
 ```bash
 # 运行全部测试

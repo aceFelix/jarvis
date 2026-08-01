@@ -15,95 +15,17 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import threading
-import time
 from typing import Any, Callable
 
-
-def _is_windows() -> bool:
-    """是否运行在 Windows 平台。"""
-    return sys.platform == "win32"
-
-
-def _is_macos() -> bool:
-    """是否运行在 macOS 平台。"""
-    return sys.platform == "darwin"
-
-
-def _find_python() -> str | None:
-    """找到用于弹出文本终端的 Python 解释器路径。
-
-    Windows: 找与当前解释器配对的 python.exe（有控制台窗口）。
-    macOS/Linux: 直接返回 sys.executable。
-    """
-    if _is_windows():
-        exe = sys.executable
-        dirname = os.path.dirname(exe)
-        basename = os.path.basename(exe).lower()
-        if basename == "python.exe":
-            return exe
-        if basename == "pythonw.exe":
-            python_exe = os.path.join(dirname, "python.exe")
-            if os.path.exists(python_exe):
-                return python_exe
-        return None
-    return sys.executable
-
-
-def _project_root() -> str:
-    """获取项目根目录（agent/ 的父目录）。"""
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-def _find_mintty() -> str | None:
-    """找到 Git Bash 的终端模拟器 mintty.exe。
-
-    搜索策略：
-    1. ``shutil.which("mintty")``
-    2. 从 ``shutil.which("git")`` 反查 Git 安装根目录
-    3. 硬编码常见路径
-
-    @author aceFelix
-    """
-    import shutil
-
-    mintty = shutil.which("mintty")
-    if mintty and os.path.isfile(mintty):
-        return mintty
-
-    git = shutil.which("git")
-    if git:
-        git_bin_dir = os.path.dirname(git)
-        git_parent = os.path.dirname(git_bin_dir)
-        git_grandparent = os.path.dirname(git_parent)
-        candidate_dirs = {git_parent, git_grandparent}
-        if os.path.basename(git_bin_dir).lower() == "cmd":
-            candidate_dirs.add(os.path.dirname(git_grandparent))
-        for root in candidate_dirs:
-            for candidate in (
-                os.path.join(root, "usr", "bin", "mintty.exe"),
-                os.path.join(root, "git-bash.exe"),
-            ):
-                if os.path.isfile(candidate):
-                    return candidate
-
-    for path in (
-        r"C:\Program Files\Git\usr\bin\mintty.exe",
-        r"D:\SoftwareDevelopmentKit\Git\usr\bin\mintty.exe",
-    ):
-        if os.path.isfile(path):
-            return path
-
-    return None
-
-
-def _to_unix_path(win_path: str) -> str:
-    """Windows 路径 → Git Bash 用的 Unix 路径。"""
-    drive, rest = os.path.splitdrive(win_path)
-    if drive:
-        return "/" + drive[0].lower() + rest.replace("\\", "/")
-    return win_path.replace("\\", "/")
+from agent.daemon.platform_utils import (
+    _find_mintty,
+    _find_python,
+    _is_macos,
+    _is_windows,
+    _project_root,
+    _to_unix_path,
+)
 
 
 def _set_foreground_window(pid: int) -> bool:

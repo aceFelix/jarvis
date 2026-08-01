@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 async def handle_paste(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /paste /p /clipboard：将剪贴板图片加入待发送列表。"""
-    # 延迟导入 main 中的图片辅助函数，避免循环引用
-    from agent.main import _load_image_from_clipboard, _pending_images
+    # 延迟导入 core.images 中的图片辅助函数，避免循环引用
+    from agent.core.images import _load_image_from_clipboard, _pending_images
 
     ui = ctx.ui
     img = _load_image_from_clipboard()
@@ -30,7 +30,7 @@ async def handle_paste(ctx: "CommandContext", stripped: str) -> bool:
 
 async def handle_image(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /image <path> /img <path>：加载本地图片到待发送列表。"""
-    from agent.main import _load_image_from_path, _pending_images
+    from agent.core.images import _load_image_from_path, _pending_images
 
     ui = ctx.ui
     parts = stripped.split(None, 1)

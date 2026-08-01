@@ -56,6 +56,9 @@ class Settings:
     # 用户自定义模型配置 {model_name: {provider, base_url, api_key, api_format, model_type}}
     # 通过 /models → 添加其他模型 创建，持久化到 ~/.jarvis/settings.toml [llm.custom_models]
     custom_models: dict[str, dict] = field(default_factory=dict)
+    # 用户自定义 TTS 音色 {voice_name: {voice_id, description, vendor}}
+    # 通过 /tts-voice → 添加音色 创建，持久化到 ~/.jarvis/settings.toml [tts.custom_voices]
+    custom_voices: dict[str, dict] = field(default_factory=dict)
     # 深度思考（思维链）—— enable_thinking 通过 extra_body 传给 DashScope
     enable_thinking: bool = True
     thinking_budget: int = 2000
@@ -436,6 +439,12 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in tts_table:
                 updates[field] = tts_table[sub_key]
+        # [tts.custom_voices] 子表 → settings.custom_voices（/tts-voice 添加的音色）
+        cv_table = tts_table.get("custom_voices")
+        if isinstance(cv_table, dict) and cv_table:
+            updates["custom_voices"] = {
+                str(k): dict(v) for k, v in cv_table.items() if isinstance(v, dict)
+            }
     # [stt] 表 → stt_* 字段
     stt_table = data.get("stt", {})
     if isinstance(stt_table, dict):
@@ -672,3 +681,4 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
 
 # ── 以下函数已拆分到独立模块，此处保留重导出以兼容现有导入 ──
 from agent.config.model_registry import save_custom_model, save_last_model, save_realtime_talk_auto_start  # noqa: E402, F401
+from agent.config.model_registry import save_custom_voice, save_tts_voice  # noqa: E402, F401

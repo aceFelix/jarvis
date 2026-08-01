@@ -10,18 +10,16 @@
 - **打断（barge-in）**: TTS 播报期间后台监听麦克风，检测到用户开口立即
   tts.stop() + abort_event，切回聆听。无需等它说完才能纠正/追问。
 - **TTS 文本清洗**: LLM 回复常带 markdown（**bold**、`code`、# 标题、- 列表、
-  > 引用、[text](url)），直接喂 TTS 会读出符号噪声。_TTSFeeder 在喂之前
-  清洗，并跳过代码块，让播报自然。
+  > 引用、[text](url)），直接喂 TTS 会读出符号噪声。清洗逻辑见 tts_text 模块。
 - **错误恢复**: STT/TTS 单轮失败不退出语音模式，自动继续下一轮。
 
 设计要点:
-- **流式低延迟**: LLM 每吐一个 TextDelta → _TTSFeeder.feed 清洗 → tts.feed。
+- **流式低延迟**: LLM 每吐一个 TextDelta → TTS 清洗 → tts.feed。
   TTS 边收边合成边播，首包延迟约 1s，后续实时。
 - **复用 QueryLoop**: 语音模式走完整 QueryLoop（含工具调用），只是给 ctx 注入
   on_assistant_text = feeder.feed。工具调用期间模型说的话也会被播报。
 - **TTS 会话包裹**: 每轮 start_stream → feed* → finish。finish 阻塞到音频播完。
-- **打断线程模型**: _BargeInWatcher 后台 daemon 线程读麦克风 RMS，超阈值持续
-  min_speak_seconds 视为用户开口 → 触发 on_barge_in。主线程在 reply 阶段
+- **打断线程模型**: 见 barge_in 模块的各类 watcher。主线程在 reply 阶段
   start/stop watcher。与 STT 的麦克风使用时段错开（STT 在 listen 阶段，
   watcher 在 reply 阶段），不冲突。
 - **回声抑制**: TTS 音频可能被麦克风拾取导致自打断。用较高阈值
@@ -34,7 +32,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 import threading
 import time
@@ -45,35 +42,21 @@ from agent.core.context import ToolContext
 from agent.core.query_loop import QueryLoop
 from agent.ui.cli import RichCLI
 
-# 复用 stt 模块的 RMS 计算（Python 3.13 无 audioop）
-from agent.voice.stt import _rms
-
-# ---- 退出/唤醒词 ----
-# 包含即触发（用户可能说"贾维斯退下吧"），不用完全匹配
-_EXIT_WORDS = (
-    "退下", "退出", "结束", "拜拜", "再见", "去休息", "休息吧",
-    "退下吧", "不用了", "先这样", "exit", "quit", "bye",
-)
-# 语音打断词：TTS 播报期间检测到这些词立刻停止说话
-_INTERRUPT_WORDS = (
-    "闭嘴", "停停停", "停停", "停", "等一下", "你别说了", "别说了",
-    "你先别说", "等等", "安静", "先别说话", "stop", "wait", "hold on",
-    "打住", "听我说",
-)
-# 唤醒词（容错谐音：Qwen3-ASR 可能把"贾维斯"识别成近音）
-_WAKE_WORDS = (
-    "贾维斯", "贾维思", "加维斯", "加维思", "贾维",
-    "jarvis", "j a r v i s",
+from agent.voice.barge_in import _KeyBargeInWatcher
+from agent.voice.tts_text import _STANDBY_TAG
+from agent.voice.voice_config import (
+    _EXIT_WORDS,
+    _STANDBY_MAX_SECONDS,
+    _STANDBY_SILENCE_SECONDS,
+    _VOICE_MODE_PROMPT,
+    _WAKE_WORDS,
+    _contains_any,
+    _voice_api_key,
+    _voice_log,
 )
 
 
-def _contains_any(text: str, words) -> bool:
-    """文本是否包含任一关键词（不区分大小写）。"""
-    t = text.lower()
-    return any(w.lower() in t for w in words)
-
-
-def _detect_standby(messages: list) -> bool:
+def _detect_standby(messages: list, since_index: int = 0) -> bool:
     """检测最近一条 assistant 回复是否含 <standby/> 退下标记。
 
     遍历 messages 找最后一条 role=assistant，调 get_text() 检测标记。
@@ -82,9 +65,23 @@ def _detect_standby(messages: list) -> bool:
     防止误触发：若去掉 <standby/> 后的正文超过 30 字，
     说明模型在正常回答的同时输出了标记（如 deepseek-v4-flash 误触），
     此时忽略标记，不进入待机。
+
+    Args:
+        messages: 消息列表
+        since_index: 只检查此索引之后的消息（用于限制检测范围到本轮新增消息）。
+                     为 0 时检查全部消息（兼容旧调用）。
     """
     for msg in reversed(messages):
         if getattr(msg, "role", None) == "assistant":
+            # 如果指定了 since_index，跳过旧消息
+            if since_index > 0:
+                try:
+                    msg_idx = messages.index(msg)
+                    if msg_idx < since_index:
+                        # 不是本轮新增的，继续检查更早的消息
+                        continue
+                except ValueError:
+                    pass
             text = msg.get_text() if hasattr(msg, "get_text") else ""
             if text and _STANDBY_TAG.search(text):
                 # 去掉标记后看正文长度
@@ -97,398 +94,31 @@ def _detect_standby(messages: list) -> bool:
     return False
 
 
-# 待机阶段录音参数（比对话阶段更短，快速循环及时响应唤醒）
-_STANDBY_MAX_SECONDS = 6.0
-_STANDBY_SILENCE_SECONDS = 1.0
+def _clean_standby_messages(messages: list) -> None:
+    """移除最后一条含 <standby/> 的 goodbye 消息及其前一条 user 消息。
 
-def _voice_log(fmt: str, *args: object) -> None:
-    """写调试日志到 daemon.log。"""
-    import os as _os, time as _time
-    try:
-        log_path = _os.path.join(_os.path.expanduser("~"), ".jarvis", "daemon.log")
-        _os.makedirs(_os.path.dirname(log_path), exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as _f:
-            ts = _time.strftime("%H:%M:%S")
-            msg = fmt % args if args else fmt
-            _f.write(f"[{ts}] {msg}\n")
-    except Exception:
-        pass
+    在 voice_loop() 退出时调用，避免残留的"退下"意图在下次语音中
+    混淆模型或导致 _detect_standby 误触发。
 
-
-def _voice_api_key(settings) -> str:
-    """获取 DashScope API Key（语音服务专用）。
-
-    语音 STT/TTS 始终走 DashScope，不受当前 LLM 模型切换影响。
-    优先从环境变量 DASHSCOPE_API_KEY 取值。
+    只移除正文 <= 30 字的短 goodbye 消息，不影响正常对话内容。
+    同时移除 goodbye 前一条 user 消息（通常是"退下吧"），
+    防止模型在下轮看到"退下吧"无对应回复而困惑。
     """
-    import os
-    return os.environ.get("DASHSCOPE_API_KEY", "") or getattr(settings, "api_key", "") or ""
-
-
-_BARGE_IN_THRESHOLD = 2500     # RMS 阈值，远高于 STT 的 500，避免 TTS 自回声触发
-_BARGE_IN_MIN_SPEAK = 0.4      # 持续发声多少秒视为用户开口（防瞬时噪音误触发）
-_BARGE_IN_RATE = 16000         # 监听采样率
-_BARGE_IN_FRAMES = 1600        # 100ms/帧
-
-# ---- TTS 文本清洗正则 ----
-_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")        # [text](url) → text
-_URL = re.compile(r"https?://\S+")                      # 裸 URL 删除
-_HEADING = re.compile(r"^\s*#{1,6}\s*", re.MULTILINE)   # # 标题
-_BULLETS = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)    # - 列表
-_QUOTE = re.compile(r"^\s*>\s?", re.MULTILINE)          # > 引用
-_EMPHASIS = re.compile(r"(\*\*|__|~~|`)")               # **bold** _em_ ~~del~ `code`
-_STANDBY_TAG = re.compile(r"<standby\s*/?>", re.IGNORECASE)  # <standby/> 退下标记（用户听不到）
-# <think>...</think> 思考标签：模型按 system prompt 要求把分析性思考放标签里，
-# TTS 朗读前过滤掉（用户听不到思考过程，只听最终回答）。DOTALL 让 . 跨行。
-_THINK_TAG = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
-# 兜底：未闭合的 <think> 标签（模型只开了头没结尾，流式中常见）
-_THINK_OPEN_TAG = re.compile(r"<think>.*", re.IGNORECASE | re.DOTALL)
-_FENCE = "```"
-
-# ---- 语音模式 system prompt 追加 ----
-# 让 LLM 理解自然语言退下意图（"不聊了"/"闭嘴"/"去忙吧"等），用 <standby/> 标记
-# 通知系统切换待机。比硬编码关键词更智能，能覆盖任意表达方式。
-_VOICE_MODE_PROMPT = """
-
-# 语音模式特殊指令
-
-你现在处于语音对话模式（STT 听用户说话，TTS 播报你的回复）。
-
-## 退下/待机意图识别（重要）
-
-当用户表达"结束对话、让你退下、待机、闭嘴"等意图时——无论用什么措辞，
-例如："退下"、"不聊了"、"你可以闭嘴了"、"行了去忙吧"、"拜拜"、"先这样"、
-"去休息"、"不用了"、"我要忙了"、"先这样吧"等——请：
-
-1. 说一句简短礼貌的告别语（如"好的先生，我先退下了，有事随时叫我"）
-2. 在告别语之后紧接 <standby/> 标记作为回复的结尾
-
-要求：
-- 仅当用户明确想结束对话时才输出 <standby/> 标记
-- 正常对话、提问、任务交代绝不使用此标记
-- 标记会被系统自动过滤（用户听不到），仅用于通知系统切换到待机状态
-- 告别语要简短自然，符合管家身份，不啰嗦
-
-## 语音回复风格
-
-- 思考过程会自动走 reasoning_content 通道（用户看不到也听不到），
-  你直接在正文输出最终回答即可，**不要**用 `<think>` 标签包裹思考。
-- 回复口语化、简短，适合听（不像文字聊天那样长篇大论）
-- 不用 markdown 符号（**、`、#、- 等），直接说自然的话
-- 像真人管家一样说话，不要像机器人分析问题
-- 不用写代码块，复杂操作用简洁语言描述
-- **正文只输出给用户听的最终回答**，不要在正文里写"用户问的是..."、"我应该..."
-  等分析性内容——这些放到 reasoning_content 里去思考
-"""
-
-
-class _TTSFeeder:
-    """把 LLM 文本增量清洗后喂给 TTS。
-
-    处理:
-    - 代码块围栏 ```：进入代码块后跳过（不喂 TTS），出来恢复
-    - markdown 标记剥离：** ` # - > 等符号去掉，保留文字
-    - [text](url) → text；裸 URL 删除
-    - 句子级缓冲：累积到句末标点（。！？.!?\n）或 120 字才 flush 给 TTS，
-      避免把破碎片段喂给 TTS 导致合成不自然
-    """
-
-    def __init__(self, tts: Any) -> None:
-        self._tts = tts
-        self._in_code = False
-        self._buf = ""
-        # <think> 标签状态机：True=当前在 <think>...</think> 块内，跳过内容
-        self._in_think = False
-
-    def feed(self, chunk: str) -> None:
-        """处理一个 LLM 文本增量。"""
-        if not chunk:
-            return
-        # 先过滤 <think>...</think> 思考内容（跨 chunk 状态机）
-        chunk = self._strip_think(chunk)
-        if not chunk:
-            return
-        # 按代码围栏切分，围栏内跳过
-        parts = chunk.split(_FENCE)
-        cleaned_parts: list[str] = []
-        for i, part in enumerate(parts):
-            if i > 0:
-                self._in_code = not self._in_code
-            if not self._in_code:
-                cleaned_parts.append(self._clean_inline(part))
-        cleaned = "".join(cleaned_parts)
-        if not cleaned:
-            return
-        self._buf += cleaned
-        self._maybe_flush()
-
-    def _strip_think(self, text: str) -> str:
-        """过滤 <think>...</think> 内容（流式状态机，跨 chunk 处理）。
-
-        - 不在 think 块内: 找 <think> 开始标记，之前的文本保留，
-          之后进入 think 块（找 </think> 结束标记）
-        - 在 think 块内: 找 </think> 结束标记，之前丢弃，之后保留并退出 think 块
-        - 流式末尾未闭合的 <think>: 整段丢弃（_in_think 保持 True）
-        """
-        out: list[str] = []
-        i = 0
-        while i < len(text):
-            if self._in_think:
-                # 找 </think> 结束标记
-                end = text.lower().find("</think>", i)
-                if end == -1:
-                    # 整段都在 think 块内，丢弃
-                    return ""
-                # 找到结束标记，跳过到标记之后
-                i = end + len("</think>")
-                self._in_think = False
-            else:
-                # 找 <think> 开始标记
-                start = text.lower().find("<think>", i)
-                if start == -1:
-                    # 没有开始标记，保留剩余全部
-                    out.append(text[i:])
-                    break
-                # 保留 start 之前的文本
-                out.append(text[i:start])
-                i = start + len("<think>")
-                self._in_think = True
-        return "".join(out)
-
-    def flush(self) -> None:
-        """收尾：把缓冲区剩余文本喂给 TTS。LLM 回复结束后调用。"""
-        # 重置 think 状态机（一轮结束）
-        self._in_think = False
-        if self._buf.strip():
-            c = self._clean_inline(self._buf)
-            if c.strip():
-                self._tts.feed(c)
-        self._buf = ""
-
-    def _maybe_flush(self) -> None:
-        """缓冲到句末标点或超长时 flush。
-
-        首句降低阈值（20 字），让 TTS 尽快开播，减少"文字出完声音才来"的延迟。
-        之后等句末标点（。！？）自然断句，保语音节奏感。
-        """
-        # 优先找句末标点
-        flush_to = 0
-        for m in re.finditer(r"[。！？!?\n]", self._buf):
-            flush_to = m.end()
-        if flush_to > 0:
-            text = self._buf[:flush_to]
-            self._buf = self._buf[flush_to:]
-            if text.strip():
-                self._tts.feed(text)
-            return
-
-        # 逗号/空格处可提前 flush，让 TTS 跟着文字走
-        if len(self._buf) >= 20:
-            # 找最后一个逗号或空格作为分界
-            for m in re.finditer(r"[，,;\s]", self._buf):
-                flush_to = m.end()
-            if flush_to > 0 and flush_to >= 10:
-                text = self._buf[:flush_to]
-                self._buf = self._buf[flush_to:]
-                if text.strip():
-                    self._tts.feed(text)
-                return
-
-        # 超过 80 字，强制断句
-        if len(self._buf) >= 80:
-            text = self._buf
-            self._buf = ""
-            self._tts.feed(text)
-
-    @staticmethod
-    def _clean_inline(text: str) -> str:
-        text = _MD_LINK.sub(r"\1", text)
-        text = _URL.sub("", text)
-        text = _HEADING.sub("", text)
-        text = _BULLETS.sub("", text)
-        text = _QUOTE.sub("", text)
-        text = _EMPHASIS.sub("", text)
-        text = _STANDBY_TAG.sub("", text)  # 剥除退下标记（用户听不到）
-        return text
-
-
-class _BargeInWatcher:
-    """后台麦克风能量监听器：检测用户说话，触发打断。
-
-    在 TTS 播报阶段运行（与 STT 录音阶段错开，不冲突）。daemon 线程读麦克风
-    帧 → 算 RMS → 持续超阈值 min_speak 秒 → 调 on_barge_in。
-    """
-
-    def __init__(self, on_barge_in, *, threshold: int = _BARGE_IN_THRESHOLD,
-                 min_speak: float = _BARGE_IN_MIN_SPEAK) -> None:
-        self._on_barge = on_barge_in
-        self._threshold = threshold
-        self._min_speak = min_speak
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._pa = None
-        self._stream = None
-        self._triggered = False
-
-    def start(self) -> None:
-        self._stop.clear()
-        self._triggered = False
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        try:
-            if self._stream is not None:
-                self._stream.close()
-        except Exception:
-            pass
-        try:
-            if self._pa is not None:
-                self._pa.terminate()
-        except Exception:
-            pass
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-
-    @property
-    def triggered(self) -> bool:
-        return self._triggered
-
-    def _run(self) -> None:
-        try:
-            import pyaudio
-            self._pa = pyaudio.PyAudio()
-            self._stream = self._pa.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=_BARGE_IN_RATE,
-                input=True,
-                frames_per_buffer=_BARGE_IN_FRAMES,
-            )
-            speaking_since: float | None = None
-            while not self._stop.is_set():
-                try:
-                    frame = self._stream.read(_BARGE_IN_FRAMES, exception_on_overflow=False)
-                except Exception:
-                    break
-                rms = _rms(frame, 2)
-                if rms >= self._threshold:
-                    if speaking_since is None:
-                        speaking_since = time.time()
-                    elif time.time() - speaking_since >= self._min_speak:
-                        self._triggered = True
-                        self._stop.set()
-                        try:
-                            self._on_barge()
-                        except Exception:
-                            pass
-                        break
-                else:
-                    speaking_since = None
-        except Exception:
-            # 麦克风监听失败静默处理，打断功能不可用但不影响对话
-            pass
-
-
-class _KeyBargeInWatcher:
-    """键盘 ESC 监听器：全阶段通用退出/打断信号。
-
-    - 对话阶段（聆听/思考/说话）：停止当前播报 → 返回聆听
-    - 待机阶段（等唤醒词）：退出语音模式 → 回到文本 REPL
-
-    用 keyboard.is_pressed() 轮询，不依赖全局钩子（Windows 上全局钩子需管理员权限）。
-    后台线程每 100ms 检查一次，响应延迟 < 200ms。
-    """
-
-    def __init__(self, on_barge_in, *, key: str = "esc") -> None:
-        self._on_barge = on_barge_in
-        self._key = key
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._triggered = False
-        self._available = False
-        try:
-            import keyboard  # noqa: F401
-            self._available = True
-        except Exception:
-            self._available = False
-
-    @property
-    def available(self) -> bool:
-        return self._available
-
-    def start(self) -> None:
-        if not self._available:
-            return
-        self._triggered = False
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._poll, daemon=True)
-        self._thread.start()
-
-    def _poll(self) -> None:
-        import keyboard
-        import time
-        while not self._stop.is_set():
-            try:
-                if keyboard.is_pressed(self._key):
-                    self._triggered = True
-                    self._on_barge()
-                    break
-            except Exception:
-                pass
-            time.sleep(0.1)
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=0.5)
-            self._thread = None
-
-    @property
-    def triggered(self) -> bool:
-        return self._triggered
-
-
-class _VoiceBargeInDetector:
-    """语音打断检测器：TTS 播报期间开短 STT 录音，检测中断词。
-
-    为避免 Windows PyAudio 双实例 segfault，每次短录后立即释放 PyAudio。
-    若 PyAudio 冲突则静默放弃当次检测，连续无冲突检测到中断词则触发打断。
-    """
-
-    def __init__(self, stt: Any, on_barge) -> None:
-        self._stt = stt
-        self._on_barge = on_barge
-        self._stop = threading.Event()
-
-    def run(self) -> None:
-        """在后台线程中循环短录，检测到中断词则回调。"""
-        import time
-        self._stop.clear()
-        # 初始延迟：避免和 TTS WS 同时建立连接触发 DashScope RST
-        time.sleep(1.0)
-        while not self._stop.is_set():
-            try:
-                result = self._stt.listen(
-                    max_seconds=1.5,
-                    silence_seconds=0.5,
-                    silence_threshold=500,
-                    on_partial=lambda t: None,
-                    on_open=lambda: None,
-                )
-                text = (result.get("text") or "").strip()
-                if text and _contains_any(text, _INTERRUPT_WORDS):
-                    self._on_barge()
-                    break
-            except Exception:
-                pass
-            # 节流：每 3 秒最多一次 STT 短录，防止 WS 连接风暴
-            if not self._stop.is_set():
-                time.sleep(3.0)
-
-    def stop(self) -> None:
-        self._stop.set()
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        if getattr(msg, "role", None) == "assistant":
+            text = msg.get_text() if hasattr(msg, "get_text") else ""
+            if text and _STANDBY_TAG.search(text):
+                body = _STANDBY_TAG.sub("", text).strip()
+                if len(body) <= 30:
+                    # 移除 goodbye 消息
+                    del messages[i]
+                    # 一并移除前一条 user 消息（"退下吧"等退下意图）
+                    for j in range(i - 1, -1, -1):
+                        if getattr(messages[j], "role", None) == "user":
+                            del messages[j]
+                            return
+                    return
 
 
 async def _voice_loop_round(
@@ -543,7 +173,8 @@ async def _voice_loop_round(
         ui.warn("没听清，再说一次")
         return True
 
-    if _contains_any(user_text, _EXIT_WORDS):
+    _exit_detected = _contains_any(user_text, _EXIT_WORDS)
+    if _exit_detected:
         ui.info("🛌 退下意图，让 LLM 告别后进入待机...")
         # 不走独立 TTS（和 standby 麦克风 PyAudio 冲突），
         # 把用户的话正常喂给 LLM，LLM 会回复告别语 + <standby/> 标记，
@@ -584,13 +215,20 @@ async def _voice_loop_round(
     else:
         ctx.on_assistant_text = None
 
-    # 键盘 ESC 打断监听（LLM 推理中按 ESC = 中断回复）
+    # 键盘 ESC 打断监听（LLM 推理 / 播报中按 ESC = 立即停止当前回复或播报）
     interrupted = False
 
     def _on_barge() -> None:
         nonlocal interrupted
         interrupted = True
         ctx.abort_event.set()
+        # 朗读中按 ESC：立即停止当前 TTS 播报。
+        # stop() 置位回调 stop_flag → on_data 丢弃音频（声音立刻停），
+        # finish() 检测到 stop 后快速返回（见 CosyVoiceTTS.finish）。
+        try:
+            stream_player.stop()
+        except Exception:
+            pass
 
     watchers: list = []
     if settings.voice_barge_in_key:
@@ -601,6 +239,10 @@ async def _voice_loop_round(
         w.start()
 
     t_reply = time.time()
+    msg_count_before = len(ctx.messages)  # 记录本轮前的消息数，供 _detect_standby 限制检测范围
+    # 重置 abort_event：确保上一轮残留（如 ESC 监听器在退出时意外设置）不会导致
+    # 本轮 LLM 调用被跳过（iterations=0 → stopped_reason=aborted）。
+    ctx.abort_event = asyncio.Event()
     try:
         stats = await loop.run(user_text, ctx)
     except KeyboardInterrupt:
@@ -628,13 +270,13 @@ async def _voice_loop_round(
         ui._voice_mode = False
         ui._voice_tts_feed = None
 
-    for w in watchers:
-        w.stop()
-
     if interrupted:
+        # LLM 推理中按 ESC：已停止流式输出的内容，回到聆听
         ui.warn("🔇 检测到打断（ESC），已停止回复（继续聆听）")
         ctx.abort_event = asyncio.Event()
         stream_player.stop()
+        for w in watchers:
+            w.stop()
         return True
 
     # ---- 3. 说：StreamTTSPlayer 已通过 ctx.on_assistant_text 流式接收文本 ----
@@ -644,16 +286,42 @@ async def _voice_loop_round(
 
     # 从最后一条 assistant message 提取完整文本（用于退下检测、verbose 日志）
     reply_text = ""
+    reply_thinking = ""
     for msg in reversed(ctx.messages):
         if msg.role == "assistant":
             reply_text = msg.get_text()
-            if reply_text.strip():
+            reply_thinking = msg.get_thinking()
+            if reply_text.strip() or reply_thinking.strip():
                 break
+
+    _voice_log(
+        "LLM reply: text=%r  thinking=%r  stopped_reason=%s  iterations=%d  tools=%d",
+        reply_text[:200], reply_thinking[:200],
+        getattr(stats, 'stopped_reason', '?'),
+        getattr(stats, 'iterations', 0),
+        getattr(stats, 'tool_calls', 0),
+    )
 
     try:
         player_stats = stream_player.finish()
+    except KeyboardInterrupt:
+        # Ctrl+C 在播报阶段：立即停止播报并退出语音模式
+        stream_player.stop()
+        for w in watchers:
+            w.stop()
+        raise
     except Exception:
         player_stats = {}
+
+    # watchers 保持运行到播报结束，让朗读中按 ESC 也能立即停止
+    for w in watchers:
+        w.stop()
+
+    if interrupted:
+        # 播报阶段按 ESC：音频已被 _on_barge 停止，finish() 提前返回
+        ui.warn("🔇 检测到打断（ESC），已停止播报（继续聆听）")
+        ctx.abort_event = asyncio.Event()
+        return True
 
     if settings.verbose:
         degraded = " (降级)" if player_stats.get("degraded") else ""
@@ -669,10 +337,10 @@ async def _voice_loop_round(
 
     # LLM 退下意图检测：回复含 <standby/> 标记 → 进待机。
     # 覆盖"不聊了"/"闭嘴"/"去忙吧"等任意自然语言表达，比硬编码关键词更智能。
-    # 标记已被 _TTSFeeder 清洗，用户听不到，只在此检测。
+    # 标记已被 TTS 清洗逻辑剥除，用户听不到，只在此检测。
     ui._voice_mode = False
     ui._voice_tts_feed = None
-    if _detect_standby(ctx.messages):
+    if _detect_standby(ctx.messages, since_index=msg_count_before) or _exit_detected:
         ui.info("🛌 贾维斯已退下（说「贾维斯」唤醒）")
         return False
 
@@ -850,7 +518,13 @@ async def voice_loop(
     prev_sigint = None
     if _in_main_thread:
         def _on_sigint(sig, frame):
+            # 1) 中断阻塞中的 stt.listen()（pyaudio C 阻塞无法直接被信号打断）
             stt_module._request_stop()
+            # 2) 重新抛出 KeyboardInterrupt，让 Ctrl+C 在 LLM 推理 / 工具执行阶段
+            #    也能生效（原实现吞掉信号导致"卡住时 Ctrl+C 退不出来"）。
+            #    聆听阶段抛出 → voice_loop 外层 except KeyboardInterrupt 退出语音模式；
+            #    LLM 阶段抛出 → _voice_loop_round 捕获后打断回复（继续聆听）。
+            raise KeyboardInterrupt
         prev_sigint = __import__("signal").signal(__import__("signal").SIGINT, _on_sigint)
 
     try:
@@ -935,6 +609,11 @@ async def voice_loop(
                 # 不含唤醒词则静默继续待机（不打印识别内容，避免刷屏）
     except KeyboardInterrupt:
         ui.info("\n退出语音模式")
+        # 重置 abort_event，避免 ESC 监听器在退出时意外设置导致下次语音会话被跳过
+        try:
+            ctx.abort_event = asyncio.Event()
+        except Exception:
+            pass
     finally:
         # 停止 ESC 监听器
         try:
@@ -963,6 +642,11 @@ async def voice_loop(
             pass
         try:
             release_voice_lock()
+        except Exception:
+            pass
+        # 清理残留的 <standby/> goodbye 消息，避免下次语音会话误触发待机
+        try:
+            _clean_standby_messages(ctx.messages)
         except Exception:
             pass
         _voice_log("[voice_loop] 语音对话循环退出")

@@ -25,6 +25,7 @@ _MODEL_VENDOR_OPTIONS: list[tuple[str, str]] = [
     ("zhipu", "智谱 BigModel"),
     ("moonshot", "Moonshot AI"),
     ("minimax", "MiniMax"),
+    ("siliconflow", "SiliconFlow（硅基流动）"),
     ("xiaomimimo", "Xiaomi MIMO"),
     ("google", "Google AI"),
     ("openai", "OpenAI"),
@@ -68,9 +69,13 @@ def _infer_model_vendor(model_name: str, cfg: dict[str, Any] | None = None) -> s
     @author aceFelix
     """
     if cfg and isinstance(cfg, dict):
-        vendor = cfg.get("vendor")
+        vendor = cfg.get("vendor") or cfg.get("provider")
         if vendor:
-            return vendor
+            # zai 是接口类型（智谱 ZhipuAi SDK），不是厂商，映射回 zhipu
+            if vendor == "zai":
+                return "zhipu"
+            if vendor in _VENDOR_LABELS:
+                return vendor
     name_lower = model_name.lower()
     if name_lower.startswith("qwen"):
         return "dashscope"
@@ -78,6 +83,8 @@ def _infer_model_vendor(model_name: str, cfg: dict[str, Any] | None = None) -> s
         return "deepseek"
     if name_lower.startswith("glm"):
         return "zhipu"
+    if name_lower.startswith("siliconflow"):
+        return "siliconflow"
     # MiniMax / Moonshot / OpenAI 等模型名通常与厂商名一致
     for vendor, _ in _MODEL_VENDOR_OPTIONS:
         if name_lower.startswith(vendor):
@@ -101,6 +108,7 @@ def _infer_base_url(vendor: str, api_format: str) -> str:
         "zhipu": "https://open.bigmodel.cn/api/paas/v4",
         "moonshot": "https://api.moonshot.cn/v1",
         "minimax": "https://api.minimax.chat/v1",
+        "siliconflow": "https://api.siliconflow.cn/v1",
         "google": "https://generativelanguage.googleapis.com/v1beta/openai",
         "openai": "https://api.openai.com/v1",
         "anthropic": "https://api.anthropic.com",
@@ -464,8 +472,8 @@ def _switch_model(
     new_provider = provider
     new_is_custom = model_name in settings.custom_models
 
-    # 延迟导入 _build_provider，避免 model_manager 与 main 模块循环引用
-    from agent.main import _build_provider
+    # 延迟导入 _build_provider，避免 model_manager 与 bootstrap 模块循环引用
+    from agent.bootstrap import _build_provider
 
     if new_is_custom:
         # 自定义模型 → 检查是否需要重建 provider（不同 base_url/api_key/api_format）

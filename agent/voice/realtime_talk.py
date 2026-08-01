@@ -224,7 +224,8 @@ class RealtimeTalk:
             "GUI控制、MCP外部服务（天气/时间/票务等）、网页搜索等。"
             "根据用户意图自行判断该调用哪个工具，优先使用专用工具而非 WebSearch。"
             "\n【地域性查询规则】涉及天气、新闻、本地服务、附近推荐等地域性查询时，"
-            "如果你不知道先生当前所在城市，必须先询问先生所在地，不要自行假设任何城市。"
+            "先用 Location 工具自动定位获取所在城市；只有定位失败时才询问先生所在地，"
+            "不要自行假设任何城市。"
             "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
         )
         self._ws_url = ws_url
@@ -567,6 +568,12 @@ class RealtimeTalk:
 
             elif t == "input_audio_buffer.speech_started":
                 # 用户开始说话 → 立即打断 AI 回复
+                # 先记录"是否有活动响应"再清状态：待机时（无活动响应）发
+                # response.cancel 会收到服务端 "Conversation has no active response"
+                # 错误，干扰对话显示，故仅在 AI 正在回复时才取消。
+                had_active_response = (
+                    self._response_start_ts is not None or self._ai_speaking
+                )
                 self._response_gen += 1  # 递增代数，丢弃残余音频
                 self._ai_speaking = False
                 self._response_start_ts = None
@@ -574,10 +581,11 @@ class RealtimeTalk:
                 ui.on_user_speaking(True)
                 ui.on_status("listening")
                 # 通知服务器停止生成，避免继续下发音频
-                try:
-                    await ws.send(json.dumps({"type": "response.cancel"}))
-                except Exception:
-                    pass
+                if had_active_response:
+                    try:
+                        await ws.send(json.dumps({"type": "response.cancel"}))
+                    except Exception:
+                        pass
                 # 清空扬声器缓冲区
                 if self._spk:
                     try:
@@ -660,7 +668,12 @@ class RealtimeTalk:
 
             elif t == "error":
                 err = event.get("error", {})
-                ui.warn(f"\n⚠ {err.get('message', str(event))}")
+                message = err.get("message", str(event))
+                # 良性错误：服务端在"无活动响应时收到 response.cancel"时返回。
+                # 正常交互中可能偶发（如打断与回复完成几乎同时发生），忽略不提示。
+                if "no active response" in message.lower():
+                    continue
+                ui.warn(f"\n⚠ {message}")
                 ui.on_status("error")
 
     async def _execute_tool(self, name: str, args: dict[str, Any], ui) -> str:

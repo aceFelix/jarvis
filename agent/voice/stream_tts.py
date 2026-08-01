@@ -54,6 +54,32 @@ _EMPHASIS = re.compile(r"(\*\*|__|~~|`)")
 _STANDBY_TAG = re.compile(r"<standby\s*/?>", re.IGNORECASE)
 _THINK_TAG = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 _THINK_OPEN_TAG = re.compile(r"<think>.*", re.IGNORECASE | re.DOTALL)
+# 模型幻觉的工具调用占位符标签（未走 function calling，仅输出成文本）：
+# <bash>...</bash> / <location>...</location> / <mcp__xxx>...</mcp__xxx> / <mcp__xxx/>
+# <bash_command> / <deferred_tool> / <tool_call> / <execute_command> 等变种
+# 朗读前必须剥离，否则会被 TTS 读出来。
+_TOOL_TAG_NAMES = (
+    r"bash|shell|location|mcp__[\w.-]+|tool|command|command_exec|exec|"
+    r"bash_command|deferred_tool|tool_call|execute_command|run_command|"
+    r"user_instructions|function_call"
+)
+_TOOL_TAG_PAIR = re.compile(
+    rf"<\s*(?:{_TOOL_TAG_NAMES})\b[^>]*>.*?</\s*(?:{_TOOL_TAG_NAMES})\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_TAG_ANY = re.compile(
+    rf"<\s*/?\s*(?:{_TOOL_TAG_NAMES})\b[^>]*>",
+    re.IGNORECASE,
+)
+# 状态机用：开标签 / 闭标签（分别匹配，避免自闭合被误判为进入块）
+_TOOL_TAG_OPEN = re.compile(
+    rf"<\s*(?:{_TOOL_TAG_NAMES})\b[^>]*>",
+    re.IGNORECASE,
+)
+_TOOL_TAG_CLOSE = re.compile(
+    rf"</\s*(?:{_TOOL_TAG_NAMES})\s*>",
+    re.IGNORECASE,
+)
 _FENCE = "```"
 
 # 首句阈值：缓冲到 20 字就算没有句末标点也送 TTS，让声音尽快出来
@@ -65,6 +91,9 @@ _WS_IDLE_TIMEOUT = 10.0
 
 def _clean_inline(text: str) -> str:
     """剥离单行内的 markdown 标记。"""
+    # 工具调用占位符标签优先处理（避免 markdown 剥离 __ 破坏 <mcp__...> 标签）
+    text = _TOOL_TAG_PAIR.sub("", text)
+    text = _TOOL_TAG_ANY.sub("", text)
     text = _MD_LINK.sub(r"\1", text)
     text = _URL.sub("", text)
     text = _HEADING.sub("", text)
@@ -113,6 +142,7 @@ class StreamTTSPlayer:
         self._buf = ""                # 未完成的句子缓冲
         self._in_code = False         # 代码块围栏状态机
         self._in_think = False        # <think> 标签状态机
+        self._in_tool_tag = False     # 工具调用占位符标签状态机（跨 chunk）
         self._started = False
         self._degraded = False        # WS 断开 → 降级，收集文本用 speak() 兜底
         self._fallback_buf = ""       # 降级时收集的剩余文本
@@ -184,6 +214,7 @@ class StreamTTSPlayer:
         # flush 剩余缓冲（未完成句 + 代码围栏内残留）
         self._in_code = False
         self._in_think = False
+        self._in_tool_tag = False
         if self._buf.strip():
             text = _clean_inline(self._buf)
             if text.strip():
@@ -270,12 +301,17 @@ class StreamTTSPlayer:
     # ---- 内部：Markdown 清洗 ----
 
     def _clean_text(self, text: str) -> str:
-        """清洗 LLM 输出文本：<think> 过滤 + 代码块围栏 + markdown 剥离。
+        """清洗 LLM 输出文本：<think> / 工具标签过滤 + 代码块围栏 + markdown 剥离。
 
-        维护 _in_code 和 _in_think 两个跨 chunk 状态机。
+        维护 _in_code / _in_think / _in_tool_tag 三个跨 chunk 状态机。
         """
         # 1. <think> 标签过滤（跨 chunk 状态机）
         text = self._strip_think(text)
+        if not text:
+            return ""
+
+        # 1.5 工具调用占位符标签过滤（跨 chunk 状态机）
+        text = self._strip_tool_tags(text)
         if not text:
             return ""
 
@@ -310,12 +346,43 @@ class StreamTTSPlayer:
                 self._in_think = True
         return "".join(out)
 
+    def _strip_tool_tags(self, text: str) -> str:
+        """过滤模型幻觉的工具调用占位符标签（跨 chunk 流式状态机）。
+
+        模型可能在正文输出 <bash>...</bash> / <location>...</location> /
+        <mcp__xxx>...</mcp__xxx> 等文本而非走 function calling，朗读前丢弃。
+        自闭合标签（<mcp__xxx/>）直接跳过，不进入块状态。
+        """
+        out: list[str] = []
+        i = 0
+        while i < len(text):
+            if self._in_tool_tag:
+                m = _TOOL_TAG_CLOSE.search(text, i)
+                if not m:
+                    return "".join(out)  # 整段仍在标签块内，丢弃
+                self._in_tool_tag = False
+                i = m.end()
+                continue
+            m = _TOOL_TAG_OPEN.search(text, i)
+            if not m:
+                out.append(text[i:])
+                break
+            if text[m.start():m.end()].rstrip().endswith("/>"):
+                # 自闭合标签 <mcp__xxx/>：跳过标签本身，继续扫描
+                i = m.end()
+                continue
+            out.append(text[i:m.start()])
+            self._in_tool_tag = True
+            i = m.end()
+        return "".join(out)
+
     # ---- 内部：降级 & 统计 ----
 
     def _finish_degraded(self) -> dict[str, Any]:
         """降级路径：用 CosyVoiceTTS.speak() 整段播放收集到的文本。"""
         self._in_code = False
         self._in_think = False
+        self._in_tool_tag = False
         if self._buf.strip():
             self._fallback_buf += _clean_inline(self._buf)
             self._buf = ""
@@ -325,6 +392,9 @@ class StreamTTSPlayer:
         text = _THINK_TAG.sub("", text)
         text = _THINK_OPEN_TAG.sub("", text)
         text = _STANDBY_TAG.sub("", text)
+        # 工具调用占位符标签
+        text = _TOOL_TAG_PAIR.sub("", text)
+        text = _TOOL_TAG_ANY.sub("", text)
         text = text.strip()
 
         if text:

@@ -281,12 +281,53 @@ class CosyVoiceTTS:
     def finish(self) -> dict[str, Any]:
         """结束流式合成，阻塞直到所有文本合成播放完毕。
 
+        stop()（ESC 打断）或 WS 关闭或 30s 超时任一发生时提前返回，
+        避免朗读中打断后仍长时间阻塞。
+
         Returns: 统计字典。
         """
         if self._synthesizer is None:
             return {"error": "未开始流式合成"}
+
         try:
-            self._synthesizer.streaming_complete()
+            import threading as _th
+            import time as _time
+
+            sc_error: list[str] = []
+
+            def _do_complete():
+                try:
+                    self._synthesizer.streaming_complete()
+                except Exception as e:
+                    sc_error.append(str(e))
+            t = _th.Thread(target=_do_complete, daemon=True)
+            t.start()
+
+            # 并发等三个信号：正常完成 / WS 关闭 / 收到 stop() 请求。
+            # 任一触发即解除阻塞（streaming_complete 可能因 WS RST 永久阻塞，
+            # 与 speak() 的兜底策略一致），最多等 30 秒。
+            done = _th.Event()
+
+            def _wait_evt(evt):
+                evt.wait()
+                done.set()
+
+            _th.Thread(target=_wait_evt, args=(self._callback._completed,), daemon=True).start()
+            _th.Thread(target=_wait_evt, args=(self._callback._closed,), daemon=True).start()
+
+            def _watch_stop():
+                cb = self._callback
+                while not done.is_set():
+                    if cb._stop_flag.is_set():
+                        done.set()
+                        break
+                    _time.sleep(0.05)
+            _th.Thread(target=_watch_stop, daemon=True).start()
+
+            ok = done.wait(timeout=30)
+            if not ok:
+                sc_error.append("TTS 合成超时 30s")
+            t.join(timeout=3)
         except Exception as e:
             return {**self._callback.stats, "error": f"结束合成失败: {type(e).__name__}: {e}"}
 

@@ -100,6 +100,15 @@ def _reset_stop() -> None:
 _SILENCE_SECONDS = 1.5  # 连续静音多少秒视为"说完了"
 _MAX_SECONDS = 15  # 单次录音最长秒数（防卡死）
 
+# QwenASR 服务端 VAD 能量阈值（0.0~1.0）。
+# 0.0 最灵敏——背景噪音 / 扬声器回声尾音都会被判定为"开始说话"，
+# 服务端再把噪声转写成含混的"嗯"等文本，造成"没说话却被识别到"的误触发。
+# 调高可显著减少误触发；过高会漏掉轻声说话。0.4 是噪音抑制与灵敏度的折中。
+_VAD_THRESHOLD = 0.4
+# 开启录音后前 N 秒音频"只读不送"（扬声器回声尾音 / 环境噪音通常集中于此窗口），
+# 避免把上一轮 TTS 刚播完的尾音当成用户开口。
+_VAD_LEAD_IN_SECONDS = 0.4
+
 
 class _RecognitionCallback:
     """Paraformer 回调实现：收集识别结果，协调线程同步。
@@ -609,7 +618,8 @@ class QwenASR:
                 output_modalities=[MultiModality.TEXT],
                 enable_turn_detection=True,
                 turn_detection_type="server_vad",
-                turn_detection_threshold=0.0,
+                # 能量阈值过低会把噪音/回声当开口（误识别出"嗯"），用 _VAD_THRESHOLD 抑制
+                turn_detection_threshold=_VAD_THRESHOLD,
                 turn_detection_silence_duration_ms=int(silence_seconds * 1000),
                 enable_input_audio_transcription=True,
                 transcription_params=TranscriptionParams(
@@ -659,6 +669,8 @@ class QwenASR:
         )
 
         t0 = time.time()
+        # 首段音频（TTS 回声尾音/环境噪音）只读不送，避免被服务端误判为开口
+        lead_in_until = t0 + _VAD_LEAD_IN_SECONDS
         try:
             while not _stop_flag.is_set():
                 elapsed = time.time() - t0
@@ -676,6 +688,10 @@ class QwenASR:
                     frame = stream.read(_FRAMES_PER_BUFFER, exception_on_overflow=False)
                 except Exception:
                     break
+
+                # lead-in 窗口内丢弃（不送服务端），规避上一轮 TTS 尾音
+                if time.time() < lead_in_until:
+                    continue
 
                 # base64 编码后送音频（Qwen3-ASR 要求 base64，与 Paraformer 的 raw bytes 不同）
                 try:

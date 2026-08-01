@@ -25,9 +25,14 @@ class TestInferModelVendor:
         assert _infer_model_vendor("glm-5.2") == "zhipu"
 
     def test_cfg_vendor_override(self) -> None:
-        """自定义配置中的 vendor 字段优先。"""
+        """自定义配置中的 vendor 字段优先（必须在 _MODEL_VENDOR_OPTIONS 中）。"""
+        cfg = {"vendor": "deepseek"}
+        assert _infer_model_vendor("qwen-unknown", cfg) == "deepseek"
+
+    def test_cfg_unknown_vendor_falls_back(self) -> None:
+        """cfg.vendor 不在 _MODEL_VENDOR_OPTIONS 中时回退到名前缀推断。"""
         cfg = {"vendor": "custom_vendor"}
-        assert _infer_model_vendor("qwen-unknown", cfg) == "custom_vendor"
+        assert _infer_model_vendor("qwen-unknown", cfg) == "dashscope"
 
     def test_cfg_empty_vendor_falls_back(self) -> None:
         """cfg.vendor 为空时回退到名前缀推断。"""

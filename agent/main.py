@@ -18,12 +18,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import os
 import sys
 import threading
-from pathlib import Path
-from typing import Any
 
 # Python 3.13 + anyio v4: MCP stdio 的 async gen 在进程退出时
 # 抛 GeneratorExit + RuntimeError（cancel scope 跨 task），无法在代码层静默。
@@ -44,17 +41,27 @@ def _jarvis_agen_finalizer(agen):
 
 sys.set_asyncgen_hooks(firstiter=_orig_firstiter, finalizer=_jarvis_agen_finalizer)
 
+from agent.bootstrap import (
+    _build_checker,
+    _build_context,
+    _build_provider,
+    _build_recovery_executor,
+    _model_type_for,
+)
 from agent.bridge import get_bridge_server
 from agent.commands.router import CommandContext, dispatch_command
 from agent.config.settings import Settings, load_settings
-from agent.core.context import ToolContext
-from agent.core.message import ImageContent, Message
+from agent.core.images import (
+    _auto_attach_clipboard_image,
+    _hash_image,
+    _load_image_from_clipboard,
+    _pending_images,
+)
+from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
 from agent.core.tool import ToolRegistry, build_default_registry
-from agent.permissions import PermissionChecker, parse_mode
-from agent.permissions.modes import PermissionMode
-from agent.permissions.rules import RuleSet, load_rules
+from agent.permissions import parse_mode
 from agent.prompts.system import build_system_prompt
 from agent.session_manager import (
     _auto_save,
@@ -62,174 +69,6 @@ from agent.session_manager import (
     _generate_title_from_first_user,
 )
 from agent.ui.cli import RichCLI
-
-
-def _model_type_for(settings: Settings, model_name: str | None = None) -> str:
-    """根据模型名推断 model_type（multimodal / text）。
-
-    自定义模型优先读取其 model_type 配置；内置模型默认 multimodal。
-
-    @author aceFelix
-    """
-    name = model_name or settings.model or ""
-    if name in settings.custom_models:
-        return settings.custom_models[name].get("model_type", "multimodal")
-    return "multimodal"
-
-
-def _build_provider(settings: Settings, model_type: str = "multimodal"):
-    """根据 settings 构造 LLM provider —— 配置表驱动。
-
-    A-04 改进：原 if-else 链已被 PROVIDER_REGISTRY 取代。
-    新增厂商只需在 provider_registry.py 加一行 ProviderMeta，
-    无需修改此函数。
-
-    @author aceFelix
-    """
-    from agent.llm.provider_registry import PROVIDER_REGISTRY
-
-    fmt = settings.api_format.lower()
-    meta = PROVIDER_REGISTRY.get(fmt)
-    if not meta:
-        raise ValueError(
-            f"未知 provider: {fmt}"
-            f"（可选: {', '.join(PROVIDER_REGISTRY.keys())}）"
-        )
-
-    # 从 settings 收集构造参数（model_type 是调用方传入的非 settings 字段）
-    kwargs: dict[str, Any] = {}
-    # 字符串字段：空字符串 → None（api_key/base_url/model）
-    _STR_KEYS = frozenset({"api_key", "base_url", "model"})
-    for key in meta.init_keys:
-        if key == "model_type":
-            kwargs[key] = model_type
-        else:
-            val = getattr(settings, key, None)
-            kwargs[key] = val or None if key in _STR_KEYS else val
-
-    return meta.create(**kwargs)
-
-
-def _build_checker(settings: Settings) -> PermissionChecker:
-    """构造权限校验器。
-
-    @author aceFelix
-    """
-    rules = RuleSet()
-    if settings.permissions_file:
-        loaded = load_rules(settings.permissions_file)
-        rules = rules.merge(loaded)
-    return PermissionChecker(rules=rules, mode=settings.permission_mode)
-
-
-def _build_recovery_executor(settings: Settings) -> "ToolRecoveryExecutor":
-    """构造工具错误自愈执行器。
-
-    @author aceFelix
-    """
-    from agent.core.error_recovery import ToolRecoveryExecutor
-
-    return ToolRecoveryExecutor(global_enabled=settings.enable_tool_self_healing)
-
-
-def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> ToolContext:
-    """构造工具执行上下文。
-
-    @author aceFelix
-    """
-    return ToolContext(
-        workdir=settings.workdir,
-        messages=messages,
-        permission_mode=settings.permission_mode.value,
-        ui=ui,
-        settings=settings,
-    )
-
-
-def _load_image_from_path(path: str) -> ImageContent | None:
-    """从文件路径加载图片，缩放并编码为 ImageContent。
-
-    @author aceFelix
-    """
-    try:
-        from PIL import Image
-        from agent.tools.system.screen import ScreenShotTool
-    except ImportError:
-        return None
-
-    p = Path(path).expanduser().resolve()
-    if not p.exists():
-        return None
-    try:
-        img = Image.open(p)
-        img.load()
-        return ScreenShotTool._encode_image(img, "jpeg", 1280)
-    except Exception:
-        return None
-
-
-def _load_image_from_clipboard() -> ImageContent | None:
-    """从系统剪贴板读取图片（Windows/macOS 支持），编码为 ImageContent。
-
-    @author aceFelix
-    """
-    try:
-        from PIL import Image, ImageGrab
-        from agent.tools.system.screen import ScreenShotTool
-    except ImportError:
-        return None
-
-    data = ImageGrab.grabclipboard()
-    if data is None:
-        return None
-    if isinstance(data, Image.Image):
-        return ScreenShotTool._encode_image(data, "jpeg", 1280)
-    # Windows 剪贴板有时是文件路径列表
-    if isinstance(data, list):
-        for item in data:
-            if isinstance(item, str):
-                ext = Path(item).suffix.lower()
-                if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
-                    content = _load_image_from_path(item)
-                    if content is not None:
-                        return content
-    return None
-
-
-def _pending_images(ctx: ToolContext) -> list[ImageContent]:
-    """获取当前待发送的图片列表。
-
-    @author aceFelix
-    """
-    return ctx.extra.setdefault("pending_images", [])
-
-
-def _hash_image(img: ImageContent) -> str:
-    """为 ImageContent 生成稳定哈希，用于去重。
-
-    @author aceFelix
-    """
-    return hashlib.md5(f"{img.media_type}:{img.data}".encode()).hexdigest()
-
-
-def _auto_attach_clipboard_image(ctx: ToolContext, ui: RichCLI) -> list[ImageContent]:
-    """如果剪贴板有新图片，自动加入待发送列表并返回。
-
-    @author aceFelix
-    """
-    pending = ctx.extra.pop("pending_images", None) or []
-    if pending:
-        return pending
-    img = _load_image_from_clipboard()
-    if img is None:
-        return []
-    h = _hash_image(img)
-    if h == ctx.extra.get("_last_clipboard_image_hash"):
-        return []
-    pending.append(img)
-    ctx.extra["_last_clipboard_image_hash"] = h
-    ui.info("✅ 检测到剪贴板图片，已自动附加到当前消息")
-    return pending
 
 
 async def repl(settings: Settings, with_tray: bool = False) -> int:
@@ -407,7 +246,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 on_voice=lambda: None,   # 前台 REPL 不需要托盘唤起
                 on_text=lambda: None,    # 用户在终端直接打字
                 on_quit=_tray_quit,
-                voice_enabled_getter=lambda: True,  # 前台 REPL 无语音开关概念，默认开启
+                voice_active_getter=lambda: True,  # 前台 REPL 无语音开关概念，默认开启
                 voice_toggle=lambda: None,
                 realtime_enabled_getter=lambda: False,  # 前台 REPL 不展示实时聊天开关
                 realtime_toggle=lambda: None,
@@ -726,16 +565,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=argparse.SUPPRESS,  # 内部参数：已是无窗口子进程
     )
     p.add_argument(
-        "--headless",
-        action="store_true",
-        help="无界面模式：stdin 读消息，stdout 写回复（供 cc-connect 等外部桥接）",
-    )
-    p.add_argument(
-        "--acp",
-        action="store_true",
-        help="ACP (Agent Client Protocol) 模式：JSON-RPC stdio 传输（供 cc-connect 桥接）",
-    )
-    p.add_argument(
         "--talk",
         action="store_true",
         help="直接启动实时双工语音对话（/talk），需要配置 DashScope API Key",
@@ -777,188 +606,6 @@ def _run_with_watchdog(daemon) -> int:
             print(f"看门狗：daemon 崩溃 ({type(e).__name__})，2s 后重启 ({len(restart_times)}/{MAX_RESTARTS})", file=_sys.stderr)
             daemon.__init__(daemon._settings)
             last_start = _time.time()
-
-
-async def repl_headless(settings: Settings) -> int:
-    """无界面模式：stdin 读消息，stdout 写回复。
-
-    供 cc-connect 等外部桥接工具调用。输出格式：
-    - 每条回复以 \n---JARVIS-REPLY---\n 分隔
-    - 思考内容前缀 [THINK]
-    - 工具进度前缀 [TOOL]
-
-    @author aceFelix
-    """
-    provider = _build_provider(settings, model_type=_model_type_for(settings))
-    registry: ToolRegistry = build_default_registry()
-
-    # 动态工具：CLI-Anything harness
-    from agent.core.tool import register_dynamic_tools
-    register_dynamic_tools(registry, workdir=settings.workdir)
-
-    checker = _build_checker(settings)
-    recovery = _build_recovery_executor(settings)
-    orchestrator = ToolOrchestrator(
-        registry=registry,
-        permission_checker=checker,
-        recovery_executor=recovery,
-    )
-
-    # MCP
-    mcp_client = None
-    if settings.enable_mcp:
-        try:
-            from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
-            mcp_client = MCPClient()
-            if mcp_client.available:
-                config = load_mcp_config()
-                if config:
-                    results = await mcp_client.connect_all(config)
-                    connected = sum(1 for v in results.values() if v)
-                    if connected:
-                        register_dynamic_tools(registry, mcp_client)
-                    failed_names = [name for name, ok in results.items() if not ok]
-                    if failed_names:
-                        ui.warn(f"MCP: {', '.join(failed_names)} 连接失败，对应工具不可用")
-        except Exception:
-            pass
-
-    from agent.core.tool import register_subagent_tool
-    register_subagent_tool(registry, provider=provider, permission_mode=settings.permission_mode)
-
-    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
-    if settings.system_prompt_append:
-        system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
-
-    model = settings.model or provider.default_model
-    loop = QueryLoop(
-        provider=provider, registry=registry, orchestrator=orchestrator,
-        system=system_prompt, model=model,
-        max_iterations=settings.max_iterations, max_tokens=settings.max_tokens,
-        temperature=settings.temperature,
-        enable_compaction=settings.context_compaction,
-        compaction_threshold=settings.compaction_threshold,
-        keep_recent_messages=settings.keep_recent_messages,
-        vendor_fallback=settings.vendor_fallback,
-        custom_models=settings.custom_models,
-    )
-
-    messages: list[Message] = []
-    from agent.core.context import ToolContext
-    import asyncio as _aio
-
-    ctx = ToolContext(
-        messages=messages,
-        workdir=settings.workdir,
-        abort_event=_aio.Event(),
-    )
-
-    # 告诉 cc-connect 贾维斯已就绪
-    sys.stdout.write("---JARVIS-READY---\n")
-    sys.stdout.flush()
-
-    while True:
-        line = await _aio.to_thread(sys.stdin.readline)
-        if not line:
-            break
-        text = line.strip()
-        if not text:
-            continue
-
-        # 回收集回调
-        reply_parts: list[str] = []
-
-        class _HeadlessUI:
-            def info(self, *a, **kw): pass
-            def warn(self, *a, **kw): pass
-            def error(self, *a, **kw): pass
-            def assistant_text(self, t):
-                reply_parts.append(t)
-            def assistant_thinking(self, t):
-                sys.stdout.write(f"[THINK]{t}")
-                sys.stdout.flush()
-            verbose = False
-
-        ctx.ui = _HeadlessUI()
-        ctx.on_assistant_text = None
-
-        try:
-            await loop.run(text, ctx)
-        except Exception as e:
-            reply_parts.append(f"[错误] {e}")
-
-        sys.stdout.write("".join(reply_parts))
-        sys.stdout.write("\n---JARVIS-REPLY---\n")
-        sys.stdout.flush()
-
-    await provider.close()
-    return 0
-
-
-def _run_acp(settings: Settings) -> int:
-    """ACP 模式：JSON-RPC stdio 传输，供 cc-connect 桥接贾维斯到 IM 平台。
-
-    cc-connect 通过 ACP (Agent Client Protocol) 框架调用贾维斯，
-    本函数在 agent 生命周期内阻塞，处理 stdin JSON-RPC 消息。
-
-    @author aceFelix
-    """
-    import asyncio as _aio
-
-    # 构建 agent 核心（和 repl() 相同的装配逻辑）
-    provider = _build_provider(settings, model_type=_model_type_for(settings))
-    registry: ToolRegistry = build_default_registry()
-
-    # 动态工具：CLI-Anything harness
-    from agent.core.tool import register_dynamic_tools
-    register_dynamic_tools(registry, workdir=settings.workdir)
-
-    checker = _build_checker(settings)
-    recovery = _build_recovery_executor(settings)
-    orchestrator = ToolOrchestrator(
-        registry=registry,
-        permission_checker=checker,
-        recovery_executor=recovery,
-    )
-
-    # MCP（ACP 模式跳过：MCP 子进程输出会污染 stdout JSON-RPC，且连接超时导致启动失败）
-    # 如需要 MCP 工具，在 jarvis daemon 模式下连接，IM 通过 ACP 复用 daemon 内的 MCP 连接。
-
-    from agent.core.tool import register_subagent_tool
-    register_subagent_tool(registry, provider=provider, permission_mode=settings.permission_mode)
-
-    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
-    if settings.system_prompt_append:
-        system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
-
-    model = settings.model or provider.default_model
-    loop = QueryLoop(
-        provider=provider, registry=registry, orchestrator=orchestrator,
-        system=system_prompt, model=model,
-        max_iterations=settings.max_iterations, max_tokens=settings.max_tokens,
-        temperature=settings.temperature,
-        enable_compaction=settings.context_compaction,
-        compaction_threshold=settings.compaction_threshold,
-        keep_recent_messages=settings.keep_recent_messages,
-        vendor_fallback=settings.vendor_fallback,
-        custom_models=settings.custom_models,
-    )
-
-    messages: list[Message] = []
-    from agent.core.context import ToolContext
-
-    ctx = ToolContext(
-        messages=messages,
-        workdir=settings.workdir,
-        abort_event=_aio.Event(),
-    )
-
-    from agent.acp import JarvisACP
-    acp = JarvisACP(settings, provider, loop, ctx, messages)
-
-    # 阻塞式 stdin 读取循环，直到 stdin 关闭或进程退出
-    acp.run()
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1037,10 +684,6 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_realtime_talk(ui, settings))
         except KeyboardInterrupt:
             return 130
-
-    # ACP 模式：cc-connect 通过 JSON-RPC over stdio 桥接贾维斯到 IM 平台
-    if args.headless or args.acp:
-        return _run_acp(settings)
 
     # 常驻模式路由
     if args.daemon:

@@ -467,7 +467,7 @@ class QueryLoop:
                 try:
                     from agent.config.settings import Settings
                     from dataclasses import replace
-                    from agent.main import _build_provider
+                    from agent.bootstrap import _build_provider
 
                     # 用自定义模型的配置重建 provider
                     # 优先使用新的 api_format 字段，兼容旧的 provider_type

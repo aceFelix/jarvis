@@ -18,7 +18,10 @@ if TYPE_CHECKING:
     from agent.ui.cli import RichCLI
 
 
-# ── 厂商列表（基于 PROVIDER_REGISTRY，选项描述含 api_format 和推荐模型）──
+# ── 厂商列表（与 /models 的 _MODEL_VENDOR_OPTIONS + _VENDOR_LABELS 保持一致）──
+# key 作为 vendor 值写入配置，与 _MODEL_VENDOR_OPTIONS 共用。
+# 注意：zai 是接口类型（智谱原生 SDK），不是厂商，不单独列在厂商列表里。
+# 用户选择 zhipu 后，save_config 会根据 api_format 决定是否走 zai SDK。
 
 _VENDORS = [
     {
@@ -31,14 +34,14 @@ _VENDORS = [
     },
     {
         "key": "deepseek", "name": "DeepSeek",
-        "desc": "高性价比，推理能力强，thinking 模式支持",
+        "desc": "高性价比，推理能力强",
         "default_model": "deepseek-chat",
         "default_base_url": "https://api.deepseek.com/v1",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",
     },
     {
-        "key": "openai", "name": "OpenAI（GPT-4o / GPT-4.1）",
+        "key": "openai", "name": "OpenAI（GPT-5.5 / GPT-5.4）",
         "desc": "综合能力最强，生态最成熟",
         "default_model": "gpt-4o",
         "default_base_url": "https://api.openai.com/v1",
@@ -47,19 +50,11 @@ _VENDORS = [
     },
     {
         "key": "zhipu", "name": "智谱 AI（GLM 系列）",
-        "desc": "国产大模型，GLM-4.7 系列",
-        "default_model": "glm-4.7-flash",
+        "desc": "国产大模型，GLM-4.7/GLM-5.2 系列",
+        "default_model": "glm-5.2",
         "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
         "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容（推荐，GLM-4.7 支持 thinking）",
-    },
-    {
-        "key": "zai", "name": "智谱 AI（原生 SDK）",
-        "desc": "GLM 原生协议，绕过 OpenAI 兼容层",
-        "default_model": "glm-4.7-flash",
-        "default_base_url": "",
-        "api_format": "zai",
-        "api_format_desc": "智谱原生 SDK（更稳定）",
+        "api_format_desc": "OpenAI 兼容（推荐，支持 thinking）",
     },
     {
         "key": "anthropic", "name": "Anthropic（Claude 系列）",
@@ -71,8 +66,8 @@ _VENDORS = [
     },
     {
         "key": "moonshot", "name": "Moonshot（Kimi）",
-        "desc": "超长上下文 128K",
-        "default_model": "moonshot-v1-8k",
+        "desc": "前端首选，Kimi-3 多模态视觉",
+        "default_model": "kimi-k3",
         "default_base_url": "https://api.moonshot.cn/v1",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",
@@ -80,7 +75,7 @@ _VENDORS = [
     {
         "key": "minimax", "name": "MiniMax（ABAB 系列）",
         "desc": "国内大模型，长上下文支持",
-        "default_model": "abab6.5s-chat",
+        "default_model": "minimax-m3",
         "default_base_url": "https://api.minimax.chat/v1",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",
@@ -88,7 +83,7 @@ _VENDORS = [
     {
         "key": "siliconflow", "name": "SiliconFlow（硅基流动）",
         "desc": "开源模型托管平台，DeepSeek/Qwen/Llama 等",
-        "default_model": "Qwen/Qwen2.5-7B-Instruct",
+        "default_model": "Qwen/Qwen3.7-Plus",
         "default_base_url": "https://api.siliconflow.cn/v1",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",
@@ -96,7 +91,7 @@ _VENDORS = [
     {
         "key": "xiaomimimo", "name": "小米 MiMo",
         "desc": "小米自研大模型",
-        "default_model": "mimo-v2-flash",
+        "default_model": "mimo-v2.5-pro",
         "default_base_url": "https://api.xiaomimimo.com/v1",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",
@@ -104,7 +99,7 @@ _VENDORS = [
     {
         "key": "google", "name": "Google Gemini",
         "desc": "Google 多模态大模型",
-        "default_model": "gemini-2.0-flash",
+        "default_model": "gemini-3.5",
         "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         "api_format": "openai",
         "api_format_desc": "OpenAI 兼容",

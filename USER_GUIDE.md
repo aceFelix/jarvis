@@ -44,7 +44,7 @@ jarvis --init
 ```
 
 交互式引导：选择 LLM 厂商 → 确认模型名 → 选纯文本/多模态 → 输 API Key → 自动测试连接。
-支持 12 个厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax 等）。
+支持 11 个厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务）。
 
 > 也可手动配置环境变量：
 > ```bash
@@ -110,11 +110,15 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 |------|------|
 | `/help` | 查看所有命令 |
 | `/model <前缀>` | 切换模型（如 `/model qwen3.6`） |
-| `/models` | 交互式模型管理（↑↓选择） |
+| `/models` | 交互式模型管理（↑↓选择，按厂商分组） |
 | `/mode yolo` | 全自动模式（不再逐次确认） |
 | `/mode default` | 恢复默认确认模式 |
 | `/think on/off` | 开关深度思考（显示推理过程） |
 | `/compact` | 手动压缩上下文（对话太长时用） |
+| `/cost` | 查看 token 用量与估算成本 |
+| `/context` | 查看上下文窗口占用情况 |
+| `/rewind [n]` | 回退最近 n 条消息 |
+| `/diff [path]` | 查看工作目录的 git diff |
 | `/reset` | 清空对话重新开始 |
 | `/verbose` | 开关详细输出（token 统计、缓存命中等） |
 
@@ -124,14 +128,15 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 |------|------|
 | `/save [名称]` | 保存当前对话 |
 | `/load <前缀>` | 加载已保存的对话 |
-| `/sessions` | 交互式选择历史会话 |
+| `/loads` | 列出并交互选择已保存会话 |
+| `/sessions` | 列出所有历史会话 |
 
 ### 图片输入
 
 | 命令 | 说明 |
 |------|------|
-| `/image <路径>` | 添加图片到下一条消息 |
-| `/paste` | 粘贴剪贴板图片 |
+| `/image <路径>` `/img <路径>` | 添加图片到下一条消息 |
+| `/paste` `/p` `/clipboard` | 粘贴剪贴板图片 |
 
 > 图片需要多模态模型（默认 qwen3.7-plus 已支持）。
 
@@ -141,8 +146,9 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 |------|------|
 | `/voice` | 语音对话模式（听→想→说 循环） |
 | `/talk` | 实时双工对话（边说边听，可打断） |
+| `/tts-voice [前缀]` | 切换/添加 TTS 音色 |
 | `/say <文本>` | 朗读文字 |
-| `/listen` | 录音转文字 |
+| `/listen` `/mic` | 录音转文字 |
 
 ### 扩展命令
 
@@ -153,16 +159,17 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/memory` | 查看长期记忆 |
 | `/mcp` | 查看 MCP 工具连接状态 |
 | `/doctor` | 系统诊断（自愈统计、配置检查） |
-| `/config show` | 查看当前生效的完整配置（LLM/语音/MCP/自定义模型等） |
+| `/config [show]` | 查看当前生效的完整配置（LLM/语音/MCP/自定义模型等） |
+| `/init` | 交互式首次配置引导 |
 | `/server [目录]` | 一键启动开发服务器 |
-| `/connect-phone` | 跨设备协同（手机扫码连接当前会话） |
-| `/connect-wechat` | 微信扫码连接 JARVIS（通过 ClawBot 对话） |
+| `/connect-phone` `/phone` | 跨设备协同（手机扫码连接当前会话） |
+| `/connect-wechat` `/wechat` | 微信扫码连接 JARVIS（通过 ClawBot 对话） |
 | `/disconnect-wechat` | 断开微信 ClawBot 连接 |
 | `/agents` | 查看多 Agent 团队状态 |
 | `/tasks` | 查看共享任务列表 |
 | `/plan` | 切换规划模式 |
-| `/plugin` | 插件管理 |
-| `/cli_anything` | CLI-Anything harness 管理 |
+| `/plugin` `/plugins` | 插件管理 |
+| `/cli_anything` `/harnesses` | CLI-Anything harness 管理 |
 
 ---
 
@@ -195,12 +202,16 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 # ~/.jarvis/settings.toml
 [stt]
 model = "qwen3-asr-flash-realtime"   # 推荐：质量最高，中英混合强
+# 也可换 paraformer-realtime-v2（轻量快）/ fun-asr-flash-*（非实时，不推荐）
 
 [tts]
 model = "cosyvoice-v3-flash"         # 快速合成
 voice = "longanlang_v3"              # 音色
 speech_rate = 1.0                    # 语速（1.2 稍快，0.8 稍慢）
+pitch_rate = 1.0                     # 音高（0.5-2.0）
 ```
+
+> 切换音色：`/tts-voice`（内置 7 种音色，支持添加自定义）。
 
 ---
 
@@ -299,7 +310,7 @@ python -m agent.daemon.autostart desktop    # 创建桌面快捷方式
 ```
 /model qwen3.6       # 前缀匹配，切到 qwen3.6-plus
 /model flash         # 匹配到 qwen3.5-flash
-/models              # 交互式选择（↑↓ + Enter）
+/models              # 交互式选择（↑↓ + Enter，按厂商分组）
 ```
 
 ### 添加自定义模型
@@ -311,7 +322,7 @@ python -m agent.daemon.autostart desktop    # 创建桌面快捷方式
 api_format = "openai"
 base_url = "https://api.deepseek.com/v1"
 api_key = "sk-your-key"
-model_type = "text"
+model_type = "text"       # "text" 纯文本 / "multimodal" 多模态
 ```
 
 支持的接口：OpenAI 兼容 / Anthropic / DashScope SDK。
@@ -495,8 +506,6 @@ jarvis [选项]
   --daemon               常驻模式
   --talk                 直接启动实时语音
   --with-tray            前台 REPL + 托盘图标
-  --headless             无界面模式（供外部桥接）
-  --acp                  ACP 模式（JSON-RPC stdio，供 cc-connect 桥接）
   --version              显示版本
 ```
 

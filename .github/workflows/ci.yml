@@ -3,7 +3,7 @@ name: CI
 # T-05: GitHub Actions CI — push/PR 时自动跑测试 + 语法检查
 #
 # 触发条件: push 到 main/master 或 PR
-# 测试矩阵: Python 3.11 / 3.12 / 3.13
+# 测试矩阵: Python 3.11 / 3.12 / 3.13 / 3.14
 # 步骤: 安装依赖 → 语法检查 → pytest
 
 on:
