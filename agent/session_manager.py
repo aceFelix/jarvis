@@ -40,21 +40,39 @@ def _sanitize_title(title: str) -> str:
 
 
 def _rename_session_file(old_name: str, title: str) -> str:
-    """重命名会话文件。返回最终可用的新名称。"""
+    """重命名会话文件。返回最终可用的新名称。
+
+    目标文件名已存在时自动追加序号（-2、-3…），避免标题冲突时
+    直接退回时间戳旧名导致标题生成失效。
+    """
     from agent.core.memory.store import sessions_dir
 
     title = _sanitize_title(title)
     if not title:
         return old_name
+    if title == old_name:
+        return title
 
     old_path = sessions_dir() / f"{old_name}.json"
+    if not old_path.exists():
+        # 旧文件不存在（未落盘）：直接用新标题，后续保存会按新名创建
+        return title
+
     new_path = sessions_dir() / f"{title}.json"
-    if old_path.exists() and not new_path.exists():
+    if not new_path.exists():
         old_path.rename(new_path)
-    elif new_path.exists():
-        # 目标已存在：保留原文件名但把标题信息附在末尾
-        return old_name
-    return title
+        return title
+
+    # 目标已存在：追加序号 -2、-3…（最多尝试 99 次）
+    for n in range(2, 100):
+        candidate = f"{title}-{n}"
+        candidate_path = sessions_dir() / f"{candidate}.json"
+        if not candidate_path.exists():
+            old_path.rename(candidate_path)
+            return candidate
+
+    # 极端情况兜底：保留原名称
+    return old_name
 
 
 async def _generate_title_from_first_user(
@@ -125,12 +143,15 @@ async def _generate_session_title(
         title_text = ""
         try:
             provider.set_thinking_enabled(False)
+            # 注意: system 不能传空字符串——DeepSeek 等 Anthropic 兼容端点
+            # 对空 system 会静默返回空文本（实测 system='' 无输出）。
+            # 传一句简短的角色说明即可规避。
             events = provider.stream(
                 model=model,
-                system="",
+                system="你是会话标题生成助手，只输出标题，不输出解释。",
                 messages=msgs,
                 tools=[],
-                max_tokens=30,
+                max_tokens=100,
                 temperature=0.3,
             )
             async for event in events:

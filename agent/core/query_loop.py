@@ -230,7 +230,11 @@ class QueryLoop:
             stats.iterations = iteration + 1
 
             # 给 LLM 发送分层上下文的冻结快照（冻结区永不改 → 缓存友好）
-            ctx.messages = layered.messages
+            # 注意: 用 in-place 切片同步而非重绑定。重绑定会让 ctx.messages 与
+            # 调用方持有的列表（如 repl 的 messages）脱钩，导致 assistant 回复
+            # 永远进不了调用方的对话历史（自动保存丢回复、len(messages) 不涨、
+            # 第 2 轮 LLM 标题永不触发）。
+            ctx.messages[:] = layered.messages
 
             try:
                 assistant_msg, stop_event = await self._stream_once(ctx)
@@ -338,7 +342,8 @@ class QueryLoop:
 
         # ---- Hook: assistant_response ----
         # 同步 ctx.messages 到分层上下文的最新快照（hooks 读 ctx.messages）
-        ctx.messages = layered.messages
+        # in-place 同步，保证调用方持有的原列表引用仍能看到完整对话历史
+        ctx.messages[:] = layered.messages
 
         # 取最后一条 assistant 消息的文本作为响应
         try:

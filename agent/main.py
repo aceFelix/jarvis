@@ -306,7 +306,12 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 ui.info(f"已恢复 {len(point.messages)} 条消息（{point.dialog_count} 轮对话）")
             else:
                 clear_recovery_point()
-                ui.info("已跳过恢复，恢复点已清除")
+                # 跳过恢复 = 全新会话：启动时 auto_resume_session 已把上次会话
+                # 消息加载进 messages，必须一并清空。否则第一轮标题生成会取
+                # 旧会话首条消息（如「jarvis在干嘛」），新会话上下文也被旧对话
+                # 污染。ctx.messages 与 messages 共享同一列表，clear() 即可同步。
+                messages.clear()
+                ui.info("已跳过恢复，恢复点已清除，开始全新会话")
     except Exception as e:
         # 恢复检测失败不阻塞启动
         from agent.core.diag import diag_warn
