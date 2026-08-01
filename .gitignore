@@ -41,5 +41,5 @@ sessions/
 -p/
 
 # ---- 文档 ----
-doc/
-docs/
+docs/publish
+docs/test
