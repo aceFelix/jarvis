@@ -1465,7 +1465,7 @@ coverage report
 
 本项目采用 [MIT License](LICENSE) 许可协议。
 
-> 本项目借鉴了 ClaudeCode 等优秀工具的设计思想。作者保留创作署名权，但不对使用方式做任何限制。
+> 本项目借鉴了 ClaudeCode 等优秀工具的设计思想。作者保留创作署名权。
 
 详细条款请参阅 [LICENSE](LICENSE) 文件。
 
@@ -1525,9 +1525,9 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
   <td align="center">抖音</td>
 </tr>
 <tr>
-  <td><img src="assets/wechat-qr.png" alt="微信" width="57"/></td>
-  <td><img src="assets/x-qr.png" alt="X" width="57"/></td>
-  <td><img src="assets/tiktok-qr.png" alt="抖音" width="57"/></td>
+  <td><img src="assets/wechat-qr.png" alt="微信" width="55"/></td>
+  <td><img src="assets/x-qr.png" alt="X" width="55"/></td>
+  <td><img src="assets/tiktok-qr.png" alt="抖音" width="55"/></td>
 </tr>
 </table>
 
