@@ -77,9 +77,12 @@ class TestResolvePath:
     def test_relative_path_joins_workdir(self, tmp_path: Path) -> None:
         assert resolve_path(make_ctx(tmp_path), "sub/b.txt") == tmp_path / "sub" / "b.txt"
 
-    def test_git_bash_style_path_on_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.skipif(
+        sys.platform != "win32",
+        reason="Git Bash 风格路径解析是 Windows 特有行为（Path 盘符语义由真实平台 pathlib 决定）",
+    )
+    def test_git_bash_style_path_on_windows(self) -> None:
         """Git Bash 风格 /e/foo → E:/foo（仅 win32）。"""
-        monkeypatch.setattr(sys, "platform", "win32")
         p = resolve_path(make_ctx("C:/work"), "/e/path/x.txt")
         assert p.drive == "E:"
         assert str(p).endswith("path/x.txt") or str(p).endswith("path\\x.txt")
