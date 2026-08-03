@@ -148,6 +148,31 @@ jarvis
 >
 > npm 包会自动检测 Python 环境并通过 pip 安装 `jarvis-agent[all]`。
 
+### 默认安装路径
+
+安装方式决定**程序本体**的位置（跟随 Python / 包管理器），而**用户数据**统一存放在 `~/.jarvis`（与 Python 无关）。
+
+**程序本体：**
+
+| 安装方式 | 包（agent）位置 | 命令入口 `jarvis` |
+|---|---|---|
+| pip（系统 Python） | `Python安装目录\Lib\site-packages`（Windows）<br>`/usr/lib/python3.x/site-packages` 或 `~/.local/lib/python3.x/site-packages`（Linux/macOS） | `Python安装目录\Scripts\jarvis.exe`（Windows）<br>`~/.local/bin/jarvis`（Linux/macOS） |
+| pip（venv 虚拟环境） | `<虚拟环境>\Lib\site-packages`（Windows）<br>`<虚拟环境>\lib\python3.x\site-packages`（Linux/macOS） | `<虚拟环境>\Scripts\jarvis.exe`（Windows）<br>`<虚拟环境>\bin\jarvis`（Linux/macOS） |
+| GitHub 开发模式（`pip install -e .`） | editable 安装，`agent` 包直接指向克隆的源码目录 | 同上（Scripts/bin 下生成入口） |
+| uv（`uv tool install`） | Windows: `%APPDATA%\uv\tools\jarvis-agent`<br>Linux/macOS: `~/.local/share/uv/tools/jarvis-agent`（uv 管理的隔离 venv） | `~/.local/bin/jarvis`（uv 自动链接） |
+| npm（`npm install -g`） | npm 包本体在全局 node_modules（Windows: `%APPDATA%\npm\node_modules`；Linux/macOS: `/usr/lib/node_modules` 或 `~/.npm-global`）；Python 包由 install.js 装到对应 Python 的 site-packages | npm 全局 bin 目录的 `jarvis`（Windows: `%APPDATA%\npm`） |
+
+**用户数据（所有安装方式统一，卸载/重装不丢）：**
+
+| 内容 | 路径 |
+|---|---|
+| 配置（`settings.toml`，含 API key） | `~/.jarvis/settings.toml`（Windows: `C:\Users\<用户名>\.jarvis`） |
+| daemon 日志 | `~/.jarvis/daemon.log` |
+| 插件 / 技能 / 会话记忆 | `~/.jarvis/` |
+| 截图临时目录 | `%TEMP%\jarvis-shots`（Windows）`/tmp/jarvis-shots`（Linux/macOS） |
+
+> **提示**：site-packages 路径跟随"执行 pip 的那个 Python"。机器上装了多个 Python（3.11/3.12/3.13）时，用 `python -m pip install` 可强制绑定当前 `python`，用 `python -m pip show jarvis-agent` 查看实际安装位置（`Location` 字段）。
+
 ### 安装可选功能
 
 jarvis 将不同能力拆分为可选依赖组，按需安装：
