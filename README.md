@@ -81,12 +81,13 @@
 | 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
 | `--daemon` 后台常驻模式 | ✅ | ✅ | ⚠️ 前台运行³ |
 | 开机自启 | ✅ Startup | ✅ LaunchAgent | ❌ 手动 systemd |
-| 桌面快捷方式 | ✅ .lnk | ✅ .command | ✅ .desktop |
+| 桌面快捷方式 | ✅ .lnk | ✅ .command | ⚠️ 终端内运行⁴ |
 | 全局热键 | ✅ | ❌ | ⚠️ 需 root |
 
 > ¹ macOS 需在「系统设置 → 隐私与安全 → 辅助功能」中授权终端/Python
 > ² Linux 鼠标键盘操作需 DISPLAY 环境变量（X11/Wayland 桌面环境）
 > ³ Linux 上 `--daemon` 会以前台模式运行（无法后台分离），功能完整
+> ⁴ Linux 桌面快捷方式双击会在终端内以 REPL 对话界面运行 jarvis（等同 Windows 的 cmd 窗口运行，关窗口即退出）
 
 > ⚠️ **重要提示**：本项目在 **Windows** 上完成全部功能开发与实机验证。macOS 和 Linux 仅做了代码层面的适配，**未经过完整实机测试**，可能存在未发现的兼容性问题。建议优先在 Windows 上使用 J.A.R.V.I.S. 以获得最佳体验。
 

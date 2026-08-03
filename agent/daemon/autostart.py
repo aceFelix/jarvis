@@ -796,7 +796,12 @@ exec "{py}" "{script}" --daemon
 
 
 def _install_desktop_linux() -> int:
-    """Linux: 创建 .desktop 桌面文件。"""
+    """Linux: 创建 .desktop 桌面文件。
+
+    双击后在终端中以前台 REPL 模式启动 jarvis（等同 Windows 的 cmd 窗口
+    运行 `jarvis`），可打字对话；关窗口即退出。Linux 不支持后台 daemon
+    分离，故不走 --daemon。
+    """
     desktop = Path.home() / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)
     spath = desktop / "JARVIS.desktop"
@@ -809,7 +814,7 @@ def _install_desktop_linux() -> int:
 Type=Application
 Name=JARVIS
 Comment=Just A Rather Very Intelligent System
-Exec={py} {script} --daemon
+Exec={py} {script}
 Path={workdir}
 Terminal=true
 Categories=Utility;
@@ -818,7 +823,7 @@ Categories=Utility;
         spath.write_text(content, encoding="utf-8")
         spath.chmod(0o755)
         print(f"✓ 已创建桌面快捷方式: {spath}")
-        print("💡 双击「JARVIS.desktop」→ 终端中启动 daemon")
+        print("💡 双击「JARVIS.desktop」→ 终端中进入 REPL 对话界面（关窗口即退出）")
         return 0
     except Exception as e:
         print(f"✗ 创建桌面快捷方式失败: {e}", file=sys.stderr)
