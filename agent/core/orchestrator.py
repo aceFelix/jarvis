@@ -18,7 +18,7 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
-from agent.core.result import PermissionBehavior, PermissionResult
+from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.tool import Tool, ToolRegistry
 from agent.permissions import PermissionChecker
 

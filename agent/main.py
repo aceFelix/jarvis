@@ -574,6 +574,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="直接启动实时双工语音对话（/talk），需要配置 DashScope API Key",
     )
+    p.add_argument(
+        "--doctor",
+        action="store_true",
+        help="检查依赖安装状态（Python 包 / 系统级依赖 / 配置文件）",
+    )
     return p.parse_args(argv)
 
 
@@ -619,6 +624,13 @@ def main(argv: list[str] | None = None) -> int:
     @author aceFelix
     """
     args = parse_args(argv)
+
+    # 健康检查：放在最前面，避免 settings 加载失败时无法诊断
+    # 检查 Python 包 / 系统级依赖 / 配置文件是否就绪，不进入 REPL
+    if args.doctor:
+        from agent.doctor import run_doctor
+        return run_doctor()
+
     settings = load_settings(workdir=args.workdir)
 
     # CLI 参数覆盖配置（最高优先级）

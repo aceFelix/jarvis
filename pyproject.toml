@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-agent"
-version = "2.0.1"
+version = "2.0.2"
 description = "J.A.R.V.I.S. — 你的钢铁侠同款 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 50+ 内置工具、MCP 生态接入、多模型动态切换。"
 readme = "README.md"
 license = { text = "MIT" }

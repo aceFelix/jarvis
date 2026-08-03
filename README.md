@@ -227,6 +227,24 @@ jarvis
 > python -m agent.daemon.autostart desktop
 > ```
 
+### 依赖健康检查
+
+安装完成后或遇到功能不可用时，运行 `--doctor` 一键诊断所有依赖状态：
+
+```bash
+jarvis --doctor
+```
+
+检查内容（用 rich 表格渲染，退出码 0=全部就绪 / 1=有缺失）：
+
+| 类别 | 检查项 |
+|---|---|
+| 📦 Python 包 | 语音 / 系统托盘 / 系统监控 / GUI / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等 21 个可选包，按 extras 组归类并给出 `pip install` 命令 |
+| 🔧 系统级依赖 | Python 版本（>=3.11） / pip / uv（推荐） / Playwright 浏览器 / Edge WebView2 Runtime（Windows） / 麦克风权限提示 |
+| ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
+
+> 包检查用 `importlib.util.find_spec` 探测，不实际 import，避免触发未安装包的副作用日志。
+
 ---
 
 ## 配置指南
@@ -1269,8 +1287,9 @@ Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件�
 
 ```
 agent/
-├── main.py            # 入口（REPL / daemon / --talk 分发）
+├── main.py            # 入口（REPL / daemon / --talk / --doctor 分发）
 ├── bootstrap.py       # 装配工厂（provider / checker / recovery / context 构建）
+├── doctor.py          # 依赖健康检查（--doctor：Python 包 / 系统级依赖 / 配置）
 ├── model_manager.py   # 模型切换与管理（/model /models 逻辑）
 ├── session_manager.py # 会话自动保存 / 标题生成
 ├── commands/          # 斜杠命令系统
@@ -1388,12 +1407,16 @@ agent/
 └── utils/             # 通用工具
     └── mask.py        # API Key 脱敏
 
-tests/                 # 测试套件（281 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon）
+tests/                 # 测试套件（1468 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
+├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试
 ├── core/ tools/ daemon/ voice/ # 各模块单元测试
 ├── test_command_router.py # 命令路由集成测试
 ├── test_query_loop.py     # 上下文压缩/图片淘汰测试
+├── test_query_loop_run.py # QueryLoop.run 主流程/工具循环/故障转移测试
+├── test_orchestrator.py   # 工具编排器测试
+├── test_session_manager.py# 会话标题生成/保存测试
 ├── test_permissions.py    # 五层权限系统测试
 ├── test_p23_proactive.py  # 主动感知提醒测试
 └── test_p38_sandbox.py    # 安全沙箱测试
@@ -1411,11 +1434,15 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **281 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理等核心模块。
+项目配备 **1468 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
 
 ```bash
 # 运行全部测试
 pytest tests/ -v
+
+# 查看覆盖率
+coverage run --source=agent -m pytest tests/ -q
+coverage report
 ```
 
 每次 push 或 PR 到 `main` 分支，**GitHub Actions 自动跑全量测试**（Python 3.11 / 3.12 / 3.13 / 3.14 矩阵），不通过不允许合并。
@@ -1468,6 +1495,7 @@ J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
 | [weixin-ClawBot-API](https://github.com/SiverKing/weixin-ClawBot-API) | 微信 ClawBot iLink Bot API 协议实现参考 |
 | [CLI-Anything](https://github.com/HKUDS/CLI-Anything) | CLI 工具集成框架，技能扩展机制参考 |
 | [DeepSeek API 文档](https://api-docs.deepseek.com) | 大模型推理接口文档 |
+| [智谱 BigModel 文档](https://docs.bigmodel.cn/cn/guide/start/introduction) | 智谱 GLM 大模型推理接口文档 |
 | [阿里云百炼平台](https://bailian.console.aliyun.com) | 实时语音对话 API（通义千问）服务端 |
 
 ---

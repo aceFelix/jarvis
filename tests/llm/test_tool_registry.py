@@ -258,3 +258,121 @@ class TestPermissionDefaults:
                 assert perm.behavior == PermissionBehavior.ALLOW, (
                     f"{name}: 只读工具应默认 ALLOW，实际: {perm.behavior}"
                 )
+
+
+# ── 补充：注册中心边界 / contains / 别名 / 基类默认 ──
+
+
+class TestRegistryEdgeCases:
+    """ToolRegistry 边界补充。"""
+
+    def test_register_empty_name_raises(self) -> None:
+        registry = ToolRegistry()
+        tool = _FakeTool()
+        tool.name = ""
+        with pytest.raises(ValueError, match="empty name"):
+            registry.register(tool)
+
+    def test_contains_by_name(self) -> None:
+        registry = ToolRegistry()
+        tool = _FakeTool()
+        tool.name = "Named"
+        registry.register(tool)
+        assert "Named" in registry
+
+    def test_contains_by_alias(self) -> None:
+        registry = ToolRegistry()
+        tool = _FakeTool()
+        tool.name = "Canonical"
+        registry.register(tool, aliases=["aka"])
+        assert "aka" in registry
+
+    def test_contains_missing(self) -> None:
+        assert "Nope" not in ToolRegistry()
+
+    def test_get_by_alias_returns_tool(self) -> None:
+        registry = ToolRegistry()
+        tool = _FakeTool()
+        tool.name = "Canonical2"
+        registry.register(tool, aliases=["alias2"])
+        assert registry.get("alias2") is tool
+        assert registry.get("Canonical2") is tool
+
+    def test_all_returns_in_registration_order(self) -> None:
+        registry = ToolRegistry()
+        t1 = _FakeTool()
+        t1.name = "First"
+        t2 = _FakeTool()
+        t2.name = "Second"
+        registry.register(t1)
+        registry.register(t2)
+        names = [t.name for t in registry.all()]
+        assert names == ["First", "Second"]
+
+    def test_aliases_not_in_all(self) -> None:
+        """别名不产生重复工具对象。"""
+        registry = ToolRegistry()
+        tool = _FakeTool()
+        tool.name = "Aliased"
+        registry.register(tool, aliases=["a1", "a2"])
+        assert len(registry.all()) == 1
+
+
+class TestToolDefaults:
+    """Tool 基类 fail-closed 默认行为。"""
+
+    def test_safety_defaults(self) -> None:
+        tool = _FakeTool()
+        assert tool.is_read_only({}) is False
+        assert tool.is_destructive({}) is False
+        assert tool.is_concurrency_safe({}) is False
+        assert tool.deferred is False
+
+    def test_check_permissions_default_ask(self) -> None:
+        from agent.core.result import PermissionBehavior
+
+        tool = _FakeTool()
+        perm = tool.check_permissions({}, None)
+        assert perm.behavior == PermissionBehavior.ASK
+
+    def test_validate_input_default_pass(self) -> None:
+        tool = _FakeTool()
+        assert tool.validate_input({}, None).ok is True
+
+    def test_ui_defaults(self) -> None:
+        tool = _FakeTool()
+        assert tool.user_facing_name() == "Fake"
+        assert tool.activity_description({}) is None
+
+    def test_prepare_permission_matcher_default_none(self) -> None:
+        assert _FakeTool().prepare_permission_matcher({}) is None
+
+
+class TestPermissionMatcher:
+    """权限规则匹配器。"""
+
+    def _matcher(self, tool_name: str = "Bash", targets: list | None = None):
+        from agent.core.tool import PermissionMatcher
+
+        return PermissionMatcher(tool_name=tool_name, targets=targets or ["git status"])
+
+    def test_tool_name_mismatch(self) -> None:
+        assert self._matcher().matches("Read(git *)") is False
+
+    def test_no_spec_matches_any_call(self) -> None:
+        assert self._matcher().matches("Bash") is True
+
+    def test_empty_spec_matches_any_call(self) -> None:
+        assert self._matcher().matches("Bash()") is True
+
+    def test_wildcard_hit(self) -> None:
+        assert self._matcher().matches("Bash(git *)") is True
+
+    def test_exact_target_hit(self) -> None:
+        assert self._matcher().matches("Bash(git status)") is True
+
+    def test_no_hit(self) -> None:
+        assert self._matcher().matches("Bash(npm *)") is False
+
+    def test_invalid_pattern_false(self) -> None:
+        assert self._matcher().matches("###") is False

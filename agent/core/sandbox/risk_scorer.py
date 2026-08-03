@@ -68,7 +68,7 @@ _READONLY_COMMANDS = frozenset({
 _MEDIUM_PATTERNS = [
     r"\bgit\s+(add|commit|checkout|switch|merge|rebase|stash|pull|fetch)\b",
     r"\bnpm\s+(install|ci|update|run|init|publish)\b",
-    r"\bpip\s+(install|uninstall|freeze)\b",
+    r"\bpip\s+(install|uninstall)\b",  # freeze 是只读，已列入 _READONLY_COMMANDS,
     r"\buv\s+(add|remove|sync|pip)\b",
     r"\bpython\s+\S+\.py",                    # 运行脚本
     r"\bnode\s+\S+\.(js|mjs|ts)",             # 运行脚本

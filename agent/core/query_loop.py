@@ -326,7 +326,11 @@ class QueryLoop:
             )
 
             # Phase 1: 多 Agent 团队——自动检查队友邮箱
-            # _inject_teammate_notifications 直接改 ctx.messages，同步到 layered
+            # 先同步 ctx.messages 到 layered 最新状态（含刚追加的工具结果），
+            # 让 _inject_teammate_notifications 能看到完整对话历史。
+            # 之前缺少这步同步 → 注入函数读到的是旧快照、看不到工具结果，
+            # 且注入的消息因长度比较基准错误而无法同步回 layered（死代码）。
+            ctx.messages[:] = layered.messages
             _inject_teammate_notifications(ctx)
             # 检查 ctx.messages 是否被注入额外消息（比 layered.messages 多）
             if len(ctx.messages) > len(layered.messages):
