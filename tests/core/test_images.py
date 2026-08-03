@@ -4,6 +4,10 @@
 _load_image_from_clipboard（mock 剪贴板，覆盖 Image / 文件路径列表 / None
 三种情况）、_pending_images 与 _auto_attach_clipboard_image 的自动附加逻辑。
 
+需要真实 Pillow 读写图片的用例（TestLoadImageFromPath /
+TestLoadImageFromClipboard）在 Pillow 未安装（CI 仅装 dev 依赖）时跳过；
+其余用例不依赖 PIL 照常运行。
+
 @author aceFelix
 """
 
@@ -17,6 +21,15 @@ import pytest
 import agent.core.images as images
 from agent.core.context import ToolContext
 from agent.core.message import ImageContent, Message
+
+try:
+    from PIL import Image  # noqa: F401  仅用于探测 Pillow 是否可用
+    _PIL_AVAILABLE = True
+except ImportError:
+    # CI 只装 dev 依赖，Pillow 属于可选 gui/daemon extras。
+    # 需要真实 PIL 读写图片 / 解析 "PIL.ImageGrab" 路径的用例在此环境下跳过，
+    # 其余纯逻辑用例不依赖 PIL 照常运行。
+    _PIL_AVAILABLE = False
 
 
 class TestHashImage:
@@ -41,6 +54,9 @@ class TestHashImage:
         assert len(images._hash_image(img)) == 32  # md5 hex 长度
 
 
+@pytest.mark.skipif(
+    not _PIL_AVAILABLE, reason="Pillow 未安装（可选 gui/daemon extras），需真实 PIL 读写图片"
+)
 class TestLoadImageFromPath:
     """从文件加载图片（依赖真实 PIL）。"""
 
@@ -66,6 +82,9 @@ class TestLoadImageFromPath:
         assert images._load_image_from_path(str(p)) is None
 
 
+@pytest.mark.skipif(
+    not _PIL_AVAILABLE, reason="Pillow 未安装（可选 gui/daemon extras），需真实 PIL 构造剪贴板图片"
+)
 class TestLoadImageFromClipboard:
     """从剪贴板加载图片（mock PIL.ImageGrab）。"""
 

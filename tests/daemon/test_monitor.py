@@ -19,7 +19,37 @@ from __future__ import annotations
 import json
 import sys
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    # CI 只装 dev 依赖，psutil 属于可选 daemon extras。
+    # monitor.py 内部是延迟 import psutil（无 psutil 时功能降级），
+    # 测试也刻意用 monkeypatch 隔离系统调用；此处用假模块替身，
+    # 让顶层 import 在无 psutil 环境也能通过、monkeypatch 注入仍生效。
+    import types
+
+    psutil = types.ModuleType("psutil")
+
+    class _NoSuchProcess(Exception):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args)
+            self.pid = kwargs.get("pid")
+
+    class _AccessDenied(Exception):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args)
+            self.pid = kwargs.get("pid")
+
+    psutil.NoSuchProcess = _NoSuchProcess
+    psutil.AccessDenied = _AccessDenied
+    # 占位属性：monkeypatch.setattr 默认 raising=True，属性不存在会抛
+    # AttributeError；预置占位让各用例能正常注入 mock 实现。
+    for _name in ("cpu_percent", "virtual_memory", "disk_usage", "process_iter"):
+        setattr(psutil, _name, None)
+    # 注册进 sys.modules：monitor.py 在函数内 `import psutil`，
+    # 无替身注册时函数内 import 会抛 ImportError 走降级路径，mock 注入失效。
+    sys.modules["psutil"] = psutil
+
 import pytest
 from unittest.mock import MagicMock
 

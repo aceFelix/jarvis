@@ -40,24 +40,13 @@ jobs:
 
       - name: Syntax check (core modules)
         run: |
-          python -m py_compile agent/main.py
-          python -m py_compile agent/core/query_loop.py
-          python -m py_compile agent/core/layered_context.py
-          python -m py_compile agent/core/orchestrator.py
-          python -m py_compile agent/core/tool.py
-          python -m py_compile agent/core/context.py
-          python -m py_compile agent/llm/openai_provider.py
-          python -m py_compile agent/llm/thinking.py
-          python -m py_compile agent/llm/provider_registry.py
-          python -m py_compile agent/config/settings.py
-          python -m py_compile agent/config/env.py
-          python -m py_compile agent/config/model_registry.py
-          python -m py_compile agent/prompts/system.py
+          # 编译检查 agent 包全部模块（含新增文件，无需维护硬编码列表）
+          python -m compileall -q agent/
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short \
-            -k "not (test_image_skip_in_text_mode or test_bring_up_reuses_running_proc)"
+          # test_bring_up_reuses_running_proc: 平台相关用例，历史 CI 失败待定位，临时排除
+          pytest tests/ -v --tb=short -k "not test_bring_up_reuses_running_proc"
 
       - name: Test summary
         if: always()

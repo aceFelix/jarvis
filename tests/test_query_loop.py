@@ -93,27 +93,26 @@ class TestMessageSerialization:
     """消息序列化测试。"""
 
     def test_image_skip_in_text_mode(self):
-        """纯文本模型应跳过 ImageContent。"""
+        """纯文本模型应跳过 ImageContent。
+
+        注意：OpenAI 规范要求 role="tool" 的 content 为 string（智谱 GLM 等
+        兼容接口对 list content 会挂起），因此工具结果图片以文本描述附加，
+        不生成 image_url；user 消息中的独立图片才走 image_url（多模态）。
+        此前的断言期望 tool 消息含 image_url，与实现设计相悖，已修正。
+        """
         from agent.llm.openai_provider import _messages_to_openai
         img = ImageContent(media_type="image/jpeg", data="fakebase64")
         msg = Message(role="user", content=[
             ToolResultContent(tool_use_id="call_1", content="截图", images=[img])
         ])
-        # 多模态：有 image_url
+        # 多模态：tool 消息 content 为 string，图片以文本描述附加
         result_mm = _messages_to_openai([msg], "system", skip_images=False)
-        content_mm = result_mm[1]["content"]
-        has_image = any(
-            isinstance(c, dict) and c.get("type") == "image_url"
-            for c in content_mm
-        )
-        assert has_image, "多模态应包含 image_url"
+        tool_msg = [m for m in result_mm if m.get("role") == "tool"][0]
+        assert isinstance(tool_msg["content"], str), "tool 消息 content 必须是 string"
+        assert "附带 1 张图片" in tool_msg["content"]
 
-        # 纯文本：无 image_url，有占位
+        # 纯文本：同样 string content，且有"图片已省略"提示
         result_text = _messages_to_openai([msg], "system", skip_images=True)
-        content_text = result_text[1]["content"]
-        has_image_text = any(
-            isinstance(c, dict) and c.get("type") == "image_url"
-            for c in content_text
-        )
-        assert not has_image_text, "纯文本不应包含 image_url"
-        assert "纯文本模型" in str(content_text), "纯文本应有图片省略提示"
+        tool_msg_text = [m for m in result_text if m.get("role") == "tool"][0]
+        assert isinstance(tool_msg_text["content"], str)
+        assert "图片已省略" in tool_msg_text["content"]
