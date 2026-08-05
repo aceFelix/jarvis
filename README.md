@@ -19,6 +19,12 @@
 
 </div>
 
+<div align="center">
+
+🌐 简体中文 | [English](README.en.md)
+
+</div>
+
 
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 >
