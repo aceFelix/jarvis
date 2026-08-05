@@ -1,10 +1,10 @@
 # Token 统计与压缩命令修复复盘
 
-> 关键词：/cost、/context、/compact、system prompt、缓存命中、asyncio.run、Anthropic 兼容端点、协议语义冲突
+> 关键词：/cost、/context、/compact、system prompt、缓存命中、asyncio.run、Anthropic 兼容端点、协议语义冲突、思考模式、thinking_delta
 
 ## 1. 问题现象
 
-在测试 JARVIS 缓存命中机制时，连续发现 3 个独立但相互关联的 bug：
+在测试 JARVIS 缓存命中机制时，连续发现 4 个独立但相互关联的 bug：
 
 ### 问题一：/cost 显示的"当前上下文 token"严重偏低
 
@@ -37,6 +37,17 @@ RuntimeWarning: coroutine 'QueryLoop.compact_now' was never awaited
 | deepseek-v4-flash | Anthropic 兼容 | 0.0% ❌ |
 
 flash 的 system prompt（63k token）应该大量命中缓存，0% 明显异常。
+
+### 问题四：DeepSeek 走 Anthropic 兼容端点时思考模式关闭
+
+同一模型 `deepseek-v4-flash`，不同端点表现不同：
+
+| 端点 | 思考过程 |
+|---|---|
+| OpenAI 兼容 | ✅ 显示 `╭─ 💭 思考过程 ───` |
+| Anthropic 兼容 | ❌ 无思考过程，直接输出回答 |
+
+DeepSeek 文档明确说"思考模式默认打开"，但走 Anthropic 兼容端点时却没有思考。
 
 ## 2. 排查过程
 
@@ -143,19 +154,75 @@ else:  # deepseek 走这里
 flash 的 `provider_name = "deepseek"`（走 else），但实际是 Anthropic 协议，
 分母用 `input_tokens` 会太小，命中率虚高（可能 >100%）。
 
+### 阶段四：定位 flash 思考模式关闭（问题四）
+
+对比 OpenAI Provider 和 Anthropic Provider 的思考模式实现：
+
+#### OpenAI Provider（完整实现）
+
+通过 `THINKING_CONFIGS` 配置表 + `apply_thinking()` 注入参数：
+
+```python
+# thinking.py 配置
+"deepseek": ThinkingConfig(
+    placement="extra_body",
+    field="thinking",
+    on_value={"type": "enabled"},
+    reasoning_effort="high",
+)
+
+# openai_provider.py stream()
+apply_thinking(request_kwargs, cfg, thinking_on, self._thinking_budget)
+```
+
+#### Anthropic Provider（三处缺失）
+
+```python
+# 缺失 1：默认关闭（与 OpenAI Provider 不一致）
+self._thinking_enabled = False  # ← OpenAI Provider 是 True
+
+# 缺失 2：set_thinking_enabled 只记录状态，stream() 不使用
+def set_thinking_enabled(self, enabled):
+    self._thinking_enabled = bool(enabled)  # ← 记录了但 stream() 没用
+
+# 缺失 3：stream() 构建请求时没有 thinking 参数
+request_kwargs = {
+    "model": ...,
+    "system": ...,
+    "messages": ...,
+    "max_tokens": ...,
+    # ← 没有 thinking 参数！
+}
+```
+
+#### 事件处理缺失
+
+Anthropic SDK 流式响应中，思考内容通过 `thinking_delta` 事件返回，但 stream()
+只处理了 `text_delta` 和 `input_json_delta`，没有 `thinking_delta`。
+
+#### 对照 DeepSeek 思考模式文档
+
+文档明确：
+- Anthropic 格式控制参数：`{"thinking": {"type": "enabled/disabled"}}`
+- 思考模式不支持 `temperature` 参数（设置不会报错但不生效）
+
+Anthropic Provider 完全没传 `thinking` 参数，导致 DeepSeek 兼容端点不开启思考。
+
 ## 3. 根因分析
 
-### 三个 bug 的共同根因：多厂商协议适配不充分
+### 四个 bug 的共同根因：多厂商协议适配不充分
 
 | Bug | 直接根因 | 深层根因 |
 |---|---|---|
 | /cost 漏算 system | `estimate_tokens` 只数 messages | system prompt 是独立字符串，未纳入统计 |
 | /compact 崩溃 | `asyncio.run()` 嵌套调用 | 同步 handler 调异步函数，未改成 async |
 | flash 缓存 0% | 合理性校验误杀命中数 | OpenAI/Anthropic 协议下 input_tokens 语义相反，校验未区分 |
+| flash 思考关闭 | stream() 没传 thinking 参数 | Anthropic Provider 的思考模式是未完成功能，只记录状态不实际使用 |
 
 **核心教训**：JARVIS 支持多厂商多协议（OpenAI/Anthropic/DashScope/ZAI），
 但部分代码假设了单一协议语义。当同一厂商（如 DeepSeek）提供两种兼容端点时，
-协议语义冲突就会暴露。
+协议语义冲突就会暴露。OpenAI Provider 通过 `THINKING_CONFIGS` 配置表完整实现了
+思考模式注入，但 Anthropic Provider 完全没走这套机制，导致功能缺失。
 
 ## 4. 修复方案
 
@@ -236,13 +303,51 @@ else:
 
 用数据特征判断比厂商名更可靠，因为同一厂商可能走不同协议。
 
+### 修复四：Anthropic Provider 思考模式完整实现（三层修复）
+
+**第一层：默认开启思考**：
+
+```python
+# 旧：self._thinking_enabled = False
+# 新：self._thinking_enabled = True  # 与 OpenAI Provider 一致
+```
+
+**第二层：`stream()` 注入 thinking 参数**（[anthropic_provider.py:215-231](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py#L215-L231)）：
+
+```python
+if self._thinking_enabled:
+    if self.name == "anthropic":
+        # Anthropic 原生需要 budget_tokens
+        request_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+    else:
+        # DeepSeek 兼容端点只需 type
+        request_kwargs["thinking"] = {"type": "enabled"}
+    # 思考模式下不传 temperature（DeepSeek 文档：不支持）
+elif temperature is not None:
+    request_kwargs["temperature"] = temperature
+```
+
+关键点：**思考模式下不传 `temperature`**——DeepSeek 文档明确说"思考模式不支持
+temperature，设置不会报错但不生效"。
+
+**第三层：处理 `thinking_delta` 事件**：
+
+```python
+elif delta.type == "thinking_delta":
+    # thinking_delta 带 .thinking 属性，不是 .text
+    yield ThinkingDelta(text=delta.thinking)
+```
+
+Anthropic SDK 流式响应中，思考内容通过 `thinking_delta` 事件返回，
+`delta.thinking` 属性（不是 `delta.text`）。
+
 ## 5. 验证结果
 
 ### 测试环境
 
 - 模型：deepseek-v4-pro（OpenAI 兼容）+ deepseek-v4-flash（Anthropic 兼容）
 - 场景：3-5 轮简单对话（各国首都问答）
-- 验证命令：`/cost`、`/context`、`/compact`
+- 验证命令：`/cost`、`/context`、`/compact`、思考过程显示
 
 ### 验证数据
 
@@ -285,6 +390,24 @@ flash 从修复前 0% → 修复后 98%+，**修复完全生效**。
 - flash：`cache_read (71,168) > input_tokens (1,280)` → 走 Anthropic 分支 ✅
 - pro：`cache_read (71,168) < input_tokens (72,466)` → 走 OpenAI 分支 ✅
 
+#### 思考模式验证（flash，Anthropic 兼容端点）
+
+修复前：无思考过程，直接输出回答
+修复后：
+
+```
+> 中国的首都是哪里
+╭─ 💭 思考过程 ────────────────────────────────────────────────────╮
+│ 用户问的是中国的首都是哪里。这是一个非常简单的事实性问题...     │
+╰────────────────────────────────────────────────────────────────╯
+先生，中国的首都是**北京**。
+```
+
+- ✅ 显示 `╭─ 💭 思考过程 ───` 窗口
+- ✅ 思考内容正常流式显示
+- ✅ 最终回答正常输出
+- ✅ pro（OpenAI 兼容端点）思考过程不受影响
+
 ### 回归验证
 
 - `estimate_tokens` 签名未变，`/compact` 压缩阈值判断不受影响
@@ -299,7 +422,7 @@ flash 从修复前 0% → 修复后 98%+，**修复完全生效**。
 | [agent/commands/handlers/core_commands.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/commands/handlers/core_commands.py) | `/cost` 拆 3 行 + system prompt 统计；`/context` 含 system；`/compact` 改 async + 提前判断；命中率分母按数据特征判断 |
 | [agent/core/query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py) | 新增 `keep_recent_messages` 和 `enable_compaction` 只读属性 |
 | [agent/llm/cache_policy.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/cache_policy.py) | `parse_cache_usage` 新增 `input_includes_cache` 参数，仅 True 时做累计值校验 |
-| [agent/llm/anthropic_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py) | 调用 `parse_cache_usage` 时传 `input_includes_cache=False` |
+| [agent/llm/anthropic_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py) | 调用 `parse_cache_usage` 时传 `input_includes_cache=False`；默认开启思考；`stream()` 注入 thinking 参数；处理 `thinking_delta` 事件；导入 ThinkingDelta |
 
 ## 7. 经验总结
 
@@ -351,14 +474,23 @@ Anthropic 兼容端点时 `provider_name = "deepseek"`，判断失效。
 1. **新增命令处理器优先用 `async def`**：避免 asyncio.run 嵌套问题
 2. **缓存策略配置表应记录协议语义**：`input_includes_cache` 字段应进 CachePolicy
 3. **统计命令覆盖完整数据源**：system + messages + tools + images 全部纳入
+4. **功能开关必须端到端打通**：`set_thinking_enabled` 不能只记录状态，
+   stream() 必须实际使用该标志注入参数
+5. **同一功能在多 Provider 间应保持实现一致**：OpenAI Provider 通过
+   `THINKING_CONFIGS` 实现了思考模式，Anthropic Provider 也应走类似机制，
+   而非独立实现且遗漏关键步骤
 
 ## 8. 后续待优化项
 
 - **CachePolicy 增加 `input_includes_cache` 字段**：当前通过 Provider 传参，
   后续可固化到配置表，让策略信息更完整
+- **Anthropic Provider 思考模式接入 THINKING_CONFIGS**：当前在 stream() 里
+  硬编码 thinking 参数，后续可像 OpenAI Provider 一样通过配置表驱动
 - **模型→窗口映射表**：当前窗口硬编码 128000，后续可按模型动态获取实际窗口
 - **短对话压缩优化**：压缩后 token 变多（67→199）是边界情况，可考虑
   `estimate_tokens(messages) < 500` 时直接跳过压缩
 - **anyio 异步生成器清理问题**：`/compact` 触发 LLM 调用时可能暴露 MCP 客户端的
   anyio 清理 bug（`Attempted to exit cancel scope in a different task`），
   虽然被 compact_now 的 try/except 捕获不崩溃，但根本问题待解决
+- **Anthropic 原生端点 budget_tokens 可配置**：当前硬编码 10000，
+  后续可根据模型和能力动态调整

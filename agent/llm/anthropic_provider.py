@@ -19,6 +19,7 @@ from agent.llm.base import (
     ProviderError,
     Stop,
     TextDelta,
+    ThinkingDelta,
     ToolCall,
     ToolCallEnd,
     ToolDef,
@@ -124,9 +125,10 @@ class AnthropicProvider(LLMProvider):
         self._client = anthropic.AsyncAnthropic(**kwargs)
         # 根据 base_url 推断实际后端名（如 deepseek 走 anthropic 兼容协议时显示 deepseek）
         self._display_name = self._derive_name(base_url or "")
-        # 思考模式标志：Anthropic 默认不启用 extended thinking（不传 thinking 参数）。
-        # voice_loop 通过 set_thinking_enabled(False) 统一关闭，这里只需记录状态。
-        self._thinking_enabled = False
+        # 思考模式标志：默认开启（与 OpenAI Provider 的 enable_thinking=True 保持一致）。
+        # voice_loop 通过 set_thinking_enabled(False) 统一关闭。
+        # stream() 会根据此标志注入 thinking={"type": "enabled"} 参数。
+        self._thinking_enabled = True
 
     @property
     def name(self) -> str:  # type: ignore[override]
@@ -151,9 +153,9 @@ class AnthropicProvider(LLMProvider):
     def set_thinking_enabled(self, enabled: bool) -> None:
         """统一开关深度思考模式。
 
-        Anthropic 的 extended thinking 需在 stream() 中传 thinking={"type": "enabled", ...}。
-        当前实现默认不启用思考（不传 thinking 参数），这里只记录状态，
-        将来如启用 thinking 需在 stream() 中尊重此标志。
+        Anthropic 的 extended thinking 需在 stream() 中传 thinking={"type": "enabled"}。
+        DeepSeek 的 Anthropic 兼容端点同样通过此参数开启思考模式。
+        voice_loop 进入语音模式时调 set_thinking_enabled(False) 关闭。
         """
         self._thinking_enabled = bool(enabled)
 
@@ -210,7 +212,23 @@ class AnthropicProvider(LLMProvider):
         }
         if tool_defs:
             request_kwargs["tools"] = tool_defs
-        if temperature is not None:
+
+        # ---- 思考模式参数注入 ----
+        # DeepSeek Anthropic 兼容端点：thinking={"type": "enabled"} 开启思考模式
+        # Anthropic 原生端点：需要额外 budget_tokens（最小 1024）
+        # 思考模式不支持 temperature（DeepSeek 文档：设置不会报错但不生效）
+        if self._thinking_enabled:
+            if self.name == "anthropic":
+                # Anthropic 原生 extended thinking 需要预算 token
+                request_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": 10000,
+                }
+            else:
+                # DeepSeek 等兼容端点只需 type，不需要 budget_tokens
+                request_kwargs["thinking"] = {"type": "enabled"}
+            # 思考模式下不传 temperature（DeepSeek 文档：思考模式不支持 temperature）
+        elif temperature is not None:
             request_kwargs["temperature"] = temperature
 
         try:
@@ -230,6 +248,10 @@ class AnthropicProvider(LLMProvider):
                         if delta.type == "text_delta":
                             text_buf += delta.text
                             yield TextDelta(text=delta.text)
+                        elif delta.type == "thinking_delta":
+                            # 思考模式下的思维链内容（DeepSeek/Anthropic extended thinking）
+                            # thinking_delta 带 .thinking 属性，不是 .text
+                            yield ThinkingDelta(text=delta.thinking)
                         elif delta.type == "input_json_delta":
                             # 累积工具参数 JSON 片段（关键修复！）
                             idx = event.index
@@ -249,6 +271,8 @@ class AnthropicProvider(LLMProvider):
                         elif block.type == "text":
                             # text block 已在 content_block_delta 处理
                             pass
+                        # thinking block 的内容通过 thinking_delta 事件流式接收，
+                        # 这里不需要额外处理 content_block_start
 
                 # 流结束后，解析累积的工具调用
                 for idx in sorted(content_blocks.keys()):
