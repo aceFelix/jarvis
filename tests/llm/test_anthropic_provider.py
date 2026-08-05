@@ -220,11 +220,12 @@ class TestProviderBasics:
         assert p2.name == "anthropic"
 
     def test_thinking_toggle(self, provider: AnthropicProvider) -> None:
-        assert provider.is_thinking_enabled() is False
-        provider.set_thinking_enabled(True)
+        # 思考模式默认开启（与 OpenAI Provider 的 enable_thinking=True 保持一致）
         assert provider.is_thinking_enabled() is True
         provider.set_thinking_enabled(False)
         assert provider.is_thinking_enabled() is False
+        provider.set_thinking_enabled(True)
+        assert provider.is_thinking_enabled() is True
 
     async def test_close(self, provider: AnthropicProvider) -> None:
         await provider.close()
@@ -368,7 +369,12 @@ class TestStream:
             )]
 
     async def test_request_kwargs_construction(self, provider: AnthropicProvider) -> None:
-        """请求参数：cache_control、system 合并、temperature、默认 model。"""
+        """请求参数：cache_control、system 合并、temperature、默认 model。
+
+        思考模式默认开启时不传 temperature（DeepSeek 文档：思考模式不支持 temperature），
+        所以这里先关闭思考模式再验证 temperature 传递。
+        """
+        provider.set_thinking_enabled(False)  # 关闭思考以验证 temperature 传递
         provider._client.messages.stream.return_value = _FakeStream(
             [_Ev(type="message_start")],
             _final_message(usage=_Ev(input_tokens=1, output_tokens=1)),
