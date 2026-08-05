@@ -304,18 +304,19 @@ class DashScopeProvider(LLMProvider):
                     # usage（含缓存命中统计）
                     if resp.usage:
                         u = resp.usage
-                        # DashScope 原生 SDK 缓存字段：
+                        # DashScope 原生 SDK 缓存字段由 cache_policy 统一归一化：
                         # - prompt_cache_hit_tokens: 命中缓存的 token 数
                         # - prompt_tokens_details.cached_tokens: OpenAI 兼容格式
-                        cached = (
-                            u.get("prompt_cache_hit_tokens", 0)
-                            or (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
-                            or 0
-                        )
+                        from agent.llm.cache_policy import CACHE_POLICIES, parse_cache_usage
+                        cache_cfg = CACHE_POLICIES.get("dashscope_sdk")
+                        cached, created = (0, 0)
+                        if cache_cfg:
+                            cached, created = parse_cache_usage(u, cache_cfg)
                         final_usage = Usage(
                             input_tokens=u.get("input_tokens", 0),
                             output_tokens=u.get("output_tokens", 0),
                             cache_read_tokens=cached,
+                            cache_creation_tokens=created,
                         )
 
                     choices = resp.output.choices if resp.output else []

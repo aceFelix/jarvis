@@ -423,8 +423,8 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | `/exit` `/quit` `/q` | 退出贾维斯 |
 | `/reset` `/clear` | 清空对话历史，重新开始 |
 | `/compact` | 手动压缩上下文（摘要旧消息节省 Token） |
-| `/cost` | 显示本会话 token 用量与估算成本 |
-| `/context` | 查看上下文窗口使用情况（按角色分组统计消息数与 tokens） |
+| `/cost` | 显示本会话 token 用量与估算成本（含 system prompt 统计、缓存命中率） |
+| `/context` | 查看上下文窗口使用情况（按角色分组统计，含 system prompt token） |
 | `/rewind [n]` | 回退最近 n 条消息（默认 1 条） |
 | `/diff [path]` | 显示工作目录的 git diff（可指定路径） |
 

@@ -340,6 +340,47 @@ API Key 同时存入系统 keyring（S-01），展示时经 [mask.py](file:///e:
 | DashScope | `usage.prompt_cache_hit_tokens` 或 `prompt_tokens_details.cached_tokens` | 双字段兼容 |
 | Zai | `usage.prompt_tokens_details.cached_tokens` | 兼容 OpenAI 字段 |
 
+### 协议语义差异（重要）
+
+同一厂商可能提供多种兼容端点，`input_tokens` 语义**完全相反**：
+
+| 协议 | input_tokens 含义 | 缓存命中字段 | 命中率分母 |
+|---|---|---|---|
+| OpenAI 兼容 | **含**缓存命中部分 | `prompt_cache_hit_tokens` | `input_tokens` |
+| Anthropic 兼容 | **不含**缓存命中部分 | `cache_read_input_tokens` | `input_tokens + cache_read_tokens` |
+
+典型场景：DeepSeek 同时提供 OpenAI 兼容端点（如 `deepseek-v4-pro`）和 Anthropic 兼容
+端点（如 `deepseek-v4-flash`），两者 `input_tokens` 语义相反。
+
+### parse_cache_usage 协议适配
+
+[cache_policy.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/cache_policy.py) 的 `parse_cache_usage` 通过 `input_includes_cache` 参数区分协议：
+
+```python
+def parse_cache_usage(usage_obj, policy, input_tokens=0, *,
+                      input_includes_cache: bool = True) -> tuple[int, int]:
+    # 仅当 input_tokens 含缓存时做累计值合理性校验
+    # Anthropic 协议下 input_tokens 不含缓存，命中数可能远大于 input_tokens（正常）
+    if input_includes_cache and input_tokens and v > input_tokens * 3:
+        continue  # 丢弃累计值异常
+```
+
+- `True`（默认，OpenAI/DashScope）：保留累计值校验
+- `False`（Anthropic Provider 调用时传）：跳过校验
+
+### /cost 命中率分母自动判断
+
+[core_commands.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/commands/handlers/core_commands.py) 用数据特征判断协议，而非厂商名：
+
+```python
+if session.cache_read_tokens > session.input_tokens:
+    # Anthropic 协议：input_tokens 不含缓存，分母需加上缓存命中
+    denom = session.input_tokens + session.cache_read_tokens
+else:
+    # OpenAI/DashScope 协议：input_tokens 已含缓存
+    denom = session.input_tokens
+```
+
 ### Usage 数据结构
 
 ```python

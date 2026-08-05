@@ -284,6 +284,12 @@ class OpenAIProvider(LLMProvider):
         if cfg:
             apply_thinking(request_kwargs, cfg, thinking_on, self._thinking_budget)
 
+        # 上下文缓存 —— 配置表驱动（显式模式注入 cache_control，隐式不动）
+        from agent.llm.cache_policy import CACHE_POLICIES, apply_cache_markers
+        cache_cfg = CACHE_POLICIES.get(self.name)
+        if cache_cfg:
+            apply_cache_markers(api_msgs, cache_cfg, tool_defs=tool_schemas)
+
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}
 
@@ -293,15 +299,17 @@ class OpenAIProvider(LLMProvider):
             finish_reason = "stop"
             async for chunk in stream:
                 if chunk.usage:
-                    # 读取缓存命中统计（OpenAI/DashScope 兼容）
-                    cached = 0
-                    details = getattr(chunk.usage, "prompt_tokens_details", None)
-                    if details:
-                        cached = getattr(details, "cached_tokens", 0) or 0
+                    # 读取缓存命中/创建统计（各厂商字段差异由 cache_policy 归一化）
+                    from agent.llm.cache_policy import parse_cache_usage
+                    cache_cfg = CACHE_POLICIES.get(self.name)
+                    cached, created = (0, 0)
+                    if cache_cfg:
+                        cached, created = parse_cache_usage(chunk.usage, cache_cfg)
                     final_usage = Usage(
                         input_tokens=chunk.usage.prompt_tokens,
                         output_tokens=chunk.usage.completion_tokens,
                         cache_read_tokens=cached,
+                        cache_creation_tokens=created,
                     )
                 if not chunk.choices:
                     continue

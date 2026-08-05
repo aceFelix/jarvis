@@ -186,14 +186,17 @@ class ZaiProvider(LLMProvider):
 
                 for chunk in stream:
                     if chunk.usage:
-                        cached = 0
-                        details = getattr(chunk.usage, "prompt_tokens_details", None)
-                        if details:
-                            cached = getattr(details, "cached_tokens", 0) or 0
+                        # 智谱隐式缓存统计归一化（cache_policy 查表）
+                        from agent.llm.cache_policy import CACHE_POLICIES, parse_cache_usage
+                        cache_cfg = CACHE_POLICIES.get("zai_sdk")
+                        cached, created = (0, 0)
+                        if cache_cfg:
+                            cached, created = parse_cache_usage(chunk.usage, cache_cfg)
                         final_usage = Usage(
                             input_tokens=chunk.usage.prompt_tokens,
                             output_tokens=chunk.usage.completion_tokens,
                             cache_read_tokens=cached,
+                            cache_creation_tokens=created,
                         )
 
                     if not chunk.choices:

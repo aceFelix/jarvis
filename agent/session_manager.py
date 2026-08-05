@@ -184,11 +184,14 @@ def _auto_save(
     provider: str = "",
     session_name: str = "auto-latest",
     verbose: bool = True,
+    dialog_count: int = 0,
+    title_generated: bool = False,
 ) -> None:
     """保存会话到指定名称（增量刷新，每次对话后都会调用）。
 
     同时写入 auto-latest.json 确保重启时自动恢复。
     session_name 为空时使用时间戳自动命名。
+    dialog_count/title_generated 随会话持久化，供 /load 恢复后续计。
     """
     if not messages:
         return
@@ -202,6 +205,8 @@ def _auto_save(
             workdir=workdir,
             model=model,
             provider=provider,
+            dialog_count=dialog_count,
+            title_generated=title_generated,
         )
         # 同时写入 auto-latest 作为恢复指针
         save_session(
@@ -209,6 +214,8 @@ def _auto_save(
             workdir=workdir,
             model=model,
             provider=provider,
+            dialog_count=dialog_count,
+            title_generated=title_generated,
         )
         if verbose:
             ui.info(f"会话已自动保存（{session_name[:40]}）")
@@ -216,8 +223,9 @@ def _auto_save(
         pass
 
 
-def _save_session(ui: RichCLI, settings: Any, cmd: str, messages: list[Message]) -> None:
-    """/save [name] — 保存当前会话。"""
+def _save_session(ui: RichCLI, settings: Any, cmd: str, messages: list[Message],
+                  dialog_count: int = 0, title_generated: bool = False) -> None:
+    """/save [name] — 保存当前会话（记录轮数与标题状态供恢复）。"""
     from agent.core.memory.store import save_session
 
     # 解析名字: /save myname → myname; /save → auto-<timestamp>
@@ -236,6 +244,8 @@ def _save_session(ui: RichCLI, settings: Any, cmd: str, messages: list[Message])
         workdir=settings.workdir,
         model=settings.model or "",
         provider=settings.provider,
+        dialog_count=dialog_count,
+        title_generated=title_generated,
     )
     ui.info(f"会话已保存: {name}（{len(messages)} 条消息）→ {path}")
 
@@ -245,30 +255,48 @@ def _load_session(ui: RichCLI, settings: Any, cmd: str, messages: list[Message])
     pass  # deprecated, 改用 _load_by_name / _load_by_picker
 
 
-def _load_by_name(ui: RichCLI, settings: Any, name: str, messages: list[Message]) -> None:
-    """/load <name> — 直接加载指定会话。"""
+def _load_by_name(ui: RichCLI, settings: Any, name: str, messages: list[Message]) -> dict | None:
+    """/load <name> — 直接加载指定会话。
+
+    Returns:
+        加载恢复信息 {session_name, dialog_count, title_generated}，
+        供 REPL 恢复轮数计数与标题状态；失败返回 None。
+
+    @author aceFelix
+    """
     from agent.core.memory.store import load_session
 
     session = load_session(name)
     if not session:
         ui.error(f"会话不存在: {name}（用 /sessions 查看保存列表）")
-        return
+        return None
 
     messages.clear()
     messages.extend(session.messages)
     ui.info(f"已加载会话: {name}（{len(session.messages)} 条消息，"
             f"保存于 {session.meta.workdir}）")
     _render_session(ui, session.messages)
+    return {
+        "session_name": session.meta.name,
+        "dialog_count": session.meta.dialog_count,
+        "title_generated": session.meta.title_generated,
+    }
 
 
-def _load_by_picker(ui: RichCLI, messages: list[Message]) -> None:
-    """/load（无参数）— 终端内联选择（↑↓ Enter Esc，不弹窗）。"""
+def _load_by_picker(ui: RichCLI, messages: list[Message]) -> dict | None:
+    """/load（无参数）— 终端内联选择（↑↓ Enter Esc，不弹窗）。
+
+    Returns:
+        加载恢复信息 {session_name, dialog_count, title_generated}；取消/失败返回 None。
+
+    @author aceFelix
+    """
     from agent.core.memory.store import list_sessions, load_session
 
     sessions = list_sessions()
     if not sessions:
         ui.info("没有已保存的会话。用 /save [name] 保存当前会话。")
-        return
+        return None
 
     # 转 pick_from_list 格式 [(value, label, description), ...]
     items = []
@@ -287,17 +315,22 @@ def _load_by_picker(ui: RichCLI, messages: list[Message]) -> None:
     from agent.ui.terminal_picker import pick_from_list
     picked = pick_from_list(items, title="加载会话")
     if picked is None:
-        return
+        return None
 
     session = load_session(picked)
     if not session:
         ui.error(f"会话加载失败: {picked}")
-        return
+        return None
 
     messages.clear()
     messages.extend(session.messages)
     ui.info(f"已加载会话: {picked}（{len(session.messages)} 条消息）")
     _render_session(ui, session.messages)
+    return {
+        "session_name": session.meta.name,
+        "dialog_count": session.meta.dialog_count,
+        "title_generated": session.meta.title_generated,
+    }
 
 
 def _render_session(ui: RichCLI, msgs: list[Message]) -> None:

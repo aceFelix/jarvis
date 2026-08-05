@@ -22,6 +22,7 @@ configs/settings.toml
 .idea/
 *.iml
 .vscode/
+.workbuddy/
 
 # ---- OS ----
 .DS_Store

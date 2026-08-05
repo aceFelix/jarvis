@@ -186,19 +186,37 @@ def handle_mode(ctx: "CommandContext", stripped: str) -> bool:
     return True
 
 
-def _compact(ui: RichCLI, loop: QueryLoop, ctx: Any) -> None:
-    """手动触发上下文压缩。/compact 命令的执行体。"""
-    from agent.core.memory.compactor import estimate_tokens, should_compact
+async def _compact(ui: RichCLI, loop: QueryLoop, ctx: Any) -> None:
+    """手动触发上下文压缩。/compact 命令的执行体。
+
+    必须是 async：dispatch_command 已运行在事件循环里，
+    内部调用 loop.compact_now()（async）需直接 await，
+    不能用 asyncio.run() 嵌套（会抛 RuntimeError）。
+
+    token 统计仅含对话历史（不含 system prompt），因为压缩
+    只作用于对话历史，system prompt 不参与压缩。
+
+    @author aceFelix
+    """
+    from agent.core.memory.compactor import estimate_tokens
 
     pre_tokens = estimate_tokens(ctx.messages)
-    if not should_compact(ctx.messages, threshold=1):  # threshold=1 强制触发
-        ui.info(f"当前 {len(ctx.messages)} 条消息，约 {pre_tokens} tokens")
-        if len(ctx.messages) < 4:
-            ui.warn("消息太少，无需压缩")
-            return
+    keep_recent = loop.keep_recent_messages
+
+    # 提前判断：消息数 ≤ 保留阈值时，没有可摘要的内容，直接提示
+    if not loop.enable_compaction:
+        ui.warn(f"压缩功能已禁用（enable_compaction=False）")
+        return
+    if len(ctx.messages) <= keep_recent:
+        ui.info(
+            f"当前 {len(ctx.messages)} 条消息，约 {pre_tokens} tokens（对话历史，不含 system）\n"
+            f"消息数 ≤ 保留阈值（{keep_recent}），全部保留，无需压缩"
+        )
+        return
 
     ui.info(f"开始压缩（{len(ctx.messages)} 条消息，约 {pre_tokens} tokens）...")
-    ok = asyncio.run(loop.compact_now(ctx))
+    # 直接 await，不能用 asyncio.run()——会与已运行的事件循环冲突导致崩溃
+    ok = await loop.compact_now(ctx)
     if ok:
         post_tokens = estimate_tokens(ctx.messages)
         ui.info(
@@ -206,49 +224,106 @@ def _compact(ui: RichCLI, loop: QueryLoop, ctx: Any) -> None:
             f"（节省 {pre_tokens - post_tokens}，现在 {len(ctx.messages)} 条消息）"
         )
     else:
-        ui.warn("压缩未执行（可能消息太少或已禁用）")
+        ui.warn("压缩未执行（摘要为空或 LLM 调用失败）")
 
 
-def handle_compact(ctx: "CommandContext", stripped: str) -> bool:
+async def handle_compact(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /compact。"""
-    _compact(ctx.ui, ctx.loop, ctx.ctx)
+    await _compact(ctx.ui, ctx.loop, ctx.ctx)
     return True
 
 
-def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: str, provider_name: str) -> None:
-    """/cost: 显示本会话累计 token 用量与估算成本。"""
-    from agent.core.memory.compactor import estimate_tokens
+def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: str, provider_name: str, ctx: "CommandContext") -> None:
+    """/cost: 显示本会话累计 token 用量与估算成本。
 
-    est_tokens = estimate_tokens(messages)
+    token 估算拆分为三部分，让用户清晰看到各组成占比：
+    - System Prompt token：系统提示词（含工具说明/技能包/平台规范）
+    - 对话历史 token：用户与助手交互的消息（不含 system）
+    - 完整上下文 token：上述两者之和，即每轮请求的实际上下文规模
+
+    @author aceFelix
+    """
+    from agent.core.memory.compactor import estimate_tokens, estimate_text_tokens
+    from agent.llm.base import Usage
+
+    # System Prompt token 估算（独立计算，原 estimate_tokens 不含 system）
+    system_tokens = estimate_text_tokens(ctx.system_prompt) if ctx.system_prompt else 0
+    dialog_tokens = estimate_tokens(messages)
+    total_tokens = system_tokens + dialog_tokens
     rows = [
         ["对话轮数", str(dialog_count)],
         ["消息数", str(len(messages))],
-        ["当前上下文 token（估算）", f"{est_tokens:,}"],
+        ["System Prompt token（估算）", f"{system_tokens:,}"],
+        ["对话历史 token（估算）", f"{dialog_tokens:,}"],
+        ["完整上下文 token（含 system）", f"{total_tokens:,}"],
         ["模型", model],
         ["Provider", provider_name],
     ]
+
+    # 会话级真实用量统计（含缓存命中，来自各 Provider 归一化后的 usage）
+    session = ctx.loop.session_usage if ctx.loop is not None else Usage()
+    if session.input_tokens:
+        rows.append(["累计输入 token（API 实计）", f"{session.input_tokens:,}"])
+        rows.append(["累计输出 token（API 实计）", f"{session.output_tokens:,}"])
+        rows.append(["缓存命中 token", f"{session.cache_read_tokens:,}"])
+        rows.append(["缓存创建 token", f"{session.cache_creation_tokens:,}"])
+        # 命中率分母按协议口径区分（而非厂商名）：
+        # - OpenAI/DashScope 兼容协议：input_tokens 已含缓存命中 → 分母=input_tokens
+        # - Anthropic 协议（含 DeepSeek Anthropic 兼容端点）：input_tokens 不含缓存
+        #   → 真实总输入 = input_tokens + cache_read_tokens
+        # 判断依据：Anthropic 协议下 cache_read 是 input_tokens 之外的独立值，
+        # 命中数可能远大于未命中的 input_tokens（如 system prompt 全命中）。
+        # 用 cache_read > input_tokens 作为"input_tokens 不含缓存"的信号。
+        if session.cache_read_tokens > session.input_tokens:
+            # input_tokens 不含缓存（Anthropic 协议），分母需加上缓存命中
+            denom = session.input_tokens + session.cache_read_tokens
+        else:
+            # input_tokens 已含缓存（OpenAI/DashScope 协议）
+            denom = session.input_tokens
+        hit_ratio = session.cache_read_tokens / denom * 100 if denom else 0
+        rows.append(["缓存命中率", f"{hit_ratio:.1f}%"])
+
     ui.info("本会话成本统计（部分基于估算）")
     render_table(rows, headers=["指标", "值"])
     ui.info("提示: 实际 API 计费以厂商账单为准；历史累计请查看 ~/.jarvis/logs/diag.log")
 
 
 def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /cost。"""
-    _print_cost(ctx.ui, ctx.messages, ctx.dialog_count, ctx.model, ctx.settings.provider)
+    """处理 /cost。
+
+    Provider 显示运行时实际检测名（如 DeepSeek Anthropic 兼容端点检测为
+    deepseek），而非 settings.provider 静态配置。
+    """
+    provider_name = getattr(ctx.provider, "name", None) or ctx.settings.provider
+    _print_cost(ctx.ui, ctx.messages, ctx.dialog_count, ctx.model, provider_name, ctx)
     return True
 
 
-def _print_context(ui: RichCLI, messages: list[Message], model: str) -> None:
-    """/context: 显示上下文窗口使用情况，按角色分组统计消息数。"""
-    from agent.core.memory.compactor import estimate_tokens
+def _print_context(ui: RichCLI, messages: list[Message], model: str, system_prompt: str = "") -> None:
+    """/context: 显示上下文窗口使用情况，按角色分组统计消息数。
+
+    system_prompt 单独传入并单独统计 token，因为 system prompt 不在
+    messages 列表内，但实际占上下文窗口。窗口占比必须含 system 才准确。
+
+    @author aceFelix
+    """
+    from agent.core.memory.compactor import estimate_tokens, estimate_text_tokens
 
     role_counts: dict[str, int] = {}
     role_tokens: dict[str, int] = {}
     for m in messages:
         role_counts[m.role] = role_counts.get(m.role, 0) + 1
         role_tokens[m.role] = role_tokens.get(m.role, 0) + estimate_tokens([m])
-    total = estimate_tokens(messages)
-    window = 32768
+    # System Prompt 独立统计（不在 messages 里，但占上下文窗口）
+    system_tokens = estimate_text_tokens(system_prompt) if system_prompt else 0
+    if system_tokens:
+        role_tokens["system"] = role_tokens.get("system", 0) + system_tokens
+        role_counts["system"] = role_counts.get("system", 0) + (1 if system_tokens else 0)
+    dialog_total = estimate_tokens(messages)
+    total = dialog_total + system_tokens
+    # 窗口默认值取主流大模型的保守值（128k）。
+    # JARVIS 暂无模型→窗口映射表，此处仅用于估算占比，非精确值。
+    window = 128000
     pct = (total / window * 100) if window else 0
     ui.info(f"上下文使用情况（模型: {model}，假设窗口 {window:,} tokens）")
     rows = [
@@ -257,7 +332,7 @@ def _print_context(ui: RichCLI, messages: list[Message], model: str) -> None:
         if role in role_counts
     ]
     render_table(rows, headers=["角色", "消息数", "tokens"])
-    ui.info(f"合计: {len(messages)} 条消息 / {total:,} tokens / 窗口占比 {pct:.1f}%")
+    ui.info(f"合计: {len(messages)} 条消息 + system prompt / {total:,} tokens / 窗口占比 {pct:.1f}%")
     children = []
     for m in messages[-5:]:
         first_text = ""
@@ -274,7 +349,7 @@ def _print_context(ui: RichCLI, messages: list[Message], model: str) -> None:
 
 def handle_context(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /context。"""
-    _print_context(ctx.ui, ctx.messages, ctx.model)
+    _print_context(ctx.ui, ctx.messages, ctx.model, ctx.system_prompt)
     return True
 
 

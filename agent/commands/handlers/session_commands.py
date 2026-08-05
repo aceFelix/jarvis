@@ -23,12 +23,17 @@ if TYPE_CHECKING:
 
 async def handle_save(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /save [name]。"""
-    _save_session(ctx.ui, ctx.settings, stripped, ctx.messages)
+    _save_session(ctx.ui, ctx.settings, stripped, ctx.messages,
+                  dialog_count=ctx.dialog_count, title_generated=ctx.title_generated)
     return True
 
 
 async def handle_load(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /load <prefix>：前缀匹配加载会话。"""
+    """处理 /load <prefix>：前缀匹配加载会话。
+
+    加载后把恢复信息（轮数/标题状态）存到 ctx.last_load_info，
+    由 REPL 主循环应用到 _dialog_count/_title_generated/_session_name。
+    """
     parts = stripped.split(None, 1)
     if len(parts) > 1 and parts[1].strip():
         want = parts[1].strip().lower()
@@ -37,13 +42,17 @@ async def handle_load(ctx: "CommandContext", stripped: str) -> bool:
         sessions = list_sessions()
         exact = next((s for s in sessions if s.name.lower() == want), None)
         if exact:
-            _load_by_name(ctx.ui, ctx.settings, exact.name, ctx.messages)
+            info = _load_by_name(ctx.ui, ctx.settings, exact.name, ctx.messages)
+            if info:
+                ctx.last_load_info = info
         else:
             matches = [s for s in sessions if s.name.lower().startswith(want)]
             if not matches:
                 ctx.ui.warn(f"无匹配会话: {want}（用 /sessions 查看保存列表）")
             elif len(matches) == 1:
-                _load_by_name(ctx.ui, ctx.settings, matches[0].name, ctx.messages)
+                info = _load_by_name(ctx.ui, ctx.settings, matches[0].name, ctx.messages)
+                if info:
+                    ctx.last_load_info = info
             else:
                 match_items = [
                     (s.name, s.name, f"{s.message_count} 条消息 | {s.workdir or '(无)'}")
@@ -51,7 +60,9 @@ async def handle_load(ctx: "CommandContext", stripped: str) -> bool:
                 ]
                 picked = pick_from_list(match_items, title=f"「{want}」匹配 {len(matches)} 个会话")
                 if picked:
-                    _load_by_name(ctx.ui, ctx.settings, picked, ctx.messages)
+                    info = _load_by_name(ctx.ui, ctx.settings, picked, ctx.messages)
+                    if info:
+                        ctx.last_load_info = info
     else:
         ctx.ui.warn("用法: /load <会话名前缀>（用 /sessions 查看并选择会话）")
     return True

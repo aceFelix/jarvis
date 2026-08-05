@@ -24,6 +24,7 @@ from agent.llm.base import (
     ToolDef,
     Usage,
 )
+from agent.llm.cache_policy import CACHE_POLICIES
 
 
 def _block_to_anthropic(block: Any) -> dict[str, Any]:
@@ -186,12 +187,20 @@ class AnthropicProvider(LLMProvider):
         # ---- Prompt Caching: 在 system 和 tools 上标记 cache_control 断点 ----
         # Anthropic 缓存前缀匹配：system + tools 是每次请求最稳定的前缀，
         # 标记后服务端会缓存这部分的 KV，后续请求命中时 input token 费用降 90%。
+        # 策略配置见 agent.llm.cache_policy.CACHE_POLICIES["anthropic"]
         system_blocks: list[dict[str, Any]] = [
             {"type": "text", "text": full_system, "cache_control": {"type": "ephemeral"}}
         ]
         # 在最后一个 tool 上标记断点（tools 整体作为前缀的一部分被缓存）
         if tool_defs:
             tool_defs[-1]["cache_control"] = {"type": "ephemeral"}
+
+        # 滚动断点：最后一条 user 消息上打标记 —— 多轮对话中该位置逐轮滚动，
+        # 每轮命中即续期 5 分钟 TTL，且不会破坏 system/tools 的独立缓存块。
+        # 注意：CACHE_POLICIES 必须在此处（函数内首次引用前）绑定，
+        # 否则下方 usage 解析的 import 会把它遮蔽为局部变量导致 UnboundLocalError。
+        from agent.llm.cache_policy import CACHE_POLICIES, apply_cache_markers
+        apply_cache_markers(api_msgs, CACHE_POLICIES.get("anthropic"), tool_defs=tool_defs)
 
         request_kwargs: dict[str, Any] = {
             "model": model or self.default_model,
@@ -271,11 +280,31 @@ class AnthropicProvider(LLMProvider):
                 try:
                     final = await stream.get_final_message()
                     u = final.usage
+                    # 缓存统计按实际厂商查表归一化——Anthropic 兼容端点可能是
+                    # DeepSeek 等第三方实现，其 cache_read_input_tokens 语义与
+                    # Anthropic 官方不同（如 DeepSeek 返回累计值而非单次命中），
+                    # 必须按 self.name 对应的策略字段解析。
+                    # 关键：Anthropic 协议下 input_tokens 不含缓存命中部分，
+                    # 必须传 input_includes_cache=False，否则备选字段的合理性
+                    # 校验会误判命中数（远大于未命中 input_tokens）为累计值异常而丢弃。
+                    from agent.llm.cache_policy import CACHE_POLICIES, parse_cache_usage
+                    cache_cfg = CACHE_POLICIES.get(self.name)
+                    cached, created = (0, 0)
+                    if cache_cfg:
+                        cached, created = parse_cache_usage(
+                            u, cache_cfg,
+                            input_tokens=u.input_tokens,
+                            input_includes_cache=False,  # Anthropic 协议：input_tokens 不含缓存
+                        )
+                    else:
+                        # 未注册厂商回退 Anthropic 官方字段
+                        cached = getattr(u, "cache_read_input_tokens", 0) or 0
+                        created = getattr(u, "cache_creation_input_tokens", 0) or 0
                     usage = Usage(
                         input_tokens=u.input_tokens,
                         output_tokens=u.output_tokens,
-                        cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
-                        cache_creation_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
+                        cache_read_tokens=cached,
+                        cache_creation_tokens=created,
                     )
                     stop_reason = final.stop_reason or "stop"
                 except Exception:

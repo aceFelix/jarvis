@@ -127,6 +127,8 @@ class QueryLoop:
         self._chat_detection = chat_detection
         # 网络错误重试计数（每轮 run() 只重试一次）
         self._network_retried: bool = False
+        # 会话级 token 累计（跨多轮 run() 累加，供 /cost 展示缓存命中率）
+        self._session_usage = Usage()
 
     def set_thinking_enabled(self, enabled: bool | None) -> None:
         """统一开关思考模式，同时同步到当前 provider。
@@ -370,7 +372,30 @@ class QueryLoop:
         except Exception:
             pass  # 非关键异常，不影响主流程
 
+        # 会话级累计（本轮 usage 并入，供 /cost 展示缓存命中统计）
+        self._session_usage = Usage(
+            input_tokens=self._session_usage.input_tokens + stats.usage.input_tokens,
+            output_tokens=self._session_usage.output_tokens + stats.usage.output_tokens,
+            cache_read_tokens=self._session_usage.cache_read_tokens + stats.usage.cache_read_tokens,
+            cache_creation_tokens=self._session_usage.cache_creation_tokens + stats.usage.cache_creation_tokens,
+        )
+
         return stats
+
+    @property
+    def session_usage(self) -> Usage:
+        """会话级累计 token 用量（跨多轮对话）。"""
+        return self._session_usage
+
+    @property
+    def keep_recent_messages(self) -> int:
+        """压缩时保留的最近消息数（供 /compact 提前判断是否值得压缩）。"""
+        return self._keep_recent_messages
+
+    @property
+    def enable_compaction(self) -> bool:
+        """压缩功能是否启用（供 /compact 显示准确原因）。"""
+        return self._enable_compaction
 
     async def _stream_once(
         self, ctx: ToolContext,

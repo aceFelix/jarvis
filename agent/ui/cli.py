@@ -113,6 +113,7 @@ except ImportError:
 SLASH_COMMANDS = [
     ("/exit",       "退出贾维斯"),
     ("/quit",       "退出贾维斯"),
+    ("/q",          "退出贾维斯（/exit 简写）"),
     ("/help",       "查看所有命令帮助"),
     ("/h",          "查看帮助（/help 简写）"),
     ("/mode <m>",   "切换权限模式 (default/plan/accept_edits/yolo)"),
@@ -121,6 +122,14 @@ SLASH_COMMANDS = [
     ("/reset",      "清空对话历史，重新开始"),
     ("/clear",      "清空对话历史（/reset 别名）"),
     ("/compact",    "手动压缩上下文（摘要旧消息节省 token）"),
+    ("/context",    "查看上下文窗口使用情况（按角色统计）"),
+    ("/cost",       "显示本会话 token 用量与成本估算（含缓存命中率）"),
+    ("/c",          "显示成本统计（/cost 简写）"),
+    ("/doctor",     "系统诊断（环境/配置/日志/自愈统计）"),
+    ("/config show","查看当前生效的完整配置（LLM/MCP/自定义模型等）"),
+    ("/init",       "交互式首次配置引导（选厂商→输Key→测试连接）"),
+    ("/rewind [n]", "回退最近 n 条消息（默认 1）"),
+    ("/diff [path]","显示 git diff（工作区改动）"),
     ("/save [name]","保存当前会话"),
     ("/load <前缀>","前缀匹配加载会话（支持模糊输入）"),
     ("/loads",      "列出并交互选择已保存会话"),
@@ -161,6 +170,8 @@ SLASH_COMMANDS = [
     ("/cli_anything market",    "列出市场可用 harness"),
     ("/cli_anything install <id>",  "安装指定 harness"),
     ("/cli_anything uninstall <id>","卸载指定 harness"),
+    ("/harnesses",     "列出已安装 CLI-Anything harness（别名）"),
+    ("/server [目录] [--port N]", "启动开发服务器（Vite/Next 等）"),
 ]
 
 # 工具名 → 语音播报描述（方言/中文，适合 TTS 朗读）

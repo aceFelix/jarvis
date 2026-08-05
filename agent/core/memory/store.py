@@ -149,6 +149,10 @@ class SessionMeta:
     workdir: str = ""
     model: str = ""
     provider: str = ""
+    # 保存时的对话轮数（恢复会话后继续计数，避免从头开始生成标题）
+    dialog_count: int = 0
+    # 会话是否已有标题（true 则恢复后不再重新生成标题）
+    title_generated: bool = False
 
 
 @dataclass
@@ -165,6 +169,24 @@ def _session_path(name: str) -> Path:
     return sessions_dir() / f"{safe_name}.json"
 
 
+def estimate_dialog_count(messages: list[Message]) -> int:
+    """从消息列表推断对话轮数（旧会话文件无 dialog_count 字段时用）。
+
+    轮数 = 用户主动提问次数：role==user 且内容不是纯工具结果的消息。
+
+    @author aceFelix
+    """
+    count = 0
+    for m in messages:
+        if m.role != "user":
+            continue
+        # 工具结果消息（role=user + ToolResultContent）不算新的一轮
+        if m.content and all(isinstance(b, ToolResultContent) for b in m.content):
+            continue
+        count += 1
+    return count
+
+
 def save_session(
     name: str,
     messages: list[Message],
@@ -172,6 +194,8 @@ def save_session(
     workdir: str = "",
     model: str = "",
     provider: str = "",
+    dialog_count: int = 0,
+    title_generated: bool = False,
 ) -> Path:
     """保存会话到 JSON 文件。返回文件路径。
 
@@ -197,6 +221,9 @@ def save_session(
         workdir=workdir,
         model=model,
         provider=provider,
+        # 保存时记录轮数/标题状态，供 /load 恢复后继续计数
+        dialog_count=dialog_count or estimate_dialog_count(messages),
+        title_generated=title_generated,
     )
 
     data = {
@@ -228,8 +255,14 @@ def load_session(name: str) -> SessionData | None:
         workdir=meta_d.get("workdir", ""),
         model=meta_d.get("model", ""),
         provider=meta_d.get("provider", ""),
+        # 旧文件无此字段：从消息数回退推断轮数
+        dialog_count=meta_d.get("dialog_count", 0),
+        title_generated=meta_d.get("title_generated", False),
     )
     messages = [_message_from_dict(m) for m in data.get("messages", [])]
+    # 旧会话文件没有 dialog_count → 用消息推断
+    if not meta.dialog_count:
+        meta.dialog_count = estimate_dialog_count(messages)
     return SessionData(meta=meta, messages=messages)
 
 

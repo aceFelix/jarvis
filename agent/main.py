@@ -375,6 +375,19 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 orchestrator = cmd_ctx.orchestrator
                 _dialog_count = cmd_ctx.dialog_count
 
+                # /load 加载会话后恢复轮数/标题状态：
+                # 继续加载前的轮数计数（如加载 3 轮 → 下一轮是第 4 轮），
+                # 并保留原标题不再重新生成。
+                if cmd_ctx.last_load_info:
+                    info = cmd_ctx.last_load_info
+                    cmd_ctx.last_load_info = None  # 只消费一次
+                    _session_name = info.get("session_name") or _session_name
+                    _dialog_count = info.get("dialog_count") or 0
+                    _title_generated = bool(info.get("title_generated"))
+                    cmd_ctx.dialog_count = _dialog_count
+                    cmd_ctx.session_name = _session_name
+                    cmd_ctx.title_generated = _title_generated
+
                 if cmd_ctx.should_exit:
                     # ---- Hook: session_end ----
                     try:
@@ -434,7 +447,9 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             # 每轮对话后增量保存（防窗口被强杀丢失记忆）
             _dialog_count += 1
             cmd_ctx.dialog_count = _dialog_count
-            _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider, session_name=_session_name, verbose=False)
+            _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
+                       session_name=_session_name, verbose=False,
+                       dialog_count=_dialog_count, title_generated=_title_generated)
             # 写恢复点（崩溃恢复用）
             try:
                 from agent.core.memory.recovery import save_recovery_point
@@ -449,7 +464,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 pass
 
             # 1轮对话后用用户首句生成标题；2轮对话后用 LLM 根据前两轮生成标题
-            if _dialog_count == 1:
+            # 注意：加载的会话已带标题（_title_generated=True），任何分支都不再生成
+            if _dialog_count == 1 and not _title_generated:
                 _session_name = await _generate_title_from_first_user(
                     ui, messages, _session_name
                 )
@@ -474,7 +490,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                 traceback.print_exc()
 
     # 退出前最终保存
-    _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider, session_name=_session_name)
+    _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
+               session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated)
 
     ui.goodbye()
     # 清理托盘图标

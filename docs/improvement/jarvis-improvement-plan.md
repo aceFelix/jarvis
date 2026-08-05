@@ -159,6 +159,7 @@
 | P-02 | Provider HTTP 连接复用 | httpx.AsyncClient 单例复用，避免每次新建（✅ 已完成 2026-07-30）| 中 |
 | P-03 | 工具注册缓存 | build_default_registry 结果缓存，不每次重建（✅ 已完成 2026-07-30）| 低 |
 | P-04 | 实时语音延迟初始化 | 先连 WebSocket 显示"已连接"，MCP 工具后台连完后热更新（✅ 已完成 — realtime_talk.py _load_mcp_tools_async）| 中 |
+| P-05 | 多厂商缓存策略管理 | cache_policy.py 配置表驱动：显式缓存注入 cache_control（DashScope/Anthropic），隐式缓存自动适配（DeepSeek/智谱），usage 统计统一归一化（✅ 已完成 2026-07-30）| 中 |
 
 ---
 

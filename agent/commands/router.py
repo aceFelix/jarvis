@@ -118,6 +118,9 @@ class CommandContext:
     system_prompt: str
     tray: Any = None
     should_exit: bool = False
+    # /load 加载会话后填充：{session_name, dialog_count, title_generated}，
+    # REPL 主循环消费后恢复轮数计数与标题状态（避免重新生成标题/重置轮数）
+    last_load_info: dict | None = None
 
 
 # 精确匹配命令表
@@ -133,6 +136,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/clear": handle_clear,
     "/compact": handle_compact,
     "/cost": handle_cost,
+    "/c": handle_cost,  # /cost 缩写（精确匹配，不影响 /clear /compact 等）
     "/context": handle_context,
     "/rewind": handle_rewind,
     "/diff": handle_diff,

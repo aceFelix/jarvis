@@ -97,11 +97,29 @@ _COMPACT_USER_TEMPLATE = """请将以下对话历史压缩成一段结构化摘�
 """
 
 
+def estimate_text_tokens(text: str) -> int:
+    """粗估纯文本字符串的 token 数（如 system prompt）。
+
+    与 estimate_tokens 使用相同的字符比例常量 _CHARS_PER_TOKEN，
+    保证 system prompt 与消息列表的 token 估算口径一致。
+    空字符串返回 0，非空至少返回 1。
+
+    @author aceFelix
+    """
+    if not text:
+        return 0
+    # _CHARS_PER_TOKEN 是 float（4.0），// 操作返回 float，需显式转 int
+    return int(max(1, len(text) // _CHARS_PER_TOKEN))
+
+
 def estimate_tokens(messages: list[Message]) -> int:
     """粗估消息列表的 token 数。
 
     遍历每条消息的每个 content block，按字符数 / 4 估算。图片块按
     固定值估算（视觉 token 通常远多于文本）。够用，不追求精确。
+
+    注意：本函数不计入 system prompt，system 需调用方单独用
+    estimate_text_tokens() 估算后累加。
     """
     total = 0
     for msg in messages:
