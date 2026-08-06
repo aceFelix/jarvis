@@ -396,6 +396,10 @@ class TestStream:
         assert kwargs["temperature"] == 0.3
         assert kwargs["max_tokens"] == 50
         assert kwargs["messages"][0]["role"] == "user"
+        # 关闭思考模式时必须显式传 {"type": "disabled"}——
+        # DeepSeek Anthropic 兼容端点思考模式默认开，不传会走默认值（开），
+        # 导致 /think off 后仍输出思考过程
+        assert kwargs["thinking"] == {"type": "disabled"}
 
     async def test_no_tools_no_tools_key(self, provider: AnthropicProvider) -> None:
         """无工具时请求里不应有 tools 键。"""

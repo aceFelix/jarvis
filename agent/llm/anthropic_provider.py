@@ -214,8 +214,11 @@ class AnthropicProvider(LLMProvider):
             request_kwargs["tools"] = tool_defs
 
         # ---- 思考模式参数注入 ----
-        # DeepSeek Anthropic 兼容端点：thinking={"type": "enabled"} 开启思考模式
-        # Anthropic 原生端点：需要额外 budget_tokens（最小 1024）
+        # DeepSeek Anthropic 兼容端点：thinking={"type": "enabled/disabled"} 控制开关
+        #   ⚠ DeepSeek 思考模式默认打开，必须显式传 {"type": "disabled"} 才能关闭，
+        #     仅不传参数会走默认值（开），导致 /think off 后仍输出思考过程。
+        # Anthropic 原生端点：需要额外 budget_tokens（最小 1024），默认关闭，
+        #   不传参数即关闭，但显式传 disabled 也兼容。
         # 思考模式不支持 temperature（DeepSeek 文档：设置不会报错但不生效）
         if self._thinking_enabled:
             if self.name == "anthropic":
@@ -228,8 +231,11 @@ class AnthropicProvider(LLMProvider):
                 # DeepSeek 等兼容端点只需 type，不需要 budget_tokens
                 request_kwargs["thinking"] = {"type": "enabled"}
             # 思考模式下不传 temperature（DeepSeek 文档：思考模式不支持 temperature）
-        elif temperature is not None:
-            request_kwargs["temperature"] = temperature
+        else:
+            # 显式关闭思考模式——DeepSeek 兼容端点默认是开的，不传会漏
+            request_kwargs["thinking"] = {"type": "disabled"}
+            if temperature is not None:
+                request_kwargs["temperature"] = temperature
 
         try:
             async with self._client.messages.stream(**request_kwargs) as stream:
