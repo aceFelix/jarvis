@@ -1482,6 +1482,55 @@ Every push or PR to `main` branch, **GitHub Actions auto-runs full tests** (Pyth
 
 ---
 
+## Auto-Publish Workflow
+
+Jarvis uses **GitHub Actions + Git Tag** to publish to PyPI and npm with one command — no manual build/upload needed.
+
+### Trigger
+
+```bash
+# 1. Update version (pyproject.toml version field + npm/package.json version field)
+# 2. Commit the version bump
+git add pyproject.toml npm/package.json
+git commit -m "chore: bump version to 2.0.6"
+
+# 3. Tag and push (the v prefix is required)
+git tag v2.0.6
+git push github v2.0.6
+```
+
+Pushing a `v*` tag triggers [publish.yml](.github/workflows/publish.yml), which automatically:
+1. **Tests** — runs full pytest; aborts on failure
+2. **Version consistency check** — tag version must match `pyproject.toml` / `npm/package.json`, else error
+3. **Builds** — `python -m build` produces wheel + sdist
+4. **Publishes to PyPI** — via Trusted Publisher (OIDC, no API token)
+5. **Publishes to npm** — via `NPM_TOKEN`
+6. **Creates GitHub Release** — with wheel/sdist attached, changelog auto-extracted from commits
+
+### First-time Setup (once only)
+
+#### PyPI Trusted Publisher (no API token)
+
+1. Log in to [pypi.org](https://pypi.org) → Account settings → Publishing
+2. Add a new pending publisher with:
+   - **PyPI Project Name**: `jarvis-agent`
+   - **Owner**: `aceFelix`
+   - **Repository name**: `jarvis`
+   - **Workflow name**: `publish.yml`
+   - **Environment name**: `pypi`
+3. After the first publish, the publisher auto-activates. No further config needed.
+
+#### npm Token
+
+1. Log in to [npmjs.com](https://www.npmjs.com) → Access Tokens → Generate New Token → **Automation** (bypasses 2FA restriction)
+2. In GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+   - **Name**: `NPM_TOKEN`
+   - **Value**: the token from the previous step
+
+> Once configured, every `v*` tag push auto-publishes everything. No local twine, no manual `npm publish`, no API token rotation headaches.
+
+---
+
 ## Development Roadmap
 
 - [x] **Phase 1**: Minimum viable Agent (chat + file + command + five-layer permission)

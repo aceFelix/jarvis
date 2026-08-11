@@ -1482,6 +1482,55 @@ coverage report
 
 ---
 
+## 自动发布流程
+
+Jarvis 通过 **GitHub Actions + Git Tag** 实现一键自动发布到 PyPI 和 npm，无需手动构建上传。
+
+### 触发方式
+
+```bash
+# 1. 更新版本号（pyproject.toml 的 version 字段 + npm/package.json 的 version 字段）
+# 2. 提交版本变更
+git add pyproject.toml npm/package.json
+git commit -m "chore: bump version to 2.0.6"
+
+# 3. 打 tag 并推送（v 前缀必须）
+git tag v2.0.6
+git push github v2.0.6
+```
+
+推送 `v*` tag 后，[publish.yml](.github/workflows/publish.yml) 自动执行：
+1. **测试** — 跑全量 pytest，失败则中止发布
+2. **版本一致性校验** — tag 版本号必须与 `pyproject.toml` / `npm/package.json` 一致，否则报错
+3. **构建** — `python -m build` 生成 wheel + sdist
+4. **发布 PyPI** — 通过 Trusted Publisher（OIDC 无凭证）上传
+5. **发布 npm** — 通过 `NPM_TOKEN` 上传 npm wrapper 包
+6. **创建 GitHub Release** — 自动附带 wheel/sdist 下载，从 commit 提取 changelog
+
+### 首次配置（仅做一次）
+
+#### PyPI Trusted Publisher（无 API Token）
+
+1. 登录 [pypi.org](https://pypi.org) → Account settings → Publishing
+2. Add a new pending publisher，填入：
+   - **PyPI Project Name**: `jarvis-agent`
+   - **Owner**: `aceFelix`
+   - **Repository name**: `jarvis`
+   - **Workflow name**: `publish.yml`
+   - **Environment name**: `pypi`
+3. 第一次发布后，publisher 自动激活。后续版本无需再次配置。
+
+#### npm Token
+
+1. 登录 [npmjs.com](https://www.npmjs.com) → Access Tokens → Generate New Token → **Automation**（绕过 2FA 限制）
+2. 在 GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+   - **Name**: `NPM_TOKEN`
+   - **Value**: 上一步生成的 token
+
+> 配置完成后，每次推送 `v*` tag 即可全自动发布。无需本地装 twine、无需手动 `npm publish`、无需管理 API token 轮换。
+
+---
+
 ## 开发路线
 
 - [x] **阶段 1**：最小可用 Agent（对话 + 文件 + 命令 + 五层权限）
