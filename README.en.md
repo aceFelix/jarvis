@@ -335,6 +335,7 @@ auto_start = false                        # Auto-enter on daemon start
 compaction = true
 compaction_threshold = 8000       # Token threshold (triggers compaction when exceeded)
 keep_recent_messages = 6          # Keep recent N messages when compacting
+tool_result_keep_recent = 4       # Keep recent N full tool outputs when folding (older ones collapse to one-line summaries)
 
 # ---- Daemon mode ----
 [daemon]

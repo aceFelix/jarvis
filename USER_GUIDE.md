@@ -474,6 +474,7 @@ max_iterations = 50               # 单轮最大工具调用
 compaction = true
 compaction_threshold = 8000
 keep_recent_messages = 6
+tool_result_keep_recent = 4   # 工具结果折叠时保留最近 N 条完整输出
 
 # 常驻模式
 [daemon]

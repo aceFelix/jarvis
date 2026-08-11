@@ -335,6 +335,7 @@ auto_start = false                        # daemon 启动时自动进入
 compaction = true
 compaction_threshold = 8000       # Token 阈值（超此值触发压缩）
 keep_recent_messages = 6          # 压缩时保留最近 N 条消息
+tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
 # ---- 常驻模式 ----
 [daemon]
