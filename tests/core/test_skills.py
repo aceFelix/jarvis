@@ -162,49 +162,86 @@ class TestLoadSkills:
 
 
 class TestPrompt:
-    """skills_to_prompt / skills_section 测试。"""
+    """skills_to_prompt / skills_section / match_skills_for_message 测试。"""
 
     def test_prompt_empty(self):
         """空技能列表返回空串。"""
         assert sk.skills_to_prompt([]) == ""
 
-    def test_prompt_content(self):
-        """拼出包含全部字段的 prompt 段落。"""
+    def test_prompt_summary_only(self):
+        """摘要模式：只输出名字+描述+时机，不输出正文。"""
         skill = sk.Skill(
             name="s1", description="描述1", when_to_use="时机1",
             trigger_words=["a", "b"], content="正文内容",
         )
         out = sk.skills_to_prompt([skill])
         assert "# 可用技能（Skills）" in out
-        assert "## 技能: s1" in out
-        assert "**描述**: 描述1" in out
-        assert "**使用时机**: 时机1" in out
-        assert "**触发词**: a, b" in out
-        assert "正文内容" in out
+        assert "s1" in out
+        assert "描述1" in out
+        assert "时机1" in out
+        # 正文不应出现在 system prompt 摘要里
+        assert "正文内容" not in out
 
     def test_prompt_partial_fields(self):
-        """字段缺失时不输出对应行。"""
+        """字段缺失时不输出对应内容。"""
         skill = sk.Skill(name="s2", content="x")
         out = sk.skills_to_prompt([skill])
-        assert "**描述**" not in out
-        assert "**触发词**" not in out
+        assert "s2" in out
+        # 正文不注入摘要
+        assert "x" not in out
 
     def test_skills_section(self, tmp_path, monkeypatch):
-        """skills_section 集成：加载并拼接。"""
+        """skills_section 集成：加载并拼接摘要。"""
         home = tmp_path / "home"
         home.mkdir()
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
         (home / ".jarvis" / "skills" / "x").mkdir(parents=True)
         (home / ".jarvis" / "skills" / "x" / "SKILL.md").write_text(
-            "---\nname: x\ndescription: X技能\n---\n正文", encoding="utf-8")
+            "---\nname: x\ndescription: X技能\ntrigger_words: git, 提交\n---\n正文内容",
+            encoding="utf-8")
         out = sk.skills_section(str(tmp_path / "proj"))
         assert "# 可用技能（Skills）" in out
         assert "X技能" in out
+        # 正文不应出现在摘要里
+        assert "正文内容" not in out
         # 无技能环境 → 空串
         empty_home = tmp_path / "empty-home"
         empty_home.mkdir()
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: empty_home))
         assert sk.skills_section(str(tmp_path / "proj")) == ""
+
+    def test_match_skills_hit(self, tmp_path, monkeypatch):
+        """触发词匹配命中时返回完整正文。"""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        (home / ".jarvis" / "skills" / "git-helper").mkdir(parents=True)
+        (home / ".jarvis" / "skills" / "git-helper" / "SKILL.md").write_text(
+            "---\nname: git-helper\ndescription: Git专家\ntrigger_words: git, 提交, 分支\n---\nGit 专业指令正文",
+            encoding="utf-8")
+        # 匹配触发词 "git"
+        out = sk.match_skills_for_message("帮我 git 提交一下", str(tmp_path / "proj"))
+        assert "git-helper" in out
+        assert "Git 专业指令正文" in out  # 正文在匹配时加载
+
+    def test_match_skills_no_hit(self, tmp_path, monkeypatch):
+        """触发词不匹配时返回空串。"""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        (home / ".jarvis" / "skills" / "git-helper").mkdir(parents=True)
+        (home / ".jarvis" / "skills" / "git-helper" / "SKILL.md").write_text(
+            "---\nname: git-helper\ndescription: Git专家\ntrigger_words: git, 提交\n---\n正文",
+            encoding="utf-8")
+        # 不匹配任何触发词
+        assert sk.match_skills_for_message("今天天气怎么样", str(tmp_path / "proj")) == ""
+
+    def test_match_skills_no_skills(self, tmp_path, monkeypatch):
+        """无 skill 时返回空串。"""
+        empty_home = tmp_path / "empty-home"
+        empty_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: empty_home))
+        assert sk.match_skills_for_message("git 提交", str(tmp_path / "proj")) == ""
 
 
 class TestListFiles:

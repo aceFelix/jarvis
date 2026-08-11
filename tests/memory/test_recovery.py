@@ -74,6 +74,21 @@ class TestSaveRecoveryPoint:
         # 不抛异常即为通过
         save_recovery_point(_messages(), workdir="", model="", provider="", dialog_count=0)
 
+    def test_save_leaves_no_tmp_file(self, recovery_dir) -> None:
+        """原子写：保存成功后不残留 .recovery.json.tmp 临时文件。"""
+        save_recovery_point(_messages(), workdir="", model="", provider="", dialog_count=1)
+        assert not (recovery_dir / ".recovery.json.tmp").exists()
+
+    def test_save_overwrite_keeps_valid_json(self, recovery_dir) -> None:
+        """重复保存（覆盖写）后文件始终是完整 JSON，无残留 tmp。"""
+        for i in range(3):
+            save_recovery_point(_messages(), workdir=f"/wd{i}", model="", provider="", dialog_count=i)
+        path = recovery_dir / ".recovery.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["workdir"] == "/wd2"
+        assert data["dialog_count"] == 2
+        assert not (recovery_dir / ".recovery.json.tmp").exists()
+
 
 class TestMarkCleanExit:
     """标记正常退出。"""

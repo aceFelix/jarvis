@@ -65,6 +65,24 @@ class RecoveryPoint:
         return self.age_seconds > _RECOVERY_TTL
 
 
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """原子写 JSON：先写临时文件再 os.replace，避免写一半崩溃留下损坏文件。
+
+    直接 write_text 若在写入途中进程被杀，会留下截断的 JSON，下次启动
+    解析失败导致恢复点白存。tmp + replace 保证目标文件要么是旧内容、
+    要么是完整新内容，绝不出现中间态。
+    """
+    import os
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
 def save_recovery_point(
     messages: list[Message],
     *,
@@ -87,12 +105,7 @@ def save_recovery_point(
             "dialog_count": dialog_count,
             "messages": [_message_to_dict(m) for m in messages],
         }
-        path = _recovery_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _atomic_write_json(_recovery_path(), data)
     except Exception as e:
         diag_warn("recovery", f"写恢复点失败: {e}")
 
@@ -108,10 +121,7 @@ def mark_clean_exit() -> None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         data["clean_exit"] = True
-        path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _atomic_write_json(path, data)
     except Exception as e:
         diag_warn("recovery", f"标记正常退出失败: {e}")
 

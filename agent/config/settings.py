@@ -123,6 +123,7 @@ class Settings:
     context_compaction: bool = True
     compaction_threshold: int = 8000   # 估算 token 超此值触发压缩
     keep_recent_messages: int = 6      # 压缩时保留最近 N 条原消息
+    tool_result_keep_recent: int = 4   # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
     # 记忆持久化（阶段四第二刀）
     # 启动时自动恢复最近会话（/resume 也可手动恢复）
@@ -502,6 +503,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("compaction", "context_compaction"),
             ("compaction_threshold", "compaction_threshold"),
             ("keep_recent_messages", "keep_recent_messages"),
+            ("tool_result_keep_recent", "tool_result_keep_recent"),
         ):
             if sub_key in ctx_table:
                 updates[field] = ctx_table[sub_key]

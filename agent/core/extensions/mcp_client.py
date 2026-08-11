@@ -285,16 +285,26 @@ class MCPClient:
 
         try:
             # stdio_client 是 async context manager，需手动管理生命周期
+            # 每步加超时：防止单个 server 卡死整个 connect_all（gather 会等最慢的）
+            #   stdio_client 启动子进程 + 首次 npx 下载包 → 给 15s
+            #   ClientSession 建立 → 5s
+            #   initialize 握手 → 10s
+            #   list_tools 列工具 → 10s
+            # 单个 server 最多 40s 超时放弃，不拖累其他 server
             conn._stdio_ctx = stdio_client(params)
-            read, write = await conn._stdio_ctx.__aenter__()
+            read, write = await asyncio.wait_for(
+                conn._stdio_ctx.__aenter__(), timeout=15
+            )
 
             conn._session_ctx = ClientSession(read, write)
-            conn._session = await conn._session_ctx.__aenter__()
+            conn._session = await asyncio.wait_for(
+                conn._session_ctx.__aenter__(), timeout=5
+            )
 
-            await conn._session.initialize()
+            await asyncio.wait_for(conn._session.initialize(), timeout=10)
 
             # 列出工具
-            result = await conn._session.list_tools()
+            result = await asyncio.wait_for(conn._session.list_tools(), timeout=10)
             for tool in result.tools:
                 conn.tools.append(McpToolDef(
                     server_name=name,
@@ -305,8 +315,9 @@ class MCPClient:
 
             self._connections[name] = conn
             return conn
-        except Exception:
-            # 连接失败: 清理半开的连接
+        except (asyncio.TimeoutError, Exception):
+            # 连接失败/超时: 清理半开的连接（含 kill 子进程）
+            # TimeoutError 继承自 BaseException 而非 Exception，需显式捕获
             await self._cleanup_connection(conn)
             return None
 

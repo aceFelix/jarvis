@@ -90,12 +90,18 @@ class TestEstimateTokens:
             images=[ImageContent(data="x"), ImageContent(data="y")],
         )
         msg = Message(role="user", content=[block])
-        # 文本部分 ≥1，每张图片 1000
-        assert estimate_tokens([msg]) >= 2000
+        # 文本部分 ≥1，每张图片 1500
+        assert estimate_tokens([msg]) >= 3000
 
     def test_image_content_fixed(self) -> None:
         msg = Message(role="user", content=[ImageContent(data="data")])
-        assert estimate_tokens([msg]) == 1000
+        assert estimate_tokens([msg]) == 1500
+
+    def test_image_tokens_overridable(self) -> None:
+        """图片 token 估算可按 provider 覆盖（不同视觉 token 算法）。"""
+        msg = Message(role="user", content=[ImageContent(data="data")])
+        assert estimate_tokens([msg], image_tokens_per_image=1000) == 1000
+        assert estimate_tokens([msg], image_tokens_per_image=2000) == 2000
 
     def test_multiple_messages_accumulate(self) -> None:
         msgs = [Message.user_text("abcd"), Message.assistant_text("efgh")]
@@ -451,3 +457,35 @@ class TestLoadSessionMemory:
         content = load_session_memory(str(tmp_path))
         assert "早期记忆已省略" in content
         assert len(content) <= 4100
+
+    def test_important_sections_kept_over_recent(self, tmp_path) -> None:
+        """超长时优先保留含重要段（错误修复/用户反馈）的条目，而非按时间取尾。"""
+        mem_dir = tmp_path / ".jarvis"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        header = "# 会话自动记忆\n\n> 说明文字\n\n"
+        important_old = (
+            "## 2026-01-01 10:00\n\n"
+            "### 4. 错误与修复\n"
+            "- 错误: compactor 缺 import os\n"
+            "- 修复: 补全导入\n"
+            "\n### 5. 用户反馈\n- 用户偏好：代码要加注释\n"
+        )
+        recent_noisy = "## 2026-01-02 10:00\n\n" + "普通闲聊内容。" * 60
+        content = header + important_old + "\n" + recent_noisy
+        (mem_dir / "SESSION_MEMORY.md").write_text(content, encoding="utf-8")
+
+        loaded = load_session_memory(str(tmp_path))
+        # 重要段保留（即使它比普通段更早）
+        assert "错误与修复" in loaded
+        assert "补全导入" in loaded
+        assert "代码要加注释" in loaded
+        # 不超过预算
+        assert len(loaded) <= 4000
+
+    def test_within_budget_returns_full(self, tmp_path) -> None:
+        """内容未超预算时原样返回，不做截断。"""
+        mem_dir = tmp_path / ".jarvis"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        content = "# 会话自动记忆\n\n## 2026-01-01 10:00\n\n少量内容"
+        (mem_dir / "SESSION_MEMORY.md").write_text(content, encoding="utf-8")
+        assert load_session_memory(str(tmp_path)) == content

@@ -273,6 +273,15 @@ def register_dynamic_tools(
             count += register_mcp_tools(registry, mcp_client)
         except ImportError:
             pass
+
+    # 3. LoadSkill 工具（按需加载技能包完整指令）
+    if workdir is not None:
+        try:
+            from agent.tools.extensions.skill_tool import LoadSkillTool
+            registry.register(LoadSkillTool(str(workdir)))
+            count += 1
+        except (ImportError, ValueError):
+            pass
     return count
 
 

@@ -136,31 +136,65 @@ def load_skills(workdir: str) -> list[Skill]:
 
 
 def skills_to_prompt(skills: list[Skill]) -> str:
-    """把 skill 列表拼成注入 system prompt 的段落。
+    """把 skill 列表拼成注入 system prompt 的摘要段落。
 
-    每个 skill 输出: 名字、描述、when_to_use、正文指令。
+    只注入名字+描述+使用时机+触发词（约 50 token/skill），
+    不注入完整正文（避免 N 个 skill 全文撑爆 system prompt）。
+    完整正文由 match_skills_for_message() 按触发词匹配后动态注入。
+
     无 skill 返回空字符串。
     """
     if not skills:
         return ""
 
     parts: list[str] = ["# 可用技能（Skills）\n"]
-    parts.append("以下是你可以调用的技能包，每个技能包含专业领域指令。")
-    parts.append("当用户的需求匹配某个技能时，按该技能的指令行事。\n")
+    parts.append("以下是可用的技能包。获取详细指令有两种方式：")
+    parts.append("1. 触发词匹配时自动加载；2. 调用 LoadSkill 工具传入技能名加载。\n")
 
     for s in skills:
+        line = f"- **{s.name}**"
+        if s.description:
+            line += f": {s.description}"
+        if s.when_to_use:
+            line += f"（{s.when_to_use}）"
+        parts.append(line)
+
+    return "\n".join(parts) + "\n"
+
+
+def match_skills_for_message(text: str, workdir: str) -> str:
+    """根据用户消息匹配 skill 触发词，返回匹配的 skill 完整正文。
+
+    在 QueryLoop.run() 里用户消息进来后调用，把匹配到的 skill 正文
+    作为上下文附加到当前用户消息，实现按需加载。
+
+    无匹配返回空字符串。
+    """
+    skills = load_skills(workdir)
+    if not skills:
+        return ""
+
+    text_lower = text.lower()
+    matched: list[Skill] = []
+    for s in skills:
+        for word in s.trigger_words:
+            if word.lower() in text_lower:
+                matched.append(s)
+                break
+
+    if not matched:
+        return ""
+
+    parts: list[str] = ["# 已激活技能（匹配到您的需求）\n"]
+    for s in matched:
         parts.append(f"## 技能: {s.name}")
         if s.description:
             parts.append(f"**描述**: {s.description}")
-        if s.when_to_use:
-            parts.append(f"**使用时机**: {s.when_to_use}")
-        if s.trigger_words:
-            parts.append(f"**触发词**: {', '.join(s.trigger_words)}")
-        parts.append("")  # 空行
+        parts.append("")
         parts.append(s.content)
-        parts.append("")  # 技能间空行
+        parts.append("")
 
-    return "\n".join(parts) + "\n"
+    return "\n".join(parts)
 
 
 def skills_section(workdir: str) -> str:

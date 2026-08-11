@@ -49,8 +49,17 @@ class LayeredContext:
         self._frozen: list[Message] = []       # 📦 冻结区：压缩后的摘要，永不修改
         self._active: list[Message] = []        # 🪟 活跃窗口：最近的消息，继续增长
         self._frozen_tokens: int = 0            # 冻结区估算 token 数（缓存，避免重复计算）
+        self._last_compact_result = None        # 📝 最近一次成功压缩的 CompactResult（供记忆落盘）
         if messages:
             self._active = list(messages)
+
+    @property
+    def last_compact_result(self):
+        """最近一次成功压缩的结果（含摘要、token 统计），未压缩过为 None。
+
+        供调用方在压缩后把摘要持久化到会话记忆文件（SESSION_MEMORY.md）。
+        """
+        return self._last_compact_result
 
     # ── 属性 ──
 
@@ -107,6 +116,7 @@ class LayeredContext:
         *,
         window_limit: int | None = None,
         keep_recent: int | None = None,
+        base_tokens: int = 0,
         on_progress: object = None,
     ) -> bool:
         """活跃窗口超阈值 → 压缩整个上下文并冻结前缀。
@@ -121,6 +131,8 @@ class LayeredContext:
             model: 模型名
             window_limit: 窗口 token 上限，超此触发。默认 DEFAULT_WINDOW_LIMIT
             keep_recent: 冻结时保留最近 N 条不压缩。默认 DEFAULT_KEEP_RECENT
+            base_tokens: 固定开销 token（system prompt 等），计入阈值判断。
+                estimate_tokens 不计 system，若忽略此值会系统性低估真实请求体积。
             on_progress: UI 回调（可选）
 
         Returns:
@@ -131,7 +143,8 @@ class LayeredContext:
         limit = window_limit or self.DEFAULT_WINDOW_LIMIT
         keep = keep_recent or self.DEFAULT_KEEP_RECENT
 
-        if self.active_tokens() < limit:
+        # 活跃窗口 + 固定开销（system prompt）超阈值才触发，避免低估
+        if self.active_tokens() + base_tokens < limit:
             return False
 
         from agent.core.memory.compactor import compact_messages
@@ -154,6 +167,7 @@ class LayeredContext:
             self._frozen = result.new_messages[:split_at]
             self._active = result.new_messages[split_at:]
             self._frozen_tokens = self._estimate_frozen()
+            self._last_compact_result = result   # 记录压缩结果，供调用方落盘记忆
             return True
         except Exception:
             from agent.core.logging import get_logger
@@ -192,6 +206,7 @@ class LayeredContext:
             self._frozen = result.new_messages[:split_at]
             self._active = result.new_messages[split_at:]
             self._frozen_tokens = self._estimate_frozen()
+            self._last_compact_result = result   # 记录压缩结果，供调用方落盘记忆
             return True
         except Exception:
             from agent.core.logging import get_logger

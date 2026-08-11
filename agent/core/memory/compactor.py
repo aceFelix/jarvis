@@ -31,6 +31,10 @@ from agent.llm.base import LLMEvent, LLMProvider, ProviderError, Stop, TextDelta
 # 粗略 token 估算系数：中英文混合约 4 字符/token
 _CHARS_PER_TOKEN = 4.0
 
+# 单张图片估算 token（截图 base64 JPEG 实测量级约 1500；不同 provider
+# 视觉 token 算法差异大，estimate_tokens 支持按需覆盖此值）
+_IMAGE_TOKENS_PER_IMAGE = 1500
+
 # 默认压缩参数
 DEFAULT_THRESHOLD_TOKENS = 8000   # 上下文超过此值触发压缩
 DEFAULT_KEEP_RECENT = 6            # 保留最近 N 条原消息（含当前轮）
@@ -112,11 +116,16 @@ def estimate_text_tokens(text: str) -> int:
     return int(max(1, len(text) // _CHARS_PER_TOKEN))
 
 
-def estimate_tokens(messages: list[Message]) -> int:
+def estimate_tokens(
+    messages: list[Message],
+    *,
+    image_tokens_per_image: int = _IMAGE_TOKENS_PER_IMAGE,
+) -> int:
     """粗估消息列表的 token 数。
 
     遍历每条消息的每个 content block，按字符数 / 4 估算。图片块按
-    固定值估算（视觉 token 通常远多于文本）。够用，不追求精确。
+    可配置的固定值估算（视觉 token 通常远多于文本，默认 1500/张，
+    不同 provider 视觉 token 算法差异大，调用方可按需覆盖）。
 
     注意：本函数不计入 system prompt，system 需调用方单独用
     estimate_text_tokens() 估算后累加。
@@ -136,10 +145,10 @@ def estimate_tokens(messages: list[Message]) -> int:
                 total += max(1, (len(block.name) + len(payload)) // _CHARS_PER_TOKEN)
             elif isinstance(block, ToolResultContent):
                 total += max(1, len(block.content) // _CHARS_PER_TOKEN)
-                # 图片块: 每张约 1000 token（保守估计）
-                total += len(block.images) * 1000
+                # 图片块: 默认每张约 1500 token（截图 base64 JPEG 实测量级）
+                total += len(block.images) * image_tokens_per_image
             elif isinstance(block, ImageContent):
-                total += 1000
+                total += image_tokens_per_image
     return int(total)
 
 
@@ -486,8 +495,13 @@ def update_session_memory(workdir: str, compact_result: CompactResult) -> str | 
         return None
 
 
-def load_session_memory(workdir: str) -> str:
-    """加载会话记忆文件内容。注入到 system prompt 作为长期记忆。"""
+def load_session_memory(workdir: str, max_chars: int = 4000) -> str:
+    """加载会话记忆文件内容。注入到 system prompt 作为长期记忆。
+
+    超长时按"重要段优先"截断：优先保留含文件变更 / 错误修复 / 用户反馈等
+    难以重新获取的高价值段落的条目，再从最新条目往回补，而不是简单按时间
+    截断尾部（尾部截断可能恰好丢掉最关键的早期决策）。
+    """
     import os
     mem_path = _session_memory_path(workdir)
     if not os.path.exists(mem_path):
@@ -495,9 +509,86 @@ def load_session_memory(workdir: str) -> str:
     try:
         with open(mem_path, "r", encoding="utf-8") as f:
             content = f.read()
-        # 只取最后 4000 字符（记忆太多反而稀释当前上下文）
-        if len(content) > 4000:
-            content = "... (早期记忆已省略)\n\n" + content[-4000:]
-        return content
+        return _truncate_memory_by_importance(content, max_chars)
     except Exception:
         return ""
+
+
+# 记忆条目中代表"难以重新获取的高价值长尾"的段落标记
+_IMPORTANT_SECTION_MARKERS = (
+    "### 3. 文件与代码变更",
+    "### 4. 错误与修复",
+    "### 5. 用户反馈",
+    "文件与代码变更",
+    "错误与修复",
+    "用户反馈",
+)
+
+
+def _split_memory_entries(content: str) -> tuple[str, list[str]]:
+    """把记忆文件拆成 (头部, 条目列表)。
+
+    每条记忆以 `## <时间戳>` 开头（见 update_session_memory 的 entry 格式）。
+    头部为第一个 `## ` 之前的全部内容。
+    """
+    entries: list[str] = []
+    header_lines: list[str] = []
+    current: list[str] | None = None
+    for line in content.splitlines():
+        if line.startswith("## "):
+            if current is not None:
+                entries.append("\n".join(current))
+            current = [line]
+        else:
+            if current is None:
+                header_lines.append(line)
+            else:
+                current.append(line)
+    if current is not None:
+        entries.append("\n".join(current))
+    return "\n".join(header_lines), entries
+
+
+def _truncate_memory_by_importance(content: str, max_chars: int) -> str:
+    """按重要段优先截断记忆内容，总长不超过 max_chars。
+
+    策略:
+    1. 头部（说明文字）优先保留；
+    2. 按时间从新到旧遍历条目，优先挑选含重要段标记的条目；
+    3. 预算仍有余量时再补普通条目（也是新到旧）。
+    """
+    if len(content) <= max_chars:
+        return content
+
+    header, entries = _split_memory_entries(content)
+    if not entries:
+        # 无 `## ` 分段（旧格式/异常内容）→ 回退到尾部截断
+        return "... (早期记忆已省略)\n\n" + content[-max_chars:]
+
+    budget = max_chars - len(header)
+    if budget <= 0:
+        return "... (早期记忆已省略)\n\n" + content[-max_chars:]
+
+    # 从新到旧：重要段条目优先
+    selected: list[str] = []
+    used = 0
+    for entry in reversed(entries):
+        if any(m in entry for m in _IMPORTANT_SECTION_MARKERS):
+            if used + len(entry) <= budget:
+                selected.append(entry)
+                used += len(entry)
+    # 预算有余 → 补普通条目（新到旧）
+    for entry in reversed(entries):
+        if entry in selected:
+            continue
+        if used + len(entry) <= budget:
+            selected.append(entry)
+            used += len(entry)
+
+    selected.reverse()  # 恢复时间正序
+    result = header
+    if len(entries) > len(selected):
+        result += "\n\n... (早期记忆已省略)"
+    for entry in selected:
+        result += "\n\n" + entry
+    return result[:max_chars]

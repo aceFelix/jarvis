@@ -44,6 +44,7 @@ from agent.core.memory.compactor import (
     DEFAULT_KEEP_RECENT,
     DEFAULT_THRESHOLD_TOKENS,
     compact_messages,
+    estimate_text_tokens,
     estimate_tokens,
     restore_recent_files,
     should_compact,
@@ -96,6 +97,7 @@ class QueryLoop:
         enable_compaction: bool = True,
         compaction_threshold: int = DEFAULT_THRESHOLD_TOKENS,
         keep_recent_messages: int = DEFAULT_KEEP_RECENT,
+        tool_result_keep_recent: int = 4,
         vendor_fallback: str = "",
         custom_models: dict | None = None,
         deferred_loading: bool = True,
@@ -112,6 +114,7 @@ class QueryLoop:
         self._enable_compaction = enable_compaction
         self._compaction_threshold = compaction_threshold
         self._keep_recent_messages = keep_recent_messages
+        self._tool_result_keep_recent = tool_result_keep_recent
         self._vendor_fallback = vendor_fallback
         self._custom_models = custom_models or {}
         self._failover_tried = False
@@ -163,6 +166,8 @@ class QueryLoop:
             if result.messages_summarized == 0:
                 return False
             ctx.messages[:] = result.new_messages
+            # 压缩成功后，把摘要持久化到会话记忆文件
+            update_session_memory(ctx.workdir, result)
             return True
         except Exception as e:
             if ctx.ui:
@@ -198,6 +203,18 @@ class QueryLoop:
 
         # 追加用户消息（文本 + 可选图片）
         content_blocks: list[ContentBlock] = [TextContent(text=user_text)]
+
+        # ── Skill 按需加载：触发词匹配 ──
+        # system prompt 只含 skill 摘要（省 60k+ token），
+        # 用户消息匹配到触发词时，把完整正文作为上下文附加到当前消息。
+        try:
+            from agent.core.extensions.skills import match_skills_for_message
+            skill_content = match_skills_for_message(user_text, ctx.workdir)
+            if skill_content:
+                content_blocks.insert(0, TextContent(text=skill_content))
+        except Exception:
+            pass  # skill 加载失败不影响主流程
+
         if images:
             content_blocks.extend(images)
         ctx.messages.append(Message(role="user", content=content_blocks))
@@ -211,16 +228,21 @@ class QueryLoop:
 
         if self._enable_compaction:
             # 冻结：活跃窗口超阈值 → 一次性压缩 + 锁定前缀
+            # base_tokens 计入 system prompt 固定开销，避免阈值被系统性低估
             frozen = await layered.freeze_if_needed(
                 self._provider, self._model,
                 window_limit=self._compaction_threshold,
                 keep_recent=self._keep_recent_messages,
+                base_tokens=estimate_text_tokens(self._system),
                 on_progress=ctx.ui.info if ctx.ui else None,
             )
             if frozen and ctx.ui:
                 ctx.ui.info(f"上下文冻结完成（活跃 {layered.active_tokens()} → 总计 {layered.total_tokens()} tokens）")
+            # 压缩成功后，把摘要持久化到会话记忆文件
+            if frozen and layered.last_compact_result:
+                update_session_memory(ctx.workdir, layered.last_compact_result)
             # 工具结果折叠（仅活跃窗口，不影响冻结区）
-            layered.collapse_old_tool_results(keep_recent=4)
+            layered.collapse_old_tool_results(keep_recent=self._tool_result_keep_recent)
             # 图片淘汰（仅活跃窗口，不影响冻结区）
             layered.evict_old_images()
 
@@ -258,6 +280,9 @@ class QueryLoop:
                         self._provider, self._model,
                         keep_recent=self._keep_recent_messages,
                     ):
+                        # 压缩成功后，把摘要持久化到会话记忆文件
+                        if layered.last_compact_result:
+                            update_session_memory(ctx.workdir, layered.last_compact_result)
                         if ctx.ui:
                             ctx.ui.warn(
                                 f"上下文过长，已自动压缩后重试"

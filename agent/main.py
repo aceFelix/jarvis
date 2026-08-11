@@ -205,6 +205,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
         enable_compaction=settings.context_compaction,
         compaction_threshold=settings.compaction_threshold,
         keep_recent_messages=settings.keep_recent_messages,
+        tool_result_keep_recent=settings.tool_result_keep_recent,
         vendor_fallback=settings.vendor_fallback,
         custom_models=settings.custom_models,
         deferred_loading=settings.tools_deferred_loading,

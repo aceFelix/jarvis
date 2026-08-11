@@ -93,6 +93,7 @@ boot_animation = true
 compaction = true
 compaction_threshold = 8000   # 估算 token 超此值触发（粗估 4 字符/token）
 keep_recent_messages = 6       # 压缩时保留最近 N 条原消息（含当前轮）
+tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
 [memory]
 # 记忆持久化：会话存盘/恢复 + 长期记忆注入 system prompt。
