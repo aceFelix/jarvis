@@ -12,7 +12,7 @@ provider = "dashscope"
 api_format = "openai"
 model = "qwen3.7-plus"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = ""           # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
+# api_key = "sk-your-dashscope-key-1"  # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
 # temperature = 0.7
 max_tokens = 20480
 # enable_thinking: 启用 qwen3.7-plus 原生深度思考（思维链），模型在回复前先输出 reasoning_content。

@@ -23,8 +23,8 @@
 **操作**：
 - 检查环境变量 `DASHSCOPE_API_KEY`，确认存在且有效。
 - 检查 `~/.jarvis/settings.toml`，发现文件中有多个 `api_key` 字段：
-  - 顶层 LLM 配置：`api_key = "sk-ac4236191c564533a17f8b2fb109e4f8"`
-  - `[realtime_talk]` 段经补充后有：`api_key = "sk-42ff39f289874f73ae70d83f7863f057"`
+  - 顶层 LLM 配置：`api_key = "sk-your-dashscope-key-1"`
+  - `[realtime_talk]` 段经补充后有：`api_key = "sk-your-dashscope-key-2"`
 - 检查 `Settings` 类发现，`[realtime_talk].api_key` 没有被映射到 `dashscope_api_key` 字段。
 
 **修复**：
@@ -55,8 +55,8 @@
 **时间**：排除 Key 本身问题  
 **操作**：
 1. 用 `curl` 直接测试 DashScope 实时语音 WebSocket 端点：
-   - `sk-ac4236191c564533a17f8b2fb109e4f8` → `InvalidApiKey`（无效）
-   - `sk-42ff39f289874f73ae70d83f7863f057` → `missing upgrade`（非 InvalidApiKey，说明 Key 有效）
+   - `sk-your-dashscope-key-1` → `InvalidApiKey`（无效）
+   - `sk-your-dashscope-key-2` → `missing upgrade`（非 InvalidApiKey，说明 Key 有效）
 2. 检查 `websockets` 版本为 `16.1`，支持 `additional_headers` 参数。
 3. 编写最小测试脚本 `test_ws.py`，用同样的 Key 和 `websockets.connect()` 直接连接：
 
@@ -83,7 +83,7 @@ print(f"[DEBUG] model: {self._model}")
 **发现**：运行 `/talk` 后终端输出两条 DEBUG 信息：
 
 ```
-[DEBUG] RealtimeTalk api_key: sk-42ff39f28987...
+[DEBUG] RealtimeTalk api_key: sk-your-dashscope-key-2...
 [DEBUG] ws_url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
 [DEBUG] model: qwen-audio-3.0-realtime-flash
 [DEBUG] RealtimeTalk api_key: ...

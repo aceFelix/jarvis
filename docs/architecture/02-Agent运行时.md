@@ -48,7 +48,10 @@ while True:
 [QueryLoop.run()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L170-L364) 的完整流程：
 
 1. **Hook: USER_PROMPT** — 钩子可修改用户输入
-2. **追加用户消息**（文本 + 可选图片）
+2. **追加用户消息**（文本 + 可选图片 + **Skill 按需加载**）
+   - 调用 `match_skills_for_message(user_text, workdir)` 检查触发词
+   - 命中的 skill 完整正文作为上下文前置到当前用户消息
+   - 详见 [10-扩展生态 - Skill 按需加载](10-扩展生态.md#三skill-技能包按需加载机制)
 3. **构建 LayeredContext** — 冻结 + 窗口分离：
    - 窗口 token 超阈值 → 冻结（压缩 + 锁定前缀）
    - 工具结果折叠（仅活跃窗口，保留最近 4 个）
@@ -67,6 +70,35 @@ while True:
    - Provider 故障转移：切到备选厂商模型（重建 provider 时同步思考模式覆盖状态）
    - `stop_reason="length"` → 输出截断，自动续写
 6. **Hook: ASSISTANT_RESPONSE** — 钩子可后处理响应
+
+### Skill 按需加载集成
+
+[QueryLoop.run()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py) 在追加用户消息时集成 skill 触发词匹配：
+
+```python
+# 追加用户消息（文本 + 可选图片）
+content_blocks: list[ContentBlock] = [TextContent(text=user_text)]
+
+# ── Skill 按需加载：触发词匹配 ──
+# system prompt 只含 skill 摘要（省 60k+ token），
+# 用户消息匹配到触发词时，把完整正文作为上下文附加到当前消息。
+try:
+    from agent.core.extensions.skills import match_skills_for_message
+    skill_content = match_skills_for_message(user_text, ctx.workdir)
+    if skill_content:
+        content_blocks.insert(0, TextContent(text=skill_content))
+except Exception:
+    pass  # skill 加载失败不影响主流程
+
+if images:
+    content_blocks.extend(images)
+ctx.messages.append(Message(role="user", content=content_blocks))
+```
+
+**关键点**：
+- skill 正文作为 user 消息的**前置上下文**，不污染 system prompt
+- skill 加载失败不影响主流程（try/except 兜底）
+- 每轮对话只在该轮注入匹配的 skill，不会持续占用 token
 
 ### 单轮流式推理 _stream_once()
 

@@ -166,15 +166,42 @@ if self.is_thinking_enabled() and hasattr(delta, "reasoning_content"):
 
 [anthropic_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py) 适配 Anthropic Messages API：
 
-- **适用模型**：Claude 3.5/3.7/4 系列
+- **适用模型**：Claude 3.5/3.7/4 系列，以及通过 Anthropic 兼容 API 接入的第三方模型（如 DeepSeek-v4-flash）
 - **SDK**：`anthropic` Python SDK
 - **消息格式转换**：内部 Message → Anthropic messages 格式
 - **工具调用**：Anthropic tool_use block → ToolCall 事件
 - **ThinkingContent 过滤**：Anthropic 兼容后端无法处理 ThinkingContent，发送前过滤
 - **Provider 名推断**：从 base_url 动态推断 provider 名
 - **多模态图片**：image content → Anthropic image block
+- **思考模式默认开启**：DeepSeek-v4-flash 等通过 Anthropic 兼容 API 接入的模型，默认开启 thinking 模式
+- **thinking_delta 事件处理**：流式响应中处理 `thinking_delta` 事件，emit `ThinkingDelta`
+- **显式 disabled 状态**：关闭思考时显式注入 `thinking: {"type": "disabled"}`，而不是省略参数
 
 **为什么过滤 ThinkingContent**：qwen3.6-flash 等模型生成的 ThinkingContent 块，DeepSeek/Anthropic 后端无法处理，会导致 API 报错。
+
+**思考模式开关修复**（P 系列修复）：
+
+之前关闭思考模式时只是省略 `thinking` 参数，但 DeepSeek-v4-flash 的 Anthropic 兼容 API 默认开启思考，省略参数等同于开启。修复后显式注入 `disabled` 状态：
+
+```python
+# stream() 里的思考参数注入
+if self.is_thinking_enabled():
+    request_kwargs["thinking"] = {"type": "enabled"}
+    # 注入 thinking_budget 等
+else:
+    # 显式关闭：不能省略，否则 DeepSeek-v4-flash 会默认开启
+    request_kwargs["thinking"] = {"type": "disabled"}
+
+# 流式响应里处理 thinking_delta 事件
+elif event.type == "content_block_delta":
+    if event.delta.type == "thinking_delta":
+        # 思考过程增量
+        yield ThinkingDelta(text=event.delta.thinking)
+    elif event.delta.type == "text_delta":
+        yield TextDelta(text=event.delta.text)
+```
+
+**为什么需要显式 disabled**：不同 API 对省略 `thinking` 参数的默认行为不一致。Claude 官方 API 省略时默认关闭，但 DeepSeek-v4-flash 的 Anthropic 兼容 API 省略时默认开启。显式注入 `disabled` 消除歧义。
 
 ### 3. DashScope Provider
 
