@@ -1,0 +1,103 @@
+# Gitleaks 配置 — JARVIS 项目自定义规则
+# 文档：https://github.com/gitleaks/gitleaks#configuration
+#
+# 扫描策略：
+#   1. 继承 Gitleaks 默认规则（覆盖主流 API Key/Token 格式）
+#   2. 添加 JARVIS 常用厂商专属规则
+#   3. allowlist 排除测试 mock 值、文档占位符
+
+# 继承默认规则（AWS/GCP/Azure/GitHub Token/OpenAI Key 等通用规则）
+[extend]
+useDefault = true
+
+# ─────────────────────────────────────────────────────────────
+# 自定义规则：JARVIS 常用厂商 API Key
+# ─────────────────────────────────────────────────────────────
+
+# 阿里云 DashScope API Key（sk- 开头 + 32 位 hex）
+[[rules]]
+id = "dashscope-api-key"
+description = "阿里云 DashScope API Key"
+regex = '''sk-[a-f0-9]{32}'''
+keywords = ["sk-"]
+
+# DeepSeek API Key（sk- 开头 + 较长字符）
+[[rules]]
+id = "deepseek-api-key"
+description = "DeepSeek API Key"
+regex = '''sk-[a-zA-Z0-9]{40,}'''
+keywords = ["sk-"]
+
+# 智谱 BigModel API Key（xxx.xxx 格式，数字ID.数字ID）
+[[rules]]
+id = "zhipu-api-key"
+description = "智谱 BigModel API Key"
+regex = '''[0-9a-f]{8}\.[0-9a-f]{16,}'''
+keywords = ["zhipu", "bigmodel", "glm"]
+
+# PyPI API Token（pypi- 开头）
+[[rules]]
+id = "pypi-token"
+description = "PyPI Upload Token"
+regex = '''pypi-[A-Za-z0-9]{60,}'''
+keywords = ["pypi-"]
+
+# ─────────────────────────────────────────────────────────────
+# 全局 allowlist — 排除已知的占位符/测试值/文档示例
+# ─────────────────────────────────────────────────────────────
+
+[allowlist]
+description = "排除测试 mock 值、文档占位符、示例配置"
+
+# 按路径排除
+paths = [
+    # 测试文件里的 mock 值
+    '''tests/.*test_.*\.py''',
+    # 示例配置文件
+    '''configs/settings\.example\.toml''',
+    '''agent/configs/settings\.example\.toml''',
+    # 文档目录（占位符示例）
+    '''config-docs/.*\.md''',
+    '''deepseek-docs/.*\.md''',
+    '''dashscope-docs/.*\.md''',
+    '''zai-docs/.*\.md''',
+    '''kimi-docs/.*\.md''',
+    '''minimax-docs/.*\.md''',
+    '''mimo-docs/.*\.md''',
+    # 架构文档
+    '''docs/architecture/.*\.md''',
+]
+
+# 按内容排除（占位符和测试值）
+regexes = [
+    # 占位符
+    '''sk-your-dashscope-key-1''',
+    '''sk-your-dashscope-key-2''',
+    '''sk-your-.*-key''',
+    '''your_api_key''',
+    '''your_authorization_code''',
+    '''your_163_email''',
+    '''<your.*key>''',
+    '''<DeepSeek API Key>''',
+    # 测试 mock 值
+    '''sk-abcdefghijklmnopqrstuvwxyz123456''',
+    '''sk-1234567890''',
+    '''test_key''',
+    '''fake_key''',
+    # 环境变量名引用（非 Key 值）
+    '''DASHSCOPE_API_KEY''',
+    '''DEEPSEEK_API_KEY''',
+    '''ZAI_API_KEY''',
+    '''ANTHROPIC_API_KEY''',
+]
+
+# 按注释排除（stopwords — 行内包含这些词时跳过）
+stopwords = [
+    "placeholder",
+    "example",
+    "mock",
+    "fake",
+    "dummy",
+    "your_key",
+    "your-api-key",
+]

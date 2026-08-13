@@ -1,0 +1,54 @@
+name: Security Scan
+
+# 敏感信息泄露扫描 — push/PR 时自动检测 API Key/Token/密码等
+#
+# 使用 Gitleaks（开源 MIT 许可）：https://github.com/gitleaks/gitleaks
+# 扫描内容：git 历史全部 commit + 当前工作区文件
+# 发现泄露时 CI 失败，阻止 PR 合并
+#
+# 自定义规则见 .gitleaks.toml
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:  # 允许手动触发全量扫描
+
+permissions:
+  contents: read          # 读取代码
+  pull-requests: write    # 在 PR 上评论检测结果
+  security-events: write  # 上传 SARIF 到 GitHub Security tab（可选）
+
+jobs:
+  gitleaks:
+    name: Scan for secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 拉取完整历史，扫描所有 commit
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: true  # 在 PR 上评论检测结果
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false  # 不上传 artifact（避免泄露 secrets 到 artifact）
+        with:
+          config-path: .gitleaks.toml  # 自定义规则
+
+      - name: Scan result summary
+        if: always()
+        run: |
+          echo "## Gitleaks 扫描结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 扫描范围：全部 git 历史 + 当前工作区" >> $GITHUB_STEP_SUMMARY
+          echo "- 配置文件：.gitleaks.toml" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "如果发现泄露，上方 Gitleaks 步骤会标红失败。" >> $GITHUB_STEP_SUMMARY
+          echo "请检查日志中的 `Finding` 段落，确认是否为真实泄露。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 误报处理" >> $GITHUB_STEP_SUMMARY
+          echo "如果是测试 mock 值或占位符，在 .gitleaks.toml 的 allowlist 中添加路径。" >> $GITHUB_STEP_SUMMARY
