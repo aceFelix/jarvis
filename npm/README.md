@@ -1,6 +1,6 @@
-# jarvis-agent (npm wrapper)
+# @acefelix/jarvis (npm wrapper)
 
-这是 **J.A.R.V.I.S** 的 npm 安装入口。它本身不包含 Python 代码，
+这是 **J.A.R.V.I.S** 的 npm 安装入口（包名 `@acefelix/jarvis`）。它本身不包含 Python 代码，
 而是在 `postinstall` 阶段自动通过 pip / uv 安装 `jarvis-agent` Python 包，
 并把 `jarvis` 命令暴露给 npm/npx 用户。
 
@@ -13,7 +13,7 @@
 ## 安装
 
 ```bash
-npm install -g jarvis-agent
+npm install -g @acefelix/jarvis
 ```
 
 安装完成后即可运行：
@@ -24,7 +24,7 @@ jarvis
 
 ## 工作原理
 
-1. `npm install jarvis-agent` 触发 `postinstall` 脚本 `install.js`
+1. `npm install @acefelix/jarvis` 触发 `postinstall` 脚本 `install.js`
 2. `install.js` 检测系统中的 Python，以及安装工具 uv / pip（**uv 优先**）
 3. 检测到 Python 后弹出**交互式功能选装菜单**（非 TTY / CI 环境自动装 `[all]`）
 4. 根据用户选择调用 `uv pip install` 或 `pip install` 安装对应 extras 的 `jarvis-agent`

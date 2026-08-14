@@ -34,7 +34,7 @@ pip install "jarvis-agent[all]"
 uv tool install "jarvis-agent[all]"
 
 # 或用 npm（需已装 Python 3.11+）
-npm install -g jarvis-agent
+npm install -g @acefelix/jarvis
 ```
 
 ### 2. 初始化配置（推荐）

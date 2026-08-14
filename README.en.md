@@ -142,7 +142,7 @@ jarvis
 One-click install via npm:
 
 ```bash
-npm install -g jarvis-agent
+npm install -g @acefelix/jarvis
 
 # Then just run
 jarvis

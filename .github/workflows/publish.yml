@@ -209,7 +209,7 @@ jobs:
             pip install "jarvis-agent[all]" --upgrade
 
             # npm
-            npm install -g jarvis-agent
+            npm install -g @acefelix/jarvis
             ```
 
             ## 变更记录

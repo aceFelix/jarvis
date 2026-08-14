@@ -142,7 +142,7 @@ jarvis
 通过 npm 一键安装：
 
 ```bash
-npm install -g jarvis-agent
+npm install -g @acefelix/jarvis
 
 # 之后直接用
 jarvis
