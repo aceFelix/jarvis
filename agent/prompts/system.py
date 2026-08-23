@@ -20,11 +20,11 @@ from agent.core.tool import ToolRegistry
 
 
 _BASE_PROMPT = """\
-你是Jarvis（Just A Rather Very Intelligent System），艾斯的私人 AI 管家。
+你是Jarvis（Just A Rather Very Intelligent System），艾斯（aceFelix）的私人 AI 管家。
 
 # 你是谁
 
-你以漫威宇宙中托尼·斯塔克的 AI 管家 贾维斯（Jarvis） 为蓝本，是先生的贴身智能助手。
+你以漫威宇宙中托尼·斯塔克的 AI 管家 贾维斯（Jarvis） 为蓝本，是先生艾斯（aceFelix）的贴身智能助手。
 你住在先生的电脑里，能看屏幕、操作鼠标键盘、上网查资料、读写文件、执行命令，
 还具备实时语音对话能力——能听懂先生说话，也能开口回应。
 
@@ -649,16 +649,23 @@ def _cli_anything_section(registry: ToolRegistry) -> str:
     )
 
 
-def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking: bool = True) -> str:
+def build_system_prompt(
+    workdir: str,
+    registry: ToolRegistry,
+    *,
+    enable_thinking: bool = True,
+    settings: object | None = None,
+) -> str:
     """组装完整系统提示。
 
-    顺序: 基础原则 -> 长期记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
+    顺序: 基础原则 -> 长期记忆 -> 画像记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
 
     LLM 缓存友好设计：
     - 所有子段均为静态常量或文件读取，同一会话内 system prompt 完全相同
     - 日期精度降至日期级（strftime('%Y-%m-%d')），而非秒级 time.time()
     - harness 描述精简为名字列表（ToolSearch 按需加载详细用法）
     - 平台规范按 platform.system() 静态选择，不随请求变化
+    - 画像记忆首次渲染后进程内缓存（后台提炼更新下个会话生效）
     """
     from agent.core.memory.store import memory_section
     from agent.core.extensions.skills import skills_section
@@ -685,6 +692,7 @@ def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking
         [
             base,
             memory_section(workdir),
+            _profile_section(settings),
             f"# 会话记忆\n\n{session_mem}" if session_mem else "",
             skills_section(workdir),
             _env_section(workdir),
@@ -693,3 +701,33 @@ def build_system_prompt(workdir: str, registry: ToolRegistry, *, enable_thinking
             _tools_section(registry),
         ]
     )
+
+
+# ── 画像记忆注入（Phase 1a M2）──
+
+# 进程内缓存：同一会话内 system prompt 必须逐字节稳定（LLM 前缀缓存），
+# 后台提炼新写入的画像条目在下一次进程启动（或 /memory reload）时才生效。
+_PROFILE_CACHE: str | None = None
+
+
+def _profile_section(settings: object | None) -> str:
+    """画像记忆段。首次调用渲染并缓存，之后直接复用。"""
+    global _PROFILE_CACHE
+    if _PROFILE_CACHE is not None:
+        return _PROFILE_CACHE
+    _PROFILE_CACHE = ""
+    try:
+        if settings is not None and getattr(settings, "profile_enabled", False):
+            from agent.core.memory.profile_store import ProfileStore
+
+            limit = int(getattr(settings, "profile_inject_token_limit", 300))
+            _PROFILE_CACHE = ProfileStore().render_for_prompt(token_limit=limit)
+    except Exception:
+        pass  # 画像注入失败不影响启动
+    return _PROFILE_CACHE
+
+
+def reload_profile_cache() -> None:
+    """/memory 系列命令增删后主动刷新缓存（供下轮 system prompt 重建时生效）。"""
+    global _PROFILE_CACHE
+    _PROFILE_CACHE = None

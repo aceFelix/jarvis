@@ -581,7 +581,7 @@ def _toggle_thinking(
     provider.set_thinking_enabled(new_state)
     settings.enable_thinking = new_state
 
-    new_system = build_system_prompt(settings.workdir, registry, enable_thinking=new_state)
+    new_system = build_system_prompt(settings.workdir, registry, enable_thinking=new_state, settings=settings)
     if settings.system_prompt_append:
         new_system = new_system + "\n\n" + settings.system_prompt_append
     loop._system = new_system

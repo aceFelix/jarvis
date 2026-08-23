@@ -307,6 +307,7 @@ class JarvisDaemon(RealtimeTalkMixin, SessionMixin, NotificationMixin):
                 deadline_check_time=settings.deadline_check_time,
                 calendar_enabled=settings.calendar_enabled,
                 calendar_remind_minutes_before=settings.calendar_remind_minutes_before,
+                profile_maintenance_enabled=getattr(settings, "profile_enabled", True),
             ),
             deadline_tracker=self._deadline_tracker,
             calendar_source=self._calendar_source if settings.calendar_enabled else None,
@@ -319,7 +320,7 @@ class JarvisDaemon(RealtimeTalkMixin, SessionMixin, NotificationMixin):
             registry=self._registry, permission_checker=checker
         )
 
-        system_prompt = build_system_prompt(settings.workdir, self._registry, enable_thinking=getattr(settings, 'enable_thinking', True))
+        system_prompt = build_system_prompt(settings.workdir, self._registry, enable_thinking=getattr(settings, 'enable_thinking', True), settings=settings)
         if settings.system_prompt_append:
             system_prompt += "\n\n" + settings.system_prompt_append
 
@@ -386,7 +387,8 @@ class JarvisDaemon(RealtimeTalkMixin, SessionMixin, NotificationMixin):
                            workdir=self._settings.workdir,
                            model=self._settings.model,
                            provider=self._settings.provider,
-                           verbose=False)
+                           verbose=False,
+                           settings=self._settings)
             except Exception:
                 pass
         # 停止语音会话

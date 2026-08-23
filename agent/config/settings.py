@@ -131,6 +131,18 @@ class Settings:
     # 启动时加载长期记忆注入 system prompt（~/.jarvis/MEMORY.md + 项目级）
     long_term_memory: bool = True
 
+    # 画像记忆（长期记忆 Phase 1a：自动从会话提炼用户偏好/习惯，
+    # 存 ~/.jarvis/memory/profile.json，注入 system prompt）
+    profile_enabled: bool = True
+    profile_max_entries: int = 200             # 条目上限（超出按置信度×新近度淘汰）
+    profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
+    profile_refine_min_messages: int = 6       # 会话至少多少条消息才触发提炼
+    # 独立提炼模型（便宜模型跑后台提炼；留空 = 用主 LLM 配置）
+    profile_refine_model: str = ""
+    profile_refine_provider: str = ""          # api_format，如 openai/dashscope
+    profile_refine_base_url: str = ""
+    profile_refine_api_key: str = ""
+
     # Skill 系统（阶段四第三刀）
     # 启动时加载 ~/.jarvis/skills/*/SKILL.md + 项目级，注入 system prompt
     enable_skills: bool = True
@@ -513,9 +525,29 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         for sub_key, field in (
             ("auto_resume_session", "auto_resume_session"),
             ("long_term_memory", "long_term_memory"),
+            # 画像记忆（Phase 1a）
+            ("profile_enabled", "profile_enabled"),
+            ("profile_max_entries", "profile_max_entries"),
+            ("profile_inject_token_limit", "profile_inject_token_limit"),
+            ("profile_refine_min_messages", "profile_refine_min_messages"),
+            ("profile_refine_model", "profile_refine_model"),
+            ("profile_refine_provider", "profile_refine_provider"),
+            ("profile_refine_base_url", "profile_refine_base_url"),
+            ("profile_refine_api_key", "profile_refine_api_key"),
         ):
             if sub_key in mem_table:
                 updates[field] = mem_table[sub_key]
+        # [memory.refine] 子表 → profile_refine_* 简写形式
+        refine_table = mem_table.get("refine", {})
+        if isinstance(refine_table, dict):
+            for sub_key, field in (
+                ("model", "profile_refine_model"),
+                ("provider", "profile_refine_provider"),
+                ("base_url", "profile_refine_base_url"),
+                ("api_key", "profile_refine_api_key"),
+            ):
+                if sub_key in refine_table:
+                    updates[field] = refine_table[sub_key]
     # [skills] 表 → Skill 系统字段
     skills_table = data.get("skills", {})
     if isinstance(skills_table, dict):

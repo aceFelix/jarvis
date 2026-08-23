@@ -217,7 +217,8 @@ class SessionMixin:
                            workdir=self._settings.workdir,
                            model=self._settings.model,
                            provider=self._settings.provider,
-                           verbose=False)
+                           verbose=False,
+                           settings=self._settings)
             except Exception:
                 pass
             ui.info("💤 回到待命状态")
@@ -268,7 +269,8 @@ class SessionMixin:
                            workdir=self._settings.workdir,
                            model=self._loop._model or self._settings.model,
                            provider=self._settings.provider,
-                           verbose=False)
+                           verbose=False,
+                           settings=self._settings)
             except Exception:
                 pass
         ui.info("💤 回到待命状态")

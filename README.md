@@ -379,6 +379,11 @@ Jarvis 支持多层记忆持久化：
 
 - **会话记忆**：自动保存/恢复对话历史。`/save` `/load` `/sessions` 管理
 - **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
+- **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
+  存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
+  后台异步提炼（10 分钟节流，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
+  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory refine` 立即提炼。
+  可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼
 - **自动恢复**：异常退出后下次启动自动提示恢复
 
 ### Skill 技能包
@@ -463,7 +468,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 
 | 命令 | 说明 |
 |---|---|
-| `/memory` | 查看长期记忆文件内容 |
+| `/memory` | 画像记忆管理（查看/add/del/clear/refine；`file` 看长期记忆文件） |
 | `/skills` | 列出已加载的技能包 |
 
 ### 语音功能

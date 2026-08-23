@@ -186,12 +186,16 @@ def _auto_save(
     verbose: bool = True,
     dialog_count: int = 0,
     title_generated: bool = False,
+    settings: Any = None,
 ) -> None:
     """保存会话到指定名称（增量刷新，每次对话后都会调用）。
 
     同时写入 auto-latest.json 确保重启时自动恢复。
     session_name 为空时使用时间戳自动命名。
     dialog_count/title_generated 随会话持久化，供 /load 恢复后续计。
+
+    settings 传入时顺带触发画像记忆提炼（Phase 1a）：
+    后台异步 + 节流（10 分钟一次），不影响保存路径。
     """
     if not messages:
         return
@@ -221,6 +225,13 @@ def _auto_save(
             ui.info(f"会话已自动保存（{session_name[:40]}）")
     except Exception:
         pass
+    # 画像记忆提炼：后台异步，失败静默（绝不影响会话保存）
+    if settings is not None:
+        try:
+            from agent.core.memory.profile_refiner import maybe_refine_async
+            maybe_refine_async(messages, session_name, settings)
+        except Exception:
+            pass
 
 
 def _save_session(ui: RichCLI, settings: Any, cmd: str, messages: list[Message],

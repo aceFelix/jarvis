@@ -134,7 +134,7 @@ SLASH_COMMANDS = [
     ("/load <前缀>","前缀匹配加载会话（支持模糊输入）"),
     ("/loads",      "列出并交互选择已保存会话"),
     ("/sessions",   "列出已保存会话（/loads 别名）"),
-    ("/memory",     "查看长期记忆文件内容"),
+    ("/memory",     "画像记忆（add/del/clear/file 管理长期记忆）"),
     ("/skills",     "列出已加载的技能包"),
     ("/agents",     "查看多 Agent 团队状态与成员"),
     ("/tasks",      "查看共享任务列表进度"),

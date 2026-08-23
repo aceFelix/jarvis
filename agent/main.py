@@ -182,7 +182,7 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             if settings.verbose:
                 ui.warn(f"LSP 初始化失败: {e}")
 
-    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking)
+    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking, settings=settings)
     if settings.system_prompt_append:
         system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
 
@@ -450,7 +450,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
             cmd_ctx.dialog_count = _dialog_count
             _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
                        session_name=_session_name, verbose=False,
-                       dialog_count=_dialog_count, title_generated=_title_generated)
+                       dialog_count=_dialog_count, title_generated=_title_generated,
+                       settings=settings)
             # 写恢复点（崩溃恢复用）
             try:
                 from agent.core.memory.recovery import save_recovery_point
@@ -492,7 +493,8 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
 
     # 退出前最终保存
     _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
-               session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated)
+               session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated,
+               settings=settings)
 
     ui.goodbye()
     # 清理托盘图标

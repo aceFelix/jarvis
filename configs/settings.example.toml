@@ -102,6 +102,23 @@ tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整�
 auto_resume_session = true     # 启动时自动恢复最近会话（退出时自动保存到 auto-latest）
 long_term_memory = true         # 启动时加载长期记忆注入 system prompt
 
+# ── 画像记忆（长期记忆 Phase 1a）──
+# 会话结束后自动用 LLM 提炼"关于用户的持久事实"（偏好/习惯/背景），
+# 存 ~/.jarvis/memory/profile.json，下次会话限额注入 system prompt。
+# 后台异步 + 10 分钟节流，不影响对话响应速度。
+profile_enabled = true
+profile_max_entries = 200            # 条目上限（超出按置信度×新近度淘汰）
+profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
+profile_refine_min_messages = 6      # 会话至少几条消息才触发提炼
+
+# 独立提炼模型（可选）：用便宜模型跑后台提炼，留空 = 用主 LLM。
+# 示例（DashScope qwen-flash，也可配 deepseek 等任意 OpenAI 兼容端点）：
+# [memory.refine]
+# model = "qwen-flash"
+# provider = "dashscope"             # api_format（openai/dashscope/deepseek...）
+# base_url = ""                      # 留空用该 provider 默认地址
+# api_key = ""                       # 留空复用主 api_key
+
 [skills]
 # Skill 系统：加载技能包注入 system prompt。
 # 目录: ~/.jarvis/skills/<name>/SKILL.md（用户级）+ <workdir>/.jarvis/skills/<name>/SKILL.md（项目级）

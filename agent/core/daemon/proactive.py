@@ -49,6 +49,7 @@ class ProactiveConfig:
         calendar_enabled: bool = False,
         calendar_check_interval_min: int = 30,
         calendar_remind_minutes_before: int = 30,
+        profile_maintenance_enabled: bool = True,
     ) -> None:
         self.briefing_enabled = briefing_enabled
         self.briefing_time = briefing_time
@@ -56,6 +57,7 @@ class ProactiveConfig:
         self.deadline_check_time = deadline_check_time
         self.calendar_enabled = calendar_enabled
         self.calendar_check_interval_min = calendar_check_interval_min
+        self.profile_maintenance_enabled = profile_maintenance_enabled
         self.calendar_remind_minutes_before = calendar_remind_minutes_before
 
 
@@ -67,6 +69,7 @@ class ProactiveConfig:
 _BRIEFING_NOTE = "__proactive_briefing__"
 _DEADLINE_NOTE = "__proactive_deadline__"
 _CALENDAR_NOTE = "__proactive_calendar__"
+_PROFILE_MAINT_NOTE = "__proactive_profile_maintenance__"
 
 
 class ProactiveEngine:
@@ -131,6 +134,10 @@ class ProactiveEngine:
         if self._config.deadline_enabled and self._deadline_tracker:
             self._register_deadline_check()
 
+        # 注册画像记忆每日维护任务（Phase 1a M3：衰减 + 上限淘汰，凌晨静默执行）
+        if self._config.profile_maintenance_enabled:
+            self._register_profile_maintenance()
+
         # 注册日历检查任务（暂用 daily 任务模拟，后续可改为更频繁）
         # 注意：Scheduler 目前只支持 once/daily/weekly，
         # 日历检查暂用 daily 在 briefing_time 时一并检查
@@ -176,6 +183,42 @@ class ProactiveEngine:
         )
         self._task_ids.append(task.id)
 
+    def _register_profile_maintenance(self) -> None:
+        """注册画像记忆每日维护任务（凌晨 3:30，管家"睡眠整理记忆"）。
+
+        纯本地计算（无 LLM、无打扰）：置信度衰减 + 超限淘汰。
+        """
+        if self._find_task_by_note(_PROFILE_MAINT_NOTE):
+            return
+
+        trigger_at = self._today_at("03:30")
+        task = self._scheduler.add_task(
+            content="画像记忆维护",
+            trigger_at=trigger_at,
+            repeat="daily",
+            note=_PROFILE_MAINT_NOTE,
+        )
+        self._task_ids.append(task.id)
+
+    def _fire_profile_maintenance(self) -> None:
+        """执行画像维护：decay + prune。静默（写日志，不打扰用户）。"""
+        import logging
+
+        logger = logging.getLogger("jarvis.memory.profile")
+        try:
+            from agent.core.memory.profile_store import ProfileStore
+
+            store = ProfileStore()
+            removed = store.decay()
+            pruned = store.prune_over_limit(200)
+            if removed or pruned:
+                logger.info(
+                    "画像维护完成: 衰减清除 %d 条, 超限淘汰 %d 条, 剩余 %d 条",
+                    removed, pruned, len(store),
+                )
+        except Exception as e:
+            logger.warning("画像维护失败: %s", e)
+
     # ---- 任务触发处理 ----
 
     def handle_task_fire(self, task: ScheduleTask) -> None:
@@ -192,10 +235,12 @@ class ProactiveEngine:
             self._fire_deadline_check()
         elif task.note == _CALENDAR_NOTE:
             self._fire_calendar_check()
+        elif task.note == _PROFILE_MAINT_NOTE:
+            self._fire_profile_maintenance()
 
     def is_proactive_task(self, task: ScheduleTask) -> bool:
         """判断任务是否是 ProactiveEngine 注册的（用于 daemon 分发）。"""
-        return task.note in (_BRIEFING_NOTE, _DEADLINE_NOTE, _CALENDAR_NOTE)
+        return task.note in (_BRIEFING_NOTE, _DEADLINE_NOTE, _CALENDAR_NOTE, _PROFILE_MAINT_NOTE)
 
     # ---- 每日简报 ----
 

@@ -379,6 +379,7 @@ Jarvis supports multi-layer memory persistence:
 
 - **Session memory**: Auto save/restore conversation history. Manage with `/save` `/load` `/sessions`
 - **Long-term memory**: `~/.jarvis/MEMORY.md` (user-level) + `<workdir>/.jarvis/MEMORY.md` (project-level), injected into system prompt at startup
+- **Profile memory**: After each session, an LLM automatically distills your preferences/habits/background (e.g. "night owl", "primary model GLM"), stored in `~/.jarvis/memory/profile.json`, and injected (capped) into the system prompt next session — Jarvis gets to know you better the more you use it. Background async distillation (10-min throttle, no impact on response speed) + daily silent maintenance (outdated memories auto-decay). `/memory` to view / `/memory add` to add manually / `/memory del` to delete / `/memory refine` to distill immediately. A cheap model can be configured under `settings.toml` `[memory.refine]` for distillation.
 - **Auto recovery**: After abnormal exit, next startup auto-prompts to restore
 
 ### Skill Packs
@@ -463,7 +464,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 
 | Command | Description |
 |---|---|
-| `/memory` | View long-term memory file contents |
+| `/memory` | Profile memory management (view/add/del/clear/refine; `file` for long-term memory file) |
 | `/skills` | List loaded skill packs |
 
 ### Voice Features

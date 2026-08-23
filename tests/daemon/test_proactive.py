@@ -25,6 +25,7 @@ from agent.core.daemon.proactive import (
     _BRIEFING_NOTE,
     _CALENDAR_NOTE,
     _DEADLINE_NOTE,
+    _PROFILE_MAINT_NOTE,
     ProactiveConfig,
     ProactiveEngine,
 )
@@ -104,27 +105,30 @@ class TestLifecycle:
     """start / stop / 任务注册。"""
 
     def test_start_registers_briefing_and_deadline_tasks(self, make_engine):
-        """start 应注册每日简报 + 截止日期检查两个 daily 任务。"""
+        """start 应注册每日简报 + 截止日期检查 + 画像维护三个 daily 任务。"""
         engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
         engine.start()
 
         notes = {t.note for t in scheduler.list_all()}
-        assert notes == {_BRIEFING_NOTE, _DEADLINE_NOTE}
+        assert notes == {_BRIEFING_NOTE, _DEADLINE_NOTE, _PROFILE_MAINT_NOTE}
         assert all(t.repeat == "daily" for t in scheduler.list_all())
         # 任务 id 已登记，供 stop 取消
-        assert len(engine._task_ids) == 2
+        assert len(engine._task_ids) == 3
 
     def test_start_idempotent(self, make_engine):
         """多次 start 不应重复注册任务。"""
         engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
         engine.start()
         engine.start()
-        assert len(scheduler.list_all()) == 2
+        assert len(scheduler.list_all()) == 3
 
     def test_start_skips_disabled_modules(self, make_engine):
-        """禁用简报/截止日期时不应注册对应任务。"""
+        """禁用简报/截止日期/画像维护时不应注册对应任务。"""
         engine, scheduler, _ = make_engine(
-            config=ProactiveConfig(briefing_enabled=False, deadline_enabled=False),
+            config=ProactiveConfig(
+                briefing_enabled=False, deadline_enabled=False,
+                profile_maintenance_enabled=False,
+            ),
         )
         engine.start()
         assert scheduler.list_all() == []
@@ -133,7 +137,7 @@ class TestLifecycle:
         """未提供 deadline_tracker 时不应注册截止日期任务。"""
         engine, scheduler, _ = make_engine(config=ProactiveConfig(deadline_enabled=True))
         engine.start()
-        assert [t.note for t in scheduler.list_all()] == [_BRIEFING_NOTE]
+        assert [t.note for t in scheduler.list_all()] == [_BRIEFING_NOTE, _PROFILE_MAINT_NOTE]
 
     def test_stop_cancels_registered_tasks(self, make_engine):
         """stop 应取消所有注册任务并清空登记。"""
