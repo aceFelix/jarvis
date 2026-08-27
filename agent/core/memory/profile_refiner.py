@@ -90,24 +90,92 @@ def _build_refine_provider(settings: Any):
     优先用 [memory] 段独立配置的便宜模型（profile_refine_*），
     未配置则回退主 LLM。提炼是纯文本任务，model_type="text"。
 
+    api_key 解析链（留空时逐级回退）：
+    refine 配置 → 按厂商查环境变量 → 同名自定义模型的 api_key → 主 LLM key。
+    环境变量优先：避免配置文件硬编码 key 失效，也避免错拿主 LLM
+    的别厂商 key（如 DashScope）导致鉴权失败。
+
     主模型为 mock 且无独立配置时返回 None（跳过提炼）。
     """
     from agent.bootstrap import _build_provider
 
     refine_model = getattr(settings, "profile_refine_model", "")
     if refine_model:
+        # 同名自定义模型的配置（协议 / base_url / vendor），留空字段时继承，
+        # 与 /model 切换自定义模型的取值逻辑保持一致（兼容旧字段名）
+        custom = settings.custom_models.get(refine_model) if hasattr(settings, "custom_models") else None
+        if not isinstance(custom, dict):
+            custom = {}
+
+        api_format = (
+            getattr(settings, "profile_refine_provider", "")
+            or custom.get("api_format") or custom.get("provider_type", "")
+            or settings.api_format
+        )
+        base_url = (
+            getattr(settings, "profile_refine_base_url", "")
+            or custom.get("base_url", "")
+            or settings.base_url
+        )
+        vendor = str(custom.get("provider") or custom.get("vendor", "") or api_format)
+        # key 解析链：refine 配置 → 环境变量 → 自定义模型配置 → 主 LLM key
+        api_key = (
+            getattr(settings, "profile_refine_api_key", "")
+            or _resolve_api_key_from_env(vendor)
+            or str(custom.get("api_key", "") or "")
+            or settings.api_key
+        )
+
         # 独立模型：复制 settings 覆盖 LLM 四元组后走统一工厂
         s = settings.with_overrides(
             model=refine_model,
-            api_format=getattr(settings, "profile_refine_provider", "") or settings.api_format,
-            base_url=getattr(settings, "profile_refine_base_url", "") or settings.base_url,
-            api_key=getattr(settings, "profile_refine_api_key", "") or settings.api_key,
+            api_format=api_format,
+            base_url=base_url,
+            api_key=api_key,
         )
         return _build_provider(s, model_type="text")
 
     if (getattr(settings, "api_format", "") or "").lower() == "mock":
         return None  # 开发模拟环境，无真实 LLM 可用
     return _build_provider(settings, model_type="text")
+
+
+# 厂商 → 专属 API key 环境变量（与 env.py 的厂商专属变量保持一致）
+_VENDOR_KEY_ENVS: dict[str, tuple[str, ...]] = {
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "dashscope": ("DASHSCOPE_API_KEY",),
+    "zai": ("ZAI_API_KEY",),
+    "zhipu": ("ZAI_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "kimi": ("KIMI_API_KEY",),
+    "moonshot": ("KIMI_API_KEY",),
+    "minimax": ("MINIMAX_API_KEY",),
+    "mimo": ("MIMO_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+}
+
+
+def _resolve_api_key_from_env(vendor: str) -> str:
+    """按厂商查环境变量取 API key。
+
+    查厂商专属变量（如 deepseek → DEEPSEEK_API_KEY）；
+    仅当厂商未知时才走通用变量兜底（OPENAI_API_KEY 等），
+    避免把别家的通用 key 错用在本厂商上。找不到返回空串。
+    """
+    import os
+
+    vendor_names = _VENDOR_KEY_ENVS.get((vendor or "").lower())
+    if vendor_names:
+        for n in vendor_names:
+            v = os.environ.get(n)
+            if v:
+                return v
+        return ""  # 知道厂商但环境变量没配 → 交给链路下一级，不乱拿通用变量
+    for n in ("OPENAI_API_KEY", "JARVIS_API_KEY", "MY_AGENT_API_KEY"):
+        v = os.environ.get(n)
+        if v:
+            return v
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────
