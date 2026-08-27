@@ -478,25 +478,35 @@ class RichCLI(UIProtocol):
     def assistant_thinking(self, text: str) -> None:
         """流式思考增量（深度思考/思维链）。
 
-        文本/语音模式统一用 Rich Live + Panel 显示思考过程。
+        交互终端：用 Rich Live + Panel 原地刷新显示思考过程。
         语音模式下 ThinkingDelta 不触发 on_assistant_text，TTS 不会朗读思考，
         所以画 Panel 不影响语音播报。
+
+        防刷屏关键（fixlog: thinking-panel-flood-fix）：
+        Rich Live 的原地擦除依赖光标移动转义序列，仅在真实交互终端可用。
+        stdout 被重定向/非交互终端（部分 IDE 终端、mintty、管道）时，
+        每次 update 都会把整帧内容追加输出——思考流每秒十几次刷新，
+        屏幕瞬间被重复递增的面板刷满。因此非交互终端降级为静态模式：
+        只累积缓冲，思考结束时一次性打印面板。
         """
         self._thinking_buf += text
 
         if not self._thinking_started:
             self._thinking_started = True
-            if self._console and _HAS_RICH:
+            if self._console and _HAS_RICH and self._console.is_terminal:
                 self._thinking_live = Live(
                     self._thinking_panel(),
                     console=self._console,
                     refresh_per_second=12,
                     transient=False,
-                    vertical_overflow="visible",
+                    # 面板超过终端可视高度时截断为省略号，而不是 "visible"
+                    # （visible 会让超高内容滚出屏幕后无法原地擦除，同样导致刷屏）
+                    vertical_overflow="ellipsis",
                 )
                 self._thinking_live.start()
+            # else: 静态模式——不建 Live，只在 _end_thinking 时打印一次
         else:
-            # 流式更新：新文本到了，刷新 Live 面板
+            # 流式更新：新文本到了，刷新 Live 面板（静态模式下无 Live，仅累积）
             if self._thinking_live is not None:
                 self._thinking_live.update(self._thinking_panel())
 
@@ -515,7 +525,11 @@ class RichCLI(UIProtocol):
         )
 
     def _end_thinking(self) -> None:
-        """结束思考阶段，停止 Live，面板自然保留。"""
+        """结束思考阶段。
+
+        Live 模式：最终刷新 + 停止，面板自然保留。
+        静态模式（非交互终端）：此刻才一次性打印面板，避免流式刷屏。
+        """
         if not self._thinking_started:
             return
         self._thinking_started = False
@@ -525,6 +539,9 @@ class RichCLI(UIProtocol):
             self._thinking_live.update(self._thinking_panel())
             self._thinking_live.stop()
             self._thinking_live = None
+        elif self._thinking_buf and self._console:
+            # 静态模式：思考完整了才输出一个面板（全程只打印一次）
+            self._console.print(self._thinking_panel())
 
         self._thinking_buf = ""
 
@@ -941,7 +958,13 @@ class RichCLI(UIProtocol):
     # ---- 内部 ----
 
     def _end_assistant_line(self) -> None:
-        """结束当前助手文本流（补一个换行）。"""
+        """结束当前助手流式输出。
+
+        先收尾思考阶段（思考→直接工具调用时没有 assistant_text 触发
+        _end_thinking，若不在此处收口，Live 面板会残留且缓冲跨轮累积），
+        再为正文补一个换行。
+        """
+        self._end_thinking()
         if self._assistant_buf:
             if self._console:
                 self._console.print()  # 补换行
