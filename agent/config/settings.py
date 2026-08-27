@@ -151,6 +151,13 @@ class Settings:
     # 启动时连接 ~/.jarvis/mcp.json 配置的 MCP server，注册其工具
     enable_mcp: bool = True
 
+    # 知识图谱画像桥（P2 画像双向同步，upgrade-plan.md §4）
+    # 启动时经 MCP 拉取 aceFelix 知识图谱画像注入 system prompt（图谱为唯一事实源），
+    # /memory sync 可把本地画像经图谱抽取管线回写。默认关闭，配置后开启。
+    profile_bridge_enabled: bool = False
+    profile_bridge_server: str = "acefelix-knowledge"  # mcp.json 中的 server 名
+    profile_bridge_token_limit: int = 400              # 图谱画像段注入 token 限额
+
     # 工具错误自愈（P0：维度 5 工具执行稳定性）
     # 工具调用失败时自动分类、重试、降级、询问用户，而不是直接抛错给 LLM。
     enable_tool_self_healing: bool = True  # 总开关
@@ -564,6 +571,16 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in mcp_table:
                 updates[field] = mcp_table[sub_key]
+    # [profile_bridge] 表 → 知识图谱画像桥字段（P2 画像双向同步）
+    bridge_table = data.get("profile_bridge", {})
+    if isinstance(bridge_table, dict):
+        for sub_key, field in (
+            ("enabled", "profile_bridge_enabled"),
+            ("server", "profile_bridge_server"),
+            ("token_limit", "profile_bridge_token_limit"),
+        ):
+            if sub_key in bridge_table:
+                updates[field] = bridge_table[sub_key]
     # [plugins] 表 → 插件市场字段
     plugins_table = data.get("plugins", {})
     if isinstance(plugins_table, dict):

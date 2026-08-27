@@ -383,7 +383,11 @@ Jarvis 支持多层记忆持久化：
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
   后台异步提炼（10 分钟节流，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
   `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory refine` 立即提炼。
-  可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼
+  可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼。
+  `/memory sync` 可把本地画像同步到 aceFelix 知识图谱（先预览后确认，图谱为唯一事实源）
+- **知识图谱画像桥**：`[profile_bridge] enabled = true` 后，启动时经 MCP 拉取 aceFelix
+  知识图谱画像注入系统提示（技能/项目/兴趣等结构化信息，无需重新聊天）；
+  前提：`~/.jarvis/mcp.json` 已配置 `acefelix-knowledge` server
 - **自动恢复**：异常退出后下次启动自动提示恢复
 
 ### Skill 技能包

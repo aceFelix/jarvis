@@ -132,6 +132,14 @@ enable = true
 # 依赖: pip install mcp（未安装时优雅跳过）。/mcp 命令查看连接状态。
 enable = true
 
+[profile_bridge]
+# 知识图谱画像桥（P2 画像双向同步）：启动时经 MCP 拉取 aceFelix 知识图谱画像
+# 注入 system prompt（图谱为唯一事实源）；/memory sync 可把本地画像回写图谱。
+# 前提：~/.jarvis/mcp.json 已配置 server（默认名 acefelix-knowledge）。
+enabled = false
+# server = "acefelix-knowledge"   # mcp.json 中的图谱 server 名（默认值）
+# token_limit = 400               # 图谱画像段注入 token 限额（默认值）
+
 [cli_anything]
 # CLI-Anything harness 市场配置（可选）。
 # 市场加载顺序：market_url 远程 → CLI-Anything 官方 GitHub → market_local 本地回退。

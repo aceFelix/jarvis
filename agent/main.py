@@ -133,6 +133,15 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                         if failed_names:
                             msg += f"（{', '.join(failed_names)} 连接失败，对应工具不可用）"
                         ui.info(msg)
+                        # P2 画像双向同步：图谱 → jarvis，启动时预加载知识图谱画像，
+                        # 缓存到 profile_bridge，后续 build_system_prompt 的画像段合并注入；
+                        # 未开启 [profile_bridge] 或拉取失败时静默跳过，不影响启动
+                        try:
+                            from agent.core.extensions.profile_bridge import preload_kg_profile
+                            if await preload_kg_profile(mcp_client, settings):
+                                ui.info("✓ 知识图谱画像已注入（图谱 → jarvis 同步）")
+                        except Exception:
+                            pass
                     else:
                         ui.warn(f"MCP: 所有 server 连接失败（{', '.join(config.keys())}）")
             else:

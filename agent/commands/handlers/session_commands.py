@@ -143,6 +143,107 @@ def _rebuild_system_prompt(ctx) -> None:
         pass  # 重建失败不影响命令本身
 
 
+async def _sync_profile_to_kg(ctx, confirm: bool) -> None:
+    """/memory sync：把本地画像同步到 aceFelix 知识图谱（P2 画像双向同步反向链路）。
+
+    流程：临时连接图谱 MCP server → 本地画像汇总成交给 ingest_text 抽取管线：
+    - 无 yes：dry_run=True 预览（将新建哪些实体/关系、跳过哪些重复）
+    - 有 yes：dry_run=False 正式写入（管线写入前自动备份，可回滚）
+    管线查重保证幂等：已在图谱中的条目自动跳过，重复执行不会产生重复实体。
+    """
+    if not getattr(ctx.settings, "profile_bridge_enabled", False):
+        ctx.ui.warn(
+            "知识图谱画像桥未开启。在 settings.toml 中添加：\n"
+            "  [profile_bridge]\n  enabled = true\n"
+            "（前提：~/.jarvis/mcp.json 已配置 acefelix-knowledge server）"
+        )
+        return
+
+    from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
+    from agent.core.extensions.profile_bridge import sync_to_kg
+
+    server = getattr(ctx.settings, "profile_bridge_server", "acefelix-knowledge")
+    config = load_mcp_config()
+    if server not in config:
+        ctx.ui.warn(f"~/.jarvis/mcp.json 未配置 MCP server [{server}]，无法同步")
+        return
+
+    # 临时连接目标 server（命令低频显式触发，不复用启动时长驻连接，避免线程/循环归属问题）
+    client = MCPClient()
+    if not client.available:
+        ctx.ui.warn("mcp SDK 未安装（pip install mcp）")
+        return
+    conn = await client.connect(server, config[server])
+    if conn is None:
+        ctx.ui.warn(f"连接图谱 MCP server [{server}] 失败，请确认后端依赖已安装")
+        return
+
+    try:
+        outcome = await sync_to_kg(client, ctx.settings, dry_run=not confirm)
+    finally:
+        await client.disconnect_all()
+
+    if not outcome["ok"]:
+        ctx.ui.warn(f"同步失败: {outcome['error']}")
+        return
+
+    result = outcome["result"]
+    # 门禁拦截（密度/价值预判）：直接展示原因，无写入也无预览
+    if "rejected" in str(result.get("gate", "")):
+        ctx.ui.info(f"图谱抽取管线拒绝本次同步: {result['gate']}")
+        return
+
+    created_e = result.get("created_entities", [])
+    created_r = result.get("created_relations", [])
+    dup_e = result.get("skipped_duplicate_entities", [])
+    dup_r = result.get("skipped_duplicate_relations", [])
+    pending = result.get("pending_review", [])
+    skipped_r = result.get("skipped_relations", [])
+
+    def _fmt_entities(items):
+        return "、".join(f"{e['name']}[{e['type']}]" for e in items if isinstance(e, dict))
+
+    def _fmt_relations(items):
+        return "、".join(
+            f"{r.get('source')} → {r.get('type')} → {r.get('target')}"
+            for r in items if isinstance(r, dict)
+        )
+
+    if not confirm:
+        # 预览模式：展示将写入的内容，等用户 /memory sync yes 确认
+        if not created_e and not created_r:
+            ctx.ui.info(
+                f"预览：无新增内容（本地画像已在图谱中，"
+                f"跳过重复实体 {len(dup_e)} 个、重复关系 {len(dup_r)} 条）"
+            )
+            return
+        ctx.ui.info(
+            "同步预览（尚未写入）：\n"
+            f"  新增实体 {len(created_e)} 个: {_fmt_entities(created_e)}\n"
+            f"  新增关系 {len(created_r)} 条: {_fmt_relations(created_r)}\n"
+            f"  跳过重复实体 {len(dup_e)} 个、重复关系 {len(dup_r)} 条"
+        )
+        if pending:
+            ctx.ui.info(f"  待人工确认 {len(pending)} 个（类型不在白名单，不会写入）")
+        if skipped_r:
+            ctx.ui.info(f"  跳过无效关系 {len(skipped_r)} 条（类型不在白名单/端点不存在）")
+        ctx.ui.info("确认写入请输入: /memory sync yes")
+        return
+
+    # 确认写入模式：展示实际写入结果（图谱为唯一事实源，写入前管线已自动备份）
+    ctx.ui.info(
+        f"已同步到知识图谱：新增实体 {len(created_e)} 个、关系 {len(created_r)} 条"
+        f"（跳过重复实体 {len(dup_e)} 个、重复关系 {len(dup_r)} 条）"
+    )
+    if created_e:
+        ctx.ui.info(f"  实体: {_fmt_entities(created_e)}")
+    if created_r:
+        ctx.ui.info(f"  关系: {_fmt_relations(created_r)}")
+    if pending:
+        ctx.ui.info(f"  另有 {len(pending)} 个待人工确认（类型不在白名单），可在图谱 Web 端处理")
+    ctx.ui.info("图谱已自动备份，如需回滚可在 Web 端操作；新画像下次启动时自动注入 system prompt")
+
+
 async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /memory 系列命令。
 
@@ -151,6 +252,7 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     /memory del <id>     删除指定条目
     /memory clear yes    清空全部画像（需 yes 二次确认）
     /memory refine       立即提炼当前会话（不等自动节流）
+    /memory sync         同步本地画像到知识图谱（先预览，/memory sync yes 确认写入）
     /memory file         查看长期记忆文件（MEMORY.md，旧功能保留）
     """
     from agent.core.memory.profile_store import ProfileStore
@@ -189,6 +291,10 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         ctx.ui.info("已开始后台提炼当前会话（用 /memory 查看结果，稍等十几秒）")
         return True
 
+    if action == "sync":
+        await _sync_profile_to_kg(ctx, confirm=(rest.lower() == "yes"))
+        return True
+
     if action == "add":
         if not rest:
             ctx.ui.warn("用法: /memory add <要记住的内容>（如 /memory add 习惯用 GLM 写代码）")
@@ -222,12 +328,13 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         return True
 
     ctx.ui.warn(
-        "用法: /memory [add <内容> | del <id> | clear yes | refine | file]\n"
+        "用法: /memory [add <内容> | del <id> | clear yes | refine | sync | file]\n"
         "  /memory              查看画像\n"
         "  /memory add <文本>    手动添加\n"
         "  /memory del <id>     删除条目\n"
         "  /memory clear yes    清空全部\n"
         "  /memory refine       立即提炼当前会话\n"
+        "  /memory sync         同步画像到知识图谱（先预览，加 yes 确认写入）\n"
         "  /memory file         查看 MEMORY.md 长期记忆文件"
     )
     return True

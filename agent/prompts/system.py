@@ -711,17 +711,31 @@ _PROFILE_CACHE: str | None = None
 
 
 def _profile_section(settings: object | None) -> str:
-    """画像记忆段。首次调用渲染并缓存，之后直接复用。"""
+    """画像记忆段。首次调用渲染并缓存，之后直接复用。
+
+    两段合并（P2 画像双向同步）：知识图谱画像（唯一事实源，启动时经 MCP
+    预加载到 profile_bridge 缓存）+ 本地画像记忆（profile_refiner 提炼）。
+    """
     global _PROFILE_CACHE
     if _PROFILE_CACHE is not None:
         return _PROFILE_CACHE
     _PROFILE_CACHE = ""
     try:
+        sections: list[str] = []
+        # 知识图谱画像段（已启动预加载则直接取；未开启/拉取失败为空）
+        from agent.core.extensions.profile_bridge import kg_profile_section
+        kg_section = kg_profile_section()
+        if kg_section:
+            sections.append(kg_section)
+
         if settings is not None and getattr(settings, "profile_enabled", False):
             from agent.core.memory.profile_store import ProfileStore
 
             limit = int(getattr(settings, "profile_inject_token_limit", 300))
-            _PROFILE_CACHE = ProfileStore().render_for_prompt(token_limit=limit)
+            local = ProfileStore().render_for_prompt(token_limit=limit)
+            if local:
+                sections.append(local)
+        _PROFILE_CACHE = "\n\n".join(sections)
     except Exception:
         pass  # 画像注入失败不影响启动
     return _PROFILE_CACHE
