@@ -333,7 +333,13 @@ auto_start = false                        # Auto-enter on daemon start
 # ---- Context compaction ----
 [context]
 compaction = true
-compaction_threshold = 8000       # Token threshold (triggers compaction when exceeded)
+compaction_threshold = 8000       # Absolute-threshold mode: token threshold (triggers compaction when exceeded)
+# Ratio mode: when context_window is set, compaction triggers only when
+# total tokens (frozen summary + active window + system prompt) >= context_window * compact_ratio.
+context_window = 128000           # Model context window size (tokens), 0 = ratio mode disabled
+compact_ratio = 0.5               # Trigger ratio of the window (0.5 = compact only after 50%)
+compact_refreeze_growth = 1.25    # Debounce: no re-compaction until total grows by this factor after last freeze
+compact_max_output_tokens = 2048  # Max output tokens for the summarization request
 keep_recent_messages = 6          # Keep recent N messages when compacting
 tool_result_keep_recent = 4       # Keep recent N full tool outputs when folding (older ones collapse to one-line summaries)
 

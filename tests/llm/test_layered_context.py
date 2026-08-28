@@ -266,6 +266,149 @@ class TestFreezeIfNeeded:
         assert lc.total_tokens() > lc._frozen_tokens
 
 
+class TestFreezeRatioMode:
+    """比例压缩模式（based_on_total=True，总量超窗口比例才冻结）。"""
+
+    @pytest.mark.asyncio
+    async def test_below_ratio_no_freeze(self, monkeypatch) -> None:
+        """总 token 低于窗口×比例时不压缩（即使活跃窗口超了绝对阈值）。"""
+        from agent.core.memory import compactor
+
+        called = False
+
+        async def fake_compact(**kwargs):
+            nonlocal called
+            called = True
+            return _make_fake_compact_result(summarized=5, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        # 10 条 ×1000 字 ≈ 2500 tokens，远低于 128k×50%=64000
+        for i in range(10):
+            lc.append(_make_msg("user", "x" * 1000))
+        # 比例模式：窗口 64000，总 2500 → 不触发
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=64000, keep_recent=2, based_on_total=True,
+        )
+        assert result is False
+        assert called is False
+
+    @pytest.mark.asyncio
+    async def test_above_ratio_freezes(self, monkeypatch) -> None:
+        """总 token（含 base_tokens）超窗口比例时触发压缩。"""
+        from agent.core.memory import compactor
+
+        async def fake_compact(**kwargs):
+            return _make_fake_compact_result(summarized=20, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        # 40 条 ×1000 字 ≈ 10000 tokens，加 base_tokens=60000 → 总 70000 > 64000
+        for i in range(40):
+            lc.append(_make_msg("user", "x" * 1000))
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=64000, keep_recent=2,
+            base_tokens=60000, based_on_total=True,
+        )
+        assert result is True
+        assert len(lc.frozen) == 1
+        assert len(lc.active) == 2
+
+    @pytest.mark.asyncio
+    async def test_ratio_mode_counts_frozen_tokens(self, monkeypatch) -> None:
+        """比例模式总量计入冻结区（不是只看活跃窗口）。"""
+        from agent.core.memory import compactor
+
+        called = False
+
+        async def fake_compact(**kwargs):
+            nonlocal called
+            called = True
+            return _make_fake_compact_result(summarized=5, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        # 手工模拟已有冻结区：1 条摘要消息（80000 字 ≈ 20000 tokens）
+        lc._frozen = [_make_msg("user", "s" * 80000)]
+        lc._frozen_tokens = 20000
+        # 活跃窗口只有 1 条小消息（远低于绝对阈值），但总量 20000+ > 限 15000
+        lc.append(_make_msg("user", "tiny"))
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=15000, keep_recent=2, based_on_total=True,
+        )
+        assert result is True
+        assert called is True
+
+    @pytest.mark.asyncio
+    async def test_ratio_mode_debounce(self, monkeypatch) -> None:
+        """防抖：冻结后总量增长不足 25% 不重复压缩。"""
+        from agent.core.memory import compactor
+
+        calls = []
+
+        async def fake_compact(**kwargs):
+            calls.append(kwargs)
+            return _make_fake_compact_result(summarized=5, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        # 手工模拟上次冻结后的状态：总量基准 20000 tokens
+        lc._frozen = [_make_msg("user", "s" * 80000)]
+        lc._frozen_tokens = 20000
+        lc._last_freeze_total = 20000
+        # 活跃窗口新增少量（500 tokens），总量 20500 < 20000×1.25=25000 → 不重复压
+        lc.append(_make_msg("user", "x" * 2000))
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=15000, keep_recent=2, based_on_total=True,
+        )
+        assert result is False
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_ratio_mode_debounce_expires_after_growth(self, monkeypatch) -> None:
+        """防抖过期：总量增长超 25% 后再次允许压缩。"""
+        from agent.core.memory import compactor
+
+        async def fake_compact(**kwargs):
+            return _make_fake_compact_result(summarized=5, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        lc._frozen = [_make_msg("user", "s" * 80000)]
+        lc._frozen_tokens = 20000
+        lc._last_freeze_total = 20000
+        # 活跃窗口新增 10000 tokens → 总 30000 ≥ 25000 → 触发
+        lc.append(_make_msg("user", "y" * 40000))
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=15000, keep_recent=2, based_on_total=True,
+        )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_absolute_mode_still_uses_active_only(self, monkeypatch) -> None:
+        """默认模式（based_on_total=False）仍只看活跃窗口，不受冻结区影响。"""
+        from agent.core.memory import compactor
+
+        called = False
+
+        async def fake_compact(**kwargs):
+            nonlocal called
+            called = True
+            return _make_fake_compact_result(summarized=5, kept=2)
+
+        monkeypatch.setattr(compactor, "compact_messages", fake_compact)
+        lc = LayeredContext()
+        # 冻结区很大但活跃窗口很小 → 默认模式不触发
+        lc._frozen = [_make_msg("user", "s" * 80000)]
+        lc._frozen_tokens = 20000
+        lc.append(_make_msg("user", "tiny"))
+        result = await lc.freeze_if_needed(
+            None, "m", window_limit=8000, keep_recent=2,
+        )
+        assert result is False
+        assert called is False
+
+
 class TestCompactReactive:
     """反应式压缩（无条件）。"""
 

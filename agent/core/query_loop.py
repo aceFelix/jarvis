@@ -42,12 +42,10 @@ from agent.core.orchestrator import ToolOrchestrator
 from agent.core.tool import ToolRegistry
 from agent.core.memory.compactor import (
     DEFAULT_KEEP_RECENT,
-    DEFAULT_THRESHOLD_TOKENS,
     compact_messages,
     estimate_text_tokens,
     estimate_tokens,
     restore_recent_files,
-    should_compact,
     update_session_memory,
 )
 from agent.llm.base import (
@@ -95,7 +93,10 @@ class QueryLoop:
         max_tokens: int = 4096,
         temperature: float | None = None,
         enable_compaction: bool = True,
-        compaction_threshold: int = DEFAULT_THRESHOLD_TOKENS,
+        context_window: int = 128000,
+        compact_ratio: float = 0.5,
+        compact_refreeze_growth: float = 1.25,
+        compact_max_output_tokens: int = 2048,
         keep_recent_messages: int = DEFAULT_KEEP_RECENT,
         tool_result_keep_recent: int = 4,
         vendor_fallback: str = "",
@@ -112,7 +113,12 @@ class QueryLoop:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._enable_compaction = enable_compaction
-        self._compaction_threshold = compaction_threshold
+        # 唯一压缩机制：总 token（含 system prompt）≥ context_window × compact_ratio 才压缩
+        self._context_window = context_window
+        self._compact_ratio = compact_ratio
+        # 防抖倍数与摘要输出上限（均可从 settings.toml [context] 段配置）
+        self._compact_refreeze_growth = compact_refreeze_growth
+        self._compact_max_output_tokens = compact_max_output_tokens
         self._keep_recent_messages = keep_recent_messages
         self._tool_result_keep_recent = tool_result_keep_recent
         self._vendor_fallback = vendor_fallback
@@ -160,6 +166,7 @@ class QueryLoop:
                 model=self._model,
                 messages=ctx.messages,
                 keep_recent=self._keep_recent_messages,
+                max_output_tokens=self._compact_max_output_tokens,
                 on_progress=ctx.ui.info if ctx.ui else None,
                 task_budget_remaining=self._task_budget_remaining,
             )
@@ -227,14 +234,17 @@ class QueryLoop:
         layered = LayeredContext(ctx.messages)
 
         if self._enable_compaction:
-            # 冻结：活跃窗口超阈值 → 一次性压缩 + 锁定前缀
-            # base_tokens 计入 system prompt 固定开销，避免阈值被系统性低估
+            # 冻结：总 token（含 system prompt 固定开销）超窗口比例 → 一次性压缩 + 锁定前缀
+            # 防抖：冻结后总量增长不足 compact_refreeze_growth 倍不重复压缩
             frozen = await layered.freeze_if_needed(
                 self._provider, self._model,
-                window_limit=self._compaction_threshold,
+                window_limit=int(self._context_window * self._compact_ratio),
                 keep_recent=self._keep_recent_messages,
                 base_tokens=estimate_text_tokens(self._system),
                 on_progress=ctx.ui.info if ctx.ui else None,
+                based_on_total=True,
+                refreeze_growth=self._compact_refreeze_growth,
+                max_output_tokens=self._compact_max_output_tokens,
             )
             if frozen and ctx.ui:
                 ctx.ui.info(f"上下文冻结完成（活跃 {layered.active_tokens()} → 总计 {layered.total_tokens()} tokens）")
@@ -279,6 +289,7 @@ class QueryLoop:
                     if await layered.compact_reactive(
                         self._provider, self._model,
                         keep_recent=self._keep_recent_messages,
+                        max_output_tokens=self._compact_max_output_tokens,
                     ):
                         # 压缩成功后，把摘要持久化到会话记忆文件
                         if layered.last_compact_result:
@@ -421,6 +432,11 @@ class QueryLoop:
     def enable_compaction(self) -> bool:
         """压缩功能是否启用（供 /compact 显示准确原因）。"""
         return self._enable_compaction
+
+    @property
+    def context_window(self) -> int:
+        """比例压缩模式的模型窗口大小（token）。0 = 未配置（绝对阈值模式）。"""
+        return self._context_window
 
     async def _stream_once(
         self, ctx: ToolContext,

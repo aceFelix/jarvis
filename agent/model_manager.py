@@ -534,8 +534,10 @@ def _switch_model(
         max_tokens=settings.max_tokens,
         temperature=settings.temperature,
         enable_compaction=settings.context_compaction,
-        compaction_threshold=settings.compaction_threshold,
-        keep_recent_messages=settings.keep_recent_messages,
+        context_window=settings.context_window,
+        compact_ratio=settings.compact_ratio,
+        compact_refreeze_growth=settings.compact_refreeze_growth,
+        compact_max_output_tokens=settings.compact_max_output_tokens,
         vendor_fallback=settings.vendor_fallback,
         custom_models=settings.custom_models,
     )

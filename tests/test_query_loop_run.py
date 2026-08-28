@@ -398,7 +398,7 @@ class TestRunProviderError:
     async def test_context_too_long_compacts_and_retries(self, registry, monkeypatch):
         """上下文过长：compact_reactive 成功 → 压缩后重试本轮。"""
 
-        async def _fake_compact_reactive(self, provider, model, *, keep_recent=None):
+        async def _fake_compact_reactive(self, provider, model, *, keep_recent=None, max_output_tokens=None):
             return True
 
         monkeypatch.setattr(LayeredContext, "compact_reactive", _fake_compact_reactive)
@@ -420,7 +420,7 @@ class TestRunProviderError:
     async def test_context_too_long_compact_fails_ends(self, registry, monkeypatch):
         """上下文过长但压缩失败（compact_reactive 返回 False）→ 以 provider_error 结束。"""
 
-        async def _fake_compact_reactive(self, provider, model, *, keep_recent=None):
+        async def _fake_compact_reactive(self, provider, model, *, keep_recent=None, max_output_tokens=None):
             return False
 
         monkeypatch.setattr(LayeredContext, "compact_reactive", _fake_compact_reactive)
@@ -941,7 +941,7 @@ class TestRunRegression:
     async def test_freeze_if_needed_notifies_ui(self, registry, monkeypatch):
         """压缩开启时 freeze_if_needed 返回 True → UI 收到冻结提示。"""
 
-        async def _fake_freeze(self, provider, model, *, window_limit=None, keep_recent=None, base_tokens=0, on_progress=None):
+        async def _fake_freeze(self, provider, model, *, window_limit=None, keep_recent=None, base_tokens=0, on_progress=None, based_on_total=False, refreeze_growth=None, max_output_tokens=None):
             return True
 
         monkeypatch.setattr(LayeredContext, "freeze_if_needed", _fake_freeze)
@@ -1267,10 +1267,10 @@ class TestSessionMemoryPersist:
         monkeypatch.setattr("agent.core.memory.compactor.compact_messages", _fake_compact)
 
         provider = ScriptedProvider([[TextDelta("你好"), Stop(reason="stop")]])
-        # compaction_threshold 传 1，保证活跃窗口必然超限触发冻结
+        # context_window 传 2（比例 0.5 → 阈值 1），保证总 token 必然超限触发冻结
         loop = make_loop(
             provider, FakeOrchestrator(), registry,
-            enable_compaction=True, compaction_threshold=1,
+            enable_compaction=True, context_window=2, compact_ratio=0.5,
         )
         ui = FakeUI()
         # workdir 指向临时目录，SESSION_MEMORY.md 会真实写到磁盘

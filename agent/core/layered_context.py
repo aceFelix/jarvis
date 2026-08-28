@@ -44,12 +44,16 @@ class LayeredContext:
     DEFAULT_WINDOW_LIMIT: int = 8000
     # 冻结时保留最近 N 条不压缩（留在窗口继续活跃）
     DEFAULT_KEEP_RECENT: int = 4
+    # 比例模式防抖：总量较上次冻结后增长不足此比例时不重复冻结
+    # （避免摘要+保留消息本身就超阈值时，每轮都浪费一次摘要 LLM 调用）
+    REFREEZE_GROWTH_FACTOR: float = 1.25
 
     def __init__(self, messages: list[Message] | None = None) -> None:
         self._frozen: list[Message] = []       # 📦 冻结区：压缩后的摘要，永不修改
         self._active: list[Message] = []        # 🪟 活跃窗口：最近的消息，继续增长
         self._frozen_tokens: int = 0            # 冻结区估算 token 数（缓存，避免重复计算）
         self._last_compact_result = None        # 📝 最近一次成功压缩的 CompactResult（供记忆落盘）
+        self._last_freeze_total: int = 0        # 上次冻结后的总 token（比例模式防抖基准）
         if messages:
             self._active = list(messages)
 
@@ -118,8 +122,11 @@ class LayeredContext:
         keep_recent: int | None = None,
         base_tokens: int = 0,
         on_progress: object = None,
+        based_on_total: bool = False,
+        refreeze_growth: float | None = None,
+        max_output_tokens: int | None = None,
     ) -> bool:
-        """活跃窗口超阈值 → 压缩整个上下文并冻结前缀。
+        """超阈值 → 压缩整个上下文并冻结前缀。
 
         压缩逻辑:
         1. 把冻结区 + 活跃窗口合并成完整消息列表
@@ -129,11 +136,17 @@ class LayeredContext:
         Args:
             provider: LLM provider（用于生成摘要）
             model: 模型名
-            window_limit: 窗口 token 上限，超此触发。默认 DEFAULT_WINDOW_LIMIT
+            window_limit: token 上限，超此触发。默认 DEFAULT_WINDOW_LIMIT
             keep_recent: 冻结时保留最近 N 条不压缩。默认 DEFAULT_KEEP_RECENT
             base_tokens: 固定开销 token（system prompt 等），计入阈值判断。
                 estimate_tokens 不计 system，若忽略此值会系统性低估真实请求体积。
             on_progress: UI 回调（可选）
+            based_on_total: True = 比例模式，按「总 token（冻结区+活跃窗口+固定开销）」
+                与 window_limit 比较（用于「总量超窗口 N% 才压缩」）；
+                False = 默认模式，只看活跃窗口（冻结后窗口重置，滚动压缩）。
+                比例模式附帶防抖：总量较上次冻结后增长不足 25% 不重复冻结。
+            refreeze_growth: 防抖倍数（默认 REFREEZE_GROWTH_FACTOR），可从配置注入。
+            max_output_tokens: 摘要请求的输出 token 上限（None 用 compact_messages 默认）。
 
         Returns:
             True 触发了冻结，False 无需冻结或冻结失败
@@ -142,10 +155,21 @@ class LayeredContext:
         """
         limit = window_limit or self.DEFAULT_WINDOW_LIMIT
         keep = keep_recent or self.DEFAULT_KEEP_RECENT
+        growth = refreeze_growth if refreeze_growth is not None else self.REFREEZE_GROWTH_FACTOR
 
-        # 活跃窗口 + 固定开销（system prompt）超阈值才触发，避免低估
-        if self.active_tokens() + base_tokens < limit:
-            return False
+        if based_on_total:
+            # 比例模式：总量（含冻结摘要 + system prompt 开销）超窗口比例才压缩
+            current = self.total_tokens() + base_tokens
+            if current < limit:
+                return False
+            # 防抖：较上次冻结后的总量增长不足 growth 倍 → 不重复压缩。
+            # 否则窗口配置过小时，摘要+保留消息本身就超比例，会每轮都白压一次。
+            if self._last_freeze_total and current < int(self._last_freeze_total * growth):
+                return False
+        else:
+            # 活跃窗口 + 固定开销（system prompt）超阈值才触发，避免低估
+            if self.active_tokens() + base_tokens < limit:
+                return False
 
         from agent.core.memory.compactor import compact_messages
 
@@ -157,6 +181,7 @@ class LayeredContext:
                 messages=all_msgs,
                 keep_recent=keep,
                 on_progress=on_progress,
+                max_output_tokens=max_output_tokens,
             )
             if not result.messages_summarized:
                 return False
@@ -168,6 +193,7 @@ class LayeredContext:
             self._active = result.new_messages[split_at:]
             self._frozen_tokens = self._estimate_frozen()
             self._last_compact_result = result   # 记录压缩结果，供调用方落盘记忆
+            self._last_freeze_total = self.total_tokens()  # 记录防抖基准
             return True
         except Exception:
             from agent.core.logging import get_logger
@@ -180,10 +206,12 @@ class LayeredContext:
         model: str,
         *,
         keep_recent: int | None = None,
+        max_output_tokens: int | None = None,
     ) -> bool:
         """反应式压缩：API 报 context too long 时强制压缩。
 
         与 freeze_if_needed 的区别：不检查阈值，无条件压缩。
+        max_output_tokens 透传给 compact_messages（None 用其默认值）。
 
         @author aceFelix
         """
@@ -197,6 +225,7 @@ class LayeredContext:
                 model=model,
                 messages=all_msgs,
                 keep_recent=keep,
+                max_output_tokens=max_output_tokens,
             )
             if not result.messages_summarized:
                 return False
@@ -207,6 +236,7 @@ class LayeredContext:
             self._active = result.new_messages[split_at:]
             self._frozen_tokens = self._estimate_frozen()
             self._last_compact_result = result   # 记录压缩结果，供调用方落盘记忆
+            self._last_freeze_total = self.total_tokens()  # 记录防抖基准（反应式压缩同样适用）
             return True
         except Exception:
             from agent.core.logging import get_logger

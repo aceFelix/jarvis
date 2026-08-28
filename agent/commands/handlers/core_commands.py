@@ -171,8 +171,10 @@ def handle_mode(ctx: "CommandContext", stripped: str) -> bool:
         max_tokens=settings.max_tokens,
         temperature=settings.temperature,
         enable_compaction=settings.context_compaction,
-        compaction_threshold=settings.compaction_threshold,
-        keep_recent_messages=settings.keep_recent_messages,
+        context_window=settings.context_window,
+        compact_ratio=settings.compact_ratio,
+        compact_refreeze_growth=settings.compact_refreeze_growth,
+        compact_max_output_tokens=settings.compact_max_output_tokens,
         vendor_fallback=settings.vendor_fallback,
         custom_models=settings.custom_models,
     )
@@ -299,11 +301,16 @@ def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
     return True
 
 
-def _print_context(ui: RichCLI, messages: list[Message], model: str, system_prompt: str = "") -> None:
+def _print_context(
+    ui: RichCLI, messages: list[Message], model: str, system_prompt: str = "",
+    window: int = 0,
+) -> None:
     """/context: 显示上下文窗口使用情况，按角色分组统计消息数。
 
     system_prompt 单独传入并单独统计 token，因为 system prompt 不在
     messages 列表内，但实际占上下文窗口。窗口占比必须含 system 才准确。
+    window 传入用户配置的 context_window（比例压缩模式）；未配置时回退
+    主流大模型的保守假设值 128k。
 
     @author aceFelix
     """
@@ -321,9 +328,10 @@ def _print_context(ui: RichCLI, messages: list[Message], model: str, system_prom
         role_counts["system"] = role_counts.get("system", 0) + (1 if system_tokens else 0)
     dialog_total = estimate_tokens(messages)
     total = dialog_total + system_tokens
-    # 窗口默认值取主流大模型的保守值（128k）。
-    # JARVIS 暂无模型→窗口映射表，此处仅用于估算占比，非精确值。
-    window = 128000
+    # 窗口：优先用用户配置的 context_window（比例压缩模式），
+    # 未配置时取主流大模型的保守值（128k）。仅用于估算占比，非精确值。
+    if not window:
+        window = 128000
     pct = (total / window * 100) if window else 0
     ui.info(f"上下文使用情况（模型: {model}，假设窗口 {window:,} tokens）")
     rows = [
@@ -349,7 +357,9 @@ def _print_context(ui: RichCLI, messages: list[Message], model: str, system_prom
 
 def handle_context(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /context。"""
-    _print_context(ctx.ui, ctx.messages, ctx.model, ctx.system_prompt)
+    # 优先使用用户配置的 context_window（比例压缩模式），未配置回退 128k 假设值
+    window = getattr(ctx.loop, "context_window", 0) if getattr(ctx, "loop", None) else 0
+    _print_context(ctx.ui, ctx.messages, ctx.model, ctx.system_prompt, window=window or 128000)
     return True
 
 
