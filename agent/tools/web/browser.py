@@ -37,9 +37,19 @@ from agent.core.tool import JSONSchema, PermissionMatcher, Tool
 # ---------------------------------------------------------------------------
 
 
+def _normalize_file_url(url: str) -> str:
+    """规范化 file:// URL：Windows 反斜杠路径 → 正斜杠。
+
+    Playwright 不认反斜杠，模型常拼出 file:///E:\\xx.html 形式，
+    统一转正斜杠保证能打开。非 file:// URL 原样返回。
+    """
+    if url.startswith("file://"):
+        return url.replace("\\", "/")
+    return url
+
+
 def _encode_image(img: Any, fmt: str = "jpeg", max_size: int = 1280) -> ImageContent:
     """把 PIL Image 缩放并编码为 base64 图片块。
-
     Args:
         img: PIL.Image.Image（playwright screenshot 返回 bytes，需先 PIL.open）。
         fmt: "jpeg" 或 "png"。
@@ -164,13 +174,20 @@ class BrowserNavigateTool(Tool):
     description = (
         "打开指定 URL 的网页。首次调用会启动浏览器（默认无头模式，不打扰用户）。"
         "打开后可用 BrowserScreenshot 看页面、BrowserClick/Type 交互。"
-        "网络操作，默认询问用户确认。"
+        "支持 file:// 打开本地 HTML 文件（静态页面自查，免确认）；"
+        "http(s) 属网络操作，默认询问用户确认。"
         "可选参数 headless（默认 true 无头；设 false 可看到浏览器窗口，调试用）。"
     )
     input_schema: JSONSchema = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "目标网址（含协议，如 https://example.com）"},
+            "url": {
+                "type": "string",
+                "description": (
+                    "目标网址（含协议，如 https://example.com），"
+                    "也支持 file:// 打开本地 HTML 文件（交付自查静态页面用）"
+                ),
+            },
             "headless": {
                 "type": "boolean",
                 "description": "是否无头模式（默认 true）。仅首次启动生效。",
@@ -181,21 +198,30 @@ class BrowserNavigateTool(Tool):
     max_result_chars = 1_000
 
     def is_read_only(self, args: dict[str, Any]) -> bool:
-        return False  # 打开网页是网络操作
+        # file:// 是本地只读查看，不算网络操作；http(s) 才算网络访问需确认。
+        return str(args.get("url", "")).startswith("file://")
 
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
         return False
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        if str(args.get("url", "")).startswith("file://"):
+            return PermissionResult.allow("本地文件自查")  # 本地文件自查免确认，降低自查摩擦
         return PermissionResult.ask(f"打开网页 {args.get('url')}")
 
     def validate_input(self, args: dict[str, Any], ctx: ToolContext) -> ValidationResult:
         url = args.get("url", "")
         if not url:
             return ValidationResult.fail("url 不能为空")
-        if not (url.startswith("http://") or url.startswith("https://")):
-            return ValidationResult.fail(f"url 必须以 http:// 或 https:// 开头: {url}")
-        return ValidationResult.pass_()
+        # 支持 http(s) 与 file://（本地静态页面自查）三种协议前缀。
+        # 裸 Windows 路径（E:\...）不自动转换，由提示词引导模型自行拼 file:// 前缀。
+        if url.startswith(("http://", "https://")):
+            return ValidationResult.pass_()
+        if url.startswith("file://"):
+            return ValidationResult.pass_()
+        return ValidationResult.fail(
+            f"url 必须以 http://、https:// 或 file:// 开头: {url}"
+        )
 
     def prepare_permission_matcher(self, args: dict[str, Any]) -> PermissionMatcher | None:
         return PermissionMatcher(tool_name="BrowserNavigate", targets=[args.get("url", "")])
@@ -203,6 +229,10 @@ class BrowserNavigateTool(Tool):
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         url = args["url"]
         headless = args.get("headless", True)
+
+        # file:// 本地路径容错：Windows 反斜杠 → 正斜杠（Playwright 不认反斜杠）。
+        # 不自动把裸路径转 file://（validate_input 已拦截），只做已有 file:// 的规范化。
+        url = _normalize_file_url(url)
 
         try:
             page = await _manager.get_page(headless=headless)
@@ -216,7 +246,7 @@ class BrowserNavigateTool(Tool):
         except Exception as e:
             return ToolResult.error(f"打开 {url} 失败: {type(e).__name__}: {e}")
 
-        status = response.status if response else "?"
+        status = response.status if response else ("file://" if url.startswith("file://") else "?")
         title = await page.title()
         return ToolResult.ok(
             f"已打开: {url}\n"
