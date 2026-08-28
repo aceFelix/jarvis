@@ -87,12 +87,12 @@ barge_in_key = true
 boot_animation = true
 
 [context]
-# 上下文压缩：对话历史超阈值时自动摘要旧消息，保留最近 N 条原消息。
+# 上下文压缩：总 token 超窗口比例时自动摘要旧消息，保留最近几条原消息。
 # 防止 token 爆炸 + 撞模型上下文窗口。
 # 也可用 /compact 命令手动触发，JARVIS_CONTEXT_COMPACTION=0 关闭。
 compaction = true
-compaction_threshold = 8000   # 估算 token 超此值触发（粗估 4 字符/token）
-keep_recent_messages = 6       # 压缩时保留最近 N 条原消息（含当前轮）
+context_window = 128000        # 模型上下文窗口（token），换模型时同步修改；不配置默认 128000，勿设 0
+compact_ratio = 0.5            # 总量超窗口 50% 才压缩，未超比例绝不压缩
 tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
 [memory]

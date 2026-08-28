@@ -117,8 +117,10 @@ def _show_context(ui: RichCLI, settings: Any) -> None:
     """
     rows = [
         ["context_compaction", _bool_icon(settings.context_compaction)],
-        ["compaction_threshold", f"{settings.compaction_threshold} tokens"],
-        ["keep_recent_messages", str(settings.keep_recent_messages)],
+        ["context_window", f"{settings.context_window} tokens"],
+        ["compact_ratio", f"{settings.compact_ratio:.0%}"],
+        ["compact_refreeze_growth", f"{settings.compact_refreeze_growth}x"],
+        ["compact_max_output_tokens", f"{settings.compact_max_output_tokens} tokens"],
         ["long_term_memory", _bool_icon(settings.long_term_memory)],
         ["auto_resume_session", _bool_icon(settings.auto_resume_session)],
     ]

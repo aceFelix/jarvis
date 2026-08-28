@@ -333,14 +333,12 @@ auto_start = false                        # daemon 启动时自动进入
 # ---- 上下文压缩 ----
 [context]
 compaction = true
-compaction_threshold = 8000       # 绝对阈值模式：Token 阈值（超此值触发压缩）
-# 比例压缩模式：配置 context_window 后按「总 token ≥ 窗口×比例」触发，
-# 未超比例绝不压缩；compaction_threshold 不再参与判断。
-context_window = 128000           # 模型上下文窗口（token），0 = 不启用比例模式
+# 压缩条件：总 token（冻结摘要+活跃窗口+system prompt）≥ context_window × compact_ratio 才压缩，
+# 未超比例绝不压缩，用满窗口前半程。
+context_window = 128000           # 模型上下文窗口（token），换模型时同步修改，勿设 0
 compact_ratio = 0.5               # 触发比例（占窗口百分比），如 0.5 = 超 50% 才压缩
 compact_refreeze_growth = 1.25    # 防抖：冻结后总量增长不足此倍数不重复压缩
 compact_max_output_tokens = 2048  # 压缩摘要请求的输出 token 上限
-keep_recent_messages = 6          # 压缩时保留最近 N 条消息
 tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
 # ---- 常驻模式 ----

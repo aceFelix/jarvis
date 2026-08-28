@@ -472,14 +472,11 @@ max_iterations = 50               # 单轮最大工具调用
 # 上下文压缩
 [context]
 compaction = true
-compaction_threshold = 8000
-# 比例压缩模式：配置 context_window 后，总 token ≥ 窗口×compact_ratio 才自动压缩
-# （未超比例绝不压缩；compaction_threshold 不再参与判断）
-context_window = 128000        # 模型窗口（token），0 = 不启用比例模式
+# 压缩条件：总 token ≥ context_window × compact_ratio 才自动压缩（未超比例绝不压缩）
+context_window = 128000        # 模型窗口（token），换模型时同步修改，勿设 0
 compact_ratio = 0.5            # 触发比例，0.5 = 超窗口 50% 才压缩
 compact_refreeze_growth = 1.25 # 防抖：冻结后总量增长不足此倍数不重复压缩
 compact_max_output_tokens = 2048  # 压缩摘要的输出 token 上限
-keep_recent_messages = 6
 tool_result_keep_recent = 4   # 工具结果折叠时保留最近 N 条完整输出
 
 # 常驻模式

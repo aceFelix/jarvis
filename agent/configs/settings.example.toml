@@ -87,20 +87,16 @@ barge_in_key = true
 boot_animation = true
 
 [context]
-# 上下文压缩：对话历史超阈值时自动摘要旧消息，保留最近 N 条原消息。
-# 防止 token 爆炸 + 撞模型上下文窗口。
-# 也可用 /compact 命令手动触发，JARVIS_CONTEXT_COMPACTION=0 关闭。
+# 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超过窗口比例时，
+# 自动将旧消息摘要为一段结构化摘要（冻结前缀），保留最近几条原消息。
+# 未超比例绝不压缩，用满窗口前半程。也可用 /compact 命令手动触发，
+# JARVIS_CONTEXT_COMPACTION=0 关闭。
 compaction = true
-compaction_threshold = 8000   # 绝对阈值模式：估算 token 超此值触发（粗估 4 字符/token）
-# 比例压缩模式：配置 context_window 后，自动压缩条件改为
-# 「总 token（冻结摘要+活跃窗口+system prompt）≥ context_window × compact_ratio」，
-# compaction_threshold 不再参与判断——未超比例绝不压缩，用满窗口前半程。
-# 举例 deepseek-v4-flash（128k 窗口）：总量超 64k 才压缩。
-context_window = 0             # 模型上下文窗口大小（token），0 = 不启用（用上面的绝对阈值）
-compact_ratio = 0.5            # 触发比例（占窗口的百分比），仅 context_window > 0 时生效
+context_window = 128000        # 模型上下文窗口大小（token），换模型时请同步修改；
+                               #   不配置默认 128000；勿设 0（会退化为每轮都触发压缩）
+compact_ratio = 0.5            # 触发比例：总量超窗口 50% 才压缩（举例：128k × 0.5 = 64k）
 compact_refreeze_growth = 1.25 # 防抖：冻结后总量增长不足此倍数不重复压缩（避免窗口过小时每轮白压）
 compact_max_output_tokens = 2048  # 压缩摘要请求的输出 token 上限（代码场景需要细节，不建议太小）
-keep_recent_messages = 6       # 压缩时保留最近 N 条原消息（含当前轮）
 tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
 [memory]

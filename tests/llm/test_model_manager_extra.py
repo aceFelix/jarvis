@@ -443,8 +443,6 @@ class TestSwitchModel:
             max_tokens=2000,
             temperature=0.1,
             context_compaction=True,
-            compaction_threshold=8000,
-            keep_recent_messages=6,
             vendor_fallback="",
             models={"qwen-max": "通义千问", "deepseek-chat": "DeepSeek"},
             **extra,

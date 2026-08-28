@@ -115,12 +115,11 @@ enable_thinking = true
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `context_compaction` | `true` | 自动压缩旧消息 |
-| `compaction_threshold` | `8000` | 估算 token 超此值触发压缩（绝对阈值模式，`context_window=0` 时生效） |
-| `context_window` | `0` | 模型上下文窗口大小（token）。>0 启用比例模式：总 token ≥ 窗口×compact_ratio 才压缩 |
-| `compact_ratio` | `0.5` | 自动压缩触发比例（占窗口百分比），仅 `context_window > 0` 时生效 |
+| `context_window` | `128000` | 模型上下文窗口大小（token），换模型时同步修改；勿设 0 |
+| `compact_ratio` | `0.5` | 压缩触发比例：总 token ≥ 窗口×比例才压缩，未超比例绝不压缩 |
 | `compact_refreeze_growth` | `1.25` | 防抖：冻结后总量增长不足此倍数不重复压缩 |
 | `compact_max_output_tokens` | `2048` | 压缩摘要请求的输出 token 上限 |
-| `keep_recent_messages` | `6` | 压缩时保留最近 N 条原消息 |
+| `tool_result_keep_recent` | `4` | 工具结果折叠时保留最近 N 条完整输出 |
 | `long_term_memory` | `true` | 加载 `~/.jarvis/MEMORY.md` 长期记忆 |
 | `auto_resume_session` | `false` | 启动时自动恢复上次会话 |
 
