@@ -91,7 +91,15 @@ boot_animation = true
 # 防止 token 爆炸 + 撞模型上下文窗口。
 # 也可用 /compact 命令手动触发，JARVIS_CONTEXT_COMPACTION=0 关闭。
 compaction = true
-compaction_threshold = 8000   # 估算 token 超此值触发（粗估 4 字符/token）
+compaction_threshold = 8000   # 绝对阈值模式：估算 token 超此值触发（粗估 4 字符/token）
+# 比例压缩模式：配置 context_window 后，自动压缩条件改为
+# 「总 token（冻结摘要+活跃窗口+system prompt）≥ context_window × compact_ratio」，
+# compaction_threshold 不再参与判断——未超比例绝不压缩，用满窗口前半程。
+# 举例 deepseek-v4-flash（128k 窗口）：总量超 64k 才压缩。
+context_window = 0             # 模型上下文窗口大小（token），0 = 不启用（用上面的绝对阈值）
+compact_ratio = 0.5            # 触发比例（占窗口的百分比），仅 context_window > 0 时生效
+compact_refreeze_growth = 1.25 # 防抖：冻结后总量增长不足此倍数不重复压缩（避免窗口过小时每轮白压）
+compact_max_output_tokens = 2048  # 压缩摘要请求的输出 token 上限（代码场景需要细节，不建议太小）
 keep_recent_messages = 6       # 压缩时保留最近 N 条原消息（含当前轮）
 tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
@@ -105,11 +113,14 @@ long_term_memory = true         # 启动时加载长期记忆注入 system promp
 # ── 画像记忆（长期记忆 Phase 1a）──
 # 会话结束后自动用 LLM 提炼"关于用户的持久事实"（偏好/习惯/背景），
 # 存 ~/.jarvis/memory/profile.json，下次会话限额注入 system prompt。
-# 后台异步 + 10 分钟节流，不影响对话响应速度。
+# 后台异步 + 节流，不影响对话响应速度。
 profile_enabled = true
 profile_max_entries = 200            # 条目上限（超出按置信度×新近度淘汰）
 profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
 profile_refine_min_messages = 6      # 会话至少几条消息才触发提炼
+profile_refine_interval = 600        # 两次提炼的最小间隔（秒）。调大降低频率：
+                                    #   频繁提炼无增量价值，白花 token，
+                                    #   半小时一次（1800）或一小时（3600）通常足够
 
 # 独立提炼模型（可选）：用便宜模型跑后台提炼，留空 = 用主 LLM。
 # 示例（DashScope qwen-flash，也可配 deepseek 等任意 OpenAI 兼容端点）：

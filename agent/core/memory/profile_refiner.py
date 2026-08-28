@@ -32,6 +32,7 @@ logger = logging.getLogger("jarvis.memory.profile")
 
 # 提炼节流：两次提炼之间的最小间隔（秒）。_auto_save 每轮对话都会调用，
 # 不能每轮都跑 LLM——间隔内直接跳过，用户中途强关终端最近行为也已提炼过。
+# 默认值，实际取 settings.profile_refine_interval（settings.toml [memory] 段可配）。
 REFINE_INTERVAL_SECONDS = 600
 
 # 喂给 LLM 的消息窗口与单条截断（控制提炼成本）
@@ -361,6 +362,8 @@ def maybe_refine_async(messages: list[Message], session_id: str, settings: Any) 
     """节流后异步触发提炼。返回是否真的启动了后台任务。
 
     条件：开关开启 + 消息够多 + 距上次提炼超过间隔 + 无进行中的提炼。
+    间隔取 settings.profile_refine_interval（未配置用默认 600 秒），
+    调大可降低提炼频率（频繁提炼无增量价值，白花 token）。
     """
     global _last_refine_ts
     if not getattr(settings, "profile_enabled", False):
@@ -368,8 +371,9 @@ def maybe_refine_async(messages: list[Message], session_id: str, settings: Any) 
     min_msgs = int(getattr(settings, "profile_refine_min_messages", 6))
     if len(messages) < min_msgs:
         return False
+    interval = int(getattr(settings, "profile_refine_interval", REFINE_INTERVAL_SECONDS))
     now = time.time()
-    if now - _last_refine_ts < REFINE_INTERVAL_SECONDS:
+    if now - _last_refine_ts < interval:
         return False
     if not _in_flight.acquire(blocking=False):
         return False  # 已有线程在提炼

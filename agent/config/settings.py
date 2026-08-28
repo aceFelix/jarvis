@@ -117,13 +117,14 @@ class Settings:
     # 终端太窄/太矮/非 TTY 时自动跳过，回退到简单横幅。--no-boot 也可关闭。
     boot_animation: bool = True
 
-    # 上下文压缩（阶段四第一刀）
-    # 对话历史超阈值时自动摘要旧消息，保留最近 N 条原消息。
-    # 防止 token 爆炸 + 撞模型上下文窗口。致敬 ClaudeCode services/compact/。
+    # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超窗口比例才自动摘要，
+    # 防止 token 爆炸 + 撞模型上下文窗口。未超比例绝不压缩，用满窗口前半程。
     context_compaction: bool = True
-    compaction_threshold: int = 8000   # 估算 token 超此值触发压缩
-    keep_recent_messages: int = 6      # 压缩时保留最近 N 条原消息
     tool_result_keep_recent: int = 4   # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
+    context_window: int = 128000       # 模型上下文窗口大小（token）
+    compact_ratio: float = 0.5         # 自动压缩触发比例（占总窗口），0.5 = 超 50% 才压缩
+    compact_refreeze_growth: float = 1.25  # 防抖：冻结后总量增长不足此倍数不重复压缩
+    compact_max_output_tokens: int = 2048  # 压缩摘要请求的输出 token 上限
 
     # 记忆持久化（阶段四第二刀）
     # 启动时自动恢复最近会话（/resume 也可手动恢复）
@@ -137,6 +138,7 @@ class Settings:
     profile_max_entries: int = 200             # 条目上限（超出按置信度×新近度淘汰）
     profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
     profile_refine_min_messages: int = 6       # 会话至少多少条消息才触发提炼
+    profile_refine_interval: int = 600         # 两次提炼的最小间隔（秒），防止频繁无意义提炼
     # 独立提炼模型（便宜模型跑后台提炼；留空 = 用主 LLM 配置）
     profile_refine_model: str = ""
     profile_refine_provider: str = ""          # api_format，如 openai/dashscope
@@ -429,7 +431,9 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "realtime_talk_auto_start",
         "bridge_http_port", "bridge_ws_port", "bridge_token",
         "boot_animation",
-        "context_compaction", "compaction_threshold", "keep_recent_messages",
+        "context_compaction",
+        "context_window", "compact_ratio",
+        "compact_refreeze_growth", "compact_max_output_tokens",
         "auto_resume_session", "long_term_memory",
         "enable_skills",
         "enable_mcp",
@@ -520,9 +524,11 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
     if isinstance(ctx_table, dict):
         for sub_key, field in (
             ("compaction", "context_compaction"),
-            ("compaction_threshold", "compaction_threshold"),
-            ("keep_recent_messages", "keep_recent_messages"),
             ("tool_result_keep_recent", "tool_result_keep_recent"),
+            ("context_window", "context_window"),
+            ("compact_ratio", "compact_ratio"),
+            ("compact_refreeze_growth", "compact_refreeze_growth"),
+            ("compact_max_output_tokens", "compact_max_output_tokens"),
         ):
             if sub_key in ctx_table:
                 updates[field] = ctx_table[sub_key]
@@ -537,6 +543,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("profile_max_entries", "profile_max_entries"),
             ("profile_inject_token_limit", "profile_inject_token_limit"),
             ("profile_refine_min_messages", "profile_refine_min_messages"),
+            ("profile_refine_interval", "profile_refine_interval"),
             ("profile_refine_model", "profile_refine_model"),
             ("profile_refine_provider", "profile_refine_provider"),
             ("profile_refine_base_url", "profile_refine_base_url"),
@@ -552,6 +559,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
                 ("provider", "profile_refine_provider"),
                 ("base_url", "profile_refine_base_url"),
                 ("api_key", "profile_refine_api_key"),
+                ("interval", "profile_refine_interval"),
             ):
                 if sub_key in refine_table:
                     updates[field] = refine_table[sub_key]
