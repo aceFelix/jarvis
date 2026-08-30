@@ -18,7 +18,7 @@ from typing import Any
 from agent.core.context import UIProtocol
 
 try:
-    from rich.console import Console
+    from rich.console import Console, ConsoleDimensions
     from rich.live import Live
     from rich.panel import Panel
     from rich.prompt import Prompt
@@ -27,6 +27,27 @@ try:
     _HAS_RICH = True
 except ImportError:  # pragma: no cover
     _HAS_RICH = False
+
+# 渲染宽度上限（列数）：防止终端从最大化缩回时画面重排错乱（作者：aceFelix）。
+# 已输出到 scrollback 的内容无法重绘——若最大化时按 200+ 列宽渲染，
+# 缩窗后终端会把超宽行折行重排，启动横幅/面板全乱。封顶后内容恒窄于常见窗口宽，缩窗不折行。
+_MAX_RENDER_WIDTH = 120
+
+if _HAS_RICH:
+
+    class _CappedConsole(Console):
+        """渲染宽度封顶的 Console。
+
+        动态覆写 size：取 min(实际终端宽, _MAX_RENDER_WIDTH)——
+        窗口缩小不折行，窗口在封顶内变大变小仍自适应。
+        """
+
+        @property
+        def size(self) -> "ConsoleDimensions":
+            dims = super().size
+            if dims.width > _MAX_RENDER_WIDTH:
+                return ConsoleDimensions(_MAX_RENDER_WIDTH, dims.height)
+            return dims
 
 # prompt_toolkit（可选，用于 Tab 补全和 / 命令列表）
 try:
@@ -433,7 +454,8 @@ class RichCLI(UIProtocol):
         self.verbose = verbose
         self._boot_animation = boot_animation
         if _HAS_RICH:
-            self._console = Console()
+            # 用封顶宽度的 Console：最大化启动后缩窗不会把已输出的宽行折行重排（作者：aceFelix）
+            self._console = _CappedConsole()
         else:
             self._console = None  # type: ignore[assignment]
         # 当前正在累积的助手文本（用于流式）

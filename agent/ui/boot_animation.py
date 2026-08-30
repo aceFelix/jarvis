@@ -10,10 +10,15 @@ JARVIS 风格的蓝光圈：
 能在终端里画出细腻的圆弧与光晕，比普通 ASCII 细腻 8 倍。
 
 **自适应**: 根据终端窗口大小动态计算画布尺寸（正方形，最大 128px）。
-**两阶段动画 + 静态横幅**:
-  Phase-1 启动渐亮 (0~1.0s) —— power 从 0→1 渐亮
-  Phase-2 展示循环 (1.0~3.5s) —— 满功率持续旋转/脉动/粒子跑动
-  Live 退出后 console.print 输出最终静态画面（含 provider/model/workdir/命令信息，无频闪）
+**两阶段动画 + 定格帧分流**:
+  Phase-1 启动渐亮 (0~1.0s) —— power 从 0→1 渐亮，画布随窗口尺寸动态调整
+  Phase-2 展示循环 (1.0~3.5s) —— 满功率持续旋转/脉动/粒子跑动（按真实窗口尺寸居中渲染）
+  Live 退出后按"定格瞬间的窗口大小"输出静态定格帧（终端输出一次成像、无法重绘）：
+  - 小窗（宽 ≤ 120 列）：静态反应炉定格帧 + 标题 + 紧凑信息面板；
+    尺寸与动画最后一帧完全一致（直接继承其几何参数，不缩放）；
+    之后放大窗口其尺寸位置固定不变（终端特性）。
+  - 大窗/最大化（宽 > 120 列）：大号 J.A.R.V.I.S 方块艺术字 + 紧凑信息面板；
+    之后缩回小窗依然整齐不折行。
 
 降级策略：终端太窄/太矮/非 TTY/无 Rich 时返回 False，调用方回退简单横幅。
 """
@@ -21,12 +26,14 @@ JARVIS 风格的蓝光圈：
 from __future__ import annotations
 
 import math
+import shutil
 import time
 from dataclasses import dataclass
 
 from rich.align import Align
 from rich.console import Console, Group
 from rich.live import Live
+from rich.padding import Padding
 from rich.text import Text
 
 # ---- 盲文像素映射 ----
@@ -336,39 +343,82 @@ def _compose(canvas: BrailleCanvas, geo: ReactorGeo,
         parts.append(Align.center(
             Text("系统就绪", style=f"cyan {_color_for(0.7 + 0.3 * power)}")
         ))
-    else:  # banner / done —— 显示信息横幅
-        if info is None:
-            info = ("", "", "")
-        provider, model, workdir = info
-        banner_lines: list[Text] = []
-        if provider or model:
-            line1 = Text()
-            line1.append("provider ", style="dim")
-            line1.append(provider, style=_color_for(0.7))
-            line1.append("                     model ", style="dim")
-            line1.append(model, style=_color_for(0.7))
-            banner_lines.append(line1)
-        if workdir:
-            line2 = Text()
-            line2.append("workdir ", style="dim")
-            line2.append(workdir, style=_color_for(0.6))
-            banner_lines.append(line2)
-        if banner_lines:
-            banner_lines.append(
-                Text("/help 查看命令    /voice 语音对话    /talk 实时聊天    /exit 退出", style="dim")
-            )
-            from rich.panel import Panel
-            banner_text = Text("\n").join(banner_lines)
-            parts.append(Align.center(Panel(
-                banner_text,
-                border_style=_color_for(0.6),
-                padding=(0, 1),
-            )))
-        else:
-            parts.append(Align.center(
-                Text("/help 查看命令    /voice 语音对话    /talk 实时聊天    /exit 退出", style="dim")
-            ))
+    # done 阶段不再走此函数：定格帧改用 _static_reactor_frame（小窗）
+    # 或 _ascii_art_banner（大窗）——画面在 Live 退出瞬间按窗口大小定格，
+    # 之后不再随窗口变化。作者：aceFelix
     return Group(*parts)
+
+
+# 命令提示行：用户要求必须单行展示。分隔符用单空格夹 ·（旧版双空格
+# 版 60 cells 超出面板内容宽被拆行；缩减至 54 cells 并配动态面板宽度）。作者：aceFelix
+_HELP_HINT = "/help 命令 · /voice 语音 · /talk 实时聊天 · /exit 退出"
+# 面板内容宽下限与余量（作者：aceFelix）。下限保证短 provider/model 时面板不局促；
+# 余量吸收 cell_len 对 CJK 歧义宽字符（如 · ）与终端实际渲染的偏差。
+_BANNER_MIN_CONTENT_WIDTH = 40
+_BANNER_WIDTH_SLACK = 4
+
+
+def _banner_content_width(info: tuple[str, str, str]) -> int:
+    """按会话信息动态计算面板内容宽（作者：aceFelix）。
+
+    必须单行的内容（/help 命令提示、provider/model 行）用 cell_len 实测，
+    取最长者 + 余量作为面板内容宽——保证它们永远一行装得下；
+    workdir 行允许在面板内自动换行（不计入）。
+    """
+    from rich.cells import cell_len
+
+    provider, model, _workdir = info
+    widths = [cell_len(_HELP_HINT)]
+    if provider or model:
+        widths.append(cell_len(f"provider {provider}   model {model}"))
+    return max(max(widths) + _BANNER_WIDTH_SLACK, _BANNER_MIN_CONTENT_WIDTH)
+
+
+def _banner_total_width(info: tuple[str, str, str]) -> int:
+    """面板外框总宽 = 内容宽 + 左右 padding 各 1 + 左右边框各 1。作者：aceFelix"""
+    return _banner_content_width(info) + 4
+
+# 居中缩进上限（列）。终端无法预知后续缩窗，缩进越大越居中，
+# 但总行宽（横幅+缩进）超过缩窗后宽度就会折行错乱——封顶 20 列兼顾观感与安全。
+# 作者：aceFelix
+_BANNER_MAX_PAD = 20
+
+
+def _compact_banner(info: tuple[str, str, str]) -> Any:
+    """紧凑会话信息面板（作者：aceFelix）。
+
+    面板宽度按内容动态计算（_banner_total_width）：/help 命令提示与
+    provider/model 行必须单行完整展示（绝不用 no_wrap——它只截断不换行），
+    workdir 超长时由 Panel 自动换行（用户预期）。标题由调用方单独成行，
+    面板内不重复。用于：定格帧信息区、异常/中断路径兜底横幅。
+    """
+    provider, model, workdir = info
+
+    lines: list[Text] = []
+    if provider or model:
+        line1 = Text()
+        line1.append("provider ", style="dim")
+        line1.append(provider, style=_color_for(0.7))
+        line1.append("   model ", style="dim")
+        line1.append(model, style=_color_for(0.7))
+        lines.append(line1)
+    if workdir:
+        line2 = Text()
+        line2.append("workdir  ", style="dim")
+        line2.append(workdir, style=_color_for(0.6))
+        lines.append(line2)
+    lines.append(Text())
+    lines.append(Text(_HELP_HINT, style="dim"))
+
+    from rich.panel import Panel
+    # 居中由调用方按真实窗口宽 + 安全缩进决定，这里只返回按内容定宽的面板。
+    # 作者：aceFelix
+    return Panel(
+        Text("\n").join(lines),
+        width=_banner_total_width(info),
+        border_style=_color_for(0.6),
+        padding=(0, 1),
+    )
 
 
 # 动画时间线常量（总时长 ≤ 8s）
@@ -382,6 +432,84 @@ _FRAME_INTERVAL = 0.045     # 帧间隔 (~22fps)
 # 否则小窗口下动画结束后的静态横幅会占满，提示符与后续对话把它顶进 scrollback（"图像往上跑"）。
 # 0.72 = 约 28% 留给命令行；想要反应炉更小就调小此值。
 _CANVAS_RATIO = 0.72
+
+# 大窗（最大化）判定阈值（列）。与 REPL 封顶宽度 120 列对齐：
+# 定格瞬间真实宽度超过此值即视为最大化窗口——改印 ASCII 艺术字横幅，
+# 用户随后缩回默认小窗时窄内容不折行；阈值内才印静态反应炉定格帧。
+# 作者：aceFelix
+_LARGE_TERMINAL_WIDTH = 120
+
+# 大窗定格帧的居中基准宽（列）：终端业界默认窗口尺寸 80 列（作者：aceFelix）。
+# 最大化定格时按此宽度预排版（而非按封顶 120 列居中）：
+# 旧实现艺术字居中在 120 列（前导空格 40、总宽 84）超出默认小窗宽度，
+# 缩回小窗后被 reflow 吃掉前导空格、排版偏左；按 80 列预居中后，
+# 缩回默认小窗恰好居中（最大化状态下轻微偏左，同既有取舍）。
+_RESTORE_TARGET_WIDTH = 80
+
+# ---- J.A.R.V.I.S 方块艺术字（7 行字形）----
+# 每个字形定宽等长（J 7 列、A/R 8 列、V/S 9 列、I 3 列，逐行校验等长后拼接），
+# 总宽约 53 列 ≤ 常见默认小窗 80 列——缩窗不折行。
+# 大窗定格帧专用：最大化时不印反应炉（防之后缩窗 reflow 错乱），
+# 改印此艺术字 + 紧凑信息面板。作者：aceFelix
+_ART_GLYPHS: dict[str, tuple[str, ...]] = {
+    "J": (
+        "     ██╗",
+        "     ██║",
+        "     ██║",
+        "██   ██║",
+        "╚█████╔╝",
+        " ╚════╝ ",
+        "        ",
+    ),
+    "A": (
+        " █████╗ ",
+        "██╔══██╗",
+        "███████║",
+        "██╔══██║",
+        "██║  ██║",
+        "╚═╝  ╚═╝",
+        "        ",
+    ),
+    "R": (
+        "██████╗ ",
+        "██╔══██╗",
+        "██████╔╝",
+        "██╔══██╗",
+        "██║  ██║",
+        "╚═╝  ╚═╝",
+        "        ",
+    ),
+    "V": (
+        "██╗   ██╗",
+        "██║   ██║",
+        "██║   ██║",
+        "╚██╗ ██╔╝",
+        " ╚███╔██╝",
+        "  ╚══╝═╝ ",
+        "         ",
+    ),
+    "I": (
+        "██╗",
+        "██║",
+        "██║",
+        "██║",
+        "██║",
+        "╚═╝",
+        "   ",
+    ),
+    "S": (
+        "███████╗ ",
+        "██╔════╝ ",
+        "╚█████╗  ",
+        " ╚═══██╗ ",
+        "██████╔╝ ",
+        "╚═════╝  ",
+        "         ",
+    ),
+}
+
+# 艺术字字形间的空列数（分隔字母，过大则总宽超出小窗安全宽度）。作者：aceFelix
+_ART_GAP = 1
 
 
 def play_boot_animation(console: Console | None,
@@ -404,10 +532,21 @@ def play_boot_animation(console: Console | None,
     except Exception:
         return False
 
+    # 动画阶段用无封顶的独立 Console：传入的 console 是 REPL 的封顶 Console
+    #（≤120 列），直接用它会让最大化窗口的动画偏左且偏小。
+    # Live 是 transient（退出即清除），不会残留超宽行到 scrollback，用真实尺寸安全。
+    # 作者：aceFelix
+    try:
+        live_console = Console()
+        if not live_console.is_terminal:
+            live_console = console
+    except Exception:
+        live_console = console
+
     def _fresh_geo() -> ReactorGeo | None:
-        """读取当前终端尺寸，计算最新几何。"""
+        """读取当前终端真实尺寸，计算最新几何（供 Live 动画随窗口缩放）。"""
         try:
-            s = console.size
+            s = live_console.size
         except Exception:
             return None
         return _calc_geo(s.width, s.height)
@@ -428,7 +567,7 @@ def play_boot_animation(console: Console | None,
         # alternate screen 会抛异常，导致整个动画被 except 吞掉、回退成简单 Panel
         # （反应炉不显示）。scrollback 污染的真正根源是画布占满视口、resize 时
         # 多余行溢出——已通过 _CANVAS_RATIO 缩小画布从源头缓解，故此处保持 False。
-        with Live(console=console, refresh_per_second=22,
+        with Live(console=live_console, refresh_per_second=22,
                   transient=True, screen=False) as live:
             frame = 0
             while True:
@@ -455,12 +594,9 @@ def play_boot_animation(console: Console | None,
                     phase = "showcase"
                     phase_info = None
                 else:
-                    # 进入 banner 阶段：立即画最终帧并退出 Live，
-                    # 之后用 console.print 一次性输出静态画面，杜绝文字频闪
-                    _draw(canvas, geo, total, 1.0)
-                    live.update(_compose(canvas, geo, 1.0, total,
-                                         phase="done", info=info))
-                    time.sleep(0.08)
+                    # 进入 banner 阶段：直接退出 Live（transient 清除动画），
+                    # 之后输出紧凑静态横幅——不再印反应炉大画布，
+                    # 避免大块静态内容留 scrollback 被缩窗折行错乱。作者：aceFelix
                     break
 
                 _draw(canvas, geo, elapsed, power)
@@ -470,28 +606,159 @@ def play_boot_animation(console: Console | None,
                 frame += 1
 
     except KeyboardInterrupt:
+        # 中断路径无定格帧：直接输出紧凑横幅兜底（窄宽防折行）。作者：aceFelix
         try:
-            final_geo = _fresh_geo()
-            if final_geo is not None:
-                geo = final_geo
-                canvas = BrailleCanvas(geo.w, geo.h)
-            _draw(canvas, geo, total, 1.0)
-            console.print(_compose(canvas, geo, 1.0, total,
-                                   phase="done", info=info))
+            console.print(_banner_with_safe_center(info, console.size.width))
         except Exception:
             return False
     except Exception:
         return False
 
-    # Live 已退出，用 console.print 输出最终静态横幅（单次绘制，不闪烁）
+    # Live 已退出：按定格瞬间的真实窗口大小输出最终静态画面（一次成像，无法重绘）。
+    # 定格帧直接继承动画最后一帧的几何参数（含缩放跟踪），保证反应炉尺寸与
+    # 动画完全一致（用户要求）；大窗/最大化仍改印 ASCII 艺术字。作者：aceFelix
     try:
-        final_geo = _fresh_geo()
-        if final_geo is not None:
-            geo = final_geo
-            canvas = BrailleCanvas(geo.w, geo.h)
-        _draw(canvas, geo, total, 1.0)
-        console.print(_compose(canvas, geo, 1.0, total,
-                               phase="done", info=info))
+        console.print(_final_renderable(info, console.size.width, anim_geo=geo))
     except Exception:
-        pass
+        # 定格帧渲染异常 → 退化为紧凑横幅，保证横幅必有输出。作者：aceFelix
+        try:
+            console.print(_banner_with_safe_center(info, console.size.width))
+        except Exception:
+            pass
     return True
+
+
+def _banner_with_safe_center(info: tuple[str, str, str],
+                             render_width: int | None = None,
+                             assume_width: int | None = None) -> Any:
+    """紧凑横幅 + 安全居中（作者：aceFelix）。
+
+    终端无法预知用户之后会不会缩窗：缩进越大越居中，但总行宽超过
+    缩窗后宽度就会折行错乱。因此缩进取三重上限：
+    min(居中偏移, _BANNER_MAX_PAD, 渲染宽-面板宽)——
+    最大化窗口下只是轻微偏左（可接受），窄窗口不折行，换取缩窗永不乱。
+    assume_width：大窗定格帧传入 _RESTORE_TARGET_WIDTH，按"缩回默认小窗后"
+    的目标宽度预居中，缩回后恰好正中（作者：aceFelix）。
+    """
+    if assume_width is not None:
+        real_w = assume_width
+    else:
+        try:
+            real_w = shutil.get_terminal_size().columns
+        except Exception:
+            real_w = 80
+    box_w = _banner_total_width(info)  # 面板外框总宽（含 padding 与边框）
+    candidates = [(real_w - box_w) // 2, _BANNER_MAX_PAD]
+    # 窄窗口约束：总宽不得超过实际渲染宽度（否则当场折行）
+    if render_width is not None:
+        candidates.append(render_width - box_w)
+    pad = max(0, min(candidates))
+    # 左侧 pad 列缩进近似居中；(1,0,0,pad) = 上/右/下/左 内边距方向外边距。
+    return Padding(_compact_banner(info), (1, 0, 0, pad))
+
+
+def _ascii_art_lines(word: str = "JARVIS") -> list[str]:
+    """拼接方块字符艺术字行（作者：aceFelix）。
+
+    按字形定宽拼接、字形间空 _ART_GAP 列。拼接前逐行校验等长，
+    字形维护失误（行长不一）会直接抛错，被单测兜住。
+    拼接后去掉全空行（字形顶部/底部的纯空格行）：缩窗 reflow 时
+    空白行仍带前导缩进，会被终端按新宽度折成多行、打散居中排版。
+    作者：aceFelix
+    """
+    glyphs = [_ART_GLYPHS[c] for c in word.upper()]
+    for glyph in glyphs:
+        assert len(set(map(len, glyph))) == 1, "艺术字字形各行宽度不一致"
+    n_rows = len(glyphs[0])
+    gap = " " * _ART_GAP
+    rows = [gap.join(g[r] for g in glyphs) for r in range(n_rows)]
+    return [r for r in rows if r.strip()]
+
+
+def _ascii_art_banner(info: tuple[str, str, str],
+                      render_width: int | None = None) -> Any:
+    """大窗（最大化）定格帧：J.A.R.V.I.S 方块艺术字 + 紧凑信息面板（作者：aceFelix）。
+
+    最大化窗口完成启动时，不印反应炉大画布：终端输出一次成像、无法重绘，
+    用户随后缩回默认小窗时宽画布会被折行重排错乱。改印 ≤53 列宽的方块艺术字，
+    缩窗后依然整齐。居中基准取 _RESTORE_TARGET_WIDTH（80 列）而非封顶宽：
+    旧实现按 120 列居中导致前导空格 40/总宽 84 超出默认小窗，缩回后排版偏左；
+    按 80 列预居中后缩回默认小窗恰好正中。艺术字块、副标题、信息面板宽度各异，
+    各自按 80 列基准独立计算缩进（共用同一缩进会让窄行偏左——用户实测反馈）。
+    窗口再放大时画面尺寸位置固定——终端本质限制，可接受。
+    """
+    art = Text()
+    lines = _ascii_art_lines("JARVIS")
+    for i, line in enumerate(lines):
+        # 亮度自上而下渐亮，呼应反应炉点亮过程。作者：aceFelix
+        art.append(line + "\n", style=_color_for(0.45 + 0.08 * i))
+    subtitle = "Just A Rather Very Intelligent System"
+
+    # 逐元素按 80 列基准预居中，并受渲染宽约束防当场折行。
+    # 不用 Align.center：它按封顶 console 宽（120）居中，前导空格会超出小窗。
+    # 作者：aceFelix
+    from rich.cells import cell_len
+
+    def _pre_center_pad(width: int) -> int:
+        candidates = [(_RESTORE_TARGET_WIDTH - width) // 2]
+        if render_width is not None:
+            candidates.append(render_width - width)
+        return max(0, min(candidates))
+
+    art_pad = _pre_center_pad(max(len(l) for l in lines))
+    sub_pad = _pre_center_pad(cell_len(subtitle))
+
+    return Group(
+        Padding(art, (1, 0, 0, art_pad)),
+        Padding(Text(subtitle, style="dim"), (0, 0, 0, sub_pad)),
+        Text(),
+        _banner_with_safe_center(info, render_width=render_width,
+                                 assume_width=_RESTORE_TARGET_WIDTH),
+    )
+
+
+def _static_reactor_frame(geo: ReactorGeo, info: tuple[str, str, str]) -> Group:
+    """小窗定格帧：满功率静态反应炉 + 标题三行 + 紧凑信息面板（作者：aceFelix）。
+
+    几何参数直接继承动画最后一帧（_calc_geo 计算、含播放中的缩放跟踪），
+    定格帧与动画尺寸完全一致。取动画中间时刻（2.0s）的满功率姿态逐元素
+    绘制一帧：线圈段、内环、核心与轨道粒子全部可见，定格后永不变化。
+    画布最宽 64 列（128px 上限），留在 scrollback 缩窗不折行。标题排版：
+    J.A.R.V.I.S / 副标题 / 系统就绪各自单独一行；信息面板内不重复标题。
+    之后放大窗口时画面尺寸位置固定——终端本质限制，可接受。
+    """
+    canvas = BrailleCanvas(geo.w, geo.h)
+    _draw(canvas, geo, elapsed=2.0, power=1.0)
+
+    return Group(
+        Align.center(canvas.render()),
+        Align.center(Text("J.A.R.V.I.S", style="bold blue")),
+        Align.center(Text("Just A Rather Very Intelligent System", style="dim")),
+        Align.center(Text("系统就绪", style="cyan")),
+        Text(),
+        _banner_with_safe_center(info),
+    )
+
+
+def _final_renderable(info: tuple[str, str, str],
+                      render_width: int | None = None,
+                      anim_geo: ReactorGeo | None = None) -> Any:
+    """启动完成定格帧分流（作者：aceFelix）。
+
+    读取定格瞬间的真实终端宽度（shutil 直读，不受封顶 Console 影响）：
+    - ≤ _LARGE_TERMINAL_WIDTH 列（默认小窗）→ 静态反应炉定格帧；
+      几何优先用 anim_geo（动画最后一帧，尺寸与动画完全一致），
+      无 anim_geo 时才回退 _calc_geo 重算；之后放大窗口画面固定不变（场景 2）。
+    - > _LARGE_TERMINAL_WIDTH 列（最大化）→ ASCII 艺术字 + 信息面板；
+      之后缩回默认小窗不折行、画面整齐（场景 1）。
+    """
+    try:
+        cols, rows = shutil.get_terminal_size().columns, shutil.get_terminal_size().lines
+    except Exception:
+        cols, rows = 80, 24
+
+    if cols <= _LARGE_TERMINAL_WIDTH:
+        geo = anim_geo if anim_geo is not None else _calc_geo(cols, rows)
+        if geo is not None:
+            return _static_reactor_frame(geo, info)
+    return _ascii_art_banner(info, render_width=render_width)

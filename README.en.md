@@ -67,8 +67,12 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 - [Dev Server](#dev-server)
 - [Tool Self-Healing](#tool-self-healing)
 - [Directory Structure](#directory-structure)
+- [Testing & CI](#testing--ci)
+- [Auto-Publish Workflow](#auto-publish-workflow)
 - [Development Roadmap](#development-roadmap)
 - [License](#license)
+- [Disclaimer](#disclaimer)
+- [Development References](#development-references)
 
 ---
 
@@ -371,7 +375,8 @@ Switch permission mode: `/mode yolo`
 
 Uses **layered context management** (frozen prefix + sliding window) — compacted summaries are locked as "frozen zone" never modified, subsequent request prefixes stay stable → LLM cache continuously hits.
 
-- **Freeze strategy**: Active window tokens exceed threshold (default 8000) → one-time compaction + lock prefix
+- **Ratio-based triggering**: compaction only fires when total tokens (frozen summary + active window + system prompt) ≥ `context_window` × `compact_ratio` (default 128000 × 0.5 = 64000); below the ratio it never compacts, fully utilizing the first half of the window; after freezing, no repeated compaction until total growth reaches `compact_refreeze_growth` (default 1.25×, debounce)
+- **Freeze strategy**: compacted summaries are locked as a "frozen prefix" never modified, subsequent request prefixes stay stable → LLM cache continuously hits
 - **Image eviction**: Old images replaced with text placeholders to free tokens (active window only)
 - **Tool result folding**: Old tool results condensed to one-line summaries (active window only)
 - **Reactive compaction**: Auto-compacts and retries on Context Too Long errors
@@ -383,7 +388,7 @@ Jarvis supports multi-layer memory persistence:
 
 - **Session memory**: Auto save/restore conversation history. Manage with `/save` `/load` `/sessions`
 - **Long-term memory**: `~/.jarvis/MEMORY.md` (user-level) + `<workdir>/.jarvis/MEMORY.md` (project-level), injected into system prompt at startup
-- **Profile memory**: After each session, an LLM automatically distills your preferences/habits/background (e.g. "night owl", "primary model GLM"), stored in `~/.jarvis/memory/profile.json`, and injected (capped) into the system prompt next session — Jarvis gets to know you better the more you use it. Background async distillation (10-min throttle, no impact on response speed) + daily silent maintenance (outdated memories auto-decay). `/memory` to view / `/memory add` to add manually / `/memory del` to delete / `/memory refine` to distill immediately. A cheap model can be configured under `settings.toml` `[memory.refine]` for distillation. `/memory sync` pushes the local profile to the aceFelix knowledge graph (preview first, confirm to write; the graph is the single source of truth).
+- **Profile memory**: After each session, an LLM automatically distills your preferences/habits/background (e.g. "night owl", "primary model GLM"), stored in `~/.jarvis/memory/profile.json`, and injected (capped) into the system prompt next session — Jarvis gets to know you better the more you use it. Background async distillation (default 600-second throttle, configurable via `profile_refine_interval`, no impact on response speed) + daily silent maintenance (outdated memories auto-decay). `/memory` to view / `/memory add` to add manually / `/memory del` to delete / `/memory refine` to distill immediately. A cheap model can be configured under `settings.toml` `[memory.refine]` for distillation. `/memory sync` pushes the local profile to the aceFelix knowledge graph (preview first, confirm to write; the graph is the single source of truth).
 - **Knowledge-graph profile bridge**: with `[profile_bridge] enabled = true`, Jarvis pulls the aceFelix knowledge-graph profile via MCP at startup and injects it into the system prompt (structured skills/projects/interests, no re-chatting needed). Requires the `acefelix-knowledge` server configured in `~/.jarvis/mcp.json`.
 - **Auto recovery**: After abnormal exit, next startup auto-prompts to restore
 
@@ -1393,7 +1398,7 @@ agent/
 │   └── mock.py        # Mock Provider (for testing)
 ├── ui/                # User interface
 │   ├── cli.py         # Rich terminal REPL + command completion
-│   ├── boot_animation.py # Boot animation (Arc Reactor pixel particles)
+│   ├── boot_animation.py # Boot animation (Arc Reactor particles + freeze-frame branching)
 │   ├── markdown_renderer.py # Markdown terminal rendering
 │   ├── model_picker.py # Interactive model picker
 │   ├── session_picker.py # Interactive session picker
@@ -1446,7 +1451,7 @@ agent/
 └── utils/             # Common utilities
     └── mask.py        # API Key masking
 
-tests/                 # Test suite (1468 tests, covers LLM/Config/Tools/Core/Voice/Daemon/Permission/Sandbox)
+tests/                 # Test suite (1599 tests, covers LLM/Config/Tools/Core/Voice/Daemon/Permission/Sandbox)
 ├── llm/               # Provider registry, thinking config, streaming parsing, config loading tests
 ├── memory/            # Session save, crash recovery, context compaction tests
 ├── collaboration/     # Multi-agent collaboration tests
@@ -1473,7 +1478,7 @@ npm/                   # npm distribution package (lets Node.js users install vi
 
 ## Testing & CI
 
-Project has **1468 unit/integration tests**, covering LLM Provider, tool registration, config loading, permission system, context management, session management, memory persistence, security sandbox, background daemon and other core modules. Core runtime (query_loop/orchestrator/memory/permission/LLM Provider) coverage **94%**.
+Project has **1599 unit/integration tests**, covering LLM Provider, tool registration, config loading, permission system, context management, session management, memory persistence, security sandbox, background daemon and other core modules. Core runtime (query_loop/orchestrator/memory/permission/LLM Provider) coverage **94%**.
 
 ```bash
 # Run all tests

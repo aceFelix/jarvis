@@ -67,8 +67,12 @@
 - [开发服务器](#开发服务器)
 - [工具错误自愈](#工具错误自愈)
 - [目录结构](#目录结构)
+- [测试与 CI](#测试与-ci)
+- [自动发布流程](#自动发布流程)
 - [开发路线](#开发路线)
 - [许可证](#许可证)
+- [反馈声明](#反馈声明)
+- [开发参考](#开发参考)
 
 ---
 
@@ -371,7 +375,8 @@ Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
 
 采用**分层上下文管理**（冻结前缀 + 滑动窗口）——压缩后的摘要锁定为「冻结区」永不修改，后续请求前缀稳定 → LLM 缓存持续命中。
 
-- **冻结策略**：活跃窗口 Token 超阈值（默认 8000）→ 一次性压缩 + 锁定前缀
+- **比例触发**：总 token（冻结摘要 + 活跃窗口 + system prompt）≥ `context_window` × `compact_ratio`（默认 128000 × 0.5 = 64000）才压缩，未超比例绝不压缩，用满窗口前半程；冻结后总量增长不足 `compact_refreeze_growth`（默认 1.25 倍）不重复压缩（防抖）
+- **冻结策略**：压缩后的摘要锁定为「冻结前缀」永不修改，后续请求前缀稳定，LLM 缓存持续命中
 - **图片驱逐**：旧图片替换为文字占位符释放 Token（仅作用于活跃窗口）
 - **工具结果折叠**：旧工具结果缩成一行摘要（仅作用于活跃窗口）
 - **反应式压缩**：遇到 Context Too Long 错误自动压缩后重试
@@ -385,7 +390,7 @@ Jarvis 支持多层记忆持久化：
 - **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
 - **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
-  后台异步提炼（10 分钟节流，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
+  后台异步提炼（默认 600 秒节流，可用 `profile_refine_interval` 配置，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
   `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory refine` 立即提炼。
   可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼。
   `/memory sync` 可把本地画像同步到 aceFelix 知识图谱（先预览后确认，图谱为唯一事实源）
@@ -1400,7 +1405,7 @@ agent/
 │   └── mock.py        # Mock Provider（测试用）
 ├── ui/                # 用户界面
 │   ├── cli.py         # Rich 终端 REPL + 命令补全
-│   ├── boot_animation.py # 启动动画（方舟反应炉像素粒子）
+│   ├── boot_animation.py # 启动动画（方舟反应炉粒子动画 + 定格帧分流）
 │   ├── markdown_renderer.py # Markdown 终端渲染
 │   ├── model_picker.py # 交互式模型选择器
 │   ├── session_picker.py # 交互式会话选择器
@@ -1453,7 +1458,7 @@ agent/
 └── utils/             # 通用工具
     └── mask.py        # API Key 脱敏
 
-tests/                 # 测试套件（1468 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
+tests/                 # 测试套件（1599 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试
@@ -1480,7 +1485,7 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **1468 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
+项目配备 **1599 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
 
 ```bash
 # 运行全部测试
