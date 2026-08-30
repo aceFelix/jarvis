@@ -175,14 +175,12 @@ args = []
 extensions = ["py"]
 
 [daemon]
-# 常驻模式：jarvis --daemon 后台待命，热键/托盘唤起。
-# 依赖: pip install keyboard pystray（缺一个不影响另一个，均缺则仅语音唤醒词可用）。
-# 开机自启: 运行 `jarvis --daemon` 的快捷方式放入 shell:startup 文件夹。
+# 桌面入口与全局热键（原常驻托盘已下线，热键/自启保留给 JARVIS 对话窗口使用）。
+# 开机自启: 运行 `jarvis --talk` 的快捷方式放入 shell:startup 文件夹。
+# 依赖: pip install keyboard（仅 keyboard 库方案需要；Windows 默认走 RegisterHotKey）。
 hotkey = "ctrl+shift+j"        # 全局热键（keyboard 库格式，如 "ctrl+shift+j"）
 hotkey_native = true            # Windows 优先使用 RegisterHotKey（比 keyboard 库更快）
 hotkey_debounce_ms = 200        # 热键去抖毫秒，防双击触发
-text_terminal_warm = false      # 预启动隐藏文本终端：热键唤起到可输入 < 500ms（但常驻内存）
-tray = true                     # 是否启用系统托盘图标
 # P2-3 每日简报：每天定时播报今日概览（提醒/节假日/系统状态/截止日期/日程）
 briefing_enabled = true
 briefing_time = "08:30"         # 简报时间（HH:MM）
@@ -197,7 +195,7 @@ ws_port = 8766                 # WebSocket 端口（实时通信）
 token = ""                     # 认证 token，留空则自动生成（每次 /connect-phone 变化）
 
 [monitor]
-# 系统资源监控：CPU/内存/磁盘超阈值时托盘通知+语音告警。
+# 系统资源监控：CPU/内存/磁盘超阈值时通知+语音告警。
 # 依赖: pip install psutil。未装时监控静默不可用，不影响其他功能。
 enabled = true
 cpu_threshold = 85.0       # CPU 使用率 %，超过持续 30s 告警

@@ -3,7 +3,6 @@
 管理 ~/.jarvis/settings.toml 中的自定义模型配置和运行时状态：
 - save_custom_model: 保存自定义模型配置
 - save_last_model: 持久化最近使用的模型名
-- save_realtime_talk_auto_start: 实时语音自动启动开关
 - save_custom_voice: 保存自定义 TTS 音色
 - save_tts_voice: 持久化当前 TTS 音色选择
 
@@ -126,49 +125,6 @@ def save_last_model(model_name: str) -> bool:
             new_top = top_part.rstrip() + f'\nlast_model = "{model_name}"\n'
 
     content = new_top + rest_part
-    toml_path.write_text(content, encoding="utf-8")
-    return True
-
-
-def save_realtime_talk_auto_start(enabled: bool) -> bool:
-    """保存实时语音对话自动启动开关到 ~/.jarvis/settings.toml 的 [realtime_talk] 节。
-
-    返回 True 表示保存成功。
-
-    @author aceFelix
-    """
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    toml_path.parent.mkdir(parents=True, exist_ok=True)
-
-    value = "true" if enabled else "false"
-    if not toml_path.exists():
-        toml_path.write_text(f"[realtime_talk]\nauto_start = {value}\n", encoding="utf-8")
-        return True
-
-    content = toml_path.read_text(encoding="utf-8")
-
-    # 定位或创建 [realtime_talk] 节
-    section_match = re.search(r'^\[realtime_talk\]\s*$', content, re.MULTILINE)
-    if section_match:
-        section_start = section_match.end()
-        next_section = re.search(r'^\[', content[section_start + 1:], re.MULTILINE)
-        section_end = section_start + 1 + (next_section.start() if next_section else len(content[section_start + 1:]))
-        section = content[section_start + 1:section_start + 1 + section_end - (section_start + 1)]
-
-        if re.search(r'^auto_start\s*=', section, re.MULTILINE):
-            new_section = re.sub(
-                r'^auto_start\s*=.*$',
-                f"auto_start = {value}",
-                section,
-                flags=re.MULTILINE,
-            )
-        else:
-            new_section = section.rstrip() + f"\nauto_start = {value}\n"
-
-        content = content[:section_start + 1] + new_section + content[section_start + 1 + section_end - (section_start + 1):]
-    else:
-        content = content.rstrip() + f"\n\n[realtime_talk]\nauto_start = {value}\n"
-
     toml_path.write_text(content, encoding="utf-8")
     return True
 

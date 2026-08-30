@@ -116,7 +116,6 @@ class CommandContext:
     session_name: str
     title_generated: bool
     system_prompt: str
-    tray: Any = None
     should_exit: bool = False
     # /load 加载会话后填充：{session_name, dialog_count, title_generated}，
     # REPL 主循环消费后恢复轮数计数与标题状态（避免重新生成标题/重置轮数）

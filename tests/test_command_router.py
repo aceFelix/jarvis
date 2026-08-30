@@ -81,7 +81,6 @@ def cmd_ctx():
         session_name="session-test",
         title_generated=False,
         system_prompt="system prompt",
-        tray=None,
         should_exit=False,
     )
 

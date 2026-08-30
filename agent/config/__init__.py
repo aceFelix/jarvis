@@ -7,12 +7,11 @@
 """
 
 from agent.config.settings import Settings, load_settings
-from agent.config.model_registry import save_custom_model, save_last_model, save_realtime_talk_auto_start
+from agent.config.model_registry import save_custom_model, save_last_model
 
 __all__ = [
     "Settings",
     "load_settings",
     "save_custom_model",
     "save_last_model",
-    "save_realtime_talk_auto_start",
 ]

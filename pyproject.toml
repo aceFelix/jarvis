@@ -66,9 +66,8 @@ voice = [
     "numpy>=1.24.0",
 ]
 daemon = [
-    # 常驻模式：系统托盘（跨平台，macOS 用 AppKit，Linux 需 GTK）
-    "pystray>=0.19.0",
-    # Windows 上 pystray 默认使用 win32 backend，需要 pywin32
+    # 桌面入口与全局热键（原系统托盘已随新 GUI 工作台计划下线，pystray 已移除）
+    # pywin32：Windows 日历源（win32com）与桌面快捷方式能力需要
     "pywin32>=227; sys_platform == 'win32'",
     # 全局热键（Windows/Linux 需要 root，macOS 需辅助功能权限）
     "keyboard>=0.13.0; sys_platform != 'darwin'",

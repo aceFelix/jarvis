@@ -16,7 +16,7 @@
       → LLM 解析自然语言时间，转成 ISO 时间字符串
       → ScheduleReminderTool 创建 ScheduleTask 加入 Scheduler
       → Scheduler 后台线程轮询，到点触发回调
-      → 回调执行：托盘通知 + 语音播报"先生，提醒您：开会"
+      → 回调执行：通知 + 语音播报"先生，提醒您：开会"
       → 一次性任务标记完成；重复任务计算下次时间
 
 设计要点:

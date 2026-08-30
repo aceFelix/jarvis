@@ -378,7 +378,6 @@ async def voice_loop(
     ctx: ToolContext,
     pause_event: threading.Event | None = None,
     *,
-    daemon_mode: bool = False,
     stop_event: threading.Event | None = None,
 ) -> None:
     """进入语音模式。对话 ⇄ 待机 循环，直到 Ctrl+C 彻底退出。
@@ -396,15 +395,8 @@ async def voice_loop(
         2. LLM 意图: 自然语言（"不聊了"/"闭嘴"/"去忙吧"等）由 LLM 理解，
            回复末尾输出 <standby/> 标记，系统检测后进待机（附告别语）
 
-    语音开关（跨进程文件信号）:
-        托盘「语音对话」菜单切换 ~/.jarvis/voice_enabled 文件:
-        - false → voice_loop 进入待机（类似说"退下"），但仍听唤醒词"贾维斯"
-        - true  → voice_loop 恢复正常对话
-        用文件而非 threading.Event: daemon 以 DETACHED_PROCESS 子进程运行，
-        文件是跨进程单一可信源（SSOT）。
-
     pause_event: 已废弃，保留参数仅为向后兼容，内部不再使用。
-    stop_event: 外部停止信号。daemon 托盘停止语音会话时设置，
+    stop_event: 外部停止信号。外部宿主（未来 GUI 窗口等）停止语音会话时设置，
         voice_loop 在循环关键点检查并干净退出。
 
     @author aceFelix
@@ -449,7 +441,7 @@ async def voice_loop(
 
     ui.info("=" * 56)
     ui.info("🎙️  语音对话模式已开启")
-    _voice_log("[voice_loop] 语音对话循环启动 (daemon_mode=%s)", daemon_mode)
+    _voice_log("[voice_loop] 语音对话循环启动")
     ui.info(f"   STT: {settings.stt_model}")
     ui.info(f"   TTS: {settings.tts_model} / {settings.tts_voice}")
     hints = []
@@ -467,8 +459,8 @@ async def voice_loop(
     ui.info("=" * 56)
 
     # ---- 跨进程语音互斥锁 ----
-    # 防止 CLI /talk 和 daemon 托盘同时开语音模式导致麦克风冲突。
-    from agent.daemon.voice_state import acquire_voice_lock, release_voice_lock, is_voice_enabled
+    # 防止 REPL /voice 与 `jarvis --talk` 窗口（或未来 GUI）同时开语音，导致麦克风冲突。
+    from agent.voice.voice_state import acquire_voice_lock, release_voice_lock
     lock_ok, lock_info = acquire_voice_lock()
     if not lock_ok:
         ui.error(f"🎙️ 语音模式已被另一个 jarvis 进程占用: {lock_info}")
@@ -479,9 +471,6 @@ async def voice_loop(
     tts_fail_count = 0
     stt_fail_count = 0
     DEGRADE_THRESHOLD = 3
-
-    # 跨进程语音开关状态（仅 daemon 模式需要，CLI /talk 忽略文件直接对话）
-    voice_was_enabled = is_voice_enabled() if daemon_mode else True
 
     # 注册 Ctrl+C 信号处理器：Windows 上 pyaudio stream.read() 阻塞时
     # KeyboardInterrupt 无法被 Python asyncio 捕获（C 扩展阻塞）。
@@ -511,8 +500,8 @@ async def voice_loop(
     # 注册 Ctrl+C 信号处理器：Windows 上 pyaudio stream.read() 阻塞时
     # KeyboardInterrupt 无法被 Python asyncio 捕获（C 扩展阻塞）。
     # 用 signal handler 触发 stt._request_stop() 来非阻塞地中断录音循环。
-    # 注意：signal.signal 只能在主线程调用，daemon 托盘语音会话运行在线程中，
-    # 因此非主线程时跳过信号注册，依赖 stop_event / ESC watcher 退出。
+    # 注意：signal.signal 只能在主线程调用，语音会话若运行在子线程（未来 GUI），
+    # 则跳过信号注册，依赖 stop_event / ESC watcher 退出。
     from agent.voice import stt as stt_module
     _in_main_thread = threading.current_thread() == threading.main_thread()
     prev_sigint = None
@@ -534,32 +523,6 @@ async def voice_loop(
                 _voice_log("[voice_loop] 收到外部停止信号，退出语音循环")
                 ui.info("🔇 语音会话已停止")
                 break
-
-            if daemon_mode:
-                # ---- 语音开关检查（仅 daemon 模式；CLI /talk 跳过）----
-                voice_now = is_voice_enabled()
-                if not voice_now or (stop_event and stop_event.is_set()):
-                    if voice_was_enabled:
-                        _voice_log("[voice_loop] 语音开关已关闭，进入待机")
-                        ui.info("🔇 语音对话已关闭（进入待机，说「贾维斯」仍可唤醒）")
-                        in_dialog = False
-                    text = await _standby_round(ui, settings, stt)
-                    if stop_event and stop_event.is_set():
-                        break
-                    if text and _contains_any(text, _WAKE_WORDS):
-                        # 如果 stop_event 已设置，不应再恢复对话
-                        if stop_event and stop_event.is_set():
-                            break
-                        ui.info("🔊 唤醒，回到对话模式（语音开关仍为关闭，可随时说「退下」）")
-                        in_dialog = True
-                    voice_was_enabled = voice_now
-                    continue
-
-                if voice_now and not voice_was_enabled:
-                    _voice_log("[voice_loop] 语音开关已开启，恢复对话")
-                    ui.info("🎙️ 语音对话已开启，随时待命")
-                    in_dialog = True
-                voice_was_enabled = voice_now
 
             if in_dialog:
                 # 对话阶段：连续多轮，直到用户说退下

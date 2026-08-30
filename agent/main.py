@@ -71,11 +71,8 @@ from agent.session_manager import (
 from agent.ui.cli import RichCLI
 
 
-async def repl(settings: Settings, with_tray: bool = False) -> int:
+async def repl(settings: Settings) -> int:
     """REPL 主循环。返回退出码。
-
-    with_tray=True 时启动一个系统托盘图标（daemon 线程），托盘"退出"
-    会直接终止整个进程。这样前台 REPL 和托盘共存，任一退出=整体退出。
 
     @author aceFelix
     """
@@ -237,40 +234,6 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
 
     ctx = _build_context(settings, ui, messages)
 
-    # 托盘图标（可选）：前台 REPL + 托盘共存模式
-    # 托盘"退出"直接 os._exit(0) 终止整个进程（input() 阻塞中无法优雅 break）
-    tray = None
-    if with_tray:
-        try:
-            from agent.daemon.daemon import TrayIcon
-            import os as _os
-
-            def _tray_quit() -> None:
-                """托盘退出回调：直接终止进程。"""
-                try:
-                    if ui._console:
-                        ui._console.print("\n[dim]托盘退出，贾维斯关闭中...[/dim]")
-                except Exception:
-                    pass
-                _os._exit(0)
-
-            tray = TrayIcon(
-                on_voice=lambda: None,   # 前台 REPL 不需要托盘唤起
-                on_text=lambda: None,    # 用户在终端直接打字
-                on_quit=_tray_quit,
-                voice_active_getter=lambda: True,  # 前台 REPL 无语音开关概念，默认开启
-                voice_toggle=lambda: None,
-                realtime_enabled_getter=lambda: False,  # 前台 REPL 不展示实时聊天开关
-                realtime_toggle=lambda: None,
-            )
-            if tray.start():
-                ui.info("✓ 托盘图标已启动（右键「退出贾维斯」可关闭）")
-            else:
-                ui.warn("托盘图标启动失败（不影响使用，直接 /exit 退出）")
-                tray = None
-        except ImportError:
-            ui.info("托盘模块不可用（pip install pystray pillow 启用）")
-
     # 生成本次会话的唯一名称（时间戳），自动保存时写入独立文件
     from datetime import datetime as _dt
     _session_name = f"session-{_dt.now().strftime('%Y%m%d-%H%M%S')}"
@@ -349,7 +312,6 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
         session_name=_session_name,
         title_generated=_title_generated,
         system_prompt=system_prompt,
-        tray=tray,
         should_exit=False,
     )
 
@@ -508,9 +470,6 @@ async def repl(settings: Settings, with_tray: bool = False) -> int:
                settings=settings)
 
     ui.goodbye()
-    # 清理托盘图标
-    if tray is not None:
-        tray.stop()
     # 清理 MCP 连接（静默处理 anyio cancel scope 错误）
     if mcp_client is not None:
         try:
@@ -581,24 +540,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="快速启动：跳过 boot animation / MCP / LSP，延迟加载 harness（热键唤起用）",
     )
     p.add_argument(
-        "--with-tray",
-        action="store_true",
-        help="前台 REPL 同时启动托盘图标（托盘退出=整体退出）",
-    )
-    p.add_argument(
         "--init",
         action="store_true",
         help="交互式首次配置引导：选厂商→输Key→测试连接→保存",
-    )
-    p.add_argument(
-        "--daemon",
-        action="store_true",
-        help="常驻模式：后台待命，热键/托盘唤起（阶段五）",
-    )
-    p.add_argument(
-        "--detached",
-        action="store_true",
-        help=argparse.SUPPRESS,  # 内部参数：已是无窗口子进程
     )
     p.add_argument(
         "--talk",
@@ -611,42 +555,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="检查依赖安装状态（Python 包 / 系统级依赖 / 配置文件）",
     )
     return p.parse_args(argv)
-
-
-def _run_with_watchdog(daemon) -> int:
-    """看门狗：daemon 崩溃后自动重启。10 分钟内最多 5 次。
-
-    @author aceFelix
-    """
-    import time as _time
-    import sys as _sys
-
-    MAX_RESTARTS = 5
-    WINDOW_SECONDS = 600
-    FAST_CRASH_SECONDS = 5
-
-    restart_times: list[float] = []
-    last_start = _time.time()
-
-    while True:
-        try:
-            return daemon.run()
-        except KeyboardInterrupt:
-            return 130
-        except BaseException as e:
-            now = _time.time()
-            elapsed = now - last_start
-            restart_times = [t for t in restart_times if now - t < WINDOW_SECONDS]
-            if elapsed < FAST_CRASH_SECONDS:
-                restart_times.append(now)
-            restart_times.append(now)
-            if len(restart_times) >= MAX_RESTARTS:
-                print(f"看门狗：{WINDOW_SECONDS}s 内崩溃 {len(restart_times)} 次，放弃重启", file=_sys.stderr)
-                return 1
-            _time.sleep(2)
-            print(f"看门狗：daemon 崩溃 ({type(e).__name__})，2s 后重启 ({len(restart_times)}/{MAX_RESTARTS})", file=_sys.stderr)
-            daemon.__init__(daemon._settings)
-            last_start = _time.time()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -733,43 +641,8 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             return 130
 
-    # 常驻模式路由
-    if args.daemon:
-        # 跨平台后台启动：若当前不是 --detached 模式，先 fork 一个
-        # detached 子进程（Windows: pythonw.exe / macOS: start_new_session），
-        # 主进程立刻退出。--detached 由 launch_detached_daemon 注入，
-        # 表示"我已经是后台子进程了，直接 run"。
-        # Linux: launch_detached_daemon 返回 1，回退到前台运行 daemon。
-        if not args.detached:
-            from agent.daemon.daemon import launch_detached_daemon, _is_detached
-            script = os.path.abspath(__file__)
-            rc = launch_detached_daemon(script, settings.workdir)
-            if rc == 0:
-                # detached 子进程无 stdout，print 会抛异常，需保护
-                if not _is_detached():
-                    print("✓ 贾维斯已后台启动（无窗口模式）")
-                    print("  托盘图标稍后出现，可关闭此窗口")
-                    print("  日志: ~/.jarvis/daemon.log")
-                return 0
-            # fork 失败（Linux 或无 pythonw.exe），回退到前台运行
-            if not _is_detached():
-                import platform as _pf
-                if _pf.system() == "Linux":
-                    print("ℹ Linux 不支持后台分离模式，以前台模式运行 daemon", file=sys.stderr)
-                    print("  提示: Linux 用户可直接用 `python -m agent.main` 进入 REPL 模式", file=sys.stderr)
-                else:
-                    print("⚠ 后台启动不可用，回退到前台模式", file=sys.stderr)
-        try:
-            from agent.daemon import JarvisDaemon
-        except ImportError as e:
-            print(f"常驻模块不可用: {e}", file=sys.stderr)
-            return 1
-        daemon = JarvisDaemon(settings)
-        # 看门狗：daemon 崩溃后自动重启，10 分钟内最多重启 5 次
-        return _run_with_watchdog(daemon)
-
     try:
-        return asyncio.run(repl(settings, with_tray=args.with_tray))
+        return asyncio.run(repl(settings))
     except KeyboardInterrupt:
         return 130
 

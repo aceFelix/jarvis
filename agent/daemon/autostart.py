@@ -1,6 +1,8 @@
 """开机自启 + 桌面快捷方式辅助脚本。
 
-生成 Windows 快捷方式，让 jarvis --daemon 一键启动或开机自动运行。
+生成 Windows 快捷方式，双击/开机自动启动 JARVIS 实时语音窗口
+（``jarvis --talk`` 独立 pywebview 窗口；三栏 GUI 工作台上线后
+此处只需再换启动目标。作者：aceFelix）。
 
 用法:
     python -m agent.daemon.autostart install            # 安装开机自启
@@ -130,12 +132,14 @@ def icon_path() -> Path:
 
 
 def vbs_path() -> Path:
-    """VBS 启动脚本路径（~/.jarvis/start_daemon.vbs）。
+    """VBS 启动脚本路径（~/.jarvis/start_jarvis_window.vbs）。
 
-    VBS 用 wscript 静默运行（无窗口），通过 py launcher 自适应找
-    Python 3.13，避免硬编码 pythonw.exe 绝对路径。
+    VBS 用 wscript 静默运行（无控制台），通过 py launcher 自适应找
+    Python 3.13，拉起 ``jarvis --talk`` 实时语音窗口。
+    （文件名从旧版 start_daemon.vbs 变更，确保存量用户的旧 VBS
+    不会被复用检查命中而继续启动已下线的 --daemon。作者：aceFelix）
     """
-    return jarvis_home() / "start_daemon.vbs"
+    return jarvis_home() / "start_jarvis_window.vbs"
 
 
 def python_exe() -> str:
@@ -173,7 +177,7 @@ def jarvis_script() -> str:
 def ensure_icon() -> Path | None:
     """确保 JARVIS 图标存在，不存在则用 PIL 生成。
 
-    图标设计: 蓝色同心圆反应炉（致敬启动动画 + 托盘图标），
+    图标设计: 蓝色同心圆反应炉（致敬启动动画），
     256×256 多尺寸 ico（含 256/128/64/48/32/16，Windows 各场景适配）。
 
     返回图标路径，失败返回 None（调用方降级为无图标快捷方式）。
@@ -242,21 +246,23 @@ def ensure_icon() -> Path | None:
 
 
 def ensure_vbs() -> Path | None:
-    """生成 VBS 启动脚本（无窗口启动 daemon）。
+    """生成 VBS 启动脚本（无控制台拉起实时语音窗口）。
 
-    VBS 用 ``wscript`` 静默运行（完全无窗口），支持两种安装方式:
+    VBS 用 ``wscript`` 静默运行（无控制台闪屏），支持两种安装方式:
 
-    1. **模块模式**（优先）: ``pyw -m agent.main --daemon``
+    1. **模块模式**（优先）: ``pyw -m agent.main --talk``
        适用于 ``pip install jarvis``（PyPI 安装）和 ``pip install -e .``（开发模式）。
        不依赖 main.py 文件路径，agent 包已安装到 site-packages，
        配置从 ``~/.jarvis/settings.toml`` 加载。
 
-    2. **脚本模式**（回退）: ``pyw main.py --daemon``
+    2. **脚本模式**（回退）: ``pyw main.py --talk``
        适用于源码 clone 后直接运行。需要 cwd = 项目根目录，
        否则 ``configs/settings.toml`` 找不到会退化成 mock provider。
 
     两种模式都先尝试 ``pyw -3.13``，回退 ``pyw`` 和 ``pythonw``。
     项目锁定 Python 3.13.x（pyaudio 无 cp314 wheel）。
+    ``--talk`` 以独立 pywebview 窗口运行，窗口关闭后进程退出、
+    VBS 随之返回，无残留。
 
     Returns: VBS 路径，失败返回 None。
 
@@ -278,10 +284,9 @@ def ensure_vbs() -> Path | None:
     # VBS 用双引号转义: 路径里的 \ 不需转义，" 用 ""
     # 注释用英文，确保纯 ASCII（VBS 默认 ANSI 编码，中文会乱码）
     #
-    # 启动逻辑: 只传 --daemon（不带 --detached），让 main.py 自己 fork。
-    # main.py 检测到 not --detached → launch_detached_daemon fork 出真 daemon
-    # 子进程 → 主进程 return 0 快速退出。VBS 的 sh.Run(..., True) 等待的是
-    # 这个「fork 主进程」，它秒退，wscript 不会阻塞。
+    # 启动逻辑: 拉起 --talk 实时语音窗口（pywebview GUI，pythonw 无控制台）。
+    # 窗口关闭后进程退出，VBS 的 sh.Run(..., True) 等待的是整个语音窗口
+    # 生命周期，退出码 0 即正常结束。
     vbs_content = (
         "Option Explicit\n"
         "Dim sh, cmd, mainPy, projDir, rc\n"
@@ -295,24 +300,24 @@ def ensure_vbs() -> Path | None:
         "' Phase 1: Module mode (pip install) - no main.py path needed\n"
         "' agent package is in site-packages, config from ~/.jarvis/\n"
         "On Error Resume Next\n"
-        "rc = sh.Run(\"pyw -3.13 -m agent.main --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pyw -3.13 -m agent.main --talk\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pyw -m agent.main --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pyw -m agent.main --talk\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pythonw -m agent.main --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pythonw -m agent.main --talk\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
         "\n"
         "' Phase 2: Script mode (dev/clone) - needs main.py path + cwd\n"
-        "rc = sh.Run(\"pyw -3.13 \"\"\" & mainPy & \"\"\" --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pyw -3.13 \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pyw \"\"\" & mainPy & \"\"\" --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pyw \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pythonw \"\"\" & mainPy & \"\"\" --daemon\", 0, True)\n"
+        "rc = sh.Run(\"pythonw \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
         "On Error GoTo 0\n"
         "Set sh = Nothing\n"
     )
@@ -346,7 +351,7 @@ def _create_shortcut(
     icon_line = f'$Shortcut.IconLocation = "{icon_str}"' if icon_str else ""
 
     if use_vbs:
-        # VBS 方案：快捷方式指向 wscript.exe 运行 VBS 脚本（无窗口后台常驻）
+        # VBS 方案：快捷方式指向 wscript.exe 运行 VBS 脚本（无控制台拉起语音窗口）
         vbs = ensure_vbs()
         if not vbs:
             print("⚠ VBS 启动脚本生成失败，回退到直接指向 pythonw.exe", file=sys.stderr)
@@ -356,7 +361,7 @@ def _create_shortcut(
             # VBS 路径可能含中文（用户名），PowerShell 双引号字符串能正确处理
             arguments = f'"{vbs}"'
             working_dir = str(jarvis_home())
-            # daemon 无窗口后台常驻，窗口样式取 7（最小化运行）
+            # 语音窗口由 pywebview 自管，窗口样式取 7（最小化运行）
             ps_script = f'''
 $WshShell = New-Object -comObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("{spath}")
@@ -389,13 +394,10 @@ $Shortcut.Save()
     if not use_vbs:
         # 直接指向 pythonw.exe 方案（适合在用户真实终端执行）
         py = pythonw_exe() or python_exe()
-        use_detached = py.endswith("pythonw.exe")
         script = jarvis_script()
 
         target = py
-        arguments = f'"{script}" --daemon'
-        if use_detached:
-            arguments += " --detached"
+        arguments = f'"{script}" --talk'
         working_dir = str(Path(script).parent)
 
         ps_script = f'''
@@ -418,7 +420,7 @@ $Shortcut.Save()
         except Exception as e:
             print(f"创建快捷方式失败: {e}", file=sys.stderr)
             print(f"可手动创建: 在 {spath.parent} 放一个指向", file=sys.stderr)
-            print(f'  "{py}" "{script}" --daemon', file=sys.stderr)
+            print(f'  "{py}" "{script}" --talk', file=sys.stderr)
             print("的快捷方式", file=sys.stderr)
             return 1
 
@@ -447,10 +449,10 @@ def install() -> int:
         print("    ~/.config/systemd/user/jarvis-daemon.service")
         print("  然后运行: systemctl --user enable jarvis-daemon.service")
         return 1
-    # Windows: 用 VBS 方案启动（完全无窗口），不再直接指向 python.exe
+    # Windows: 用 VBS 方案启动（无控制台拉起语音窗口），不再直接指向 python.exe
     spath = shortcut_path()
     spath.parent.mkdir(parents=True, exist_ok=True)
-    return _create_shortcut(spath, "JARVIS 常驻守护进程（开机自启）", use_vbs=True)
+    return _create_shortcut(spath, "JARVIS 实时语音工作台（开机自启）", use_vbs=True)
 
 
 def uninstall() -> int:
@@ -492,8 +494,8 @@ def status() -> int:
 def install_desktop() -> int:
     """创建桌面快捷方式（跨平台）。
 
-    Windows: .lnk 快捷方式，指向 VBS 脚本后台启动 daemon。
-    macOS: 创建 .command 文件，双击在 Terminal.app 中启动 daemon。
+    Windows: .lnk 快捷方式，指向 VBS 脚本拉起实时语音窗口（--talk）。
+    macOS: 创建 .command 文件，双击在 Terminal.app 中启动语音窗口。
     Linux: 创建 .desktop 文件。
     """
     if sys.platform == "darwin":
@@ -511,13 +513,12 @@ def install_desktop() -> int:
     rc = _create_shortcut(spath, "JARVIS 个人 AI 管家", use_vbs=True)
     if rc == 0:
         print()
-        print("💡 双击桌面「JARVIS」图标 → 后台启动贾维斯（无窗口）")
-        # 提示文案与实际行为对齐：daemon 启动后语音对话默认关闭，
-        # 需托盘「语音对话」或热键手动唤起（作者：aceFelix）。
-        print("   托盘图标出现后：右键「语音对话」开启，或按热键唤起")
-        print("   语音对话中说「退下」回待机 · 说「贾维斯」唤醒")
-        print("   托盘右键「退出贾维斯」= 彻底关闭")
-        print("   日志: ~/.jarvis/daemon.log")
+        print("💡 双击桌面「JARVIS」图标 → 打开实时语音对话窗口")
+        # 提示文案与实际行为对齐：--talk 独立窗口，直接说话即可对话；
+        # 三栏 GUI 工作台上线后此处入口不变，只换窗口内容（作者：aceFelix）。
+        print("   窗口内直接说话即可对话，可打断")
+        print("   点「结束」/ESC/说「退下」结束会话，点 X 关闭窗口")
+        print("   日志: ~/.jarvis/realtime_window.log")
     return rc
 
 
@@ -592,8 +593,7 @@ def _install_macos() -> int:
     <array>
         <string>{py}</string>
         <string>{script}</string>
-        <string>--daemon</string>
-        <string>--detached</string>
+        <string>--talk</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{workdir}</string>
@@ -626,7 +626,7 @@ def _install_macos() -> int:
         print(f"  Python: {py}")
         print(f"  脚本: {script}")
         print(f"  日志: {log_file}")
-        print("  下次登录系统时自动启动 jarvis daemon")
+        print("  下次登录系统时自动启动 JARVIS 实时语音窗口")
         return 0
     except Exception as e:
         print(f"✗ 安装 LaunchAgent 失败: {e}", file=sys.stderr)
@@ -683,10 +683,10 @@ def _status_macos() -> int:
 
 
 def _install_desktop_macos() -> int:
-    """macOS: 创建 .command 桌面文件，双击在 Terminal.app 中启动 daemon。
+    """macOS: 创建 .command 桌面文件，双击在 Terminal.app 中启动语音窗口。
 
     .command 文件是 macOS 特有的可执行脚本文件，双击会用 Terminal.app 打开。
-    与 Windows .lnk 不同，它会弹出一个终端窗口。
+    与 Windows .lnk 不同，它会保留一个终端窗口（语音窗口由 pywebview 弹出）。
     """
     desktop = Path.home() / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)
@@ -696,20 +696,20 @@ def _install_desktop_macos() -> int:
     py = sys.executable
     workdir = str(Path(script).parent)
 
-    # .command 文件内容：cd 到项目目录 → 运行 jarvis daemon
+    # .command 文件内容：cd 到项目目录 → 运行实时语音窗口（--talk）
     content = f"""#!/bin/bash
-# JARVIS daemon 启动脚本（macOS .command）
+# JARVIS realtime voice window launcher (macOS .command)
 cd "{workdir}" || exit 1
-exec "{py}" "{script}" --daemon
+exec "{py}" "{script}" --talk
 """
     try:
         spath.write_text(content, encoding="utf-8")
         # 赋予可执行权限
         spath.chmod(0o755)
         print(f"✓ 已创建桌面快捷方式: {spath}")
-        print("💡 双击「JARVIS.command」→ Terminal.app 中启动 daemon")
-        print("   说「退下」进入待机 · 说「贾维斯」唤醒")
-        print("   日志: ~/.jarvis/daemon.log")
+        print("💡 双击「JARVIS.command」→ 打开实时语音对话窗口")
+        print("   窗口内直接说话即可对话，可打断")
+        print("   日志: ~/.jarvis/realtime_window.log")
         return 0
     except Exception as e:
         print(f"✗ 创建桌面快捷方式失败: {e}", file=sys.stderr)
@@ -720,8 +720,7 @@ def _install_desktop_linux() -> int:
     """Linux: 创建 .desktop 桌面文件。
 
     双击后在终端中以前台 REPL 模式启动 jarvis（等同 Windows 的 cmd 窗口
-    运行 `jarvis`），可打字对话；关窗口即退出。Linux 不支持后台 daemon
-    分离，故不走 --daemon。
+    运行 `jarvis`），可打字对话；关窗口即退出。
     """
     desktop = Path.home() / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)

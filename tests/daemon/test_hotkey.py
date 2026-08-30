@@ -1,9 +1,11 @@
-"""热键响应优化模块的单元测试。
+"""热键模块的单元测试。
 
 覆盖:
 - 热键字符串解析
 - NativeHotkeyListener 平台可用性
-- FastTerminalSpawner 窗口复用逻辑
+
+（FastTerminalSpawner 随“无窗口 daemon + 托盘遥控”架构下线，
+其测试用例一并移除。作者：aceFelix）
 
 @author aceFelix
 """
@@ -12,11 +14,8 @@ from __future__ import annotations
 
 import sys
 import unittest
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
 
 from agent.daemon.hotkey_native import _MOD_ALT, _MOD_CONTROL, _MOD_SHIFT, _MOD_WIN, _parse_hotkey
-from agent.daemon.terminal_spawner import FastTerminalSpawner
 
 
 class TestParseHotkey(unittest.TestCase):
@@ -67,61 +66,6 @@ class TestNativeHotkeyListener(unittest.TestCase):
             self.assertFalse(listener.available)
         # start() 在不可用时应直接返回当前状态 False
         self.assertFalse(listener.start())
-
-
-@dataclass
-class _FakeSettings:
-    """用于测试的最小 Settings 替身。"""
-
-    workdir: str = "/tmp"
-
-
-class TestFastTerminalSpawner(unittest.TestCase):
-    """测试 FastTerminalSpawner 唤起策略。"""
-
-    def test_bring_up_reuses_running_proc(self):
-        """已有运行中进程时，bring_up 不应 spawn 新进程。"""
-        settings = _FakeSettings(workdir="/tmp")
-        spawner = FastTerminalSpawner(settings)
-
-        fake_proc = MagicMock()
-        fake_proc.poll.return_value = None
-        fake_proc.pid = 12345
-        spawner._text_terminal_proc = fake_proc
-
-        with patch("agent.daemon.terminal_spawner._set_foreground_window", return_value=True) as mock_fg:
-            spawner.bring_up()
-            mock_fg.assert_called_once_with(12345)
-
-        # 没有 spawn 新进程
-        self.assertIs(spawner._text_terminal_proc, fake_proc)
-
-    def test_bring_up_spawns_when_no_running_proc(self):
-        """无运行中进程时，bring_up 应调用 _spawn_quick。"""
-        settings = _FakeSettings(workdir="/tmp")
-        spawner = FastTerminalSpawner(settings)
-
-        with patch.object(spawner, "_spawn_quick") as mock_spawn:
-            spawner.bring_up()
-            mock_spawn.assert_called_once()
-
-    def test_bring_up_uses_warm_proc(self):
-        """warm 进程可用时，应提升为当前终端并启动下一个 warm。"""
-        settings = _FakeSettings(workdir="/tmp")
-        spawner = FastTerminalSpawner(settings)
-
-        warm_proc = MagicMock()
-        warm_proc.poll.return_value = None
-        warm_proc.pid = 54321
-        spawner._warm_proc = warm_proc
-
-        with patch("agent.daemon.terminal_spawner._set_foreground_window", return_value=True):
-            with patch.object(spawner, "start_warm") as mock_start_warm:
-                spawner.bring_up()
-                # warm 进程被提升为当前终端
-                self.assertIs(spawner._text_terminal_proc, warm_proc)
-                # 启动下一个 warm 进程
-                mock_start_warm.assert_called_once()
 
 
 if __name__ == "__main__":

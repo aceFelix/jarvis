@@ -105,7 +105,6 @@ class Settings:
     realtime_ws_url: str = ""
     realtime_model: str = "qwen-audio-3.0-realtime-flash"
     realtime_voice: str = "longanqian"
-    realtime_talk_auto_start: bool = False
 
     # P3-1 跨设备协同（手机通过 PWA 连接）
     bridge_http_port: int = 8765
@@ -198,20 +197,19 @@ class Settings:
     enable_lsp: bool = True
     lsp_servers: dict[str, dict] = field(default_factory=dict)
 
-    # 常驻模式（阶段五第一刀）
-    # jarvis --daemon 后台常驻，热键/托盘唤起
+    # 全局热键（为新 GUI 工作台保留：热键召唤/置顶窗口）。
+    # 原"无窗口 daemon + 托盘"常驻模式已下线，热键配置在 GUI 阶段继续生效。
+    # 作者：aceFelix
     daemon_hotkey: str = "ctrl+shift+j"        # 全局热键（keyboard 库格式）
     daemon_hotkey_native: bool = True            # Windows 优先使用 RegisterHotKey（更快）
     daemon_hotkey_debounce_ms: int = 200         # 热键去抖毫秒，防双击触发
-    daemon_text_terminal_warm: bool = False      # 预启动隐藏文本终端（极速唤起，但常驻内存）
-    daemon_tray: bool = True                     # 是否启用系统托盘图标
 
     # 快速启动模式（P1-2 热键响应优化）
     # --quick 时启用，用于跳过可选初始化、延迟加载 harness
     quick_start: bool = False
 
     # 主动感知（阶段五第三刀）
-    # 系统资源监控：CPU/内存/磁盘超阈值时托盘通知+语音告警。
+    # 系统资源监控：CPU/内存/磁盘超阈值时通知+语音告警。
     # 依赖 psutil。enabled=false 关闭监控。
     monitor_enabled: bool = True
     monitor_cpu_threshold: float = 85.0    # CPU 使用率 %，超过告警
@@ -434,7 +432,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "stt_model", "stt_max_seconds", "stt_silence_seconds", "stt_silence_threshold",
         "voice_max_seconds",
         "realtime_ws_url", "realtime_model", "realtime_voice",
-        "realtime_talk_auto_start",
         "bridge_http_port", "bridge_ws_port", "bridge_token",
         "boot_animation",
         "context_compaction",
@@ -451,7 +448,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "enable_thinking", "thinking_budget",
         "vendor_fallback",
         "daemon_hotkey", "daemon_hotkey_native", "daemon_hotkey_debounce_ms",
-        "daemon_text_terminal_warm", "daemon_tray",
     ):
         if key in data:
             updates[key] = data[key]
@@ -503,7 +499,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("ws_url", "realtime_ws_url"),
             ("model", "realtime_model"),
             ("voice", "realtime_voice"),
-            ("auto_start", "realtime_talk_auto_start"),
         ):
             if sub_key in rt_table:
                 updates[field] = rt_table[sub_key]
@@ -647,8 +642,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("hotkey", "daemon_hotkey"),
             ("hotkey_native", "daemon_hotkey_native"),
             ("hotkey_debounce_ms", "daemon_hotkey_debounce_ms"),
-            ("text_terminal_warm", "daemon_text_terminal_warm"),
-            ("tray", "daemon_tray"),
             # P2-3 每日简报
             ("briefing_enabled", "briefing_enabled"),
             ("briefing_time", "briefing_time"),
@@ -745,5 +738,5 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
 
 
 # ── 以下函数已拆分到独立模块，此处保留重导出以兼容现有导入 ──
-from agent.config.model_registry import save_custom_model, save_last_model, save_realtime_talk_auto_start  # noqa: E402, F401
+from agent.config.model_registry import save_custom_model, save_last_model  # noqa: E402, F401
 from agent.config.model_registry import save_custom_voice, save_tts_voice  # noqa: E402, F401

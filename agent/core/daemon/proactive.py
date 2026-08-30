@@ -7,7 +7,7 @@ P2-3 主动提醒系统的核心调度器。统一管理所有主动提醒源：
 - CalendarSource: 日历事件提前提醒
 
 ProactiveEngine 不自己起线程，而是利用现有 Scheduler 注册定时任务，
-到期时通过 on_notify 回调播报（复用 daemon 的托盘+TTS 通道）。
+到期时通过 on_notify 回调播报（走通知回调 + TTS 通道）。
 
 工作流:
     daemon 启动 → 创建 ProactiveEngine → engine.start()

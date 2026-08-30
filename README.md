@@ -59,7 +59,7 @@
   - [录音识别 `/listen`](#录音识别-listen)
 - [图片输入](#图片输入)
 - [GUI 自动化](#gui-自动化)
-- [常驻模式（贾维斯形态）](#常驻模式贾维斯形态)
+- [桌面入口（实时语音窗口）](#桌面入口实时语音窗口)
 - [多 Agent 协作](#多-agent-协作)
 - [插件系统](#插件系统)
 - [CLI-Anything 外部软件控制](#cli-anything-外部软件控制)
@@ -89,14 +89,14 @@
 | 实时聊天窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
 | 鼠标 / 键盘 / 截屏（pyautogui） | ✅ | ✅¹ | ✅² |
 | 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
-| `--daemon` 后台常驻模式 | ✅ | ✅ | ⚠️ 前台运行³ |
+| 桌面图标启动实时语音窗口（`--talk`） | ✅ | ✅ | ⚠️ 终端内运行³ |
 | 开机自启 | ✅ Startup | ✅ LaunchAgent | ❌ 手动 systemd |
 | 桌面快捷方式 | ✅ .lnk | ✅ .command | ⚠️ 终端内运行⁴ |
 | 全局热键 | ✅ | ❌ | ⚠️ 需 root |
 
 > ¹ macOS 需在「系统设置 → 隐私与安全 → 辅助功能」中授权终端/Python
 > ² Linux 鼠标键盘操作需 DISPLAY 环境变量（X11/Wayland 桌面环境）
-> ³ Linux 上 `--daemon` 会以前台模式运行（无法后台分离），功能完整
+> ³ Linux 桌面入口在终端内以实时语音会话运行（关窗口即退出）
 > ⁴ Linux 桌面快捷方式双击会在终端内以 REPL 对话界面运行 jarvis（等同 Windows 的 cmd 窗口运行，关窗口即退出）
 
 > ⚠️ **重要提示**：本项目在 **Windows** 上完成全部功能开发与实机验证。macOS 和 Linux 仅做了代码层面的适配，**未经过完整实机测试**，可能存在未发现的兼容性问题。建议优先在 Windows 上使用 J.A.R.V.I.S. 以获得最佳体验。
@@ -195,7 +195,7 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 | `camera` | 摄像头拍照 | `pip install "jarvis-agent[camera]"` |
 | `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | 语音对话 `/voice` + 实时双工 `/talk`（STT+TTS+全双工） | `pip install "jarvis-agent[voice]"` |
-| `daemon` | 后台常驻/托盘/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
+| `daemon` | 桌面入口/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
 | `realtime_ui` | 实时聊天独立窗口（方舟反应炉动画，`/talk` 可视化） | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
 
@@ -217,7 +217,6 @@ brew install portaudio          # pyaudio 编译依赖（语音功能必需）
 
 ```bash
 sudo apt install portaudio19-dev python3-pyaudio  # 语音功能
-sudo apt install libgtk-3-dev libnotify-dev        # 系统托盘（pystray）
 sudo apt install python3-tk                        # pyautogui 截屏依赖
 ```
 
@@ -275,7 +274,7 @@ jarvis --doctor
 
 | 类别 | 检查项 |
 |---|---|
-| 📦 Python 包 | 语音 / 系统托盘 / 系统监控 / GUI / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等 21 个可选包，按 extras 组归类并给出 `pip install` 命令 |
+| 📦 Python 包 | 语音 / 系统监控 / GUI / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等可选包，按 extras 组归类并给出 `pip install` 命令 |
 | 🔧 系统级依赖 | Python 版本（>=3.11） / pip / uv（推荐） / Playwright 浏览器 / Edge WebView2 Runtime（Windows） / 麦克风权限提示 |
 | ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
 
@@ -332,7 +331,6 @@ barge_in_key = true               # 键盘打断：播报中按 ESC 立即停止
 [realtime_talk]
 model = "qwen-audio-3.0-realtime-flash"  # DashScope 实时语音模型
 voice = "longanqian"                      # 音色
-auto_start = false                        # daemon 启动时自动进入
 
 # ---- 上下文压缩 ----
 [context]
@@ -345,10 +343,9 @@ compact_refreeze_growth = 1.25    # 防抖：冻结后总量增长不足此倍�
 compact_max_output_tokens = 2048  # 压缩摘要请求的输出 token 上限
 tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
 
-# ---- 常驻模式 ----
+# ---- 桌面入口与热键 ----
 [daemon]
-hotkey = "ctrl+shift+j"           # 全局热键
-tray = true                       # 系统托盘图标
+hotkey = "ctrl+shift+j"           # 全局热键（保留给新 GUI 工作台）
 ```
 
 > 📖 完整配置项参见 **[config-docs/configuration.md](config-docs/configuration.md)**；各厂商接入见 **[config-docs/providers.md](config-docs/providers.md)**；语音配置见 **[config-docs/voice-setup.md](config-docs/voice-setup.md)**；常见问题见 **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**。
@@ -792,32 +789,20 @@ pip install "jarvis-agent[gui]"
 
 ---
 
-## 常驻模式（贾维斯形态）
+## 桌面入口（实时语音窗口）
 
 ```bash
-jarvis --daemon          # 后台启动
+jarvis --talk          # 直接启动实时双工语音对话窗口
 ```
 
-### 跨平台行为
+双击桌面「JARVIS」图标（或开机自启）会直接打开方舟反应炉实时语音窗口：
+窗口内直接说话即可对话（可打断），点「结束」/按 ESC/说「退下」结束会话，点 X 关闭窗口。
+日志位于 `~/.jarvis/realtime_window.log`。
 
-| 平台 | 后台分离方式 | 说明 |
-|---|---|---|
-| Windows | `pythonw.exe` + `DETACHED_PROCESS` | 无窗口进程，关闭终端不影响 |
-| macOS | `start_new_session=True` | 新会话脱离终端 |
-| Linux | 不支持后台分离 | 以前台模式运行 |
-
-启动后系统托盘出现蓝色同心圆图标。
-
-### 托盘菜单（右键）
-
-| 菜单项 | 行为 |
-|---|---|
-| **语音对话** | 唤起语音对话模式 |
-| **文本对话** | 弹出终端运行完整 REPL（自动恢复上次会话） |
-| **实时聊天** | 开关实时双工语音对话（勾选=开启），弹出方舟反应炉窗口 |
-| **退出贾维斯** | 立即终止守护进程 |
-
-> 实时聊天窗口：daemon 生命周期内保持单例，重复点击不会新建窗口，仅唤起已有窗口。窗口随 daemon 退出而销毁。
+> 📌 **架构说明**：原「无窗口 daemon + 托盘遥控」常驻模式（`--daemon`、pystray 托盘菜单、
+> 托盘语音/文本终端派生）已于 2026-08 下线，由新一代三栏 GUI 工作台（开发中）取代。
+> 桌面入口当前指向 `--talk` 独立窗口作为过渡，新 GUI 上线后切换指向。
+> 定时提醒/每日简报/资源监控等主动感知服务随之进入休眠态（代码保留，待新 GUI 重新接线）。
 
 ### 开机自启 / 桌面快捷方式
 
@@ -832,9 +817,9 @@ python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 
 | 平台 | 开机自启 | 桌面快捷方式 |
 |---|---|---|
-| Windows | Startup 文件夹 .lnk | .lnk（指向 VBS 无窗口启动） |
+| Windows | Startup 文件夹 .lnk | .lnk（指向静默 VBS，打开 `--talk` 语音窗口） |
 | macOS | LaunchAgent plist（`launchctl load`） | .command（Terminal.app 打开） |
-| Linux | 不支持（提示手动 systemd） | .desktop 文件 |
+| Linux | 不支持（提示手动 systemd） | .desktop 文件（终端内运行） |
 
 ### 实时双工配置
 
@@ -845,16 +830,13 @@ python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 api_key = "sk-xxx"              # DashScope API Key（实时语音必需）
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
-auto_start = false              # daemon 启动时是否自动进入实时聊天
 ```
 
 > `api_key` 用于 `/talk` 实时双工语音鉴权。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量。
->
-> daemon 启动时自动进入实时聊天模式。托盘菜单可随时开关。
 
-### 更快的热键响应（P1-2）
+### 全局热键（保留）
 
-daemon 模式默认使用 Windows 原生 `RegisterHotKey` 监听全局热键，比键盘钩子响应更快。可在 `~/.jarvis/settings.toml` 中微调：
+全局热键能力已保留（Windows 默认用原生 `RegisterHotKey`），预留新一代 GUI 工作台的「热键召唤窗口」场景：
 
 ```toml
 [daemon]
@@ -863,23 +845,16 @@ hotkey_native = true            # Windows 优先使用 RegisterHotKey（更快�
 hotkey_debounce_ms = 200        # 去抖毫秒，防止一次按下触发多次
 ```
 
-如果希望热键按下后文本窗口能立即输入，可开启 warm 预启动（常驻一个隐藏终端进程）：
-
-```toml
-[daemon]
-text_terminal_warm = true       # 预启动隐藏文本终端，唤起到可输入 < 500ms（但常驻内存）
-```
-
-文本终端也可以用 `--quick` 快速启动，跳过开机动画、MCP、LSP 等可选初始化，首次调用相关命令时再懒加载：
+REPL 仍可用 `--quick` 快速启动，跳过开机动画、MCP、LSP 等可选初始化，首次调用相关命令时再懒加载：
 
 ```bash
 jarvis --quick                # REPL 快速启动
-jarvis --daemon --quick       # daemon 快速启动（弹出终端自动带 --quick）
 ```
 
-### 系统资源监控
+### 系统资源监控（休眠态）
 
-daemon 模式下自动监控 CPU / 内存 / 磁盘：
+监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，
+当前处于休眠态，将由新一代 GUI 工作台重新接线。配置项预留：
 
 ```toml
 [monitor]
@@ -895,9 +870,10 @@ high_cpu_duration = 600    # 异常进程：CPU > 50% 持续多少秒通知
 work_break_interval = 7200 # 连续工作 2 小时提醒休息
 ```
 
-### 主动提醒系统（P2-3）
+### 主动提醒系统（P2-3，休眠态）
 
-daemon 模式下，贾维斯具备主动感知能力，不需要用户提问就能主动服务：
+主动感知能力代码完整保留（`agent.core.daemon`），原由常驻 daemon 拉起，
+当前处于休眠态，将由新一代 GUI 工作台重新接线。能力清单：
 
 **每日简报**：每天 08:30 自动播报今日概览（待触发提醒、节假日、系统状态、截止日期、日历事件）。
 

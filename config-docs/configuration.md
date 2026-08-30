@@ -150,12 +150,13 @@ enable_thinking = true
 
 ---
 
-## Daemon / 常驻模式
+## 桌面入口 / 全局热键（原常驻模式已下线）
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `daemon_hotkey` | `"ctrl+shift+j"` | 全局热键 |
-| `daemon_tray` | `true` | 系统托盘图标 |
+| `daemon_hotkey` | `"ctrl+shift+j"` | 全局热键（保留给新 GUI 工作台） |
+| `daemon_hotkey_native` | `true` | Windows 优先 RegisterHotKey |
+| `daemon_hotkey_debounce_ms` | `200` | 热键去抖毫秒 |
 
 ---
 
@@ -187,6 +188,4 @@ email_default_recipient = "target@qq.com"
 | `--verbose` | 详细输出 |
 | `--no-boot` | 跳过启动动画 |
 | `--quick` | 快速启动（跳过 MCP/LSP） |
-| `--daemon` | 常驻后台 |
-| `--talk` | 直接启动实时语音对话 |
-| `--voice` | 直接启动语音对话模式 |
+| `--talk` | 直接启动实时语音对话窗口（桌面图标同款入口） |

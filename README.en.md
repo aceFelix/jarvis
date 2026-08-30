@@ -59,7 +59,7 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
   - [Recording Recognition `/listen`](#recording-recognition-listen)
 - [Image Input](#image-input)
 - [GUI Automation](#gui-automation)
-- [Daemon Mode (JARVIS Form)](#daemon-mode-jarvis-form)
+- [Desktop Entry (Real-time Voice Window)](#desktop-entry-real-time-voice-window)
 - [Multi-Agent Collaboration](#multi-agent-collaboration)
 - [Plugin System](#plugin-system)
 - [CLI-Anything External Software Control](#cli-anything-external-software-control)
@@ -89,14 +89,14 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 | Real-time chat window (Arc Reactor animation) | ✅ | ✅ | ✅ |
 | Mouse / keyboard / screenshot (pyautogui) | ✅ | ✅¹ | ✅² |
 | Camera / vision monitoring | ✅ | ✅ | ✅ |
-| `--daemon` background mode | ✅ | ✅ | ⚠️ Foreground only³ |
+| Desktop icon launches real-time voice window (`--talk`) | ✅ | ✅ | ⚠️ Runs in terminal³ |
 | Auto-start on boot | ✅ Startup | ✅ LaunchAgent | ❌ Manual systemd |
 | Desktop shortcut | ✅ .lnk | ✅ .command | ⚠️ Runs in terminal⁴ |
 | Global hotkey | ✅ | ❌ | ⚠️ Requires root |
 
 > ¹ macOS requires granting terminal/Python access in "System Settings → Privacy & Security → Accessibility"
 > ² Linux mouse/keyboard operations require DISPLAY environment variable (X11/Wayland desktop environment)
-> ³ On Linux, `--daemon` runs in foreground mode (cannot detach to background), but all features work
+> ³ On Linux, the desktop entry runs a real-time voice session inside a terminal (closing the window exits)
 > ⁴ Linux desktop shortcut double-click runs jarvis in terminal as REPL (equivalent to Windows cmd window; closing the window exits)
 
 > ⚠️ **Important**: This project was fully developed and tested on **Windows**. macOS and Linux have code-level adaptations but **have not undergone complete real-machine testing**; there may be undiscovered compatibility issues. For the best experience, it is recommended to use J.A.R.V.I.S. on Windows.
@@ -195,7 +195,7 @@ jarvis splits different capabilities into optional dependency groups, install on
 | `camera` | Camera capture | `pip install "jarvis-agent[camera]"` |
 | `vision` | Real-time vision monitoring + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | Voice chat `/voice` + real-time duplex `/talk` (STT+TTS+full-duplex) | `pip install "jarvis-agent[voice]"` |
-| `daemon` | Background daemon/tray/hotkey/auto-start | `pip install "jarvis-agent[daemon]"` |
+| `daemon` | Desktop entry/hotkey/auto-start | `pip install "jarvis-agent[daemon]"` |
 | `realtime_ui` | Real-time chat standalone window (Arc Reactor animation, `/talk` visualization) | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | All of the above | `pip install "jarvis-agent[all]"` |
 
@@ -217,7 +217,6 @@ brew install portaudio          # pyaudio build dependency (required for voice f
 
 ```bash
 sudo apt install portaudio19-dev python3-pyaudio  # Voice features
-sudo apt install libgtk-3-dev libnotify-dev        # System tray (pystray)
 sudo apt install python3-tk                        # pyautogui screenshot dependency
 ```
 
@@ -275,7 +274,7 @@ Checks (rendered with rich tables, exit code 0=all ready / 1=missing):
 
 | Category | Check Items |
 |---|---|
-| 📦 Python packages | 21 optional packages including voice / system tray / system monitoring / GUI / browser / camera / vision monitoring / MCP / real-time window / WeChat / LLM core, grouped by extras with `pip install` commands |
+| 📦 Python packages | optional packages including voice / system monitoring / GUI / browser / camera / vision monitoring / MCP / real-time window / WeChat / LLM core, grouped by extras with `pip install` commands |
 | 🔧 System-level dependencies | Python version (>=3.11) / pip / uv (recommended) / Playwright browser / Edge WebView2 Runtime (Windows) / microphone permission prompt |
 | ⚙️ Config status | Whether `~/.jarvis/settings.toml` exists / API Key configured (key content not shown) / `permissions.yaml` ready |
 
@@ -332,7 +331,6 @@ barge_in_key = true               # Keyboard barge-in: press ESC to stop during 
 [realtime_talk]
 model = "qwen-audio-3.0-realtime-flash"  # DashScope real-time voice model
 voice = "longanqian"                      # Voice
-auto_start = false                        # Auto-enter on daemon start
 
 # ---- Context compaction ----
 [context]
@@ -345,10 +343,9 @@ compact_refreeze_growth = 1.25    # Debounce: no re-compaction until total grows
 compact_max_output_tokens = 2048  # Max output tokens for the summarization request
 tool_result_keep_recent = 4       # Keep recent N full tool outputs when folding (older ones collapse to one-line summaries)
 
-# ---- Daemon mode ----
+# ---- Desktop entry & hotkey ----
 [daemon]
-hotkey = "ctrl+shift+j"           # Global hotkey
-tray = true                       # System tray icon
+hotkey = "ctrl+shift+j"           # Global hotkey (kept for the new GUI workbench)
 ```
 
 > 📖 Full config options see **[config-docs/configuration.md](config-docs/configuration.md)**; vendor integration see **[config-docs/providers.md](config-docs/providers.md)**; voice config see **[config-docs/voice-setup.md](config-docs/voice-setup.md)**; FAQ see **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**.
@@ -785,32 +782,20 @@ Visual positioning suits scenarios where button/icon position isn't fixed: pass 
 
 ---
 
-## Daemon Mode (JARVIS Form)
+## Desktop Entry (Real-time Voice Window)
 
 ```bash
-jarvis --daemon          # Background start
+jarvis --talk          # Launch real-time duplex voice chat window directly
 ```
 
-### Cross-platform Behavior
+Double-clicking the desktop "JARVIS" icon (or auto-start) opens the Arc Reactor real-time voice window:
+speak directly in the window to converse (interruptible), click "End" / press ESC / say "退下" to end the session, click X to close the window.
+Logs: `~/.jarvis/realtime_window.log`.
 
-| Platform | Detach Method | Description |
-|---|---|---|
-| Windows | `pythonw.exe` + `DETACHED_PROCESS` | Windowless process, closing terminal doesn't affect |
-| macOS | `start_new_session=True` | New session detaches from terminal |
-| Linux | Not supported | Runs in foreground mode |
-
-After startup, system tray shows blue concentric circle icon.
-
-### Tray Menu (Right-click)
-
-| Menu Item | Behavior |
-|---|---|
-| **Voice Chat** | Bring up voice conversation mode |
-| **Text Chat** | Pop terminal running full REPL (auto-restores last session) |
-| **Real-time Chat** | Toggle real-time duplex voice chat (check=on), pops up Arc Reactor window |
-| **Exit JARVIS** | Immediately terminate daemon process |
-
-> Real-time chat window: singleton during daemon lifecycle, repeated clicks won't create new windows, only brings up existing one. Window destroyed when daemon exits.
+> 📌 **Architecture note**: the old "windowless daemon + tray remote-control" resident mode (`--daemon`, pystray tray menu,
+> tray voice/text terminal spawning) was retired in 2026-08, replaced by a new three-column GUI workbench (in development).
+> The desktop entry currently points to the `--talk` standalone window as a transition; it will be re-pointed when the new GUI ships.
+> Scheduled reminders / daily briefing / resource monitoring entered dormant state accordingly (code kept, to be re-wired by the new GUI).
 
 ### Auto-start / Desktop Shortcut
 
@@ -825,9 +810,9 @@ python -m agent.daemon.autostart desktop-uninstall  # Remove desktop shortcut
 
 | Platform | Auto-start | Desktop Shortcut |
 |---|---|---|
-| Windows | Startup folder .lnk | .lnk (points to VBS windowless launch) |
+| Windows | Startup folder .lnk | .lnk (silent VBS launching the `--talk` voice window) |
 | macOS | LaunchAgent plist (`launchctl load`) | .command (opens Terminal.app) |
-| Linux | Not supported (prompts manual systemd) | .desktop file |
+| Linux | Not supported (prompts manual systemd) | .desktop file (runs in terminal) |
 
 ### Real-time Duplex Config
 
@@ -838,16 +823,13 @@ Configure in `~/.jarvis/settings.toml`:
 api_key = "sk-xxx"              # DashScope API Key (required for real-time voice)
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
-auto_start = false              # Whether to auto-enter real-time chat on daemon start
 ```
 
 > `api_key` for `/talk` real-time duplex voice auth. Falls back to `DASHSCOPE_API_KEY` env var if not configured.
->
-> Auto-enters real-time chat mode on daemon start. Tray menu can toggle anytime.
 
-### Faster Hotkey Response (P1-2)
+### Global Hotkey (Kept)
 
-Daemon mode defaults to Windows native `RegisterHotKey` for global hotkey listening, faster than keyboard hooks. Fine-tunable in `~/.jarvis/settings.toml`:
+Global hotkey capability is kept (Windows native `RegisterHotKey` by default), reserved for the new GUI workbench's "hotkey summons window" scenario:
 
 ```toml
 [daemon]
@@ -856,23 +838,16 @@ hotkey_native = true            # Windows prefer RegisterHotKey (faster)
 hotkey_debounce_ms = 200        # Debounce ms, prevents multiple triggers per press
 ```
 
-To enable immediate input in text window after hotkey press, enable warm pre-start (keeps a hidden terminal process resident):
-
-```toml
-[daemon]
-text_terminal_warm = true       # Pre-start hidden text terminal, wake-to-input < 500ms (but resident in memory)
-```
-
-Text terminal can also use `--quick` for fast startup, skipping boot animation, MCP, LSP etc. optional init, lazy-loading on first use of relevant commands:
+The REPL can still use `--quick` for fast startup, skipping boot animation, MCP, LSP etc. optional init, lazy-loading on first use of relevant commands:
 
 ```bash
 jarvis --quick                # REPL quick start
-jarvis --daemon --quick       # daemon quick start (popped terminal auto-includes --quick)
 ```
 
-### System Resource Monitoring
+### System Resource Monitoring (Dormant)
 
-Daemon mode auto-monitors CPU / memory / disk:
+Monitoring code is fully kept (`agent.core.daemon.monitor`); it was started by the resident daemon,
+now in dormant state, to be re-wired by the new GUI workbench. Config reserved:
 
 ```toml
 [monitor]
@@ -888,9 +863,10 @@ high_cpu_duration = 600    # Abnormal process: CPU > 50% for how many seconds to
 work_break_interval = 7200 # Work 2 hours continuously, remind to rest
 ```
 
-### Proactive Reminder System (P2-3)
+### Proactive Reminder System (P2-3, Dormant)
 
-In daemon mode, JARVIS has proactive perception, can serve proactively without user asking:
+Proactive perception code is fully kept (`agent.core.daemon`); it was started by the resident daemon,
+now in dormant state, to be re-wired by the new GUI workbench. Capability list:
 
 **Daily Briefing**: Auto-broadcasts today's overview at 08:30 daily (pending reminders, holidays, system status, deadlines, calendar events).
 

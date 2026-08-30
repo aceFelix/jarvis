@@ -45,7 +45,6 @@ api_key = ""                                        # → dashscope_api_key（�
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
 ws_url = ""
-auto_start = false                                  # daemon 启动时自动进入实时聊天
 
 # ── 语音打断（注意：barge_in / barge_in_key 必须在 [voice] 表内，写顶层无效）──
 [voice]

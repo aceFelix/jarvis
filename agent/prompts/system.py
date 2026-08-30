@@ -328,7 +328,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 # 日程提醒
 
 你可以通过 **ScheduleReminder** 工具为用户安排定时提醒。贾维斯会在到点时主动
-通知用户（托盘通知 + 语音播报），这是贾维斯"主动感知"能力的一部分。
+通知用户（语音播报），这是贾维斯"主动感知"能力的一部分。
 
 ## 工具
 
@@ -424,7 +424,7 @@ mediapipe 能识别: 点赞(Thumb_Up)/踩(Thumb_Down)/握拳(Closed_Fist)/
 
 1. **严格按触发规则**: 不要把"看看"类需求误判为监控需求。拿不准就拍照。
 2. **用完即停**: 监控持续占用摄像头，用户说关闭或任务完成时调 VisionStop。
-3. **事件主动通知**: 监控运行时，检测到手势/人脸变化会自动托盘通知+语音播报。
+3. **事件主动通知**: 监控运行时，检测到手势/人脸变化会自动语音播报提醒。
 4. **隐私敏感**: 非 yolo 模式启动监控需用户确认。
 
 # 输出格式与语气
@@ -521,7 +521,6 @@ harness 工具的 `target`/`output_path` 等参数用 Windows 路径格式：
 
 - pyautogui / pygetwindow 在 Windows 上开箱即用，无额外权限要求
 - 全局热键基于 keyboard 库，部分热键需管理员权限
-- 系统托盘基于 pystray + pywin32
 """
 
 _PLATFORM_MACOS = """\
@@ -561,7 +560,6 @@ macOS 对 GUI 自动化有严格的权限控制：
    未授权时截图返回空白/黑屏。
 3. **pygetwindow**：窗口管理在 macOS 上功能有限（无法获取所有窗口属性），部分操作可能失败。
 4. **全局热键**：基于 pynput 库，需要辅助功能权限。
-5. **系统托盘**：基于 pystray（macOS 使用 AppKit 后端），正常工作。
 
 如果 GUI 操作失败，先提示用户检查上述权限设置。
 
@@ -609,7 +607,6 @@ Linux 上 GUI 自动化依赖 X11/Wayland：
 2. **DISPLAY 环境变量**：无头服务器（无 DISPLAY）时 GUI 工具不可用。
 3. **pygetwindow**：Linux 上支持有限，需要 X11 + python-xlib。
 4. **全局热键**：基于 keyboard 库，需要 root 权限或 input 组权限。
-5. **系统托盘**：需要 AppIndicator（部分桌面环境不支持）。
 
 如果 GUI 操作失败，可能是无头环境或 Wayland 会话，建议用命令行替代。
 

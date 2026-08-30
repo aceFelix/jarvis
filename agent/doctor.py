@@ -41,11 +41,8 @@ _PKG_CHECKS: list[tuple[str, str, str]] = [
     ("语音 TTS/STT", "pyaudio", "voice"),
     ("语音 TTS/STT", "aec_audio_processing", "voice"),
     ("语音 TTS/STT", "numpy", "voice"),
-    # 系统托盘 / daemon
-    ("系统托盘", "pystray", "daemon"),
-    ("系统托盘", "PIL", "daemon"),
-    # 系统监控
-    ("系统监控", "psutil", "daemon"),
+    # 系统监控（主依赖，新 GUI 工作台右栏指标数据源）
+    ("系统监控", "psutil", "核心依赖"),
     # GUI 操作
     ("GUI 操作", "pyautogui", "gui"),
     ("GUI 操作", "PIL", "gui"),
