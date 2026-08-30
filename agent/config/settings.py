@@ -275,7 +275,13 @@ def _read_toml(path: Path) -> dict:
         if raw.startswith(b"\xef\xbb\xbf"):
             raw = raw[3:]
         return tomllib.loads(raw.decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        # 解析失败不能静默吞掉：否则用户配置不生效且无任何线索（作者：aceFelix）。
+        # 输出到 stderr 提醒修复配置文件，不阻断启动（返回空配置回退默认值）。
+        print(
+            f"\u26a0\ufe0f  配置文件解析失败，已忽略并使用默认值：{path}\n   原因：{e}",
+            file=sys.stderr,
+        )
         return {}
 
 
