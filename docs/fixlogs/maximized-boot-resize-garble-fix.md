@@ -122,3 +122,7 @@ terminal 已输出到 scrollback 的内容无法重绘。两类受害者：
   用户大概率会缩回默认窗口，按终端默认 80 列预居中才能在目标状态下正中；
   按当前（120+ 列）居中只会让垫宽超出小窗、被 reflow 吞掉后偏左。
   宽度不同的多行元素（艺术字/副标题/面板）必须各自独立计算缩进。
+- **渲染类测试别依赖宿主编码环境**：`io.StringIO().encoding` 是只读的 `None`，
+  Rich 据此判定 `ascii_only`、把面板边框降级成 ASCII `+--`；本地设了
+  `PYTHONIOENCODING=utf-8` 掩盖了差异，CI（Linux 无该变量）挂掉。
+  测试里用自定义 buffer（encoding="utf-8"）固定环境，边框断言同时认 ┌/└ 与 +。

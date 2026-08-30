@@ -35,10 +35,27 @@ from agent.ui.boot_animation import (  # noqa: E402
 _INFO = ("zhipu", "glm-5.3-flash", r"C:\Users\许发明\.jarvis")
 
 
+class _Utf8Buffer(io.StringIO):
+    """带可写 encoding 的 StringIO（作者：aceFelix）。
+
+    StringIO.encoding 是只读属性（值 None），Rich 会视为非 UTF-8 控制台
+    （ascii_only）把面板边框降级成 ASCII +--：本地曾设 PYTHONIOENCODING
+    未暴露，CI（Linux 无该变量）直接挂掉。子类覆盖为可读写的 utf-8，
+    消除环境差异。
+    """
+
+    encoding = "utf-8"
+
+
 def _render_lines(renderable, width: int) -> list[str]:
-    buf = io.StringIO()
+    buf = _Utf8Buffer()
     Console(file=buf, force_terminal=False, width=width).print(renderable)
     return buf.getvalue().splitlines()
+
+
+# Panel 边框行首字符：Unicode 框为 ┌/└，非 UTF-8 终端下 Rich 自动降级
+# 为 ASCII +（ascii_only），断言两种都要认（作者：aceFelix）。
+_BOX_TOP_BOTTOM = ("┌", "└", "+")
 
 
 def test_compact_banner_is_narrow_and_short():
@@ -195,7 +212,7 @@ def test_maximized_frame_centered_for_default_small_window(monkeypatch):
     sub_lead = len(sub) - len(sub.lstrip())
     assert abs(2 * sub_lead + len(sub.strip()) - _RESTORE_TARGET_WIDTH) <= 1
     # 4) 信息面板同基准居中（取面板边框行；宽度同样去掉前导空格）
-    box_lines = [l for l in lines if l.lstrip().startswith(("┌", "└"))]
+    box_lines = [l for l in lines if l.lstrip().startswith(_BOX_TOP_BOTTOM)]
     assert box_lines, "定格帧必须包含信息面板边框"
     for l in box_lines:
         lead = len(l) - len(l.lstrip())
