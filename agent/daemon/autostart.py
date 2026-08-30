@@ -138,15 +138,6 @@ def vbs_path() -> Path:
     return jarvis_home() / "start_daemon.vbs"
 
 
-def vbs_foreground_path() -> Path:
-    """前台 REPL VBS 启动脚本路径（~/.jarvis/start_jarvis.vbs）。
-
-    与 ``vbs_path()`` 区别: 这个脚本用 ``py -3.13``（非 pyw，带控制台
-    窗口）启动前台 REPL，双击图标弹出终端窗口可对话。
-    """
-    return jarvis_home() / "start_jarvis.vbs"
-
-
 def python_exe() -> str:
     """获取当前 Python 解释器路径。"""
     return sys.executable
@@ -333,77 +324,10 @@ def ensure_vbs() -> Path | None:
         return None
 
 
-def ensure_vbs_foreground() -> Path | None:
-    """生成前台 REPL VBS 启动脚本（弹出终端窗口跑 jarvis 交互界面）。
-
-    与 ``ensure_vbs()`` 区别:
-    - 用 ``py -3.13``（非 pyw，带控制台窗口）→ 双击图标弹出终端窗口
-    - 不带 ``--daemon`` → 直接进前台 REPL，可打字/``/voice`` 语音对话
-    - ``cmd /k title J.A.R.V.I.S && py ...`` 设窗口标题为 J.A.R.V.I.S
-    - ``sh.Run(..., 1, False)`` — 1=正常窗口显示，False=不等待（VBS 秒退）
-
-    用户体验:
-    - 双击桌面图标 → 弹出标题「J.A.R.V.I.S」的终端窗口 → 启动动画 → REPL
-    - 可打字对话、/voice 语音对话、/exit 退出
-    - 关窗口右上角 X = 杀进程退出 jarvis（符合"关窗口=退出"预期）
-    - /exit 正常退出后窗口停留（cmd /k），用户看完 goodbye 手动关
-
-    Returns: VBS 路径，失败返回 None。
-    """
-    vbs = vbs_foreground_path()
-    # main.py 路径变了则重新生成（项目目录搬迁后自愈）
-    if vbs.exists():
-        existing = vbs.read_text(encoding="ascii", errors="ignore")
-        if jarvis_script() in existing:
-            return vbs
-
-    try:
-        jarvis_home().mkdir(parents=True, exist_ok=True)
-    except Exception:
-        return None
-
-    main_py = jarvis_script()
-    # 项目根目录 = main.py 所在目录(agent/)的父目录 → jarvis/
-    # configs/settings.toml 在 jarvis/configs/ 下，cwd 必须是 jarvis/ 才能加载
-    project_dir = str(Path(main_py).resolve().parent.parent)
-    # 纯 ASCII，避免 VBS ANSI 编码问题
-    # 关键: 先 cd /d 到项目目录，否则 configs/settings.toml 找不到 → 退化成 mock provider
-    # --with-tray: 前台 REPL 同时启动托盘图标，托盘退出=整体退出
-    # cmd /c 跑完 pause 保持窗口看 goodbye，title 设窗口标题
-    # py -3.13 自适应找 Python 3.13（有控制台版，弹窗口）
-    vbs_content = (
-        "Option Explicit\n"
-        "Dim sh, mainPy, projDir\n"
-        f'mainPy = "{main_py}"\n'
-        f'projDir = "{project_dir}"\n'
-        "Set sh = CreateObject(\"WScript.Shell\")\n"
-        "\n"
-        "' Launch foreground REPL + tray icon in a console titled J.A.R.V.I.S\n"
-        "' cd /d to project dir so configs/settings.toml loads (else mock!)\n"
-        "' --with-tray: tray icon coexists with REPL, tray quit = full exit\n"
-        "' py -3.13 (not pyw) opens console; & pause keeps window after exit\n"
-        "On Error Resume Next\n"
-        "sh.Run \"cmd /c title J.A.R.V.I.S && cd /d \"\"\" & projDir & \"\"\" && py -3.13 \"\"\" & mainPy & \"\"\" --with-tray & pause\", 1, False\n"
-        "If Err.Number <> 0 Then\n"
-        "  Err.Clear\n"
-        "  sh.Run \"cmd /c title J.A.R.V.I.S && cd /d \"\"\" & projDir & \"\"\" && py \"\"\" & mainPy & \"\"\" --with-tray & pause\", 1, False\n"
-        "End If\n"
-        "On Error GoTo 0\n"
-        "Set sh = Nothing\n"
-    )
-    try:
-        vbs.write_text(vbs_content, encoding="ascii")
-        return vbs
-    except Exception as e:
-        print(f"⚠ 前台 VBS 写入失败: {type(e).__name__}: {e}", file=sys.stderr)
-        return None
-
-
 def _create_shortcut(
     spath: Path,
     description: str,
     use_vbs: bool = False,
-    foreground: bool = False,
 ) -> int:
     """创建快捷方式的通用实现。
 
@@ -413,8 +337,6 @@ def _create_shortcut(
         use_vbs: True=用 VBS 启动脚本（自适应找 Python，适合桌面双击）；
             False=直接指向 pythonw.exe（适合开机自启，路径在用户真实
             终端执行时自然正确）
-        foreground: 仅 use_vbs=True 时有效。True=前台 REPL VBS（弹终端窗口
-            可对话，关窗口=退出）；False=daemon VBS（无窗口后台常驻）。
 
     Returns: 0 成功，非 0 失败。
     """
@@ -424,8 +346,8 @@ def _create_shortcut(
     icon_line = f'$Shortcut.IconLocation = "{icon_str}"' if icon_str else ""
 
     if use_vbs:
-        # VBS 方案：快捷方式指向 wscript.exe 运行 VBS 脚本
-        vbs = ensure_vbs_foreground() if foreground else ensure_vbs()
+        # VBS 方案：快捷方式指向 wscript.exe 运行 VBS 脚本（无窗口后台常驻）
+        vbs = ensure_vbs()
         if not vbs:
             print("⚠ VBS 启动脚本生成失败，回退到直接指向 pythonw.exe", file=sys.stderr)
             use_vbs = False
@@ -434,9 +356,7 @@ def _create_shortcut(
             # VBS 路径可能含中文（用户名），PowerShell 双引号字符串能正确处理
             arguments = f'"{vbs}"'
             working_dir = str(jarvis_home())
-            # 前台模式 WindowStyle=1（正常窗口），daemon 模式=7（最小化）
-            window_style = 1 if foreground else 7
-
+            # daemon 无窗口后台常驻，窗口样式取 7（最小化运行）
             ps_script = f'''
 $WshShell = New-Object -comObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("{spath}")
@@ -445,7 +365,7 @@ $Shortcut.Arguments = '{arguments}'
 $Shortcut.WorkingDirectory = "{working_dir}"
 $Shortcut.Description = "{description}"
 {icon_line}
-$Shortcut.WindowStyle = {window_style}
+$Shortcut.WindowStyle = 7
 $Shortcut.Save()
 '''
             import subprocess
@@ -530,7 +450,7 @@ def install() -> int:
     # Windows: 用 VBS 方案启动（完全无窗口），不再直接指向 python.exe
     spath = shortcut_path()
     spath.parent.mkdir(parents=True, exist_ok=True)
-    return _create_shortcut(spath, "JARVIS 常驻守护进程（开机自启）", use_vbs=True, foreground=False)
+    return _create_shortcut(spath, "JARVIS 常驻守护进程（开机自启）", use_vbs=True)
 
 
 def uninstall() -> int:
@@ -588,12 +508,14 @@ def install_desktop() -> int:
         spath.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-    rc = _create_shortcut(spath, "JARVIS 个人 AI 管家", use_vbs=True, foreground=False)
+    rc = _create_shortcut(spath, "JARVIS 个人 AI 管家", use_vbs=True)
     if rc == 0:
         print()
         print("💡 双击桌面「JARVIS」图标 → 后台启动贾维斯（无窗口）")
-        print("   托盘图标出现后，贾维斯自动进入语音对话模式")
-        print("   说「退下」进入待机 · 说「贾维斯」唤醒")
+        # 提示文案与实际行为对齐：daemon 启动后语音对话默认关闭，
+        # 需托盘「语音对话」或热键手动唤起（作者：aceFelix）。
+        print("   托盘图标出现后：右键「语音对话」开启，或按热键唤起")
+        print("   语音对话中说「退下」回待机 · 说「贾维斯」唤醒")
         print("   托盘右键「退出贾维斯」= 彻底关闭")
         print("   日志: ~/.jarvis/daemon.log")
     return rc
@@ -626,7 +548,6 @@ def status_desktop() -> int:
     if spath.exists():
         print(f"✓ 桌面快捷方式已创建: {spath}")
         print(f"  图标: {icon_path()}")
-        print(f"  前台 VBS: {vbs_foreground_path()}")
         print(f"  后台 VBS: {vbs_path()}")
     else:
         print(f"✗ 桌面快捷方式不存在（{spath}）")
