@@ -36,26 +36,31 @@ _INFO = ("zhipu", "glm-5.3-flash", r"C:\Users\许发明\.jarvis")
 
 
 class _Utf8Buffer(io.StringIO):
-    """带可写 encoding 的 StringIO（作者：aceFelix）。
+    """固定 UTF-8 编码的渲染 buffer（作者：aceFelix）。
 
-    StringIO.encoding 是只读属性（值 None），Rich 会视为非 UTF-8 控制台
-    （ascii_only）把面板边框降级成 ASCII +--：本地曾设 PYTHONIOENCODING
-    未暴露，CI（Linux 无该变量）直接挂掉。子类覆盖为可读写的 utf-8，
-    消除环境差异。
+    渲染类测试不得依赖宿主编码环境：显式声明 utf-8，避免 Rich 因
+    编码判定差异（ascii_only 等）改变输出形态，保证各平台行为一致。
     """
 
     encoding = "utf-8"
 
 
 def _render_lines(renderable, width: int) -> list[str]:
+    # 渲染环境必须固定，消除宿主差异（作者：aceFelix）：
+    # - encoding=utf-8：避免 Rich 按宿主编码判定 ascii_only 降级边框；
+    # - legacy_windows=False：Rich 默认按宿主平台判定，Windows 会把圆角
+    #   ╭/╰ 替换成方角 ┌/└，导致本地/CI 渲染形态不一致；固定为非
+    #   legacy，所有平台统一渲染 ROUNDED 圆角，断言随之确定。
     buf = _Utf8Buffer()
-    Console(file=buf, force_terminal=False, width=width).print(renderable)
+    Console(file=buf, force_terminal=False, width=width,
+            legacy_windows=False).print(renderable)
     return buf.getvalue().splitlines()
 
 
-# Panel 边框行首字符：Unicode 框为 ┌/└，非 UTF-8 终端下 Rich 自动降级
-# 为 ASCII +（ascii_only），断言两种都要认（作者：aceFelix）。
-_BOX_TOP_BOTTOM = ("┌", "└", "+")
+# Panel 边框行首字符（作者：aceFelix）：
+# _compact_banner 用默认 ROUNDED 框；_render_lines 已固定 legacy_windows=False，
+# 各平台统一渲染圆角 ╭/╰。保留 ┌/└/+ 仅作防御性兼容（真实终端降级场景）。
+_BOX_TOP_BOTTOM = ("┌", "└", "╭", "╰", "+")
 
 
 def test_compact_banner_is_narrow_and_short():
