@@ -547,7 +547,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--talk",
         action="store_true",
-        help="直接启动实时双工语音对话（/talk），需要配置 DashScope API Key",
+        help="启动三栏工作台窗口（实时语音/文本对话一体，原独立实时窗口已合并）",
+    )
+    p.add_argument(
+        "--gui",
+        action="store_true",
+        help="启动三栏 GUI 工作台（与 --talk 等价，桌面图标入口）",
     )
     p.add_argument(
         "--doctor",
@@ -631,15 +636,10 @@ def main(argv: list[str] | None = None) -> int:
         _show_config(ui, settings, provider, mcp_client=None)
         return 0
 
-    # 直接启动实时双工语音对话
-    if args.talk:
-        ui = RichCLI(verbose=settings.verbose, boot_animation=not args.no_boot)
-        try:
-            # 延迟导入语音模块，避免未安装时主入口异常
-            from agent.commands.handlers.voice_commands import _realtime_talk
-            return asyncio.run(_realtime_talk(ui, settings))
-        except KeyboardInterrupt:
-            return 130
+    # 三栏工作台窗口（--gui 与 --talk 等价：--talk 已从独立实时窗口合并进工作台）
+    if args.talk or args.gui:
+        from agent.ui.workbench import run_workbench
+        return run_workbench(settings)
 
     try:
         return asyncio.run(repl(settings))

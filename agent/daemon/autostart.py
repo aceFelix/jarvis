@@ -1,8 +1,8 @@
 """开机自启 + 桌面快捷方式辅助脚本。
 
-生成 Windows 快捷方式，双击/开机自动启动 JARVIS 实时语音窗口
-（``jarvis --talk`` 独立 pywebview 窗口；三栏 GUI 工作台上线后
-此处只需再换启动目标。作者：aceFelix）。
+生成 Windows 快捷方式，双击/开机自动启动 JARVIS 三栏工作台窗口
+（``jarvis --gui`` 单窗口三栏 GUI；实时语音/文本对话/历史会话一体。
+作者：aceFelix）。
 
 用法:
     python -m agent.daemon.autostart install            # 安装开机自启
@@ -132,14 +132,14 @@ def icon_path() -> Path:
 
 
 def vbs_path() -> Path:
-    """VBS 启动脚本路径（~/.jarvis/start_jarvis_window.vbs）。
+    """VBS 启动脚本路径（~/.jarvis/start_workbench.vbs）。
 
     VBS 用 wscript 静默运行（无控制台），通过 py launcher 自适应找
-    Python 3.13，拉起 ``jarvis --talk`` 实时语音窗口。
-    （文件名从旧版 start_daemon.vbs 变更，确保存量用户的旧 VBS
-    不会被复用检查命中而继续启动已下线的 --daemon。作者：aceFelix）
+    Python 3.13，拉起 ``jarvis --gui`` 三栏工作台窗口。
+    （文件名从旧版 start_jarvis_window.vbs 变更，确保存量用户的旧 VBS
+    不会被复用检查命中而继续启动旧的独立实时窗口。作者：aceFelix）
     """
-    return jarvis_home() / "start_jarvis_window.vbs"
+    return jarvis_home() / "start_workbench.vbs"
 
 
 def python_exe() -> str:
@@ -174,29 +174,23 @@ def jarvis_script() -> str:
     return str(here / "main.py")
 
 
-def ensure_icon() -> Path | None:
-    """确保 JARVIS 图标存在，不存在则用 PIL 生成。
+def _draw_reactor_icon(solid_bg: tuple[int, int, int] | None = None):
+    """绘制 JARVIS 反应炉图标（蓝色同心圆，致敬启动动画），返回 256×256 RGBA 图。
 
-    图标设计: 蓝色同心圆反应炉（致敬启动动画），
-    256×256 多尺寸 ico（含 256/128/64/48/32/16，Windows 各场景适配）。
-
-    返回图标路径，失败返回 None（调用方降级为无图标快捷方式）。
+    solid_bg：指定则先铺不透明实底——窗口/任务栏图标专用，透明像素在任务栏
+    浅色底上会被合成发白（用户实测反馈）；不指定则透明底（桌面快捷方式，
+    桌面壁纸由系统合成不受影响）。PIL 缺失时返回 None。
     """
-    ico = icon_path()
-    if ico.exists():
-        return ico
     try:
         from PIL import Image, ImageDraw, ImageFilter
     except ImportError:
         return None
 
-    try:
-        jarvis_home().mkdir(parents=True, exist_ok=True)
-    except Exception:
-        return None
-
     size = 256
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    if solid_bg is not None:
+        img = Image.new("RGBA", (size, size), (*solid_bg, 255))
+    else:
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     # 外层氛围光晕（径向渐变模糊圆）
@@ -225,6 +219,7 @@ def ensure_icon() -> Path | None:
 
     # 8 段旋转线圈装饰（外环上的 8 个亮点）
     import math
+
     cx, cy = size // 2, size // 2
     r_outer = (size - 80) // 2  # 外环半径
     for i in range(8):
@@ -232,16 +227,63 @@ def ensure_icon() -> Path | None:
         px = cx + int(r_outer * math.cos(angle))
         py = cy + int(r_outer * math.sin(angle))
         draw.ellipse([px - 6, py - 6, px + 6, py + 6], fill=(91, 200, 255))
+    return img
 
-    # 保存为多尺寸 ico
+
+def _save_ico(img, path: Path) -> bool:
+    """保存为多尺寸 ico（256/128/64/48/32/16，Windows 各场景适配），失败返回 False。"""
     try:
-        img.save(ico, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        img.save(path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        return True
     except Exception:
         # 某些 PIL 版本 sizes 参数格式不同，降级单尺寸
         try:
-            img.save(ico, format="ICO")
+            img.save(path, format="ICO")
+            return True
         except Exception:
-            return None
+            return False
+
+
+def ensure_icon() -> Path | None:
+    """确保 JARVIS 桌面图标存在（透明底），不存在则用 PIL 生成。
+
+    返回图标路径，失败返回 None（调用方降级为无图标快捷方式）。
+    """
+    ico = icon_path()
+    if ico.exists():
+        return ico
+    try:
+        jarvis_home().mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return None
+    img = _draw_reactor_icon()
+    if img is None or not _save_ico(img, ico):
+        return None
+    return ico
+
+
+def window_icon_path() -> Path:
+    """窗口专用图标路径（~/.jarvis/jarvis_window.ico，实底）。"""
+    return jarvis_home() / "jarvis_window.ico"
+
+
+def ensure_window_icon() -> Path | None:
+    """确保窗口/任务栏图标存在（深蓝实底），不存在则生成。
+
+    与桌面图标同一反应炉图案，但铺不透明实底：透明底图标在任务栏会被
+    合成到浅色底上显示发白（用户实测反馈），实底则始终稳定。
+    """
+    ico = window_icon_path()
+    if ico.exists():
+        return ico
+    try:
+        jarvis_home().mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return None
+    # 深蓝实底（与工作台面板色一致），避免任务栏浅色底透出白色
+    img = _draw_reactor_icon(solid_bg=(8, 18, 32))
+    if img is None or not _save_ico(img, ico):
+        return None
     return ico
 
 
@@ -250,19 +292,19 @@ def ensure_vbs() -> Path | None:
 
     VBS 用 ``wscript`` 静默运行（无控制台闪屏），支持两种安装方式:
 
-    1. **模块模式**（优先）: ``pyw -m agent.main --talk``
+    1. **模块模式**（优先）: ``pyw -m agent.main --gui``
        适用于 ``pip install jarvis``（PyPI 安装）和 ``pip install -e .``（开发模式）。
        不依赖 main.py 文件路径，agent 包已安装到 site-packages，
        配置从 ``~/.jarvis/settings.toml`` 加载。
 
-    2. **脚本模式**（回退）: ``pyw main.py --talk``
+    2. **脚本模式**（回退）: ``pyw main.py --gui``
        适用于源码 clone 后直接运行。需要 cwd = 项目根目录，
        否则 ``configs/settings.toml`` 找不到会退化成 mock provider。
 
     两种模式都先尝试 ``pyw -3.13``，回退 ``pyw`` 和 ``pythonw``。
     项目锁定 Python 3.13.x（pyaudio 无 cp314 wheel）。
-    ``--talk`` 以独立 pywebview 窗口运行，窗口关闭后进程退出、
-    VBS 随之返回，无残留。
+    ``--gui`` 以三栏工作台窗口运行（单实例：二次双击聚焦已有窗口），
+    点 X 关闭窗口后进程退出、VBS 随之返回，无残留。
 
     Returns: VBS 路径，失败返回 None。
 
@@ -284,8 +326,8 @@ def ensure_vbs() -> Path | None:
     # VBS 用双引号转义: 路径里的 \ 不需转义，" 用 ""
     # 注释用英文，确保纯 ASCII（VBS 默认 ANSI 编码，中文会乱码）
     #
-    # 启动逻辑: 拉起 --talk 实时语音窗口（pywebview GUI，pythonw 无控制台）。
-    # 窗口关闭后进程退出，VBS 的 sh.Run(..., True) 等待的是整个语音窗口
+    # 启动逻辑: 拉起 --gui 三栏工作台窗口（pywebview GUI，pythonw 无控制台）。
+    # 窗口关闭后进程退出，VBS 的 sh.Run(..., True) 等待的是整个工作台
     # 生命周期，退出码 0 即正常结束。
     vbs_content = (
         "Option Explicit\n"
@@ -300,24 +342,24 @@ def ensure_vbs() -> Path | None:
         "' Phase 1: Module mode (pip install) - no main.py path needed\n"
         "' agent package is in site-packages, config from ~/.jarvis/\n"
         "On Error Resume Next\n"
-        "rc = sh.Run(\"pyw -3.13 -m agent.main --talk\", 0, True)\n"
+        "rc = sh.Run(\"pyw -3.13 -m agent.main --gui\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pyw -m agent.main --talk\", 0, True)\n"
+        "rc = sh.Run(\"pyw -m agent.main --gui\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pythonw -m agent.main --talk\", 0, True)\n"
+        "rc = sh.Run(\"pythonw -m agent.main --gui\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
         "\n"
         "' Phase 2: Script mode (dev/clone) - needs main.py path + cwd\n"
-        "rc = sh.Run(\"pyw -3.13 \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
+        "rc = sh.Run(\"pyw -3.13 \"\"\" & mainPy & \"\"\" --gui\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pyw \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
+        "rc = sh.Run(\"pyw \"\"\" & mainPy & \"\"\" --gui\", 0, True)\n"
         "If Err.Number = 0 And rc = 0 Then WScript.Quit 0\n"
         "Err.Clear\n"
-        "rc = sh.Run(\"pythonw \"\"\" & mainPy & \"\"\" --talk\", 0, True)\n"
+        "rc = sh.Run(\"pythonw \"\"\" & mainPy & \"\"\" --gui\", 0, True)\n"
         "On Error GoTo 0\n"
         "Set sh = Nothing\n"
     )
@@ -370,6 +412,7 @@ $Shortcut.Arguments = '{arguments}'
 $Shortcut.WorkingDirectory = "{working_dir}"
 $Shortcut.Description = "{description}"
 {icon_line}
+$Shortcut.AppUserModelID = "AceFelix.JARVIS.Workbench"
 $Shortcut.WindowStyle = 7
 $Shortcut.Save()
 '''
@@ -397,7 +440,7 @@ $Shortcut.Save()
         script = jarvis_script()
 
         target = py
-        arguments = f'"{script}" --talk'
+        arguments = f'"{script}" --gui'
         working_dir = str(Path(script).parent)
 
         ps_script = f'''
@@ -408,6 +451,7 @@ $Shortcut.Arguments = '{arguments}'
 $Shortcut.WorkingDirectory = "{working_dir}"
 $Shortcut.Description = "{description}"
 {icon_line}
+$Shortcut.AppUserModelID = "AceFelix.JARVIS.Workbench"
 $Shortcut.Save()
 '''
         import subprocess
@@ -420,7 +464,7 @@ $Shortcut.Save()
         except Exception as e:
             print(f"创建快捷方式失败: {e}", file=sys.stderr)
             print(f"可手动创建: 在 {spath.parent} 放一个指向", file=sys.stderr)
-            print(f'  "{py}" "{script}" --talk', file=sys.stderr)
+            print(f'  "{py}" "{script}" --gui', file=sys.stderr)
             print("的快捷方式", file=sys.stderr)
             return 1
 
@@ -494,8 +538,8 @@ def status() -> int:
 def install_desktop() -> int:
     """创建桌面快捷方式（跨平台）。
 
-    Windows: .lnk 快捷方式，指向 VBS 脚本拉起实时语音窗口（--talk）。
-    macOS: 创建 .command 文件，双击在 Terminal.app 中启动语音窗口。
+    Windows: .lnk 快捷方式，指向 VBS 脚本拉起三栏工作台（--gui）。
+    macOS: 创建 .command 文件，双击在 Terminal.app 中启动工作台。
     Linux: 创建 .desktop 文件。
     """
     if sys.platform == "darwin":
@@ -513,12 +557,11 @@ def install_desktop() -> int:
     rc = _create_shortcut(spath, "JARVIS 个人 AI 管家", use_vbs=True)
     if rc == 0:
         print()
-        print("💡 双击桌面「JARVIS」图标 → 打开实时语音对话窗口")
-        # 提示文案与实际行为对齐：--talk 独立窗口，直接说话即可对话；
-        # 三栏 GUI 工作台上线后此处入口不变，只换窗口内容（作者：aceFelix）。
-        print("   窗口内直接说话即可对话，可打断")
-        print("   点「结束」/ESC/说「退下」结束会话，点 X 关闭窗口")
-        print("   日志: ~/.jarvis/realtime_window.log")
+        print("💡 双击桌面「JARVIS」图标 → 打开三栏工作台窗口")
+        # 提示文案与实际行为对齐：--gui 三栏工作台，单实例二次双击聚焦（作者：aceFelix）。
+        print("   中栏文本对话 / 左栏切换实时语音模式")
+        print("   二次双击图标唤起已驻留窗口，点 X 关闭")
+        print("   日志: ~/.jarvis/workbench.log")
     return rc
 
 
@@ -593,7 +636,7 @@ def _install_macos() -> int:
     <array>
         <string>{py}</string>
         <string>{script}</string>
-        <string>--talk</string>
+        <string>--gui</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{workdir}</string>
@@ -696,20 +739,20 @@ def _install_desktop_macos() -> int:
     py = sys.executable
     workdir = str(Path(script).parent)
 
-    # .command 文件内容：cd 到项目目录 → 运行实时语音窗口（--talk）
+    # .command 文件内容：cd 到项目目录 → 运行三栏工作台（--gui）
     content = f"""#!/bin/bash
-# JARVIS realtime voice window launcher (macOS .command)
+# JARVIS workbench GUI launcher (macOS .command)
 cd "{workdir}" || exit 1
-exec "{py}" "{script}" --talk
+exec "{py}" "{script}" --gui
 """
     try:
         spath.write_text(content, encoding="utf-8")
         # 赋予可执行权限
         spath.chmod(0o755)
         print(f"✓ 已创建桌面快捷方式: {spath}")
-        print("💡 双击「JARVIS.command」→ 打开实时语音对话窗口")
-        print("   窗口内直接说话即可对话，可打断")
-        print("   日志: ~/.jarvis/realtime_window.log")
+        print("💡 双击「JARVIS.command」→ 打开三栏工作台窗口")
+        print("   中栏文本对话 / 左栏切换实时语音模式")
+        print("   日志: ~/.jarvis/workbench.log")
         return 0
     except Exception as e:
         print(f"✗ 创建桌面快捷方式失败: {e}", file=sys.stderr)

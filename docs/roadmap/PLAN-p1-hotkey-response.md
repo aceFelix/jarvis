@@ -1,7 +1,7 @@
 # P1-2 更快的热键响应 — 升级方案（历史文档）
 
 > ⚠️ 2026-08 更新：常驻托盘模式已下线，本方案中 `text_terminal_warm` 配置与终端派生路径已移除；
-> 热键能力（`hotkey` / `hotkey_native` / `hotkey_debounce_ms`）保留给新 GUI 工作台。
+> 热键能力（`hotkey` / `hotkey_native` / `hotkey_debounce_ms`）保留，待三栏工作台（一期已落地）接线。
 > 以下为历史实现记录。
 
 

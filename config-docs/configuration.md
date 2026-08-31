@@ -154,7 +154,7 @@ enable_thinking = true
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `daemon_hotkey` | `"ctrl+shift+j"` | 全局热键（保留给新 GUI 工作台） |
+| `daemon_hotkey` | `"ctrl+shift+j"` | 全局热键（召唤三栏工作台，待接线） |
 | `daemon_hotkey_native` | `true` | Windows 优先 RegisterHotKey |
 | `daemon_hotkey_debounce_ms` | `200` | 热键去抖毫秒 |
 
@@ -188,4 +188,5 @@ email_default_recipient = "target@qq.com"
 | `--verbose` | 详细输出 |
 | `--no-boot` | 跳过启动动画 |
 | `--quick` | 快速启动（跳过 MCP/LSP） |
-| `--talk` | 直接启动实时语音对话窗口（桌面图标同款入口） |
+| `--gui` | 启动三栏 GUI 工作台（桌面图标同款入口） |
+| `--talk` | 与 `--gui` 等价（兼容旧快捷方式），启动三栏工作台 |

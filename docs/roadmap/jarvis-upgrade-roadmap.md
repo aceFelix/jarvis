@@ -19,8 +19,8 @@
 | **5. 工具执行** | 61 内置工具 + 71 CLI-Anything harness：文件读写编辑、Bash（Windows Git Bash 自动检测）、浏览器、GUI 操作（点击/拖拽/等待/窗口相对坐标/视觉定位）、屏幕截图、摄像头、视觉监控、MCP 工具集成；ToolRegistry 注册中心、并发安全分组、文件访问追踪、工具结果截断落盘、ToolOrchestrator 编排 | ⭐⭐⭐⭐ |
 | **6. 语音交互** | 双系统并行：`/voice`（STT+TTS 闭环，四后端自动适配）+ `/talk`（DashScope 全双工 WebSocket，qwen-audio-3.0-realtime-flash）；WebRTC AEC3 回声消除（外放免耳机也能正常对话）+ smart_turn 语义轮次检测 + 开口打断 + ESC 键盘；Function Calling（内置时间工具 + ToolRegistry 全部工具，高风险操作语音确认）；API Key 隔离（`_voice_api_key` 始终用 DashScope Key）；待机防误触（30 字正文检测）；方舟反应炉粒子动画 UI；RealtimeTalkWindow 单例窗口管理 | ⭐⭐⭐⭐ |
 | **7. 安全权限** | 五层 fail-closed 管线（工具特判 → 路径守护 → 模式覆写 → 规则匹配 → 默认 ASK）；路径守护（危险目录拒绝 + 符号链接逃逸检测）；Shell 命令分类；四种权限模式（DEFAULT/PLAN/ACCEPT_EDITS/YOLO）；`permissions.yaml` 规则配置；安全合并规则 DENY > ASK > ALLOW | ⭐⭐⭐⭐ |
-| **8. 桌面入口** | 桌面快捷方式/开机自启（指向 `--talk` 实时语音窗口）、全局热键（保留）；原 `--daemon` 后台常驻 + 系统托盘已于 2026-08 下线，由三栏 GUI 工作台（开发中）取代；调度器/监控/主动提醒休眠待新 GUI 接线 | ⭐⭐⭐ |
-| **9. 主动感知** | 调度器周期任务、视觉守望者（mediapipe 手势/人脸检测）、系统资源监控（CPU 85% / 内存 90% / 磁盘 10% 阈值告警 + 磁盘趋势预测 + 异常进程检测 + 工作时长提醒）、P2-3 主动提醒系统（每日简报 + 截止日期分级提醒 + 提醒升级 + 日历集成）、通知 + 语音告警、告警冷却（600 秒）；**当前休眠待新 GUI 接线；用户状态感知、习惯学习仍未实现** | ⭐⭐⭐ |
+| **8. 桌面入口** | 桌面快捷方式/开机自启（指向 `--gui` 三栏工作台）、全局热键召唤（待接线）；原 `--daemon` 后台常驻 + 系统托盘已于 2026-08 下线，由三栏 GUI 工作台取代（一期已落地）；调度器/监控/主动提醒接线工作台待二期接线 | ⭐⭐⭐ |
+| **9. 主动感知** | 调度器周期任务、视觉守望者（mediapipe 手势/人脸检测）、系统资源监控（CPU 85% / 内存 90% / 磁盘 10% 阈值告警 + 磁盘趋势预测 + 异常进程检测 + 工作时长提醒）、P2-3 主动提醒系统（每日简报 + 截止日期分级提醒 + 提醒升级 + 日历集成）、通知 + 语音告警、告警冷却（600 秒）；**当前休眠待工作台二期接线；用户状态感知、习惯学习仍未实现** | ⭐⭐⭐ |
 | **10. 记忆系统** | 动态水位压缩（30%/60%/80% 三档）、9 段结构化摘要提示词（用户请求/技术决策/文件代码/错误修复/用户反馈/消息列表/待办/当前状态/下一步）、token 估算、图片剥离、工具结果折叠、压缩后文件回灌（5 个/5000 字）、会话记忆自动持久化（`.jarvis/SESSION_MEMORY.md`）、长期记忆（`~/.jarvis/MEMORY.md` + 项目级）、`auto_resume_session` + `/resume` 命令 | ⭐⭐⭐⭐ |
 | **11. 多 Agent 协作** | 子代理 Subagent（独立 QueryLoop + 工具子集 + 隔离权限）、Team 团队、Mailbox 邮箱通信、共享 TaskList 任务列表、Plan 模式（只读白名单规划） | ⭐⭐ |
 | **12. 扩展生态** | MCP 集成（`~/.jarvis/mcp.json`）、Skill 技能包（`~/.jarvis/skills/*/SKILL.md` + 项目级）、CLI-Anything harness（71 个软件，多级市场源，pip 型/目录型安装）、Plugin 插件系统（`/plugin search\|install\|uninstall`）、LSP 代码智能（`[lsp.servers.<name>]`）、Hook 钩子系统 | ⭐⭐⭐⭐ |

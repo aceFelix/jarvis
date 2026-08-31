@@ -59,7 +59,7 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
   - [Recording Recognition `/listen`](#recording-recognition-listen)
 - [Image Input](#image-input)
 - [GUI Automation](#gui-automation)
-- [Desktop Entry (Real-time Voice Window)](#desktop-entry-real-time-voice-window)
+- [Desktop Entry (Three-Column Workbench)](#desktop-entry-three-column-workbench)
 - [Multi-Agent Collaboration](#multi-agent-collaboration)
 - [Plugin System](#plugin-system)
 - [CLI-Anything External Software Control](#cli-anything-external-software-control)
@@ -86,17 +86,18 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 | Rich terminal UI + boot animation | ✅ | ✅ | ✅ |
 | Voice conversation `/voice` (STT + TTS) | ✅ | ✅ | ✅ |
 | Real-time duplex voice `/talk` (full duplex) | ✅ | ✅ | ✅ |
-| Real-time chat window (Arc Reactor animation) | ✅ | ✅ | ✅ |
+| Real-time chat window (Arc Reactor animation, REPL `/talk` only) | ✅ | ✅ | ✅ |
+| Three-column GUI workbench (`--gui`/`--talk`, transparent + Arc Reactor) | ✅ | ✅ | ✅ |
 | Mouse / keyboard / screenshot (pyautogui) | ✅ | ✅¹ | ✅² |
 | Camera / vision monitoring | ✅ | ✅ | ✅ |
-| Desktop icon launches real-time voice window (`--talk`) | ✅ | ✅ | ⚠️ Runs in terminal³ |
+| Desktop icon launches three-column workbench (`--gui`) | ✅ | ✅ | ⚠️ Runs in terminal³ |
 | Auto-start on boot | ✅ Startup | ✅ LaunchAgent | ❌ Manual systemd |
 | Desktop shortcut | ✅ .lnk | ✅ .command | ⚠️ Runs in terminal⁴ |
 | Global hotkey | ✅ | ❌ | ⚠️ Requires root |
 
 > ¹ macOS requires granting terminal/Python access in "System Settings → Privacy & Security → Accessibility"
 > ² Linux mouse/keyboard operations require DISPLAY environment variable (X11/Wayland desktop environment)
-> ³ On Linux, the desktop entry runs a real-time voice session inside a terminal (closing the window exits)
+> ³ On Linux, the desktop entry runs the three-column workbench inside a terminal (closing the window exits)
 > ⁴ Linux desktop shortcut double-click runs jarvis in terminal as REPL (equivalent to Windows cmd window; closing the window exits)
 
 > ⚠️ **Important**: This project was fully developed and tested on **Windows**. macOS and Linux have code-level adaptations but **have not undergone complete real-machine testing**; there may be undiscovered compatibility issues. For the best experience, it is recommended to use J.A.R.V.I.S. on Windows.
@@ -108,7 +109,7 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 ### Install from PyPI (Recommended)
 
 ```bash
-# One-click full installation (voice + GUI + daemon + MCP + browser + camera/vision + real-time chat window)
+# One-click full installation (voice + GUI workbench + daemon + MCP + browser + camera/vision + real-time chat window)
 pip install "jarvis-agent[all]"
 
 # Install core chat functionality only
@@ -196,14 +197,14 @@ jarvis splits different capabilities into optional dependency groups, install on
 | `vision` | Real-time vision monitoring + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | Voice chat `/voice` + real-time duplex `/talk` (STT+TTS+full-duplex) | `pip install "jarvis-agent[voice]"` |
 | `daemon` | Desktop entry/hotkey/auto-start | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | Real-time chat standalone window (Arc Reactor animation, `/talk` visualization) | `pip install "jarvis-agent[realtime_ui]"` |
+| `realtime_ui` | Three-column workbench (`--gui`/`--talk`, Arc Reactor animation) + REPL `/talk` standalone window | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | All of the above | `pip install "jarvis-agent[all]"` |
 
 ### Platform System Dependencies
 
 **Windows**: No additional system dependencies required, just `pip install`.
 
-> The real-time chat window requires Edge WebView2 Runtime (usually preinstalled on Win10/11). If not installed, download from [Microsoft official site](https://developer.microsoft.com/microsoft-edge/webview2/).
+> The workbench / real-time chat window requires Edge WebView2 Runtime (usually preinstalled on Win10/11). If not installed, download from [Microsoft official site](https://developer.microsoft.com/microsoft-edge/webview2/).
 
 **macOS**:
 
@@ -274,7 +275,7 @@ Checks (rendered with rich tables, exit code 0=all ready / 1=missing):
 
 | Category | Check Items |
 |---|---|
-| 📦 Python packages | optional packages including voice / system monitoring / GUI / browser / camera / vision monitoring / MCP / real-time window / WeChat / LLM core, grouped by extras with `pip install` commands |
+| 📦 Python packages | optional packages including voice / system monitoring / GUI workbench / browser / camera / vision monitoring / MCP / real-time window / WeChat / LLM core, grouped by extras with `pip install` commands |
 | 🔧 System-level dependencies | Python version (>=3.11) / pip / uv (recommended) / Playwright browser / Edge WebView2 Runtime (Windows) / microphone permission prompt |
 | ⚙️ Config status | Whether `~/.jarvis/settings.toml` exists / API Key configured (key content not shown) / `permissions.yaml` ready |
 
@@ -782,20 +783,25 @@ Visual positioning suits scenarios where button/icon position isn't fixed: pass 
 
 ---
 
-## Desktop Entry (Real-time Voice Window)
+## Desktop Entry (Three-Column Workbench)
 
 ```bash
-jarvis --talk          # Launch real-time duplex voice chat window directly
+jarvis --gui           # Launch the three-column GUI workbench (--talk is equivalent, kept for old shortcuts)
 ```
 
-Double-clicking the desktop "JARVIS" icon (or auto-start) opens the Arc Reactor real-time voice window:
-speak directly in the window to converse (interruptible), click "End" / press ESC / say "退下" to end the session, click X to close the window.
-Logs: `~/.jarvis/realtime_window.log`.
+Double-clicking the desktop "JARVIS" icon (or auto-start) opens the three-column workbench
+(transparent background showing your desktop, frameless filling the work area with taskbar kept;
+custom title bar is draggable and carries minimize / fullscreen / close buttons):
+left column — mode switch + model/voice pickers ⇄ history session list (panel toggle button), click a history item to resume;
+middle column — text chat bubble stream, switchable to `/talk` real-time duplex mode;
+right column — live CPU / memory / disk metrics.
+Double-clicking again focuses the existing window instead of opening a new one (single instance, port 47812).
+Clicking the close button on the title bar exits. Logs: `~/.jarvis/workbench.log`.
 
 > 📌 **Architecture note**: the old "windowless daemon + tray remote-control" resident mode (`--daemon`, pystray tray menu,
-> tray voice/text terminal spawning) was retired in 2026-08, replaced by a new three-column GUI workbench (in development).
-> The desktop entry currently points to the `--talk` standalone window as a transition; it will be re-pointed when the new GUI ships.
-> Scheduled reminders / daily briefing / resource monitoring entered dormant state accordingly (code kept, to be re-wired by the new GUI).
+> tray voice/text terminal spawning) was retired in 2026-08, replaced by the three-column GUI workbench (phase 1 shipped).
+> The old standalone `--talk` real-time window has been merged into the workbench (REPL `/talk` still uses it for now).
+> Scheduled reminders / daily briefing remain dormant (code kept, to be re-wired in workbench phase 2); right-column metrics already shipped.
 
 ### Auto-start / Desktop Shortcut
 
@@ -810,7 +816,7 @@ python -m agent.daemon.autostart desktop-uninstall  # Remove desktop shortcut
 
 | Platform | Auto-start | Desktop Shortcut |
 |---|---|---|
-| Windows | Startup folder .lnk | .lnk (silent VBS launching the `--talk` voice window) |
+| Windows | Startup folder .lnk | .lnk (silent VBS launching the `--gui` workbench) |
 | macOS | LaunchAgent plist (`launchctl load`) | .command (opens Terminal.app) |
 | Linux | Not supported (prompts manual systemd) | .desktop file (runs in terminal) |
 
@@ -1307,7 +1313,7 @@ Jarvis calls `SendEmail`, asks for confirmation before sending. Supports specify
 
 ```
 agent/
-├── main.py            # Entry (REPL / daemon / --talk / --doctor dispatch)
+├── main.py            # Entry (REPL / --gui workbench / --doctor dispatch)
 ├── bootstrap.py       # Assembly factory (provider / checker / recovery / context build)
 ├── doctor.py          # Dependency health check (--doctor: Python packages / system deps / config)
 ├── model_manager.py   # Model switch and management (/model /models logic)
@@ -1379,7 +1385,15 @@ agent/
 │   ├── model_picker.py # Interactive model picker
 │   ├── session_picker.py # Interactive session picker
 │   ├── terminal_picker.py # Interactive terminal picker
-│   └── realtime_window/ # Real-time chat standalone window
+│   ├── workbench/     # Three-column GUI workbench (--gui/--talk, desktop icon host)
+│   │   ├── app.py     # run_workbench() entry (guard → queues → assembly → window)
+│   │   ├── engine.py  # ChatEngine (command dispatch, lazy assembly, session persistence)
+│   │   ├── api.py     # WorkbenchAPI (pywebview js_api)
+│   │   ├── bridge.py  # UI protocol → event adapters
+│   │   ├── metrics.py # CPU/memory/disk collector
+│   │   ├── single_instance.py # Single-instance guard (port 47812 + lock heartbeat)
+│   │   └── assets/    # HTML/JS/CSS (transparent Arc Reactor + bubbles)
+│   └── realtime_window/ # Real-time chat standalone window (REPL /talk only)
 │       ├── window.py  # Parent process window controller (singleton + child process management)
 │       ├── process.py # Child process entry + frontend window + JSBridge
 │       ├── bridge.py  # Webview ↔ RealtimeTalk bridge (UI protocol implementation)

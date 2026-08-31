@@ -59,7 +59,7 @@
   - [录音识别 `/listen`](#录音识别-listen)
 - [图片输入](#图片输入)
 - [GUI 自动化](#gui-自动化)
-- [桌面入口（实时语音窗口）](#桌面入口实时语音窗口)
+- [桌面入口（三栏工作台）](#桌面入口三栏工作台)
 - [多 Agent 协作](#多-agent-协作)
 - [插件系统](#插件系统)
 - [CLI-Anything 外部软件控制](#cli-anything-外部软件控制)
@@ -86,17 +86,17 @@
 | Rich 终端 UI + 启动动画 | ✅ | ✅ | ✅ |
 | 语音对话 `/voice`（STT + TTS） | ✅ | ✅ | ✅ |
 | 实时双工语音 `/talk`（全双工） | ✅ | ✅ | ✅ |
-| 实时聊天窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
+| 三栏工作台窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
 | 鼠标 / 键盘 / 截屏（pyautogui） | ✅ | ✅¹ | ✅² |
 | 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
-| 桌面图标启动实时语音窗口（`--talk`） | ✅ | ✅ | ⚠️ 终端内运行³ |
+| 桌面图标启动三栏工作台（`--gui`） | ✅ | ✅ | ⚠️ 终端内运行³ |
 | 开机自启 | ✅ Startup | ✅ LaunchAgent | ❌ 手动 systemd |
 | 桌面快捷方式 | ✅ .lnk | ✅ .command | ⚠️ 终端内运行⁴ |
 | 全局热键 | ✅ | ❌ | ⚠️ 需 root |
 
 > ¹ macOS 需在「系统设置 → 隐私与安全 → 辅助功能」中授权终端/Python
 > ² Linux 鼠标键盘操作需 DISPLAY 环境变量（X11/Wayland 桌面环境）
-> ³ Linux 桌面入口在终端内以实时语音会话运行（关窗口即退出）
+> ³ Linux 桌面入口在终端内以工作台窗口运行（关窗口即退出）
 > ⁴ Linux 桌面快捷方式双击会在终端内以 REPL 对话界面运行 jarvis（等同 Windows 的 cmd 窗口运行，关窗口即退出）
 
 > ⚠️ **重要提示**：本项目在 **Windows** 上完成全部功能开发与实机验证。macOS 和 Linux 仅做了代码层面的适配，**未经过完整实机测试**，可能存在未发现的兼容性问题。建议优先在 Windows 上使用 J.A.R.V.I.S. 以获得最佳体验。
@@ -196,14 +196,14 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 | `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | 语音对话 `/voice` + 实时双工 `/talk`（STT+TTS+全双工） | `pip install "jarvis-agent[voice]"` |
 | `daemon` | 桌面入口/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | 实时聊天独立窗口（方舟反应炉动画，`/talk` 可视化） | `pip install "jarvis-agent[realtime_ui]"` |
+| `realtime_ui` | 三栏工作台窗口（方舟反应炉动画，`--gui`/`--talk`） | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
 
 ### 平台系统依赖
 
 **Windows**: 无需额外系统依赖，直接 `pip install` 即可。
 
-> 实时聊天窗口需要 Edge WebView2 Runtime（Win10/11 通常已预装），如未安装请从 [Microsoft 官网](https://developer.microsoft.com/microsoft-edge/webview2/) 下载。
+> 三栏工作台窗口需要 Edge WebView2 Runtime（Win10/11 通常已预装），如未安装请从 [Microsoft 官网](https://developer.microsoft.com/microsoft-edge/webview2/) 下载。
 
 **macOS**:
 
@@ -274,7 +274,7 @@ jarvis --doctor
 
 | 类别 | 检查项 |
 |---|---|
-| 📦 Python 包 | 语音 / 系统监控 / GUI / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等可选包，按 extras 组归类并给出 `pip install` 命令 |
+| 📦 Python 包 | 语音 / 系统监控 / GUI 工作台 / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等可选包，按 extras 组归类并给出 `pip install` 命令 |
 | 🔧 系统级依赖 | Python 版本（>=3.11） / pip / uv（推荐） / Playwright 浏览器 / Edge WebView2 Runtime（Windows） / 麦克风权限提示 |
 | ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
 
@@ -345,7 +345,7 @@ tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完�
 
 # ---- 桌面入口与热键 ----
 [daemon]
-hotkey = "ctrl+shift+j"           # 全局热键（保留给新 GUI 工作台）
+hotkey = "ctrl+shift+j"           # 全局热键（召唤三栏工作台，待接线）
 ```
 
 > 📖 完整配置项参见 **[config-docs/configuration.md](config-docs/configuration.md)**；各厂商接入见 **[config-docs/providers.md](config-docs/providers.md)**；语音配置见 **[config-docs/voice-setup.md](config-docs/voice-setup.md)**；常见问题见 **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**。
@@ -789,20 +789,25 @@ pip install "jarvis-agent[gui]"
 
 ---
 
-## 桌面入口（实时语音窗口）
+## 桌面入口（三栏工作台）
 
 ```bash
-jarvis --talk          # 直接启动实时双工语音对话窗口
+jarvis --gui           # 启动三栏工作台窗口（--talk 与 --gui 等价）
 ```
 
-双击桌面「JARVIS」图标（或开机自启）会直接打开方舟反应炉实时语音窗口：
-窗口内直接说话即可对话（可打断），点「结束」/按 ESC/说「退下」结束会话，点 X 关闭窗口。
-日志位于 `~/.jarvis/realtime_window.log`。
+双击桌面「JARVIS」图标（或开机自启）打开单窗口三栏工作台：
+透明背景透出桌面，方舟反应炉淡蓝动效居中律动（核心呼吸 + 三角线圈轮流点亮，说话时加速）。
+
+- **左栏**：模式切换（💬 文本 / 🎙️ 实时）+ 三面板切换（📜 历史会话 ⇄ 🤖 模型 ⇄ 🎵 音色）
+- **中栏**：气泡对话流（流式渲染 + 工具卡片折叠）+ 文本输入框，支持历史会话恢复
+- **右栏**：CPU / 内存 / 磁盘实时指标
+- **窗口行为**：无边框铺满工作区启动（不盖任务栏；自绘标题栏可拖动，带最小化/关闭按钮，不提供全屏）、单实例（二次双击唤起已驻留窗口）
+- 日志位于 `~/.jarvis/workbench.log`
 
 > 📌 **架构说明**：原「无窗口 daemon + 托盘遥控」常驻模式（`--daemon`、pystray 托盘菜单、
-> 托盘语音/文本终端派生）已于 2026-08 下线，由新一代三栏 GUI 工作台（开发中）取代。
-> 桌面入口当前指向 `--talk` 独立窗口作为过渡，新 GUI 上线后切换指向。
-> 定时提醒/每日简报/资源监控等主动感知服务随之进入休眠态（代码保留，待新 GUI 重新接线）。
+> 托盘语音/文本终端派生）已于 2026-08 下线；原 `--talk` 独立实时窗口已合并进工作台。
+> 定时提醒/每日简报等主动感知服务处于休眠态（代码保留，待二期重新接线）。
+> 完整开发计划见 [docs/plans/workbench-gui.md](docs/plans/workbench-gui.md)。
 
 ### 开机自启 / 桌面快捷方式
 
@@ -817,7 +822,7 @@ python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 
 | 平台 | 开机自启 | 桌面快捷方式 |
 |---|---|---|
-| Windows | Startup 文件夹 .lnk | .lnk（指向静默 VBS，打开 `--talk` 语音窗口） |
+| Windows | Startup 文件夹 .lnk | .lnk（指向静默 VBS，打开三栏工作台） |
 | macOS | LaunchAgent plist（`launchctl load`） | .command（Terminal.app 打开） |
 | Linux | 不支持（提示手动 systemd） | .desktop 文件（终端内运行） |
 
@@ -1314,7 +1319,7 @@ Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件�
 
 ```
 agent/
-├── main.py            # 入口（REPL / daemon / --talk / --doctor 分发）
+├── main.py            # 入口（REPL / --gui 工作台 / --doctor 分发）
 ├── bootstrap.py       # 装配工厂（provider / checker / recovery / context 构建）
 ├── doctor.py          # 依赖健康检查（--doctor：Python 包 / 系统级依赖 / 配置）
 ├── model_manager.py   # 模型切换与管理（/model /models 逻辑）
@@ -1386,7 +1391,15 @@ agent/
 │   ├── model_picker.py # 交互式模型选择器
 │   ├── session_picker.py # 交互式会话选择器
 │   ├── terminal_picker.py # 交互式终端选择器
-│   └── realtime_window/ # 实时聊天独立窗口
+│   ├── workbench/     # 三栏 GUI 工作台（--gui/--talk，桌面图标宿主）
+│   │   ├── app.py     # run_workbench() 入口（守卫→队列→装配→建窗）
+│   │   ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
+│   │   ├── api.py     # WorkbenchAPI（pywebview js_api）
+│   │   ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
+│   │   ├── metrics.py # CPU/内存/磁盘采集（2 秒推事件）
+│   │   ├── single_instance.py # 单实例守卫（端口 47812 + 锁文件心跳）
+│   │   └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
+│   └── realtime_window/ # 实时聊天独立窗口（仅 REPL /talk 在用）
 │       ├── window.py  # 父进程窗口控制器（单例 + 子进程管理）
 │       ├── process.py # 子进程入口 + 前端窗口 + JSBridge
 │       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接（UI 协议实现）

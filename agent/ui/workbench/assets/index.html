@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S 工作台</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 背景 Canvas：方舟反应炉波纹动画（透明底，透出桌面） -->
+    <canvas id="reactor-canvas"></canvas>
+
+    <!-- 自绘标题栏（无边框窗口）：整条拖动（按钮除外）+ 窗口控制按钮 -->
+    <header id="title-bar">
+        <span id="title-drag" class="pywebview-drag-region">
+            <span id="title-logo">J.A.R.V.I.S</span>
+            <span id="title-sub">· 工作台</span>
+        </span>
+        <div id="win-controls">
+            <button id="btn-min" class="win-btn" title="最小化">─</button>
+            <!-- 无全屏按钮：窗口启动即铺满工作区（不盖任务栏），真全屏会盖任务栏故不提供 -->
+            <button id="btn-close" class="win-btn close" title="关闭">✕</button>
+        </div>
+    </header>
+
+    <!-- 三栏主布局 -->
+    <div id="workbench">
+        <!-- 左栏：模式切换 + 双面板（历史会话 / 模型音色） -->
+        <aside id="left-col" class="glass-col">
+            <div class="col-header">
+                <span class="col-title">控制台</span>
+            </div>
+
+            <!-- 模式切换 -->
+            <div id="mode-switch" class="segmented">
+                <button id="mode-text" class="seg-btn active" title="文本对话">💬 文本</button>
+                <button id="mode-talk" class="seg-btn" title="实时语音（/talk）">🎙️ 实时</button>
+            </div>
+
+            <!-- 面板切换按钮：历史会话 ⇄ 模型 ⇄ 音色（各自独占全高，列表可滚动） -->
+            <div id="panel-switch" class="segmented">
+                <button id="panel-history" class="seg-btn active">📜 历史会话</button>
+                <button id="panel-model" class="seg-btn">🤖 模型</button>
+                <button id="panel-voice" class="seg-btn">🎵 音色</button>
+            </div>
+
+            <!-- 面板一：历史会话列表 -->
+            <div id="history-panel" class="panel">
+                <div id="session-list" class="list-area"></div>
+                <button id="new-session-btn" class="action-btn">＋ 新建会话</button>
+            </div>
+
+            <!-- 面板二：对话模型选择（独占全高，列表滚动） -->
+            <div id="model-panel" class="panel hidden">
+                <div class="panel-label">对话模型</div>
+                <div id="model-list" class="list-area"></div>
+            </div>
+
+            <!-- 面板三：TTS 音色选择（独占全高，列表滚动） -->
+            <div id="voice-panel" class="panel hidden">
+                <div class="panel-label">TTS 音色</div>
+                <div id="voice-list" class="list-area"></div>
+            </div>
+
+            <footer id="left-footer">
+                <span id="status-dot" class="status-dot idle"></span>
+                <span id="status-text">就绪</span>
+            </footer>
+        </aside>
+
+        <!-- 中栏：对话主区 -->
+        <main id="center-col">
+            <div id="chat-history"></div>
+            <div id="ask-user-bar" class="hidden">
+                <span id="ask-user-text"></span>
+                <input id="ask-user-input" type="text" placeholder="输入回答...">
+                <button id="ask-user-send" class="action-btn">发送</button>
+            </div>
+            <footer id="input-bar" class="glass-bar">
+                <textarea id="chat-input" rows="1" placeholder="和贾维斯说点什么...（Enter 发送，Shift+Enter 换行）"></textarea>
+                <button id="send-btn" class="action-btn primary">发送</button>
+                <button id="talk-btn" class="action-btn" title="开始/结束实时语音">🎙️</button>
+            </footer>
+        </main>
+
+        <!-- 右栏：系统指标 -->
+        <aside id="right-col" class="glass-col">
+            <div class="col-header">
+                <span class="col-title">系统状态</span>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-head"><span>CPU</span><span id="cpu-value" class="metric-value">--%</span></div>
+                <div class="gauge"><div id="cpu-bar" class="gauge-fill"></div></div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-head"><span>内存</span><span id="mem-value" class="metric-value">--%</span></div>
+                <div class="gauge"><div id="mem-bar" class="gauge-fill"></div></div>
+                <div id="mem-detail" class="metric-detail"></div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-head"><span>磁盘</span><span id="disk-value" class="metric-value">--%</span></div>
+                <div class="gauge"><div id="disk-bar" class="gauge-fill"></div></div>
+                <div id="disk-detail" class="metric-detail"></div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="reactor.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

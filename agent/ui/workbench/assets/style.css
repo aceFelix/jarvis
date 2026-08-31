@@ -1,0 +1,548 @@
+/* 工作台样式 —— 透明毛玻璃三栏 + 淡蓝反应炉科技感
+   视觉口径（用户拍板）：透明背景透出桌面；气泡/面板半透明毛玻璃；
+   说话时反应炉波纹律动（由 reactor.js 根据 ai_speaking 事件驱动）。
+   @author aceFelix
+*/
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    /* 透明：窗口由 pywebview transparent=True 承载，这里不设背景色 */
+    background: transparent;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e8f4ff;
+}
+
+#reactor-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* ---- 自绘标题栏（无边框窗口） ---- */
+:root {
+    --titlebar-h: 40px;
+    /* 板块边界色（用户要求线条明显）：主边近不透明亮蓝、辅边中等，统一调这里 */
+    --edge-strong: rgba(110, 210, 255, 0.85);
+    --edge-mid: rgba(91, 200, 255, 0.68);
+    --edge-soft: rgba(91, 200, 255, 0.58);
+}
+
+#title-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--titlebar-h);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px 0 16px;
+    user-select: none;
+    /* 标题栏板块边界：底部分割线加粗 + 半透明底，与三栏区隔出层次 */
+    background: rgba(8, 18, 32, 0.5);
+    border-bottom: 1.5px solid var(--edge-mid);
+    backdrop-filter: blur(14px);
+}
+
+/* 拖动区：铺满标题栏剩余宽度（.pywebview-drag-region 由 pywebview 注入拖动逻辑） */
+#title-drag {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: default;
+}
+
+#title-logo {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: #5bc8ff;
+    text-shadow: 0 0 10px rgba(91, 200, 255, 0.6);
+}
+
+#title-sub {
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: rgba(159, 201, 232, 0.7);
+}
+
+/* 窗口控制按钮（最小化 / 全屏 / 关闭） */
+#win-controls {
+    display: flex;
+    gap: 4px;
+}
+
+.win-btn {
+    width: 40px;
+    height: 30px;
+    font-size: 12px;
+    color: #9fc9e8;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.win-btn:hover {
+    background: rgba(91, 200, 255, 0.16);
+    color: #eafaff;
+}
+
+.win-btn.close:hover {
+    background: rgba(255, 90, 90, 0.28);
+    color: #ffd7d7;
+}
+
+/* ---- 三栏布局 ---- */
+#workbench {
+    position: fixed;
+    top: var(--titlebar-h);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 300px 1fr 300px;
+    gap: 14px;
+    padding: 10px 14px 14px;
+}
+
+.glass-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    /* grid 项默认 min-height:auto 会被长列表撑破窗口，内部滚动永远不触发；
+       置 0 后高度被行高约束，溢出才落到 .list-area 产生滚动（用户反馈划不动的根因） */
+    min-height: 0;
+    border-radius: 16px;
+    background: rgba(8, 18, 32, 0.52);
+    /* 边框加深加粗：近不透明亮蓝边，板块边界一眼可辨 */
+    border: 1.5px solid var(--edge-strong);
+    /* blur 降低：透明窗口走软件合成，大半径 backdrop-filter 是 CPU 大头（风扇狂转） */
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.42),
+                0 0 14px rgba(91, 200, 255, 0.14),
+                inset 0 1px 0 rgba(140, 220, 255, 0.2),
+                inset 0 0 24px rgba(91, 200, 255, 0.05);
+}
+
+.col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.col-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    color: #5bc8ff;
+    text-shadow: 0 0 8px rgba(91, 200, 255, 0.5);
+}
+
+/* ---- 分段按钮（模式切换 / 面板切换） ---- */
+.segmented {
+    display: flex;
+    gap: 6px;
+}
+
+.seg-btn {
+    flex: 1;
+    padding: 7px 4px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #b8dcf5;
+    background: rgba(91, 200, 255, 0.06);
+    border: 1.2px solid var(--edge-mid);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.seg-btn:hover {
+    background: rgba(91, 200, 255, 0.14);
+    /* 悬停字体变主题蓝（用户要求：鼠标浏览到即变蓝） */
+    color: #5bc8ff;
+}
+
+.seg-btn.active {
+    /* 选中态字体蓝（与悬停同口径，选中更醒目） */
+    color: #5bc8ff;
+    background: rgba(91, 200, 255, 0.22);
+    border-color: rgba(0, 240, 255, 0.6);
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+/* ---- 左栏面板 ---- */
+.panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0; /* 允许内部滚动 */
+}
+
+.panel.hidden { display: none; }
+
+.panel-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #9cc9e8;
+    letter-spacing: 2px;
+    margin-top: 4px;
+}
+
+.list-area {
+    flex: 1;
+    min-height: 0; /* 双保险：flex 子项高度受面板约束，内容溢出才能滚动 */
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(91, 200, 255, 0.55) rgba(255, 255, 255, 0.06);
+}
+
+/* 滚动条加宽加亮：此前 5px 近透明，用户反馈“划不动/看不到滚动” */
+.list-area::-webkit-scrollbar { width: 8px; }
+.list-area::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }
+.list-area::-webkit-scrollbar-thumb { background: rgba(91, 200, 255, 0.55); border-radius: 4px; }
+.list-area::-webkit-scrollbar-thumb:hover { background: rgba(91, 200, 255, 0.8); }
+
+.list-item {
+    flex-shrink: 0; /* 列表项不参与压缩：高度不够时滚动而非压扁条目 */
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #e6f4ff;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1.2px solid var(--edge-soft);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+    word-break: break-all;
+}
+
+.list-item:hover {
+    background: rgba(91, 200, 255, 0.12);
+    /* 悬停字体变主题蓝（用户要求） */
+    color: #5bc8ff;
+}
+
+.list-item.current {
+    /* 选中项（当前模型/音色）字体亮蓝 */
+    color: #7fe3ff;
+    border-color: rgba(0, 240, 255, 0.65);
+    background: rgba(0, 240, 255, 0.1);
+}
+
+.list-item .sub {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+    color: #9cc4e0;
+}
+
+/* 左栏新建会话按钮：悬停字体同变蓝（中栏发送按钮不受影响，另有主色样式） */
+#new-session-btn:hover { color: #5bc8ff; }
+
+#left-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1.5px solid var(--edge-soft);
+    font-size: 12px;
+    font-weight: 500;
+    color: #a9cde8;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3d5a75;
+}
+
+.status-dot.busy { background: #00f0ff; box-shadow: 0 0 8px #00f0ff; animation: pulse 1s infinite; }
+.status-dot.talk { background: #ff6b35; box-shadow: 0 0 8px #ff6b35; animation: pulse 0.8s infinite; }
+.status-dot.err  { background: #ff2a2a; box-shadow: 0 0 8px #ff2a2a; }
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.5); opacity: 0.55; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* ---- 中栏对话区（补上板块容器，三栏边界统一） ---- */
+#center-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    /* 同三栏：grid 项 min-height:0，长对话才能落在 #chat-history 内滚动 */
+    min-height: 0;
+    border-radius: 16px;
+    background: rgba(8, 18, 32, 0.34);
+    border: 1.5px solid var(--edge-strong);
+    backdrop-filter: blur(8px);
+    padding: 10px 0;
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.38),
+                0 0 14px rgba(91, 200, 255, 0.12),
+                inset 0 1px 0 rgba(140, 220, 255, 0.18);
+}
+
+#chat-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 10%;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(91, 200, 255, 0.55) rgba(255, 255, 255, 0.06);
+}
+
+#chat-history::-webkit-scrollbar { width: 8px; }
+#chat-history::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }
+#chat-history::-webkit-scrollbar-thumb { background: rgba(91, 200, 255, 0.55); border-radius: 4px; }
+
+.message {
+    flex-shrink: 0; /* 气泡不参与压缩：消息多时滚动而非压扁 */
+    max-width: 78%;
+    padding: 11px 15px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 450;
+    line-height: 1.6;
+    word-break: break-word;
+    white-space: pre-wrap;
+    /* 不开 backdrop-filter：每条气泡都做模糊合成，消息多时 CPU 随条数增长 */
+    animation: fadeIn 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.message.user {
+    align-self: flex-end;
+    background: rgba(91, 200, 255, 0.14);
+    border: 1px solid rgba(120, 215, 255, 0.72);
+    color: #e6f6ff;
+    border-bottom-right-radius: 4px;
+}
+
+.message.ai {
+    align-self: flex-start;
+    background: rgba(10, 22, 38, 0.62);
+    border: 1px solid rgba(140, 200, 240, 0.45);
+    color: #f2f8ff;
+    border-bottom-left-radius: 4px;
+}
+
+.message.system {
+    align-self: center;
+    max-width: 90%;
+    font-size: 12px;
+    color: #9fc4e0;
+    background: rgba(8, 18, 32, 0.48);
+    border: 1px dashed rgba(91, 200, 255, 0.6);
+}
+
+.message.error-msg { border-color: rgba(255, 90, 90, 0.5); color: #ffb0b0; }
+
+.message-label {
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    opacity: 0.85;
+    letter-spacing: 1px;
+}
+
+.message.user .message-label { color: #5bc8ff; }
+.message.ai .message-label { color: #7fe3ff; }
+
+.thinking-block {
+    font-size: 12px;
+    color: #8fb8d8;
+    font-style: italic;
+    border-left: 2px solid rgba(91, 200, 255, 0.6);
+    padding-left: 8px;
+    margin-bottom: 6px;
+    white-space: pre-wrap;
+}
+
+.tool-card {
+    font-size: 12px;
+    color: #b8d8f0;
+    background: rgba(8, 18, 32, 0.55);
+    border: 1px solid var(--edge-soft);
+    border-radius: 8px;
+    margin: 4px 0;
+    overflow: hidden;
+}
+
+.tool-card summary {
+    cursor: pointer;
+    padding: 5px 10px;
+    list-style: none;
+}
+
+.tool-card summary::before { content: "⚙ "; }
+.tool-card .tool-body {
+    padding: 6px 10px;
+    border-top: 1px solid var(--edge-soft);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.tool-card.error { border-color: rgba(255, 90, 90, 0.45); }
+
+/* ---- 输入区 / ask-user 条 ---- */
+.glass-bar {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    margin: 0 10%;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(8, 18, 32, 0.6);
+    border: 1.5px solid var(--edge-mid);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+}
+
+#chat-input {
+    flex: 1;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #eaf6ff;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1.5;
+    max-height: 120px;
+}
+
+#chat-input::placeholder { color: rgba(159, 201, 232, 0.45); }
+
+#ask-user-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 0 10% 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(255, 170, 60, 0.1);
+    border: 1px solid rgba(255, 170, 60, 0.4);
+    font-size: 12px;
+}
+
+#ask-user-bar.hidden { display: none; }
+#ask-user-text { flex: 1; color: #ffd9a0; }
+#ask-user-input {
+    width: 180px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 200, 120, 0.4);
+    background: rgba(8, 18, 32, 0.6);
+    color: #fff;
+    outline: none;
+}
+
+/* ---- 按钮 ---- */
+.action-btn {
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #e0f2ff;
+    background: rgba(91, 200, 255, 0.1);
+    border: 1px solid var(--edge-mid);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.action-btn:hover { background: rgba(91, 200, 255, 0.22); }
+
+.action-btn.primary {
+    color: #04121f;
+    background: linear-gradient(135deg, #5bc8ff, #00d5ff);
+    border: none;
+    font-weight: 600;
+}
+
+.action-btn.primary:hover { filter: brightness(1.12); }
+.action-btn.danger {
+    color: #ffd7d7;
+    background: rgba(255, 90, 90, 0.15);
+    border-color: rgba(255, 90, 90, 0.5);
+}
+
+/* ---- 右栏指标 ---- */
+.metric-card {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1.2px solid var(--edge-soft);
+    box-shadow: inset 0 1px 0 rgba(140, 220, 255, 0.12);
+}
+
+.metric-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: #cfe8fa;
+    margin-bottom: 8px;
+}
+
+.metric-value { color: #7fe3ff; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.gauge {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(91, 200, 255, 0.4);
+    overflow: hidden;
+}
+
+.gauge-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #2f7fbf, #5bc8ff, #00f0ff);
+    box-shadow: 0 0 8px rgba(91, 200, 255, 0.5);
+    transition: width 0.6s ease;
+}
+
+.gauge-fill.hot { background: linear-gradient(90deg, #ff9a3d, #ff6b35); }
+
+.metric-detail {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #9cc4e0;
+}
