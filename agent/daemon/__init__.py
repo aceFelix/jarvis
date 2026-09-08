@@ -3,7 +3,8 @@
 原"无窗口 daemon + 托盘遥控"架构已下线（新 GUI 工作台取代），
 本包仅保留与常驻外壳无关的桌面入口工具：
 
-- ``autostart``: 开机自启 + 桌面快捷方式（.lnk/.command/.desktop）
+- ``autostart``: 开机自启（Windows Startup .lnk / macOS LaunchAgent；
+  桌面快捷方式已于 2026-09 下线，桌面入口由 jarvis-desktop 桌面应用接管）
 - ``hotkey`` / ``hotkey_native``: 全局热键监听（新 GUI 阶段用于召唤窗口）
 - ``platform_utils``: 平台判断与可选依赖检测纯函数
 

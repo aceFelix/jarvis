@@ -113,7 +113,7 @@
   - /talk 整合：工作台左栏实时模式直接内嵌 `RealtimeTalk`（非复用 `WebviewRealtimeTalkUI` 独立窗）；`agent/ui/realtime_window/` 包保留，仅 REPL `/talk` 在用，待后续整合下线。
   - 右栏三件套用轻量 `workbench/metrics.py`（psutil + shutil）落地，未拉起休眠的 `monitor.py`（阈值告警留二期）。
   - 全局热键召唤窗口一期未接线（模块保留，二期接）。
-- 待实机验证：`python -m agent.daemon.autostart desktop` 重建快捷方式后双击验证（透明效果依赖 WebView2 版本，不透明时降级深色底）。
+- 待实机验证：`python -m agent.daemon.autostart desktop` 重建快捷方式后双击验证（透明效果依赖 WebView2 版本，不透明时降级深色底）。（2026-09 注：桌面快捷方式入口已下线，由 jarvis-desktop 桌面应用接管，本条作废。）
 
 ## 八、实机反馈修复复盘（2026-08-30 第二轮）
 

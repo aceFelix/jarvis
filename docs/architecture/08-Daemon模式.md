@@ -65,21 +65,24 @@ hotkey_debounce_ms = 200  # 去抖毫秒
 | macOS | pynput | keyboard 库（需 root） | pynput 只需辅助功能权限 |
 | Linux | keyboard 库 | — | 需 root 或 input 组权限 |
 
-## 五、开机自启 / 桌面快捷方式
+## 五、开机自启
 
 ```bash
 python -m agent.daemon.autostart install            # 安装开机自启
 python -m agent.daemon.autostart uninstall          # 卸载
 python -m agent.daemon.autostart status             # 查看状态
-python -m agent.daemon.autostart desktop            # 创建桌面快捷方式
-python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 ```
 
-| 平台 | 开机自启 | 桌面快捷方式 |
-|---|---|---|
-| Windows | Startup 文件夹 `.lnk` | `.lnk`（指向静默 VBS，打开 `--gui` 工作台） |
-| macOS | LaunchAgent plist（`launchctl load`） | `.command`（Terminal.app 打开） |
-| Linux | 不支持（提示手动 systemd） | `.desktop` 文件（终端内运行） |
+| 平台 | 开机自启 |
+|---|---|
+| Windows | Startup 文件夹 `.lnk`（指向静默 VBS，打开 `--gui` 工作台） |
+| macOS | LaunchAgent plist（`launchctl load`） |
+| Linux | 不支持（提示手动 systemd） |
+
+> 桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status`）已于
+> 2026-09 下线：桌面入口由 jarvis-desktop（Electron 桌面应用）接管，
+> 旧桌面图标与桌面应用功能冲突，子命令与跨平台 .command/.desktop 生成
+> 逻辑一并移除。
 
 > VBS 脚本名 `start_daemon.vbs` → `start_jarvis_window.vbs` → `start_workbench.vbs`（现行）：
 > 复用检查按文件名命中旧脚本会跳过重新生成，换名强制刷新启动目标。

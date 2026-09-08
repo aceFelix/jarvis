@@ -1,16 +1,17 @@
-"""开机自启 + 桌面快捷方式辅助脚本。
+"""开机自启辅助脚本。
 
-生成 Windows 快捷方式，双击/开机自动启动 JARVIS 三栏工作台窗口
-（``jarvis --gui`` 单窗口三栏 GUI；实时语音/文本对话/历史会话一体。
-作者：aceFelix）。
+生成 Windows Startup 快捷方式 / macOS LaunchAgent，开机自动启动 JARVIS
+三栏工作台窗口（``jarvis --gui`` 单窗口三栏 GUI；实时语音/文本对话/
+历史会话一体。作者：aceFelix）。
+
+桌面快捷方式入口已于 2026-09 下线：桌面入口由 jarvis-desktop（Electron
+桌面应用）接管，旧桌面图标与桌面应用功能冲突，故整体移除
+（desktop / desktop-uninstall / desktop-status 子命令一并删除）。
 
 用法:
     python -m agent.daemon.autostart install            # 安装开机自启
     python -m agent.daemon.autostart uninstall          # 卸载开机自启
     python -m agent.daemon.autostart status             # 查看开机自启状态
-    python -m agent.daemon.autostart desktop            # 创建桌面快捷方式
-    python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
-    python -m agent.daemon.autostart desktop-status     # 查看桌面快捷方式状态
 """
 
 from __future__ import annotations
@@ -99,11 +100,6 @@ def shortcut_path() -> Path:
     return startup_dir() / "JARVIS.lnk"
 
 
-def desktop_shortcut_path() -> Path:
-    """桌面快捷方式路径。"""
-    return desktop_dir() / "JARVIS.lnk"
-
-
 def real_home() -> Path:
     """获取真实用户 home 目录。
 
@@ -150,7 +146,7 @@ def python_exe() -> str:
 def pythonw_exe() -> str | None:
     """获取配对的 pythonw.exe 路径（无窗口 Python）。
 
-    Windows 上 pythonw.exe 不弹控制台窗口，适合开机自启/桌面快捷方式场景。
+    Windows 上 pythonw.exe 不弹控制台窗口，适合开机自启场景。
     非 Windows 或找不到时返回 None。
     """
     if sys.platform != "win32":
@@ -178,8 +174,8 @@ def _draw_reactor_icon(solid_bg: tuple[int, int, int] | None = None):
     """绘制 JARVIS 反应炉图标（蓝色同心圆，致敬启动动画），返回 256×256 RGBA 图。
 
     solid_bg：指定则先铺不透明实底——窗口/任务栏图标专用，透明像素在任务栏
-    浅色底上会被合成发白（用户实测反馈）；不指定则透明底（桌面快捷方式，
-    桌面壁纸由系统合成不受影响）。PIL 缺失时返回 None。
+    浅色底上会被合成发白（用户实测反馈）；不指定则透明底（快捷方式图标
+    通用场景）。PIL 缺失时返回 None。
     """
     try:
         from PIL import Image, ImageDraw, ImageFilter
@@ -245,7 +241,7 @@ def _save_ico(img, path: Path) -> bool:
 
 
 def ensure_icon() -> Path | None:
-    """确保 JARVIS 桌面图标存在（透明底），不存在则用 PIL 生成。
+    """确保 JARVIS 快捷方式图标存在（透明底），不存在则用 PIL 生成。
 
     返回图标路径，失败返回 None（调用方降级为无图标快捷方式）。
     """
@@ -535,72 +531,8 @@ def status() -> int:
     return 0
 
 
-def install_desktop() -> int:
-    """创建桌面快捷方式（跨平台）。
-
-    Windows: .lnk 快捷方式，指向 VBS 脚本拉起三栏工作台（--gui）。
-    macOS: 创建 .command 文件，双击在 Terminal.app 中启动工作台。
-    Linux: 创建 .desktop 文件。
-    """
-    if sys.platform == "darwin":
-        return _install_desktop_macos()
-    if sys.platform != "win32":
-        return _install_desktop_linux()
-
-    # Windows 原有逻辑
-    spath = desktop_shortcut_path()
-    # 桌面目录可能不存在（极端环境），mkdir 兜底
-    try:
-        spath.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    rc = _create_shortcut(spath, "JARVIS 个人 AI 管家", use_vbs=True)
-    if rc == 0:
-        print()
-        print("💡 双击桌面「JARVIS」图标 → 打开三栏工作台窗口")
-        # 提示文案与实际行为对齐：--gui 三栏工作台，单实例二次双击聚焦（作者：aceFelix）。
-        print("   中栏文本对话 / 左栏切换实时语音模式")
-        print("   二次双击图标唤起已驻留窗口，点 X 关闭")
-        print("   日志: ~/.jarvis/workbench.log")
-    return rc
-
-
-def uninstall_desktop() -> int:
-    """删除桌面快捷方式（跨平台）。"""
-    if sys.platform == "darwin":
-        spath = Path.home() / "Desktop" / "JARVIS.command"
-    elif sys.platform != "win32":
-        spath = Path.home() / "Desktop" / "JARVIS.desktop"
-    else:
-        spath = desktop_shortcut_path()
-    if spath.exists():
-        spath.unlink()
-        print(f"✓ 已删除桌面快捷方式: {spath}")
-    else:
-        print(f"桌面快捷方式不存在: {spath}")
-    return 0
-
-
-def status_desktop() -> int:
-    """查看桌面快捷方式状态（跨平台）。"""
-    if sys.platform == "darwin":
-        spath = Path.home() / "Desktop" / "JARVIS.command"
-    elif sys.platform != "win32":
-        spath = Path.home() / "Desktop" / "JARVIS.desktop"
-    else:
-        spath = desktop_shortcut_path()
-    if spath.exists():
-        print(f"✓ 桌面快捷方式已创建: {spath}")
-        print(f"  图标: {icon_path()}")
-        print(f"  后台 VBS: {vbs_path()}")
-    else:
-        print(f"✗ 桌面快捷方式不存在（{spath}）")
-        print(f"  运行 `python -m agent.daemon.autostart desktop` 创建")
-    return 0
-
-
 # ---------------------------------------------------------------------------
-# macOS 适配：LaunchAgent + .command 桌面文件
+# macOS 适配：LaunchAgent
 # ---------------------------------------------------------------------------
 
 def _macos_plist_path() -> Path:
@@ -725,74 +657,6 @@ def _status_macos() -> int:
     return 0
 
 
-def _install_desktop_macos() -> int:
-    """macOS: 创建 .command 桌面文件，双击在 Terminal.app 中启动语音窗口。
-
-    .command 文件是 macOS 特有的可执行脚本文件，双击会用 Terminal.app 打开。
-    与 Windows .lnk 不同，它会保留一个终端窗口（语音窗口由 pywebview 弹出）。
-    """
-    desktop = Path.home() / "Desktop"
-    desktop.mkdir(parents=True, exist_ok=True)
-    spath = desktop / "JARVIS.command"
-
-    script = jarvis_script()
-    py = sys.executable
-    workdir = str(Path(script).parent)
-
-    # .command 文件内容：cd 到项目目录 → 运行三栏工作台（--gui）
-    content = f"""#!/bin/bash
-# JARVIS workbench GUI launcher (macOS .command)
-cd "{workdir}" || exit 1
-exec "{py}" "{script}" --gui
-"""
-    try:
-        spath.write_text(content, encoding="utf-8")
-        # 赋予可执行权限
-        spath.chmod(0o755)
-        print(f"✓ 已创建桌面快捷方式: {spath}")
-        print("💡 双击「JARVIS.command」→ 打开三栏工作台窗口")
-        print("   中栏文本对话 / 左栏切换实时语音模式")
-        print("   日志: ~/.jarvis/workbench.log")
-        return 0
-    except Exception as e:
-        print(f"✗ 创建桌面快捷方式失败: {e}", file=sys.stderr)
-        return 1
-
-
-def _install_desktop_linux() -> int:
-    """Linux: 创建 .desktop 桌面文件。
-
-    双击后在终端中以前台 REPL 模式启动 jarvis（等同 Windows 的 cmd 窗口
-    运行 `jarvis`），可打字对话；关窗口即退出。
-    """
-    desktop = Path.home() / "Desktop"
-    desktop.mkdir(parents=True, exist_ok=True)
-    spath = desktop / "JARVIS.desktop"
-
-    script = jarvis_script()
-    py = sys.executable
-    workdir = str(Path(script).parent)
-
-    content = f"""[Desktop Entry]
-Type=Application
-Name=JARVIS
-Comment=Just A Rather Very Intelligent System
-Exec={py} {script}
-Path={workdir}
-Terminal=true
-Categories=Utility;
-"""
-    try:
-        spath.write_text(content, encoding="utf-8")
-        spath.chmod(0o755)
-        print(f"✓ 已创建桌面快捷方式: {spath}")
-        print("💡 双击「JARVIS.desktop」→ 终端中进入 REPL 对话界面（关窗口即退出）")
-        return 0
-    except Exception as e:
-        print(f"✗ 创建桌面快捷方式失败: {e}", file=sys.stderr)
-        return 1
-
-
 def main(argv: list[str] | None = None) -> int:
     args = argv or sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -802,11 +666,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  install            安装开机自启（Windows: Startup .lnk / macOS: LaunchAgent）")
         print("  uninstall          卸载开机自启")
         print("  status             查看开机自启状态")
-        print("  desktop            创建桌面快捷方式（Windows: .lnk / macOS: .command / Linux: .desktop）")
-        print("  desktop-uninstall  删除桌面快捷方式")
-        print("  desktop-status     查看桌面快捷方式状态")
         print()
         print("注意: Linux 暂不支持自动安装开机自启，可手动创建 systemd user unit。")
+        print("注意: 桌面快捷方式入口已于 2026-09 下线（由 jarvis-desktop 桌面应用接管）。")
         return 0
     cmd = args[0].lower()
     if cmd == "install":
@@ -815,12 +677,6 @@ def main(argv: list[str] | None = None) -> int:
         return uninstall()
     if cmd == "status":
         return status()
-    if cmd == "desktop":
-        return install_desktop()
-    if cmd in ("desktop-uninstall", "uninstall-desktop", "remove-desktop"):
-        return uninstall_desktop()
-    if cmd in ("desktop-status", "status-desktop"):
-        return status_desktop()
     print(f"未知命令: {cmd}", file=sys.stderr)
     print("用法: python -m agent.daemon.autostart <command>", file=sys.stderr)
     print("运行 `python -m agent.daemon.autostart --help` 查看完整命令列表", file=sys.stderr)
