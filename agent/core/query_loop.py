@@ -89,7 +89,7 @@ class QueryLoop:
         *,
         system: str = "",
         model: str | None = None,
-        max_iterations: int = 25,
+        max_iterations: int = 20,
         max_tokens: int = 4096,
         temperature: float | None = None,
         enable_compaction: bool = True,

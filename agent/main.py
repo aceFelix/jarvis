@@ -555,6 +555,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="启动三栏 GUI 工作台（与 --talk 等价，桌面图标入口）",
     )
     p.add_argument(
+        "--serve",
+        action="store_true",
+        help="headless API 服务（供 jarvis-desktop 等外部前端经 WebSocket 接入）",
+    )
+    p.add_argument(
         "--doctor",
         action="store_true",
         help="检查依赖安装状态（Python 包 / 系统级依赖 / 配置文件）",
@@ -640,6 +645,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.talk or args.gui:
         from agent.ui.workbench import run_workbench
         return run_workbench(settings)
+
+    # headless API 服务：不渲染本地 UI，桌面壳（jarvis-desktop）经 WS 接入
+    if args.serve:
+        from agent.serve import run_serve
+        return run_serve(settings)
 
     try:
         return asyncio.run(repl(settings))

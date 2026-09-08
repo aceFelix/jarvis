@@ -12,6 +12,13 @@
 - asyncio.Lock 确保同一时间只有一个 query 在跑（避免并发污染共享 messages）。
 - Token 认证：WS 连接时通过 URL 参数 ?token=xxx 校验，token 为空时自动生成。
 
+扩展点（供 agent.serve 桌面 API 模式复用）：
+- WS 指令分发采用处理器表 ``_ws_handlers``，子类/外部经
+  ``register_ws_handler(type, handler)`` 注册新指令，内置 ``message`` 行为不变。
+- ``host`` 参数控制绑定地址（手机协同默认 0.0.0.0；桌面 serve 模式传 127.0.0.1）。
+- 端口传 0 时由系统分配随机可用端口，start() 后回填真实端口到
+  ``http_port`` / ``ws_port`` 属性。
+
 @author aceFelix
 """
 
@@ -85,29 +92,33 @@ class BridgeServer:
     def __init__(
         self,
         query_loop: Any,
-        ctx: ToolContext,
+        ctx: "ToolContext | None",
         *,
         http_port: int = 8765,
         ws_port: int = 8766,
         token: str = "",
         workdir: str = "",
+        host: str = "0.0.0.0",
     ) -> None:
         """
         Args:
-            query_loop: QueryLoop 实例（共享 REPL 的）。
-            ctx: ToolContext 实例（共享 REPL 的 messages）。
-            http_port: HTTP 静态文件服务端口，默认 8765。
-            ws_port: WebSocket 通信端口，默认 8766。
+            query_loop: QueryLoop 实例（共享 REPL 的）；子类自接管 message 指令时可为 None。
+            ctx: ToolContext 实例（共享 REPL 的 messages）；同上可为 None。
+            http_port: HTTP 静态文件服务端口，默认 8765；传 0 由系统分配随机端口。
+            ws_port: WebSocket 通信端口，默认 8766；传 0 由系统分配随机端口。
             token: 认证 token，空则自动生成 16 位 hex。
             workdir: 工作目录，空则沿用 ctx.workdir。
+            host: 绑定地址；手机协同默认 0.0.0.0，桌面 serve 模式应传 127.0.0.1。
         """
         self._query_loop = query_loop
         self._ctx = ctx
         self._http_port = http_port
         self._ws_port = ws_port
+        self._host = host
         # token 为空时自动生成，避免裸奔
         self._token = token or secrets.token_hex(8)
-        self._workdir = workdir or ctx.workdir
+        # ctx 可为 None（桌面 serve 模式不用手机端的共享上下文路径）
+        self._workdir = workdir or (ctx.workdir if ctx is not None else "")
 
         # 并发锁：确保同一时间只有一个 query（避免共享 messages 被并发写入破坏）
         self._lock = asyncio.Lock()
@@ -128,6 +139,21 @@ class BridgeServer:
         self._query_lock = threading.Lock()
         # 当前已连接的 WebSocket 客户端集合
         self._clients: set[Any] = set()
+        # WS 指令处理器表：{type: async handler(ws, data)}。
+        # 内置 message（手机 PWA 对话）；abort 在 reader 中直接处理不入表；
+        # 桌面 serve 模式经 register_ws_handler 追加指令。
+        self._ws_handlers: dict[str, Any] = {"message": self._handle_message_command}
+
+    def register_ws_handler(self, msg_type: str, handler: Any) -> None:
+        """注册一个 WS 指令处理器（扩展点，供 agent.serve 等子类使用）。
+
+        Args:
+            msg_type: 指令 type 字段值，如 "sessions.list"。
+            handler: ``async def handler(ws, data)``，data 为解析后的消息 dict。
+
+        @author aceFelix
+        """
+        self._ws_handlers[msg_type] = handler
 
     # ---- 对外属性 ----
 
@@ -167,12 +193,23 @@ class BridgeServer:
 
         # 1. HTTP 服务（独立线程）
         self._start_http()
+        # 端口传 0 时回填系统分配的随机端口（供握手 JSON 上报）
+        if self._http_server is not None:
+            self._http_port = self._http_server.server_address[1]
 
         # 2. WebSocket 服务（asyncio loop 内）
-        # 绑定 0.0.0.0：手机通过局域网访问；token 认证防未授权访问
+        # 默认绑定 0.0.0.0：手机通过局域网访问；token 认证防未授权访问。
+        # 桌面 serve 模式由 host=127.0.0.1 收敛为本机回环。
         self._ws_server = await websockets.serve(
-            self._handle_ws, "0.0.0.0", self._ws_port
+            self._handle_ws, self._host, self._ws_port
         )
+        # 同样回填随机 WS 端口
+        try:
+            sockets = list(self._ws_server.sockets or [])
+            if sockets:
+                self._ws_port = sockets[0].getsockname()[1]
+        except Exception:
+            pass
 
     async def stop(self) -> None:
         """停止所有服务，释放端口。"""
@@ -326,7 +363,7 @@ class BridgeServer:
                     return
                 self._send_json({"ok": True, "name": fname, "path": f"/{fname}"})
 
-        self._http_server = ThreadingHTTPServer(("0.0.0.0", self._http_port), _Handler)
+        self._http_server = ThreadingHTTPServer((self._host, self._http_port), _Handler)
         self._http_thread = threading.Thread(
             target=self._http_server.serve_forever, name="bridge-http", daemon=True
         )
@@ -409,12 +446,11 @@ class BridgeServer:
                     except Exception:
                         pass
                     continue
-                if t == "message":
-                    text = (data.get("text") or "").strip()
-                    if not text:
-                        continue
-                    await self._run_query(ws, text)
-                # 其它 type 静默忽略（MVP 只处理 message / abort）
+                # 指令处理器表分发：内置 message + 子类注册的扩展指令；
+                # 未注册的 type 静默忽略（与旧 MVP 行为一致）
+                handler = self._ws_handlers.get(t)
+                if handler is not None:
+                    await handler(ws, data)
         finally:
             self._clients.discard(ws)
             reader_task.cancel()
@@ -422,6 +458,18 @@ class BridgeServer:
                 await reader_task
             except Exception:
                 pass
+
+    async def _handle_message_command(self, ws, data: dict) -> None:
+        """内置 message 指令处理器：手机 PWA 发来的对话文本。
+
+        从处理器表分发进入，行为与原 if/elif 分发完全一致。
+
+        @author aceFelix
+        """
+        text = (data.get("text") or "").strip()
+        if not text:
+            return
+        await self._run_query(ws, text)
 
     async def run_query(
         self, text: str, ctx: ToolContext, images: list[Any] | None = None
