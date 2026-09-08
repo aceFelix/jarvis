@@ -121,21 +121,48 @@ class SingleInstanceGuard:
         return True
 
     def release(self) -> None:
-        """释放守卫：关闭监听、清理锁文件。窗口退出时调用。"""
+        """释放守卫：停止监听、清理锁文件。窗口退出时调用。
+
+        平台差异（aceFelix）：Linux 下 close() 不会唤醒其他线程中阻塞的
+        accept()——监听 socket 要等 accept 自身超时（0.5s）到期才从端口表
+        释放，此窗口内立即重绑会被误判「已有驻留实例」（CI Linux
+        test_release_frees_port_and_lock 实测踩中；Windows closesocket 会
+        强制取消他线程阻塞调用故本地不复现）。故先 shutdown 尽力唤醒
+        accept，再 close，并 join 监听线程确认 socket 完全释放后才返回。
+        """
         self._stop.set()
         if self._server is not None:
+            try:
+                self._server.shutdown()  # 尽力唤醒阻塞的 accept（部分平台立即生效）
+            except Exception:
+                pass
             try:
                 self._server.close()
             except Exception:
                 pass
-            self._server = None
+        # join 监听/心跳线程：线程退出后监听 socket 引用计数才归零、
+        # 端口真正释放（Linux 下确定性释放的关键一步）
+        for th in (self._listener, self._heartbeat):
+            if th is not None:
+                th.join(timeout=2.0)
+        self._server = None
+        self._listener = None
+        self._heartbeat = None
         _clear_lock()
 
     def _accept_loop(self) -> None:
-        """接受聚焦连接：收到任意数据即触发窗口置前回调。"""
+        """接受聚焦连接：收到任意数据即触发窗口置前回调。
+
+        监听 socket 用局部引用（aceFelix）：release() 会把 self._server
+        置 None，循环内直接读属性会 AttributeError；局部引用同时保证
+        线程退出前始终持有 socket 引用，端口释放时机与 join 对齐。
+        """
+        srv = self._server
+        if srv is None:
+            return
         while not self._stop.is_set():
             try:
-                conn, _ = self._server.accept()
+                conn, _ = srv.accept()
             except (socket.timeout, TimeoutError):
                 continue
             except OSError:
