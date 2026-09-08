@@ -1606,11 +1606,13 @@ J.A.R.V.I.S. design and implementation references the following excellent projec
   <td align="center">WeChat</td>
   <td align="center">X (Twitter)</td>
   <td align="center">Douyin</td>
+  <td align="center">Bilibili</td>
 </tr>
 <tr>
   <td><img src="assets/wechat-qr.png" alt="WeChat" width="55"/></td>
   <td><img src="assets/x-qr.png" alt="X" width="55"/></td>
   <td><img src="assets/tiktok-qr.png" alt="Douyin" width="55"/></td>
+  <td><img src="assets/bilibili-qr.png" alt="Bilibili" width="55"/></td>
 </tr>
 </table>
 
