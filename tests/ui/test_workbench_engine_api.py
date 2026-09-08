@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import queue
 
+from agent import session_manager as session_manager_mod
 from agent.config.settings import Settings
 from agent.core.message import Message, TextContent, ToolResultContent, ToolUseContent
 from agent.ui.workbench.api import WorkbenchAPI
@@ -89,6 +91,53 @@ def test_engine_new_session_resets_state():
         assert engine._title_generated is False
     finally:
         engine.stop()
+
+
+def test_engine_title_rename_emits_session_renamed(monkeypatch):
+    """标题生成改名推 session_renamed，不得复用 session_ready（清屏语义）。
+
+    回归背景：首轮回复后标题任务重发 session_ready，前端按初始化语义
+    清空气泡，用户看到"刚开始回答就空白"。改名只应刷新会话列表。
+
+    @author aceFelix
+    """
+    # 屏蔽落盘与真实标题生成：只验证事件语义
+    monkeypatch.setattr(session_manager_mod, "_auto_save", lambda *a, **k: None)
+
+    async def fake_title(ui, messages, old_name):
+        return "new-title"
+
+    monkeypatch.setattr(
+        session_manager_mod, "_generate_title_from_first_user", fake_title
+    )
+
+    settings = Settings()
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+    # 预置会话状态跳过重型装配：首轮结束触发 _gen_first 改名分支
+    engine._session_ready = True
+    engine._messages = [Message(role="user", content=[TextContent(text="你好")])]
+    engine._session_name = "session-x"
+    engine._dialog_count = 0
+    engine._title_generated = False
+
+    async def drive() -> None:
+        engine._after_turn()
+        # 等后台标题任务跑完（create_task 不阻塞 _after_turn）
+        await asyncio.sleep(0.2)
+
+    asyncio.run(drive())
+
+    events = []
+    while not event_queue.empty():
+        events.append(event_queue.get_nowait())
+    types = [e["type"] for e in events]
+    assert "session_renamed" in types
+    assert "session_ready" not in types  # 清屏语义事件不得在改名时出现
+    renamed = next(e for e in events if e["type"] == "session_renamed")
+    assert renamed["payload"]["name"] == "new-title"
+    assert engine._session_name == "new-title"
 
 
 # ---- JSBridge API ----
@@ -191,3 +240,13 @@ def test_parse_args_gui_and_talk():
     assert parse_args(["--gui"]).gui is True
     assert parse_args(["--talk"]).talk is True
     assert parse_args([]).gui is False and parse_args([]).talk is False
+
+
+def test_parse_args_serve():
+    """--serve 被识别（headless API 服务，供 jarvis-desktop 接入），默认关闭。"""
+    from agent.main import parse_args
+
+    assert parse_args(["--serve"]).serve is True
+    assert parse_args([]).serve is False
+    # 与 --gui/--talk 共存时 --gui/--talk 优先（分发顺序在前）
+    assert parse_args(["--serve", "--gui"]).serve is True

@@ -249,7 +249,9 @@ class ChatEngine:
                 self._session_name = await _generate_title_from_first_user(
                     self._ui, self._messages, self._session_name
                 )
-                self._emitter.emit("session_ready", {"name": self._session_name})
+                # 标题改名专用事件：session_ready 带"清空气泡"的初始化语义，
+                # 复用会把刚渲染的回复清掉（桌面端/工作台均踩过），改名只刷列表
+                self._emitter.emit("session_renamed", {"name": self._session_name})
 
             asyncio.get_event_loop().create_task(_gen_first())
         elif self._dialog_count == 2 and len(self._messages) >= 4 and not self._title_generated:
@@ -259,7 +261,8 @@ class ChatEngine:
                 self._session_name = await _generate_session_title(
                     self._ui, self._provider, self._model, self._messages, self._session_name
                 )
-                self._emitter.emit("session_ready", {"name": self._session_name})
+                # 同上：改名推送 session_renamed，前端只刷新会话列表不清屏
+                self._emitter.emit("session_renamed", {"name": self._session_name})
 
             asyncio.get_event_loop().create_task(_gen_llm())
 

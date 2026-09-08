@@ -378,6 +378,12 @@
                 showAskUser(payload);
                 break;
             // ---- 会话管理 ----
+            case 'session_renamed':
+                // 标题生成改名：只刷新会话列表，不清空气泡
+                // （session_ready 带清屏初始化语义，复用会擦除刚渲染的回复）
+                // @author aceFelix
+                refreshSessionList();
+                break;
             case 'session_ready':
             case 'session_new':
                 chatHistory.innerHTML = '';

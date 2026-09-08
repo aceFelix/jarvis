@@ -8,6 +8,7 @@ FakeTitleProvider 模拟流式事件序列。
 @author aceFelix
 """
 
+import json
 import re
 from datetime import datetime
 
@@ -172,6 +173,67 @@ class TestRenameSessionFile:
 
     def test_same_title_returns_title(self, jarvis_home) -> None:
         assert _rename_session_file("same", "same") == "same"
+
+    def test_meta_name_synced_after_rename(self, jarvis_home) -> None:
+        """重命名后回写文件内 meta.name，保证列表上报名=文件名（可按名加载）。
+
+        回归背景：只 rename 文件不同步 meta 时，sessions.list 上报旧名，
+        按旧名 load_session 找不到文件报"会话不存在或为空"。
+
+        @author aceFelix
+        """
+        d = jarvis_home / "sessions"
+        d.mkdir(parents=True, exist_ok=True)
+        old = d / "old.json"
+        old.write_text(
+            json.dumps({"meta": {"name": "old"}, "messages": []}),
+            encoding="utf-8",
+        )
+
+        result = _rename_session_file("old", "新标题")
+        assert result == "新标题"
+        data = json.loads((d / f"{result}.json").read_text(encoding="utf-8"))
+        assert data["meta"]["name"] == result
+
+    def test_meta_name_synced_with_suffix(self, jarvis_home) -> None:
+        """追加 -2 序号的重命名同样回写 meta.name 为最终名。"""
+        d = jarvis_home / "sessions"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "old.json").write_text(
+            json.dumps({"meta": {"name": "old"}, "messages": []}),
+            encoding="utf-8",
+        )
+        (d / "标题.json").write_text("{}", encoding="utf-8")
+
+        result = _rename_session_file("old", "标题")
+        assert result == "标题-2"
+        data = json.loads((d / "标题-2.json").read_text(encoding="utf-8"))
+        assert data["meta"]["name"] == "标题-2"
+
+    def test_auto_latest_pointer_kept_on_rename(self, jarvis_home) -> None:
+        """重命名 auto-latest 时保留恢复指针（复制而非移走）。
+
+        回归背景：自动恢复后会话名为 auto-latest，标题改名把指针文件
+        移走导致 auto-latest.json 消失、恢复链断裂。
+
+        @author aceFelix
+        """
+        d = jarvis_home / "sessions"
+        d.mkdir(parents=True, exist_ok=True)
+        pointer = d / "auto-latest.json"
+        pointer.write_text(
+            json.dumps({"meta": {"name": "auto-latest"}, "messages": []}),
+            encoding="utf-8",
+        )
+
+        result = _rename_session_file("auto-latest", "新标题")
+        assert result == "新标题"
+        assert pointer.exists()  # 指针文件必须留在原位
+        # 副本 meta 同步为新名，指针内部仍为 auto-latest
+        copy_data = json.loads((d / "新标题.json").read_text(encoding="utf-8"))
+        assert copy_data["meta"]["name"] == "新标题"
+        pointer_data = json.loads(pointer.read_text(encoding="utf-8"))
+        assert pointer_data["meta"]["name"] == "auto-latest"
 
 
 class TestGenerateTitleFromFirstUser:

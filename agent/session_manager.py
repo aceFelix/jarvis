@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,11 +41,48 @@ def _sanitize_title(title: str) -> str:
     return title
 
 
+def _sync_meta_name(path: Path, new_name: str) -> None:
+    """重命名后回写会话文件内部的 meta.name 为新名。
+
+    list_sessions 按文件内 meta.name 上报列表，load_session 按名字定位文件；
+    只改文件名不同步内部 meta 会导致列表显示旧名、按旧名点击加载失败
+    （"会话不存在或为空"）。读写失败静默跳过（不影响重命名结果）。
+
+    @author aceFelix
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        data.setdefault("meta", {})["name"] = new_name
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+def _move_or_copy_pointer(old_name: str, old_path: Path, new_path: Path) -> None:
+    """移动会话文件到新路径；old_name 为 auto-latest 时改为复制。
+
+    auto-latest.json 是启动自动恢复的指针文件，被重命名移走后恢复指针即
+    丢失（列表还会出现一条 meta 为 auto-latest 的"幽灵"条目），故保留原
+    文件、仅复制出一份带标题的副本。
+
+    @author aceFelix
+    """
+    if old_name == "auto-latest":
+        shutil.copy2(old_path, new_path)
+    else:
+        old_path.rename(new_path)
+
+
 def _rename_session_file(old_name: str, title: str) -> str:
     """重命名会话文件。返回最终可用的新名称。
 
     目标文件名已存在时自动追加序号（-2、-3…），避免标题冲突时
-    直接退回时间戳旧名导致标题生成失效。
+    直接退回时间戳旧名导致标题生成失效。移动后同步回写文件内部
+    meta.name，保证列表上报名与文件名一致（可按列表名加载）。
     """
     from agent.core.memory.store import sessions_dir
 
@@ -60,7 +99,8 @@ def _rename_session_file(old_name: str, title: str) -> str:
 
     new_path = sessions_dir() / f"{title}.json"
     if not new_path.exists():
-        old_path.rename(new_path)
+        _move_or_copy_pointer(old_name, old_path, new_path)
+        _sync_meta_name(new_path, title)
         return title
 
     # 目标已存在：追加序号 -2、-3…（最多尝试 99 次）
@@ -68,7 +108,8 @@ def _rename_session_file(old_name: str, title: str) -> str:
         candidate = f"{title}-{n}"
         candidate_path = sessions_dir() / f"{candidate}.json"
         if not candidate_path.exists():
-            old_path.rename(candidate_path)
+            _move_or_copy_pointer(old_name, old_path, candidate_path)
+            _sync_meta_name(candidate_path, candidate)
             return candidate
 
     # 极端情况兜底：保留原名称
