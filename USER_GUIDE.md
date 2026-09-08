@@ -58,8 +58,13 @@ jarvis --init
 ```bash
 jarvis              # 进入 REPL 对话
 jarvis --gui        # 启动三栏 GUI 工作台（桌面图标同款入口，--talk 等价）
+jarvis --serve      # 启动 headless API 服务（不渲染本地 UI，供 jarvis-desktop 等外部前端接入）
 jarvis --quick      # 快速启动（跳过动画和可选初始化）
 ```
+
+> `--serve` 与 `--gui`/`--talk` 互斥：它不开窗口，而是把对话引擎以 WebSocket API 形式绑定在
+> `127.0.0.1` 随机端口（token 认证），就绪后向 stdout 打印单行握手 JSON，供 Electron 桌面壳
+> jarvis-desktop 逐行解析后拉起 UI。需可选依赖 `websockets`（`pip install websockets`）。
 
 ---
 
@@ -245,19 +250,17 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
 
 ---
 
-## 桌面入口（推荐）
+## 桌面入口（jarvis-desktop 桌面应用）
 
-```bash
-python -m agent.daemon.autostart desktop    # 创建桌面快捷方式（一次性）
-```
+桌面入口已由 **jarvis-desktop**（Electron 桌面应用，独立仓库）接管：
+连接 `jarvis --serve` 后端，提供会话管理 / 流式对话 / 实时语音等完整桌面体验。
+原桌面快捷方式（双击打开 pywebview 三栏工作台窗口）已于 2026-09 下线，
+与桌面应用功能冲突；存量桌面 JARVIS.lnk 可直接手动删除。
 
-双击桌面「JARVIS」图标 → 打开三栏 GUI 工作台（透明背景，能看到桌面；铺满工作区但保留任务栏）：
-- **标题栏**：窗口无边框，顶部自绘标题栏可整条拖动，右侧有最小化/关闭按钮（不提供全屏：启动即铺满工作区，不盖任务栏）；
-- **左栏**：模式切换 + 三面板切换（📜 历史会话 / 🤖 模型 / 🎵 音色，各自独占全高可滚动），点历史项可恢复会话；
-- **中栏**：文本对话气泡流（流式渲染 + 工具卡片），左栏可切到 /talk 实时双工模式；
-- **右栏**：CPU / 内存 / 磁盘实时指标。
-窗口已驻留时再次双击图标，不会新建窗口，而是把已有窗口唤到前台。
-点 X 关闭窗口退出。
+本仓库内仍保留两个终端入口：
+- `jarvis`：REPL 终端对话；
+- `jarvis --gui`：三栏 GUI 工作台窗口（透明背景铺满工作区；左栏模式/面板
+  切换、中栏文本对话、右栏系统指标；单实例驻留，点 X 关闭）。
 
 > 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线，由三栏 GUI 工作台取代（一期已落地）。
 > 定时提醒/每日简报等主动服务仍处于休眠态，将随工作台二期一并回归（右栏指标三件套已先行落地）。
@@ -268,7 +271,6 @@ python -m agent.daemon.autostart desktop    # 创建桌面快捷方式（一次�
 ```bash
 python -m agent.daemon.autostart install    # 安装
 python -m agent.daemon.autostart status     # 查看状态
-python -m agent.daemon.autostart desktop    # 创建桌面快捷方式
 ```
 
 ### 跨平台行为
@@ -276,8 +278,8 @@ python -m agent.daemon.autostart desktop    # 创建桌面快捷方式
 | 平台 | 行为 |
 |------|------|
 | Windows | 静默启动（无终端窗口），直接打开三栏工作台 |
-| macOS | Terminal.app 内启动三栏工作台 |
-| Linux | 终端内前台运行（终端不能关） |
+| macOS | LaunchAgent 登录时启动三栏工作台 |
+| Linux | 不支持自动安装（提示手动 systemd user unit） |
 
 ---
 

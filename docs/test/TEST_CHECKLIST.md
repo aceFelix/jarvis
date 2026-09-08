@@ -388,7 +388,7 @@
 | T-171 | 安装自启 | `python -m agent.daemon.autostart install` | 注册到 Startup |
 | T-172 | 查看状态 | `python -m agent.daemon.autostart status` | 显示已安装 |
 | T-173 | 卸载自启 | `python -m agent.daemon.autostart uninstall` | 从 Startup 移除 |
-| T-174 | 桌面快捷方式 | `python -m agent.daemon.autostart desktop` | 创建 .lnk |
+| T-174 | 桌面入口下线 | `python -m agent.daemon.autostart desktop` | 报未知命令（退出码 1），桌面快捷方式子命令已移除 |
 
 ### 16.5 快速启动
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -702,6 +702,46 @@
 
 ---
 
+## 35. serve 模式（外部前端接入）
+
+> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 6 + 路由 11 + 集成 2 = 19 项）。
+
+### 35.1 启动与握手
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-321 | 启动 serve | `jarvis --serve`（或 `python -m agent.serve`） | 进程阻塞运行，stdout 打印单行握手 JSON |
+| T-322 | 握手 JSON 格式 | 解析 stdout 就绪行 | `{"type":"jarvis-serve-ready","port","http_port","token","pid"}` 字段齐全 |
+| T-323 | loopback 绑定 | 检查监听地址 | 仅绑 `127.0.0.1` + 随机端口，不对局域网暴露 |
+| T-324 | 依赖缺失降级 | 不装 websockets 时 `--serve` | stderr 提示装 websockets，退出码 3 |
+| T-325 | stdin EOF 停机 | 父进程关闭 stdin 管道 | 优雅停机（先关传输层再停引擎），退出码 0 |
+
+### 35.2 WS 认证与协议
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-326 | token 认证通过 | `ws://127.0.0.1:<port>/?token=<正确>` | 连接建立，首推 `init` 事件 |
+| T-327 | token 认证拒绝 | 用错误/缺失 token 连接 | 服务端以 `4401` 关闭连接 |
+| T-328 | init 事件 | 连接后观察首个事件 | `{"event":"init","data":{provider,model,...}}`（同 state.get） |
+| T-329 | 未知指令 | 发送未注册 type | 不回执/不崩溃，连接保持 |
+
+### 35.3 桌面指令（request/response）
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-330 | message 流式 | 发 `{"type":"message","text":"你好"}` | 回执 ok=true；随后 `assistant_text` 流式增量 + `assistant_done` |
+| T-331 | message 空文本 | 发 `{"type":"message","text":""}` | 回执 ok=false，error="空消息" |
+| T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` | list 返回会话数组；open 触发 `session_loaded`；new 触发 `session_new` |
+| T-333 | models 指令 | `models.list` / `models.select`(name) | list 返回模型数组（含 current）；select 返回 bool 且持久化 |
+| T-334 | voices/metrics/state | `voices.list`/`voices.select`/`metrics.get`/`state.get` | 各自返回对应结构（metrics 含 cpu/memory/disk） |
+| T-335 | answer_user / talk | `answer_user`(text) 回填 ask_user；`talk.start`/`talk.stop` | ask_user 弹窗被回填；talk 触发 `talk_started`/`talk_stopped` |
+
+### 35.4 事件泵与兼容性
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-336 | 事件泵广播 | 引擎产生事件后观察 WS | 每 50ms 轮询，`{"type","payload"}` 原样广播为 `{"event","data"}` |
+| T-337 | 指标推送 | 连接后静置 | 每 ~2 秒收到 `metrics` 事件 |
+| T-338 | 手机 PWA 旧协议回归 | 用 BridgeServer 原 `query`/`abort` 协议连接 | 行为不变、向后兼容 |
+
+---
+
 ## 快速冒烟测试（每次改动必跑）
 
 | 优先级 | 编号 | 测试项 | 耗时 |
@@ -718,13 +758,14 @@
 | P1 | T-128 | 语音闭环 | 30s |
 | P1 | T-133 | 实时双工启动 | 20s |
 | P1 | T-158 | Daemon 启停 | 20s |
+| P1 | T-321 | serve 启动握手 | 15s |
 | P2 | T-196 | 跨设备协同 | 30s |
 | P2 | T-203 | 安全沙箱 | 20s |
 | P2 | T-245 | CLI-Anything 安装 | 30s |
 
 ---
 
-> **总计：320 项测试，覆盖 34 个功能模块**
+> **总计：338 项测试，覆盖 35 个功能模块**
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >

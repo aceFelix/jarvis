@@ -60,6 +60,7 @@
 - [图片输入](#图片输入)
 - [GUI 自动化](#gui-自动化)
 - [桌面入口（三栏工作台）](#桌面入口三栏工作台)
+- [外部前端接入（serve 模式）](#外部前端接入serve-模式)
 - [多 Agent 协作](#多-agent-协作)
 - [插件系统](#插件系统)
 - [CLI-Anything 外部软件控制](#cli-anything-外部软件控制)
@@ -87,6 +88,7 @@
 | 语音对话 `/voice`（STT + TTS） | ✅ | ✅ | ✅ |
 | 实时双工语音 `/talk`（全双工） | ✅ | ✅ | ✅ |
 | 三栏工作台窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
+| 外部前端接入（`--serve` headless WS API） | ✅ | ✅ | ✅ |
 | 鼠标 / 键盘 / 截屏（pyautogui） | ✅ | ✅¹ | ✅² |
 | 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
 | 桌面图标启动三栏工作台（`--gui`） | ✅ | ✅ | ⚠️ 终端内运行³ |
@@ -257,10 +259,9 @@ jarvis
 - `Shift+Enter` 换行（Windows 终端自动转换）
 - `Ctrl+C` **任意阶段中断**（LLM 流式输出中 / 工具执行中 / 思考中均可立即停止）
 
-> **桌面快捷方式**：安装后不会自动创建。如需桌面图标，运行：
-> ```bash
-> python -m agent.daemon.autostart desktop
-> ```
+> **桌面入口**：桌面快捷方式（`autostart desktop`）已于 2026-09 下线，
+> 桌面入口由 jarvis-desktop（Electron 桌面应用，独立仓库）接管；
+> 本仓库终端内仍可用 `jarvis --gui` 打开三栏工作台窗口。
 
 ### 依赖健康检查
 
@@ -809,22 +810,23 @@ jarvis --gui           # 启动三栏工作台窗口（--talk 与 --gui 等价�
 > 定时提醒/每日简报等主动感知服务处于休眠态（代码保留，待二期重新接线）。
 > 完整开发计划见 [docs/plans/workbench-gui.md](docs/plans/workbench-gui.md)。
 
-### 开机自启 / 桌面快捷方式
+### 开机自启
 
 ```bash
 python -m agent.daemon.autostart install            # 安装开机自启
 python -m agent.daemon.autostart uninstall          # 卸载开机自启
 python -m agent.daemon.autostart status             # 查看状态
-
-python -m agent.daemon.autostart desktop            # 创建桌面快捷方式
-python -m agent.daemon.autostart desktop-uninstall  # 删除桌面快捷方式
 ```
 
-| 平台 | 开机自启 | 桌面快捷方式 |
-|---|---|---|
-| Windows | Startup 文件夹 .lnk | .lnk（指向静默 VBS，打开三栏工作台） |
-| macOS | LaunchAgent plist（`launchctl load`） | .command（Terminal.app 打开） |
-| Linux | 不支持（提示手动 systemd） | .desktop 文件（终端内运行） |
+| 平台 | 开机自启 |
+|---|---|
+| Windows | Startup 文件夹 .lnk（指向静默 VBS，打开三栏工作台） |
+| macOS | LaunchAgent plist（`launchctl load`） |
+| Linux | 不支持（提示手动 systemd） |
+
+> 📌 桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status` 子命令）
+> 已于 2026-09 下线：桌面入口由 jarvis-desktop 桌面应用接管，旧桌面图标
+> 与桌面应用功能冲突。存量桌面 JARVIS.lnk 可直接手动删除。
 
 ### 实时双工配置
 
@@ -1015,6 +1017,29 @@ audit = true                 # 记录审计日志
 max_snapshots = 20           # 文件快照最大保留数
 excluded_commands = []       # 不走沙箱的命令（如 ["docker", "wsl"]）
 ```
+
+---
+
+## 外部前端接入（serve 模式）
+
+```bash
+jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供外部前端接入）
+```
+
+`--serve` 把 J.A.R.V.I.S 的对话引擎以 **WebSocket API** 形式对外服务，供 jarvis-desktop（Electron 桌面壳，独立仓库）等外部前端接入。它与 `--gui`/`--talk` 互斥：后者在本进程内渲染 pywebview 工作台，`--serve` 不渲染任何本地 UI，只装配与工作台**完全相同**的引擎零件（`ChatEngine` + `WorkbenchAPI` + `MetricsCollector`），经 `DesktopBridgeServer` 以 WS 事件流对外服务。
+
+- **绑定收敛**：仅监听 `127.0.0.1` + 系统分配的随机端口，不对局域网暴露（这是与手机协同模式 `0.0.0.0` + 固定端口的关键差异）。
+- **token 认证**：WS 连接须带 token（`ws://127.0.0.1:<port>/?token=xxx`），token 错误服务端以 `4401` 关闭。
+- **就绪握手**：进程就绪后向 stdout 打印**单行** JSON，外部宿主（Electron 主进程）逐行解析：
+
+  ```json
+  {"type": "jarvis-serve-ready", "port": 51234, "http_port": 51235, "token": "<hex>", "pid": 999}
+  ```
+
+- **停机信号**：stdin EOF（父进程退出 / 杀管道）或 `SIGINT` 触发优雅停机（先关传输层，再停采集与引擎）。
+- **依赖**：需要可选依赖 `websockets`（`pip install websockets`），缺失时以退出码 `3` 报错退出。
+
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：13 条桌面指令（`message` / `sessions.*` / `models.*` / `voices.*` / `metrics.get` / `state.get` / `answer_user` / `talk.*`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md)。
 
 ---
 
