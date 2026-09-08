@@ -44,7 +44,7 @@ jobs:
         run: python -m compileall -q agent/
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short -k "not test_bring_up_reuses_running_proc"
+        run: pytest tests/ -v --tb=short
 
   # ─────────────────────────────────────────────────────────────
   # Job 2: 构建 Python 包（wheel + sdist）
