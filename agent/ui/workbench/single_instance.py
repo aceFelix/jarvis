@@ -83,12 +83,27 @@ class SingleInstanceGuard:
     @author aceFelix
     """
 
-    def __init__(self, on_focus: Callable[[], None]) -> None:
+    def __init__(self, on_focus: Callable[[], None], port: int = FOCUS_PORT) -> None:
+        # port 可注入（aceFelix）：生产用默认固定端口 47812（多实例约定会合点）；
+        # 测试传 port=0 由内核分配空闲端口——47812 落在 Linux 临时端口范围
+        # （32768–60999）内，共享 CI runner 上其它 localhost 连接可能随机占用
+        # 它导致 bind 偶发 EADDRINUSE（2026-09-10 Linux CI 两用例连挂复盘）。
         self._on_focus = on_focus
+        self._port = port
         self._server: socket.socket | None = None
         self._listener: threading.Thread | None = None
         self._heartbeat: threading.Thread | None = None
         self._stop = threading.Event()
+
+    @property
+    def port(self) -> int:
+        """实际监听端口（port=0 时绑定后由内核分配，供测试/诊断读取）。"""
+        if self._server is not None:
+            try:
+                return self._server.getsockname()[1]
+            except OSError:
+                pass
+        return self._port
 
     def try_acquire(self) -> bool:
         """尝试成为驻留实例。
@@ -100,9 +115,11 @@ class SingleInstanceGuard:
             # 注意：不设 SO_REUSEADDR——Windows 下该选项允许两个进程同时绑定
             # 同一端口，会导致单实例检测失效；绑定失败即视为已有驻留实例。
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server.bind(("127.0.0.1", FOCUS_PORT))
+            server.bind(("127.0.0.1", self._port))
             server.listen(4)
             server.settimeout(0.5)
+            # port=0 时回写内核实际分配的端口，供 port 属性/聚焦回连使用
+            self._port = server.getsockname()[1]
         except OSError:
             # 端口被占：向宿主发送聚焦指令
             self._request_focus_from_host()
@@ -133,7 +150,10 @@ class SingleInstanceGuard:
         self._stop.set()
         if self._server is not None:
             try:
-                self._server.shutdown()  # 尽力唤醒阻塞的 accept（部分平台立即生效）
+                # shutdown 必须显式传 how（aceFelix）：旧写法 shutdown() 缺参
+                # 永远抛 TypeError 被吞，“唤醒阻塞 accept”实为死代码，
+                # 一直靠 0.5s accept 超时 + join 兜底。这里补正。
+                self._server.shutdown(socket.SHUT_RDWR)  # 尽力唤醒阻塞的 accept
             except Exception:
                 pass
             try:
@@ -190,7 +210,7 @@ class SingleInstanceGuard:
     def _request_focus_from_host(self) -> None:
         """向驻留实例发送聚焦指令；失败时静默（宿主会自行保持窗口）。"""
         try:
-            with socket.create_connection(("127.0.0.1", FOCUS_PORT), timeout=2.0) as conn:
+            with socket.create_connection(("127.0.0.1", self._port), timeout=2.0) as conn:
                 conn.sendall(FOCUS_CMD)
         except Exception:
             pass

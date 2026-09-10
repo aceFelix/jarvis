@@ -78,3 +78,59 @@ workflow 清理：`ci.yml` / `publish.yml` 中
   释放侧保证确定性后，误判窗口才消失；
 - CI 的 `-k` 临时排除要登记待办并及时清理，用例删除后过滤会静默空转，
   掩盖「其实已经没人管这条失败」的事实。
+
+---
+
+# 追加复盘（2026-09-10）：固定端口撞 Linux 临时端口范围，测试改 port=0 隔离
+
+## 8. 第二轮问题现象
+
+上一轮 release 修复（含 shutdown+join）推送后，Linux CI（1671 用例）仍挂，
+且从 1 个变 2 个，**都倒在第一次 `try_acquire()`**：
+
+```text
+tests/ui/test_workbench_single_instance.py:50  assert guard.try_acquire() is True   # test_release_frees_port_and_lock
+tests/ui/test_workbench_single_instance.py:70  assert guard.try_acquire() is True   # test_focus_signal_via_plain_connection
+```
+
+## 9. 第二轮排查与根因
+
+1. 占用时长对不上自身线程：脏状态从 test 2 持续到 test 3（≥3s），而修复后
+   监听/心跳线程最迟 2s（join 上限）内必退——排除「自己线程占端口」；
+2. test 1 首绑成功、test 2/3 首绑连挂 → 端口在 test 1 release 后的瞬间被
+   外部占据且持续存活；
+3. 根因：**固定端口 47812 落在 Linux 临时端口范围（32768–60999）内**。
+   GitHub 共享 runner 上 runner agent/docker/日志流存在大量 localhost
+   连接，任一连接被内核随机分到 47812 当本地端口，后续
+   `bind(127.0.0.1:47812)` 即 EADDRINUSE，且该连接可存活数十秒；
+   Windows 本地不复现（bind 语义宽松 + 无邻居抢端口）；
+4. 顺带发现上一轮修复的死代码：`self._server.shutdown()` 缺必传参数
+   `how`，永远抛 TypeError 被 `except Exception` 吞掉，「唤醒阻塞
+   accept」实际从未生效，一直靠 0.5s accept 超时 + join 兜底。
+
+## 10. 第二轮修复方案
+
+1. `single_instance.py`：构造函数增加 `port: int = FOCUS_PORT` 注入点，
+   `try_acquire`/`_request_focus_from_host` 改用 `self._port`，绑定后回写
+   内核实际分配端口；新增 `port` 属性供测试/诊断读取；生产路径（app.py）
+   默认 47812 不变；
+2. `shutdown()` 补正为 `shutdown(socket.SHUT_RDWR)`，唤醒 accept 真正生效；
+3. 测试三用例全部改 `port=0`（内核分配空闲端口），第二个守卫显式指向
+   `guard.port` 复现多开探测/同端口重抢——既彻底隔离共享 runner 的端口
+   噪音，又保留 release 释放语义的回归价值。
+
+## 11. 第二轮验证
+
+- 本地：`tests/ui/test_workbench_single_instance.py` 连跑 4 遍全绿，
+  `tests/ui` 全套 45 passed；
+- Linux 侧由推送后 CI 全量跑验证（端口已隔离，不再依赖环境端口空闲）。
+
+## 12. 第二轮经验
+
+- **测试绝不要抢固定端口**：固定会合端口是生产需求，但用例应通过依赖
+  注入（port=0 + 读回实际端口）隔离，否则固定端口落在临时端口范围内时，
+  共享 CI 机器上必然偶发 EADDRINUSE；
+- **被 `except Exception` 包裹的调用要验证真实生效**：shutdown() 缺参
+  TypeError 被静默吞掉一轮多才发现，兑底路径有效≠主路径正确；
+- 失败断言的**持续时长**是定位线索：占用超过代码内所有超时上限时，
+  应怀疑环境级冲突而非自身线程。
