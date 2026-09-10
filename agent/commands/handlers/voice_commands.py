@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import time
@@ -110,29 +109,39 @@ async def _voice_mode(ui, settings, loop, ctx) -> None:
     await voice_loop(ui, settings, loop, ctx)
 
 
-async def _realtime_talk(ui, settings, *, use_window: bool = True) -> None:
-    """/talk 命令 —— 实时双工语音对话。
+async def _realtime_talk(ui, settings) -> None:
+    """/talk 命令 —— 实时双工语音对话（纯终端）。
+
+    2026-09 调整（aceFelix）：下线 pywebview 独立窗口路径，/talk 一律
+    直接在终端内运行全双工对话（引擎不变，UI 为 RichCLI 转录文字流）；
+    图形化实时聊天由工作台（--gui 中栏实时模式）与 jarvis-desktop
+    桌面应用承担，realtime_window 独立窗口包已作为孤儿代码删除。
 
     实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
     如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，
-    不能直接用于 DashScope WebSocket 鉴权，因此优先使用独立的 dashscope_api_key。
-
-    Args:
-        use_window: 为 True 时优先使用 pywebview 独立窗口 UI；
-                    未安装 pywebview 或环境不支持时回退到 RichCLI。
+    不能直接用于 DashScope WebSocket 鉴权，因此只认独立的 dashscope_api_key。
 
     @author aceFelix
     """
+    # 防呆 fail-fast（aceFelix）：只认「专属 dashscope_api_key → DASHSCOPE_API_KEY
+    # 环境变量 →（当前厂商就是 dashscope 时）settings.api_key」，不再兜底
+    # 其它厂商的 key——拿别家 key 硬连 DashScope 必被服务端 1007 Access
+    # denied 秒拒，用户只能看到英文报错；不如在这里快速失败给中文指引。
     api_key = (
         settings.dashscope_api_key
         or os.environ.get("DASHSCOPE_API_KEY", "")
-        or settings.api_key
-        or os.environ.get("OPENAI_API_KEY", "")
     )
+    if not api_key and getattr(settings, "provider", "") == "dashscope":
+        # 当前 LLM 就是 DashScope 时，api_key 本身即 DashScope key，可直接用
+        api_key = settings.api_key or ""
     if not api_key:
         ui.error(
-            "未配置 DashScope API Key。实时双工语音对话依赖 DashScope 服务，"
-            "请设置环境变量 DASHSCOPE_API_KEY，或在 settings.toml 中配置 dashscope_api_key。"
+            "实时双工语音依赖阿里云 DashScope 服务，需要 DashScope API Key"
+            "（不能拿 deepseek/openai 等其它厂商的 key 混用）。请任选其一配置：\n"
+            "  1. ~/.jarvis/settings.toml 中添加 dashscope_api_key = \"sk-...\"\n"
+            "  2. 设置环境变量 DASHSCOPE_API_KEY\n"
+            "并确认百炼账号无欠费、已开通实时语音模型"
+            "（qwen-audio-3.0-realtime-flash）。"
         )
         return
 
@@ -150,27 +159,9 @@ async def _realtime_talk(ui, settings, *, use_window: bool = True) -> None:
         "workdir": getattr(settings, "workdir", "") or os.getcwd(),
     }
 
-    has_window = False
-    window = None
-    if use_window:
-        try:
-            from agent.ui.realtime_window import RealtimeTalkWindow
-
-            window = RealtimeTalkWindow(on_close=lambda: None, standalone=True)
-            window.set_config(config)
-            window.show()
-            has_window = window.is_open or True
-        except ImportError:
-            ui.warn("未安装 pywebview，实时聊天将回退到终端界面。")
-        except Exception as e:
-            ui.warn(f"启动实时聊天窗口失败: {e}，回退到终端界面。")
-
-    if has_window and window is not None:
-        while window.is_open:
-            await asyncio.sleep(0.2)
-    else:
-        rt = RealtimeTalk(**config)
-        await rt.run(ui)
+    # 纯终端全双工对话（原「优先拉起 pywebview 独立窗口」路径已于 2026-09 下线）
+    rt = RealtimeTalk(**config)
+    await rt.run(ui)
 
 
 async def handle_listen(ctx: "CommandContext", stripped: str) -> bool:

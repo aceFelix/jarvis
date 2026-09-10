@@ -426,6 +426,20 @@ class RealtimeTalk:
             close_reason = getattr(e, "reason", "") or ""
             close_code = getattr(e, "code", "")
             ui.warn(f"实时语音连接已关闭 (code={close_code}, reason={close_reason})")
+            # 防呆翻译（aceFelix）：DashScope 鉴权拒绝（1007 Access denied /
+            # account in good standing）把英文服务端报错映射成可操作的中文
+            # 指引，覆盖 key 错误 / 账号欠费 / 实时模型未开通三种情况。
+            if (
+                close_code == 1007
+                or "Access denied" in close_reason
+                or "good standing" in close_reason
+            ):
+                ui.error(
+                    "DashScope 鉴权被拒：API Key 无效，或百炼账号欠费/未开通"
+                    "实时语音模型。请检查 dashscope_api_key（或环境变量 "
+                    "DASHSCOPE_API_KEY）配置，并登录阿里云百炼控制台确认"
+                    "账号状态与 qwen-audio-3.0-realtime-flash 开通情况。"
+                )
         except Exception as e:
             msg = str(e)
             if "401" in msg or "403" in msg:

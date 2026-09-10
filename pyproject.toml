@@ -76,8 +76,9 @@ daemon = [
     "psutil>=5.9.0",
 ]
 realtime_ui = [
-    # 实时双工语音对话独立窗口（HTML5 Canvas 方舟反应炉动画）
+    # 三栏工作台 GUI（jarvis --gui，HTML5 Canvas 方舟反应炉动画）
     # Windows 上需要 Edge WebView2 Runtime（Win10/11 通常已预装）
+    # （原 /talk 独立实时窗口已于 2026-09 下线，/talk 现为纯终端）
     "pywebview>=5.0",
 ]
 wechat = [

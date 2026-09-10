@@ -10,7 +10,8 @@ QueryLoop 与 RealtimeTalk 只依赖 UI 协议，不感知 GUI 细节：
 - info / warn / error / ask_user（询问转前端弹窗）
 - assistant_done（一轮结束，前端收尾气泡）
 
-实时语音（RealtimeTalk，沿用 realtime_window 协议）：
+实时语音（RealtimeTalk，沿用原 realtime_window 事件协议——该窗口包已于
+2026-09 删除，协议由工作台与 serve/桌面壳继续沿用）：
 - status / volume / user_speaking / ai_speaking
 - user_transcript / ai_transcript / ai_transcript_delta
 
@@ -122,7 +123,7 @@ class WorkbenchRealtimeUI(WorkbenchUI):
     """RealtimeTalk 的 GUI 适配器（实现 RealtimeTalkUI 扩展）。
 
     继承 WorkbenchUI 复用基础方法，追加实时对话的状态/音量/转录回调。
-    事件类型与 realtime_window 保持一致，前端可复用同一套渲染分支。
+    事件类型与原 realtime_window 协议保持一致，前端可复用同一套渲染分支。
 
     @author aceFelix
     """
