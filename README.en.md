@@ -85,8 +85,7 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 | MCP integration / session memory / context compaction | ✅ | ✅ | ✅ |
 | Rich terminal UI + boot animation | ✅ | ✅ | ✅ |
 | Voice conversation `/voice` (STT + TTS) | ✅ | ✅ | ✅ |
-| Real-time duplex voice `/talk` (full duplex) | ✅ | ✅ | ✅ |
-| Real-time chat window (Arc Reactor animation, REPL `/talk` only) | ✅ | ✅ | ✅ |
+| Real-time duplex voice `/talk` (full duplex, in-terminal) | ✅ | ✅ | ✅ |
 | Three-column GUI workbench (`--gui`/`--talk`, transparent + Arc Reactor) | ✅ | ✅ | ✅ |
 | Mouse / keyboard / screenshot (pyautogui) | ✅ | ✅¹ | ✅² |
 | Camera / vision monitoring | ✅ | ✅ | ✅ |
@@ -197,7 +196,7 @@ jarvis splits different capabilities into optional dependency groups, install on
 | `vision` | Real-time vision monitoring + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | Voice chat `/voice` + real-time duplex `/talk` (STT+TTS+full-duplex) | `pip install "jarvis-agent[voice]"` |
 | `daemon` | Desktop entry/hotkey/auto-start | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | Three-column workbench (`--gui`/`--talk`, Arc Reactor animation) + REPL `/talk` standalone window | `pip install "jarvis-agent[realtime_ui]"` |
+| `realtime_ui` | Three-column workbench (`--gui`/`--talk`, Arc Reactor animation) | `pip install "jarvis-agent[realtime_ui]"` |
 | `all` | All of the above | `pip install "jarvis-agent[all]"` |
 
 ### Platform System Dependencies
@@ -480,7 +479,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 | Command | Description |
 |---|---|
 | `/voice` | Enter voice conversation mode (continuous STT→LLM→TTS loop) |
-| `/talk` | Enter real-time duplex voice chat (full duplex, speak to interrupt) |
+| `/talk` | Enter real-time duplex voice chat (in-terminal full duplex, speak to interrupt) |
 | `/tts-voice [prefix]` | Switch/add TTS voice (DashScope only) |
 | `/say <text>` | TTS read specified text |
 | `/listen` `/mic` | Record and recognize to text |
@@ -684,12 +683,8 @@ Based on DashScope real-time voice WebSocket service (`qwen-audio-3.0-realtime-f
 - **smart_turn turn detection**: Fuses acoustic perception with semantic understanding to detect speech boundaries, meaningless echo sounds won't interrupt conversation
 - **AEC echo cancellation**: Based on WebRTC AEC3, eliminates speaker echo, works without headphones, preserves speak-to-interrupt capability
 - **Function Calling**: Model can autonomously call tools for real-time info. Built-in time query tool, auto-integrates all ToolRegistry tools (file read/write, Bash, Glob, Grep, WebSearch, SendEmail etc.). Model judges high-risk operations per instructions, asks user for voice confirmation before executing
-- **Standalone window UI**: After installing `realtime_ui`, pops up dedicated conversation window
-  - Black borderless design, window auto-maximizes
-  - **Arc Reactor particle animation**: Background real-time fluctuation, changes with voice volume
-  - AI speaking makes reactor core glow with color change, pulse ripples expand
-  - Dialog bubbles real-time display user and AI voice transcription text
-- **Terminal mode**: When `realtime_ui` not installed, runs in terminal, also supports interruption
+- **Terminal-only UI**: Runs full-duplex conversation directly in the terminal with live transcription stream, interruption fully supported (the pywebview standalone window was retired in 2026-09)
+- **Graphical real-time chat**: Handled by the three-column workbench (`--gui` middle-column real-time mode, Arc Reactor animation) and the jarvis-desktop app
 - Exit: ESC key or say "stand down"
 
 > **AEC dependency**: Real-time chat echo cancellation depends on `aec-audio-processing` (WebRTC AEC3 Python binding) and `numpy`, included in `[voice]` optional dependency group. Auto-degrades to smart_turn-only semantic anti-echo mode when not installed.
@@ -800,7 +795,7 @@ Clicking the close button on the title bar exits. Logs: `~/.jarvis/workbench.log
 
 > 📌 **Architecture note**: the old "windowless daemon + tray remote-control" resident mode (`--daemon`, pystray tray menu,
 > tray voice/text terminal spawning) was retired in 2026-08, replaced by the three-column GUI workbench (phase 1 shipped).
-> The old standalone `--talk` real-time window has been merged into the workbench (REPL `/talk` still uses it for now).
+> The old standalone `--talk` real-time window has been merged into the workbench (REPL `/talk` is now pure terminal; the standalone window package was retired in 2026-09).
 > Scheduled reminders / daily briefing remain dormant (code kept, to be re-wired in workbench phase 2); right-column metrics already shipped.
 
 ### Auto-start / Desktop Shortcut
@@ -831,7 +826,7 @@ model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
 ```
 
-> `api_key` for `/talk` real-time duplex voice auth. Falls back to `DASHSCOPE_API_KEY` env var if not configured.
+> `api_key` authenticates `/talk` real-time duplex voice (mapped to `dashscope_api_key`). Falls back to the `DASHSCOPE_API_KEY` env var if not configured; the main `api_key` is also reused when the current LLM provider is dashscope. **Keys from other vendors (deepseek/openai) are never borrowed** — since 2026-09 it fails fast with clear setup guidance instead of attempting a connection doomed to a 1007 Access denied rejection.
 
 ### Global Hotkey (Kept)
 
@@ -1385,19 +1380,14 @@ agent/
 │   ├── model_picker.py # Interactive model picker
 │   ├── session_picker.py # Interactive session picker
 │   ├── terminal_picker.py # Interactive terminal picker
-│   ├── workbench/     # Three-column GUI workbench (--gui/--talk, desktop icon host)
-│   │   ├── app.py     # run_workbench() entry (guard → queues → assembly → window)
-│   │   ├── engine.py  # ChatEngine (command dispatch, lazy assembly, session persistence)
-│   │   ├── api.py     # WorkbenchAPI (pywebview js_api)
-│   │   ├── bridge.py  # UI protocol → event adapters
-│   │   ├── metrics.py # CPU/memory/disk collector
-│   │   ├── single_instance.py # Single-instance guard (port 47812 + lock heartbeat)
-│   │   └── assets/    # HTML/JS/CSS (transparent Arc Reactor + bubbles)
-│   └── realtime_window/ # Real-time chat standalone window (REPL /talk only)
-│       ├── window.py  # Parent process window controller (singleton + child process management)
-│       ├── process.py # Child process entry + frontend window + JSBridge
-│       ├── bridge.py  # Webview ↔ RealtimeTalk bridge (UI protocol implementation)
-│       └── assets/    # HTML/JS/CSS (Arc Reactor animation + dialog bubbles)
+│   └── workbench/     # Three-column GUI workbench (--gui/--talk, desktop icon host)
+│       ├── app.py     # run_workbench() entry (guard → queues → assembly → window)
+│       ├── engine.py  # ChatEngine (command dispatch, lazy assembly, session persistence)
+│       ├── api.py     # WorkbenchAPI (pywebview js_api)
+│       ├── bridge.py  # UI protocol → event adapters
+│       ├── metrics.py # CPU/memory/disk collector
+│       ├── single_instance.py # Single-instance guard (port 47812 + lock heartbeat)
+│       └── assets/    # HTML/JS/CSS (transparent Arc Reactor + bubbles)
 ├── voice/             # Voice engine
 │   ├── tts.py         # CosyVoiceTTS (whole-segment synthesis + streaming start/feed/finish + interrupt)
 │   ├── stt.py         # STT three backends (QwenASR / ParaformerSTT / FunASRFlashSTT)

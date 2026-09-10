@@ -487,7 +487,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | 命令 | 说明 |
 |---|---|
 | `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
-| `/talk` | 进入实时双工语音对话（全双工，说话即可打断） |
+| `/talk` | 进入实时双工语音对话（终端内全双工，说话即可打断） |
 | `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope） |
 | `/say <文本>` | TTS 朗读指定文字 |
 | `/listen` `/mic` | 录音并识别为文字 |
@@ -691,12 +691,8 @@ Jarvis 提供两套独立的语音系统：
 - **smart_turn 轮次检测**：融合声学感知与语义理解判断说话边界，无意义附和声不会打断对话
 - **AEC 回声消除**：基于 WebRTC AEC3，消除扬声器回声，外放不戴耳机也不会自言自语，同时保留开口打断能力
 - **Function Calling**：模型可自主调用工具获取实时信息。内置时间查询工具，并自动接入 ToolRegistry 全部工具（文件读写、Bash、Glob、Grep、WebSearch、SendEmail 等）。模型根据 instructions 自主判断高风险操作，先用语音询问用户确认后再执行
-- **独立窗口 UI**：安装 `realtime_ui` 后，弹出专用对话窗口
-  - 黑色无边框设计，窗口自动最大化
-  - **方舟反应炉粒子动画**：背景实时波动，随语音音量改变
-  - AI 说话时反应炉核心变色发光，脉冲波纹扩散
-  - 对话气泡实时显示用户和 AI 的语音转录文本
-- **终端模式**：未安装 `realtime_ui` 时在终端中运行，同样支持打断
+- **纯终端 UI**：直接在终端内运行全双工对话，转录文字流实时显示，支持随时打断（2026-09 起不再弹出 pywebview 独立窗口）
+- **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式，方舟反应炉动画）与 jarvis-desktop 桌面应用承担
 - 退出方式：ESC 键或说"退下"
 
 > **AEC 依赖**：实时聊天回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，已包含在 `[voice]` 可选依赖组中。未安装时自动降级为仅 smart_turn 语义防回声模式。
@@ -839,7 +835,7 @@ model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
 ```
 
-> `api_key` 用于 `/talk` 实时双工语音鉴权。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量。
+> `api_key` 用于 `/talk` 实时双工语音鉴权（映射到 `dashscope_api_key`）。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量；当前 LLM 厂商就是 dashscope 时也可直接复用主 `api_key`。**不会借用 deepseek/openai 等其它厂商的 key**（2026-09 起防呆 fail-fast：缺配置时直接给出中文配置指引，不发起注定被 1007 Access denied 拒绝的连接）。
 
 ### 全局热键（保留）
 
@@ -1416,19 +1412,14 @@ agent/
 │   ├── model_picker.py # 交互式模型选择器
 │   ├── session_picker.py # 交互式会话选择器
 │   ├── terminal_picker.py # 交互式终端选择器
-│   ├── workbench/     # 三栏 GUI 工作台（--gui/--talk，桌面图标宿主）
-│   │   ├── app.py     # run_workbench() 入口（守卫→队列→装配→建窗）
-│   │   ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
-│   │   ├── api.py     # WorkbenchAPI（pywebview js_api）
-│   │   ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
-│   │   ├── metrics.py # CPU/内存/磁盘采集（2 秒推事件）
-│   │   ├── single_instance.py # 单实例守卫（端口 47812 + 锁文件心跳）
-│   │   └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
-│   └── realtime_window/ # 实时聊天独立窗口（仅 REPL /talk 在用）
-│       ├── window.py  # 父进程窗口控制器（单例 + 子进程管理）
-│       ├── process.py # 子进程入口 + 前端窗口 + JSBridge
-│       ├── bridge.py  # Webview ↔ RealtimeTalk 桥接（UI 协议实现）
-│       └── assets/    # HTML/JS/CSS（方舟反应炉动画 + 对话气泡）
+│   └── workbench/     # 三栏 GUI 工作台（--gui/--talk，桌面图标宿主）
+│       ├── app.py     # run_workbench() 入口（守卫→队列→装配→建窗）
+│       ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
+│       ├── api.py     # WorkbenchAPI（pywebview js_api）
+│       ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
+│       ├── metrics.py # CPU/内存/磁盘采集（2 秒推事件）
+│       ├── single_instance.py # 单实例守卫（端口 47812 + 锁文件心跳）
+│       └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
 ├── voice/             # 语音引擎
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
 │   ├── stt.py         # STT 三后端（QwenASR / ParaformerSTT / FunASRFlashSTT）

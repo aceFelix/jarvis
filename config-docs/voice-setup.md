@@ -189,6 +189,7 @@ voice = "longxiaochun_v3"
 | `缺少 pyaudio 库` | 下载 whl 安装 |
 | `音频设备初始化失败` | 检查麦克风/扬声器是否被其他程序占用 |
 | `Authentication failed` | 检查 `dashscope_api_key` 是否正确 |
+| `code=1007 Access denied / account in good standing` | DashScope 鉴权被拒：key 无效，或百炼账号欠费/未开通实时语音模型；确认 `dashscope_api_key`（或 `DASHSCOPE_API_KEY`）与控制台账号状态 |
 | `WebSocket 连接超时` | 检查网络，DashScope 实时语音需要稳定的公网连接 |
 
 ### 声音断续 / 卡顿
