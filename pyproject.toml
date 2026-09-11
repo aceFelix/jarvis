@@ -25,6 +25,10 @@ dependencies = [
     "rich>=13.7.0",
     "prompt_toolkit>=3.0.0",
     "pyyaml>=6.0",
+    # WebSocket 传输层：/talk 实时双工语音、--serve 桌面壳桥接、/connect-phone
+    # 手机协同共用。原为口头「可选依赖」需手动 pip install，新用户频繁漏装
+    # （serve 退出码 3 / 实时语音直接报错），2026-09 起升级为核心依赖。
+    "websockets>=13.0",
     "tomli>=2.0; python_version < '3.11'",
 ]
 
@@ -117,7 +121,8 @@ build-backend = "setuptools.build_meta"
 include = ["agent*"]
 
 [tool.setuptools.package-data]
-"agent" = ["configs/*.toml", "configs/*.yaml", "ui/realtime_window/assets/*"]
+# （原 ui/realtime_window/assets/* 条目已随 2026-09 该孤儿包删除而清理）
+"agent" = ["configs/*.toml", "configs/*.yaml"]
 
 [tool.ruff]
 line-length = 100
