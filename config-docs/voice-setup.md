@@ -7,7 +7,7 @@
 ## 快速启动
 
 ```bash
-# 启动后输入（REPL 内仍弹独立实时窗口）
+# 启动后输入（REPL 内纯终端全双工对话，2026-09 起不再弹独立窗口）
 /talk
 
 # 或 CLI 直接启动（打开三栏工作台，窗口内左栏切换实时模式；--gui 等价）
@@ -21,11 +21,11 @@ jarvis --talk
 ## 依赖安装
 
 ```bash
-pip install pyaudio websockets
+pip install pyaudio
 ```
 
 - **PyAudio**：Windows 上可能需要从 [这里](https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio) 下载 whl 安装
-- **websockets**：`pip install websockets` 即可
+- **websockets**：已为核心依赖，随 `pip install` 自动安装（2026-09 起，无需手动安装）
 
 ---
 

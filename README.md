@@ -1033,7 +1033,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
   ```
 
 - **停机信号**：stdin EOF（父进程退出 / 杀管道）或 `SIGINT` 触发优雅停机（先关传输层，再停采集与引擎）。
-- **依赖**：需要可选依赖 `websockets`（`pip install websockets`），缺失时以退出码 `3` 报错退出。
+- **依赖**：`websockets` 已为核心依赖（随 `pip install` 自动安装，2026-09 起）；仍保留缺失降级：import 失败时以退出码 `3` 报错退出。
 
 协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：13 条桌面指令（`message` / `sessions.*` / `models.*` / `voices.*` / `metrics.get` / `state.get` / `answer_user` / `talk.*`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md)。
 

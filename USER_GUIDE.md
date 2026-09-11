@@ -64,7 +64,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 
 > `--serve` 与 `--gui`/`--talk` 互斥：它不开窗口，而是把对话引擎以 WebSocket API 形式绑定在
 > `127.0.0.1` 随机端口（token 认证），就绪后向 stdout 打印单行握手 JSON，供 Electron 桌面壳
-> jarvis-desktop 逐行解析后拉起 UI。需可选依赖 `websockets`（`pip install websockets`）。
+> jarvis-desktop 逐行解析后拉起 UI。`websockets` 已为核心依赖，随安装自动就绪（2026-09 起）。
 
 ---
 
