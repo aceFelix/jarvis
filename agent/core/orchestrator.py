@@ -125,9 +125,15 @@ class ToolOrchestrator:
             # 无 UI 又需要询问，fail-closed 拒绝
             return PermissionResult.deny("需要用户确认但当前环境无 UI")
 
-        # 通过 UI 问用户
+        # 通过 UI 问用户：异步宿主（serve 引擎循环）优先 ask_user_async，
+        # 同步阻塞版会饿死宿主事件循环导致 answer_user 自死锁；
+        # REPL 等同步宿主无 ask_user_async，回退同步版。
+        # @author aceFelix
         question = self._format_ask(tool, tu, perm.reason)
-        answer = ctx.ui.ask_user(question)
+        if hasattr(ctx.ui, "ask_user_async"):
+            answer = await ctx.ui.ask_user_async(question)
+        else:
+            answer = ctx.ui.ask_user(question)
         normalized = answer.strip().lower()
         if normalized in ("y", "yes", "允许", "好", "确认"):
             return PermissionResult.allow("用户确认")

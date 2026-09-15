@@ -6,6 +6,8 @@
 > `--daemon` / `--with-tray` / `--detached` 启动参数一并移除。
 > 由新一代**三栏 GUI 工作台**取代（2026-08 一期落地，见 `docs/plans/workbench-gui.md`）。
 > 桌面入口已指向 `jarvis --gui` 三栏工作台。
+>
+> ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` / `holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
 
 ## 一、现存核心文件
 
@@ -16,17 +18,17 @@
 | [hotkey_native.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/hotkey_native.py) | Windows 原生 RegisterHotKey 热键监听 | ✅ 保留（待工作台接线） |
 | [platform_utils.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/platform_utils.py) | 平台/依赖探测辅助 | ✅ 在用 |
 | [voice/voice_state.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/voice/voice_state.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（由语音包持有） |
-| [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | 💤 休眠（待工作台二期接线） |
-| [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | 💤 休眠 |
-| [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | 💤 休眠 |
+| [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配） |
+| [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期已接，日历源传 None 未接） |
+| [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
 | [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | 💤 休眠 |
 | [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控 | 💤 休眠 |
 | [core/daemon/vision_watcher.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/vision_watcher.py) | 视觉守望者 | 💤 休眠 |
 | [core/daemon/holidays.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/holidays.py) | 节假日识别 | 💤 休眠 |
 
-> 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除；
-> 工作台二期将重新装配这些服务（通知渠道改为窗口内提示 + 语音播报）。
-> 注：右栏 CPU/内存/磁盘三件套一期已由工作台 `workbench/metrics.py` 轻量采集落地，休眠的 `monitor.py`（阈值告警/趋势预测）待二期接线。
+> 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
+> ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报；**仅 `--serve` / 桌面壳运行期间生效**，pywebview 工作台宿主仍未接。
+> 注：右栏 CPU/内存/磁盘三件套一期已由工作台 `workbench/metrics.py` 轻量采集落地；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）、`vision_watcher.py`、`holidays.py` 待二期接线。
 
 ## 二、桌面入口（当前形态：三栏工作台）
 
@@ -87,17 +89,17 @@ python -m agent.daemon.autostart status             # 查看状态
 > VBS 脚本名 `start_daemon.vbs` → `start_jarvis_window.vbs` → `start_workbench.vbs`（现行）：
 > 复用检查按文件名命中旧脚本会跳过重新生成，换名强制刷新启动目标。
 
-## 六、休眠服务清单（待工作台二期重新接线）
+## 六、主动感知服务清单（三件套已接线，余待二期）
 
-| 服务 | 能力 | 配置节 |
-|---|---|---|
-| Scheduler | 定时/周期/一次性任务，与日程工具联动 | — |
-| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` |
-| DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` |
-| CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` |
-| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` |
-| VisionWatcher | mediapipe 本地手势/人脸监控 | — |
-| Holidays | 节假日/工作日识别 | — |
+| 服务 | 能力 | 配置节 | 状态 |
+|---|---|---|---|
+| Scheduler | 定时/周期/一次性任务，与日程工具联动 | — | ✅ serve 宿主 ProactiveHub 装配 |
+| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` | ✅ 简报/截止已接；日历源传 None 未接 |
+| DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` | ✅ serve 宿主 ProactiveHub 装配 |
+| CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` | 💤 休眠（二期） |
+| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` | 💤 休眠（二期） |
+| VisionWatcher | mediapipe 本地手势/人脸监控 | — | 💤 休眠 |
+| Holidays | 节假日/工作日识别 | — | 💤 休眠 |
 
 ## 七、设计取舍（下线复盘）
 
@@ -107,5 +109,5 @@ python -m agent.daemon.autostart status             # 查看状态
 | 无窗口后台分离 | ❌ 移除 | 单窗口进程模型更简单：最小化到任务栏即可，无需 DETACHED_PROCESS |
 | 文本终端派生 | ❌ 移除 | 文本对话已进入工作台中栏，不再弹独立终端 |
 | 全局热键 | ✅ 保留 | 工作台「热键召唤窗口」场景复用（待接线） |
-| 主动感知全家桶 | 💤 休眠 | 代码保留，随工作台二期以窗口内通知形式回归 |
+| 主动感知全家桶 | ✅ 部分复活 | 调度/简报/截止三件套 2026-09 由 serve 宿主 `ProactiveHub` 装配、经 jarvis-desktop 桌面壳播报（`proactive_notify` 事件 + 系统通知）；监控/日历/视觉/节假日仍休眠待二期 |
 | 语音互斥锁 | ✅ 迁移 | 麦克风独占需求与形态无关，迁入 `agent/voice/` |

@@ -196,11 +196,13 @@ class SandboxExecutor:
                 logger.warning("[Sandbox] Job Object 创建失败，回退普通执行")
                 return await self._run_normal(command, cwd, env, timeout)
 
-            # 启动进程（挂起状态）
+            # 启动进程（挂起状态）；stdin 显式 DEVNULL 不继承宿主管道 stdin
+            #（MSYS2 bash 继承永不关闭的管道 stdin 会挂死，见 serve-bash-hang-fix）
             proc = await asyncio.create_subprocess_exec(
                 *shell_args,
                 cwd=work_dir,
                 env=proc_env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -270,6 +272,7 @@ class SandboxExecutor:
                 *shell_args,
                 cwd=work_dir,
                 env=proc_env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -370,6 +373,7 @@ class SandboxExecutor:
                 *shell_args,
                 cwd=work_dir,
                 env=proc_env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=_set_limits,

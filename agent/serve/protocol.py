@@ -39,6 +39,10 @@ state.get           —                           {provider, model, ...}
 answer_user         text: str                   null（回填 ask_user 弹窗）
 talk.start          —                           null（结果走 talk_started）
 talk.stop           —                           null（结果走 talk_stopped）
+voice.start         —                           null（结果走 voice_started）
+voice.stop          —                           null（结果走 voice_stopped）
+voice.interrupt     —                           bool（打断当前播报/推理）
+proactive.ack       task_id: str                bool（提醒确认，停止升级重发）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -52,6 +56,13 @@ talk.stop           —                           null（结果走 talk_stopped�
 - 实时语音：``talk_started`` / ``talk_stopped`` / ``volume`` /
   ``user_speaking`` / ``ai_speaking`` / ``user_transcript`` /
   ``ai_transcript`` / ``ai_transcript_delta``
+- 半双工语音（/voice）：``voice_started`` / ``voice_stopped`` /
+  ``voice_state``（payload = listening/thinking/speaking/standby/dialog/
+  exited） / ``voice_user_transcript`` / ``voice_ai_text_delta`` /
+  ``voice_ai_text``（源自解耦 voice_loop 经 ServeVoiceAdapter 外抛）
+- 主动播报：``proactive_notify``（payload ``{kind, title, text, task_id}``，
+  kind = ``briefing`` 每日简报 / ``reminder`` 用户提醒 / ``deadline``
+  截止日期；源自 ProactiveHub，见 ``agent/serve/hub.py``）
 - 初始化：``init``（连接建立后首推，payload 同 state.get）
 
 @author aceFelix
@@ -74,8 +85,13 @@ CMD_VOICES_SELECT = "voices.select"
 CMD_METRICS_GET = "metrics.get"
 CMD_STATE_GET = "state.get"
 CMD_ANSWER_USER = "answer_user"
+CMD_REPLY_ABORT = "reply.abort"
 CMD_TALK_START = "talk.start"
 CMD_TALK_STOP = "talk.stop"
+CMD_VOICE_START = "voice.start"
+CMD_VOICE_STOP = "voice.stop"
+CMD_VOICE_INTERRUPT = "voice.interrupt"
+CMD_PROACTIVE_ACK = "proactive.ack"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -90,14 +106,26 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_METRICS_GET,
     CMD_STATE_GET,
     CMD_ANSWER_USER,
+    CMD_REPLY_ABORT,
     CMD_TALK_START,
     CMD_TALK_STOP,
+    CMD_VOICE_START,
+    CMD_VOICE_STOP,
+    CMD_VOICE_INTERRUPT,
+    CMD_PROACTIVE_ACK,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----
 EVT_REPLY = "reply"
 EVT_INIT = "init"
 EVT_METRICS = "metrics"
+EVT_PROACTIVE_NOTIFY = "proactive_notify"
+EVT_VOICE_STARTED = "voice_started"
+EVT_VOICE_STOPPED = "voice_stopped"
+EVT_VOICE_STATE = "voice_state"
+EVT_VOICE_USER_TRANSCRIPT = "voice_user_transcript"
+EVT_VOICE_AI_TEXT_DELTA = "voice_ai_text_delta"
+EVT_VOICE_AI_TEXT = "voice_ai_text"
 
 
 def build_reply(cmd_type: str, *, ok: bool, result: object = None, error: str = "") -> dict:

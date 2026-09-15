@@ -160,6 +160,23 @@ enable_thinking = true
 
 ---
 
+## 主动播报（每日简报 / 提醒 / 截止日期）
+
+由 serve 宿主的 `ProactiveHub` 消费，经 jarvis-desktop 播报（仅 `--serve` / 桌面壳运行期间生效）。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `briefing_enabled` | `true` | 每日简报开关 |
+| `briefing_time` | `"08:30"` | 每日简报时间 HH:MM |
+| `briefing_catchup_window_min` | `120` | 简报补播窗口（分钟）：启动时错过 ≤ 此值才补播一次；≤0 关闭补播 |
+| `deadline_enabled` | `true` | 截止日期分级提醒开关 |
+| `deadline_check_time` | `"09:00"` | 每日检查截止日期的时间 HH:MM |
+| `calendar_enabled` | `false` | 日历集成（本期未接线，保留） |
+
+> 定时任务持久化在 `~/.jarvis/schedule.json`；对话里说“提醒我…”即可创建一次性任务（需桌面壳/`--serve` 在跑）。
+
+---
+
 ## 邮件
 
 ```toml

@@ -48,6 +48,7 @@ class DesktopBridgeServer(BridgeServer):
         http_port: int = 0,
         ws_port: int = 0,
         token: str = "",
+        hub: Any | None = None,
     ) -> None:
         """
         Args:
@@ -56,6 +57,8 @@ class DesktopBridgeServer(BridgeServer):
             http_port: HTTP 端口，默认 0（系统分配随机端口）。
             ws_port: WS 端口，默认 0（系统分配随机端口）。
             token: 认证 token，空则自动生成。
+            hub: ProactiveHub 实例（可选，主动播报中枢）；为 None 时
+                proactive.ack 指令回执 ok=false（协议向后兼容）。
         """
         # query_loop/ctx 传 None：桌面模式不用手机端的共享 REPL 上下文路径，
         # message 指令被本类改路由到 ChatEngine 队列
@@ -70,6 +73,7 @@ class DesktopBridgeServer(BridgeServer):
         )
         self._api = api
         self._settings = settings
+        self._hub = hub
         # 事件泵运行时状态
         self._pump_thread: threading.Thread | None = None
         self._pump_stop = threading.Event()
@@ -93,8 +97,14 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_METRICS_GET, lambda data: collect_metrics())
         self._register_rpc(protocol.CMD_STATE_GET, lambda data: self._api.get_state())
         self._register_rpc(protocol.CMD_ANSWER_USER, self._rpc_answer_user)
+        # reply.abort：停止当前回复（线程安全取消引擎 send 任务，不入队列）
+        self._register_rpc(protocol.CMD_REPLY_ABORT, lambda data: self._api.abort_reply())
         self._register_rpc(protocol.CMD_TALK_START, lambda data: self._api.start_talk())
         self._register_rpc(protocol.CMD_TALK_STOP, lambda data: self._api.stop_talk())
+        self._register_rpc(protocol.CMD_VOICE_START, lambda data: self._api.start_voice())
+        self._register_rpc(protocol.CMD_VOICE_STOP, lambda data: self._api.stop_voice())
+        self._register_rpc(protocol.CMD_VOICE_INTERRUPT, lambda data: self._api.interrupt_voice())
+        self._register_rpc(protocol.CMD_PROACTIVE_ACK, self._rpc_proactive_ack)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -153,6 +163,21 @@ class DesktopBridgeServer(BridgeServer):
     def _rpc_answer_user(self, data: dict) -> None:
         """answer_user：回填引擎 ask_user 弹窗（权限确认等）。"""
         self._api.answer_user(data.get("text") or "")
+
+    def _rpc_proactive_ack(self, data: dict) -> bool:
+        """proactive.ack：确认提醒任务（停止升级重发）。
+
+        桌面壳收到 reminder 类 proactive_notify 且窗口可见时自动回执，
+        视为已读。hub 未装配时报错（回执 ok=false，连接不中断）。
+
+        @author aceFelix
+        """
+        task_id = (data.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("缺少任务 ID task_id")
+        if self._hub is None:
+            raise RuntimeError("主动播报中枢未装配")
+        return self._hub.acknowledge(task_id)
 
     # ---- 事件泵 ----
 

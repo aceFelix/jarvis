@@ -211,9 +211,15 @@ class BashTool(Tool):
             shell_args = ["/bin/bash", "-c", command]
 
         try:
+            # stdin 必须显式 DEVNULL，不能继承宿主 stdin：serve 宿主的 stdin 是
+            # Electron 永不关闭的管道且有 _watch_stdin 线程阻塞读，MSYS2 bash
+            # 继承该管道后 Cygwin 初始化探测 stdin 句柄会挂死（bash 永不退出、
+            # 管道 EOF 永不到达），见 docs/fixlogs/serve-bash-hang-fix.md。
+            # @author aceFelix
             proc = await asyncio.create_subprocess_exec(
                 *shell_args,
                 cwd=work_dir,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -230,6 +236,13 @@ class BashTool(Tool):
             except ProcessLookupError:
                 pass
             return ToolResult.error(f"命令超时（{timeout}秒）: {command}")
+        except asyncio.CancelledError:
+            # 用户中断回复（reply.abort 取消）：回收子进程避免孤儿，再抛取消
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise
 
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace") if stderr else ""

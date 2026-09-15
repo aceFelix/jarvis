@@ -6,6 +6,7 @@ JS 通过 ``pywebview.api.*`` 调用，全部为轻量只读/入队操作，
 - 事件拉取：poll_events（前端轮询引擎事件）
 - 文本对话：send_message / new_session / list_sessions / load_session
 - 实时语音：start_talk / stop_talk
+- 半双工语音：start_voice / stop_voice / interrupt_voice
 - 左栏数据：list_models / set_model / list_voices / set_voice / get_state
 - 窗口控制：window_minimize / window_close（无边框自绘标题栏；不提供全屏，
   启动即铺满工作区且真全屏会盖住任务栏）
@@ -110,6 +111,16 @@ class WorkbenchAPI:
         """回答引擎的 ask_user 弹窗（权限确认等）。"""
         self._post({"cmd": "answer_user", "text": text})
 
+    def abort_reply(self) -> bool:
+        """停止当前回复（桌面壳发送按钮二次点击）。
+
+        直接调引擎的线程安全取消（不经指令队列：队列被当前 send 轮次
+        串行占用，入队会自死锁）。返回是否真的有轮次被取消。
+
+        @author aceFelix
+        """
+        return self._engine.abort_current_reply()
+
     # ---- 实时语音 ----
 
     def start_talk(self) -> None:
@@ -119,6 +130,20 @@ class WorkbenchAPI:
     def stop_talk(self) -> None:
         """结束实时语音会话（窗口保持）。"""
         self._post({"cmd": "stop_talk"})
+
+    # ---- 半双工语音（/voice） ----
+
+    def start_voice(self) -> None:
+        """启动 /voice 半双工语音（连续 听→答 循环）。"""
+        self._post({"cmd": "start_voice"})
+
+    def stop_voice(self) -> None:
+        """结束半双工语音会话。"""
+        self._post({"cmd": "stop_voice"})
+
+    def interrupt_voice(self) -> None:
+        """打断当前播报 / 推理（回到聆听）。"""
+        self._post({"cmd": "interrupt_voice"})
 
     # ---- 左栏：模型与音色 ----
 

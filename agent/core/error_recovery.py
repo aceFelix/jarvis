@@ -645,7 +645,13 @@ class ToolRecoveryExecutor:
                 f"建议: {error.suggestion}\n\n"
                 "是否重试一次? [y] 重试 / [n] 放弃: "
             )
-            user_answer = ctx.ui.ask_user(question)
+            # 异步宿主优先 ask_user_async：同步阻塞版会饿死 serve 引擎
+            # 事件循环，answer_user 指令同环串行无法被消费（自死锁）。
+            # @author aceFelix
+            if hasattr(ctx.ui, "ask_user_async"):
+                user_answer = await ctx.ui.ask_user_async(question)
+            else:
+                user_answer = ctx.ui.ask_user(question)
             if user_answer and user_answer.strip().lower() in ("y", "yes", "好", "确认", "重试"):
                 try:
                     result = await call_fn(effective_args, ctx)

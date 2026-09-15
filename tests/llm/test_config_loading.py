@@ -133,6 +133,24 @@ class TestApplyToml:
         assert result.email_smtp_host == "smtp.163.com"
         assert result.email_smtp_port == 465
 
+    def test_daemon_subtable_mapping(self) -> None:
+        """[daemon] 表字段应映射到主动播报/热键字段（含新增补播窗口）。"""
+        s = Settings()
+        # 默认值：补播窗口 120 分钟（与旧常量一致，向后兼容）
+        assert s.briefing_catchup_window_min == 120
+        result = _apply_toml(s, {
+            "daemon": {
+                "briefing_enabled": False,
+                "briefing_time": "09:15",
+                "briefing_catchup_window_min": 45,
+                "hotkey": "ctrl+alt+j",
+            }
+        })
+        assert result.briefing_enabled is False
+        assert result.briefing_time == "09:15"
+        assert result.briefing_catchup_window_min == 45
+        assert result.daemon_hotkey == "ctrl+alt+j"
+
     def test_llm_models_subtable(self) -> None:
         """[llm.models] 应映射到 models 字典。"""
         s = Settings()

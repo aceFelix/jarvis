@@ -190,6 +190,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 - **退出**：说"退下"或按 `ESC`
 - **打断**：我说话时按 `ESC` 立即停止朗读
 - **适用**：做饭时、开车时、懒得打字时
+- **桌面壳**：jarvis-desktop 左栏「🎤 语音」模式即此半双工循环（2026-09 起）——状态条显示聆听/思考/播报，「✋ 打断」按钮或开口说话（麦克风 barge-in）双通道打断，「⏹ 退出语音」回文本；音频在本机 serve 进程出入声，与 `/talk` 互斥。
 
 ### 实时双工 `/talk`
 
@@ -253,7 +254,7 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
 ## 桌面入口（jarvis-desktop 桌面应用）
 
 桌面入口已由 **jarvis-desktop**（Electron 桌面应用，独立仓库）接管：
-连接 `jarvis --serve` 后端，提供会话管理 / 流式对话 / 实时语音等完整桌面体验。
+连接 `jarvis --serve` 后端，提供会话管理 / 流式对话 / 实时语音（`/talk`）/ 半双工语音（`/voice`）等完整桌面体验。
 原桌面快捷方式（双击打开 pywebview 三栏工作台窗口）已于 2026-09 下线，
 与桌面应用功能冲突；存量桌面 JARVIS.lnk 可直接手动删除。
 
@@ -263,7 +264,7 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
   切换、中栏文本对话、右栏系统指标；单实例驻留，点 X 关闭）。
 
 > 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线，由三栏 GUI 工作台取代（一期已落地）。
-> 定时提醒/每日简报等主动服务仍处于休眠态，将随工作台二期一并回归（右栏指标三件套已先行落地）。
+> 定时提醒/每日简报等主动服务已于 2026-09 重新接线：现在通过 **jarvis-desktop 桌面应用**（连 `jarvis --serve` 后端）播报——每日简报、对话内“提醒我”、截止日期提醒到期时会在聊天区上屏并弹系统通知。因 serve 进程随桌面壳启停，主动服务仅在桌面壳（或手动 `--serve`）运行期间生效。
 > 终端文本对话仍可用 `jarvis`（REPL），REPL 内语音对话用 `/voice`。
 
 ### 开机自启
@@ -476,11 +477,17 @@ compact_refreeze_growth = 1.25 # 防抖：冻结后总量增长不足此倍数�
 compact_max_output_tokens = 2048  # 压缩摘要的输出 token 上限
 tool_result_keep_recent = 4   # 工具结果折叠时保留最近 N 条完整输出
 
-# 桌面入口与热键（热键召唤三栏工作台，待接线）
+# 桌面入口与主动播报（热键召唤三栏工作台，待接线；简报/截止日期由 serve 宿主的 ProactiveHub 消费，经 jarvis-desktop 播报）
 [daemon]
 hotkey = "ctrl+shift+j"
-briefing_enabled = true
-briefing_time = "08:30"
+briefing_enabled = true        # 每日简报开关（仅 --serve / 桌面壳运行期间生效）
+briefing_time = "08:30"        # 每日简报时间 HH:MM
+briefing_catchup_window_min = 120  # 简报补播窗口（分钟）：启动时错过 ≤ 此值补播一次；≤0 关闭补播
+
+# 截止日期分级提醒（❗段名是 deadline、key 是 enabled/check_time；勿写进 [daemon]，否则不生效）
+[deadline]
+enabled = true                 # 截止日期分级提醒开关
+check_time = "09:00"           # 每日检查截止日期的时间 HH:MM
 
 # 安全沙箱
 [sandbox]

@@ -674,6 +674,7 @@ After entering voice conversation mode, forms a **Listen → Think → Speak** l
 - **Interrupt mechanism**: ESC key interrupts current AI playback, or say "stand down" to exit voice mode
 - **Thinking isolation**: Thinking process only shown in terminal panel, not sent to TTS
 - **Content cleaning**: Auto-filters code blocks, tables, links and other content unsuitable for speech
+- **Desktop shell**: The jarvis-desktop left-column "🎤 Voice" mode is this same half-duplex loop (since 2026-09) — `/voice` was decoupled from RichCLI (`VoiceSessionEvents` protocol + dual adapters) and bridged through `--serve` like `/talk` (commands `voice.{start,stop,interrupt}`, events `voice_*`, mutually exclusive with `/talk`). Audio I/O (STT recording / TTS playback) stays in the serve subprocess's local pyaudio (same machine as the shell); the shell acts only as a remote control showing state/text (interrupt via button + microphone barge-in dual channel).
 
 ### Real-time Duplex `/talk`
 

@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.serve import protocol
+from agent.serve.hub import ProactiveHub
 from agent.serve.server import DesktopBridgeServer
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.engine import ChatEngine
@@ -54,13 +55,32 @@ async def _serve_main(settings: Settings) -> None:
 
     @author aceFelix
     """
-    # 装配：与 workbench app.run_workbench 同一套零件，仅宿主从 pywebview 换成 WS
+    # 装配：与 workbench app.run_workbench 同一套零件，仅宿主从 pywebview 换成 WS；
+    # 额外接 ProactiveHub（主动播报中枢，复活 59f746a 休眠的主动感知套件）
     event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
     command_queue: queue.Queue[dict[str, Any]] = queue.Queue()
-    engine = ChatEngine(settings, event_queue, command_queue)
+    hub = ProactiveHub(settings, event_queue)
+
+    def _register_proactive_tools(registry: Any) -> None:
+        """registry_hook：把提醒/截止日期工具挂进引擎注册表。
+
+        与老 daemon 同一套工具（schedule_tool / deadline_tool），共享 hub
+        内部的 Scheduler / DeadlineTracker 单例；在系统提示词生成前执行，
+        对话里说「提醒我」即可创建定时任务。失败由钩子宿主（ChatEngine）
+        捕获降级，不阻断引擎装配。
+
+        @author aceFelix
+        """
+        from agent.tools.extensions.deadline_tool import register_deadline_tools
+        from agent.tools.extensions.schedule_tool import register_schedule_tools
+
+        register_schedule_tools(registry, hub.scheduler)
+        register_deadline_tools(registry, hub.deadline_tracker)
+
+    engine = ChatEngine(settings, event_queue, command_queue, registry_hook=_register_proactive_tools)
     metrics = MetricsCollector(event_queue)
     api = WorkbenchAPI(event_queue, command_queue, engine, settings)
-    server = DesktopBridgeServer(api, settings)
+    server = DesktopBridgeServer(api, settings, hub=hub)
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -69,6 +89,9 @@ async def _serve_main(settings: Settings) -> None:
         engine.start()
         metrics.start()
         server.start_event_pump(event_queue)
+        # 主动播报中枢：调度器轮询 + 每日简报/截止日期任务注册（事件泵启动后，
+        # 确保到期事件有消费方；补播定时器延迟 5 秒等桌面壳 WS 连上）
+        hub.start()
         # 首推 init 事件（payload 与工作台 get_state 同构，前端首屏渲染）
         event_queue.put_nowait({"type": protocol.EVT_INIT, "payload": api.get_state()})
         # 就绪握手：单行 JSON 打到 stdout，Electron 逐行解析识别
@@ -87,7 +110,12 @@ async def _serve_main(settings: Settings) -> None:
         watcher.start()
         await stop_event.wait()
     finally:
-        # 优雅停机：先关传输层（含事件泵），再停采集与引擎
+        # 优雅停机：先停主动播报（避免停机中再投事件），再关传输层（含事件泵），
+        # 最后停采集与引擎
+        try:
+            hub.stop()
+        except Exception:
+            pass
         try:
             await server.stop()
         except Exception:

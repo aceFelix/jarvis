@@ -97,11 +97,32 @@ class WorkbenchUI:
         """阻塞式询问：推事件给前端弹窗，等待 answer_user 回填。
 
         超时 10 分钟兜底返回空串，避免引擎线程永久挂起。
+        仅供同步宿主（REPL 等）使用；异步宿主（serve 引擎循环）必须走
+        ask_user_async，否则阻塞等待会饿死宿主事件循环。
         """
         self._answer_event.clear()
         self._answer_text = ""
         self._emit("ask_user", prompt)
         self._answer_event.wait(timeout=600)
+        return self._answer_text
+
+    async def ask_user_async(self, prompt: str) -> str:
+        """ask_user 的异步版：serve 引擎循环等异步宿主专用。
+
+        同步版 ask_user 用 threading.Event.wait 阻塞调用线程；serve 宿主下
+        调用方就是引擎事件循环线程，阻塞期间 _command_loop 无法消费
+        answer_user 指令（同环串行）→ 自死锁直到 600s 超时。异步版把等待
+        放 asyncio.to_thread 工作线程，引擎循环保持可调度，answer_user
+        能被即时消费。事件外抛 / 回填语义与同步版完全一致。
+
+        @author aceFelix
+        """
+        import asyncio
+
+        self._answer_event.clear()
+        self._answer_text = ""
+        self._emit("ask_user", prompt)
+        await asyncio.to_thread(self._answer_event.wait, 600)
         return self._answer_text
 
     def answer_user(self, text: str) -> None:

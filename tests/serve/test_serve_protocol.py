@@ -4,6 +4,7 @@
 - build_handshake 握手 JSON 结构（Electron 主进程解析契约）
 - build_reply 回执信封（ok / 失败两路）
 - DESKTOP_COMMANDS 与 DesktopBridgeServer 处理器表一一对应（防漏注册）
+- proactive.ack RPC：hub 缺失/参数缺失报错、正常路径透传
 
 @author aceFelix
 """
@@ -11,6 +12,8 @@
 from __future__ import annotations
 
 import queue
+
+import pytest
 
 from agent.config.settings import Settings
 from agent.serve import protocol
@@ -81,3 +84,65 @@ def test_message_handler_overridden():
     handler = server._ws_handlers["message"]
     assert handler == server._cmd_message  # bound method 相等即同一实现
     assert handler.__name__ == "_cmd_message"
+
+
+# ---- reply.abort RPC ----
+
+def test_reply_abort_routes_to_api():
+    """reply.abort 已注册且透传 api.abort_reply（无进行中回复时 False）。"""
+    server = _make_server()
+    assert protocol.CMD_REPLY_ABORT in server._ws_handlers
+    assert protocol.CMD_REPLY_ABORT in protocol.DESKTOP_COMMANDS
+    # 引擎未启动/无 send 任务：abort_reply 返回 False（前端静默忽略）
+    assert server._api.abort_reply() is False
+
+
+def test_desktop_commands_count():
+    """指令总数契约：message + 17 个 rpc = 18（增减须同步双仓文档）。"""
+    assert len(protocol.DESKTOP_COMMANDS) == 18
+
+
+# ---- proactive.ack RPC ----
+
+class _StubHub:
+    """ProactiveHub 替身：记录 acknowledge 调用。"""
+
+    def __init__(self):
+        self.acked: list[str] = []
+
+    def acknowledge(self, task_id: str) -> bool:
+        self.acked.append(task_id)
+        return True
+
+
+def _make_server_with_hub(hub):
+    settings = Settings()
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
+    return DesktopBridgeServer(api, settings, hub=hub)
+
+
+def test_proactive_ack_routes_to_hub():
+    """正常路径：task_id 透传 hub.acknowledge，返回 True。"""
+    hub = _StubHub()
+    server = _make_server_with_hub(hub)
+    assert server._rpc_proactive_ack({"task_id": "abc123"}) is True
+    assert hub.acked == ["abc123"]
+
+
+def test_proactive_ack_missing_task_id_raises():
+    """缺 task_id / 空白 task_id → ValueError（回执 ok=false）。"""
+    server = _make_server_with_hub(_StubHub())
+    with pytest.raises(ValueError):
+        server._rpc_proactive_ack({})
+    with pytest.raises(ValueError):
+        server._rpc_proactive_ack({"task_id": "   "})
+
+
+def test_proactive_ack_without_hub_raises():
+    """hub 未装配 → RuntimeError（协议向后兼容，连接不中断）。"""
+    server = _make_server()  # 无 hub
+    with pytest.raises(RuntimeError):
+        server._rpc_proactive_ack({"task_id": "abc123"})

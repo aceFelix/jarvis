@@ -17,11 +17,60 @@ import asyncio
 import queue
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.message import Message
 from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
+from agent.voice.voice_events import VoiceEventsBase
+
+# 半双工语音 WS 事件名（与 agent/serve/protocol.py 的 EVT_VOICE_* 字面量对齐；
+# 此处不 import serve 包，避免 workbench ↔ serve 循环依赖）。
+_EVT_VOICE_STARTED = "voice_started"
+_EVT_VOICE_STOPPED = "voice_stopped"
+_EVT_VOICE_STATE = "voice_state"
+_EVT_VOICE_USER_TRANSCRIPT = "voice_user_transcript"
+_EVT_VOICE_AI_TEXT_DELTA = "voice_ai_text_delta"
+_EVT_VOICE_AI_TEXT = "voice_ai_text"
+
+
+class ServeVoiceAdapter(VoiceEventsBase):
+    """serve / 桌面壳宿主适配器：voice_loop 事件 → WS 事件外抛。
+
+    把解耦 voice_loop 的状态 / 转录 / 流式文本转成 ``voice_*`` 事件经
+    event_queue 推给桌面壳（jarvis-desktop）渲染；提示 / 错误复用现有
+    info / warn / error 通道。音频（STT 录音 / TTS 播放）留在本进程本地
+    pyaudio，不向 GUI 传音频流。
+
+    @author aceFelix
+    """
+
+    def __init__(self, emitter: _EventEmitter) -> None:
+        self._emitter = emitter
+
+    def on_state(self, state: str) -> None:
+        """状态迁移 → voice_state 事件。"""
+        self._emitter.emit(_EVT_VOICE_STATE, state)
+
+    def on_user_transcript(self, text: str) -> None:
+        """用户识别全文 → voice_user_transcript 事件（上屏用户气泡）。"""
+        self._emitter.emit(_EVT_VOICE_USER_TRANSCRIPT, text)
+
+    def on_ai_text_delta(self, text: str) -> None:
+        """AI 流式增量 → voice_ai_text_delta 事件（流式上屏）。"""
+        self._emitter.emit(_EVT_VOICE_AI_TEXT_DELTA, text)
+
+    def on_ai_text(self, text: str) -> None:
+        """AI 回复全文 → voice_ai_text 事件（流式收尾校验）。"""
+        self._emitter.emit(_EVT_VOICE_AI_TEXT, text)
+
+    def on_info(self, msg: str, level: str = "info") -> None:
+        """提示 / 告警 → 复用 info / warn 通道。"""
+        self._emitter.emit(level if level in ("info", "warn") else "info", msg)
+
+    def on_error(self, msg: str) -> None:
+        """错误 → 复用 error 通道。"""
+        self._emitter.emit("error", msg)
 
 
 class ChatEngine:
@@ -38,16 +87,30 @@ class ChatEngine:
         settings: Settings,
         event_queue: queue.Queue[dict[str, Any]],
         command_queue: queue.Queue[dict[str, Any]],
+        registry_hook: Callable[[Any], None] | None = None,
     ) -> None:
+        """
+        Args:
+            settings: 全局配置。
+            event_queue: 引擎 → 前端事件队列。
+            command_queue: 前端 → 引擎指令队列。
+            registry_hook: 可选工具注册表钩子。在 build_default_registry()
+                之后、系统提示词生成之前调用，宿主可据此挂载额外工具
+                （如 serve 宿主的提醒/截止日期工具）。workbench 宿主不传，
+                行为零变化。钩子异常静默降级（info 事件告知）。
+        """
         self._settings = settings
         self._event_queue = event_queue
         self._command_queue = command_queue
+        self._registry_hook = registry_hook
         self._emitter = _EventEmitter(event_queue)
         self._ui = WorkbenchUI(self._emitter)
         self._realtime_ui = WorkbenchRealtimeUI(self._emitter)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event = threading.Event()
+        # 当前 send 轮次的任务句柄（reply.abort 从其他线程线程安全地取消它）
+        self._send_task: asyncio.Task | None = None
 
     # ---- 生命周期 ----
 
@@ -102,6 +165,11 @@ class ChatEngine:
                 break
             try:
                 await self._dispatch(cmd)
+            except asyncio.CancelledError:
+                # reply.abort 取消了当前 send 轮次：_handle_send 的 finally
+                # 已发 assistant_done 收尾，指令循环继续消费后续指令。
+                # @author aceFelix
+                self._emitter.emit("info", "已停止回复")
             except Exception as e:
                 self._emitter.emit("error", f"指令处理失败({action}): {type(e).__name__}: {e}")
 
@@ -121,6 +189,12 @@ class ChatEngine:
             await self._handle_start_talk()
         elif action == "stop_talk":
             await self._handle_stop_talk()
+        elif action == "start_voice":
+            await self._handle_start_voice()
+        elif action == "stop_voice":
+            await self._handle_stop_voice()
+        elif action == "interrupt_voice":
+            await self._handle_interrupt_voice()
         elif action == "answer_user":
             self._ui.answer_user(cmd.get("text", ""))
 
@@ -146,6 +220,13 @@ class ChatEngine:
         self._emitter.emit("status", "正在初始化对话引擎...")
         provider = _build_provider(s, model_type=_model_type_for(s))
         registry: ToolRegistry = build_default_registry()
+        # 宿主钩子：挂载额外工具（serve 宿主在此接提醒/截止日期工具），
+        # 在系统提示词生成前执行，使 LLM 能感知新工具；失败不阻断装配
+        if self._registry_hook is not None:
+            try:
+                self._registry_hook(registry)
+            except Exception as e:
+                self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
         # harness 动态工具后台加载，避免阻塞首轮对话
         threading.Thread(
             target=lambda: self._register_harness(registry, s.workdir), daemon=True
@@ -210,13 +291,33 @@ class ChatEngine:
         if not text:
             return
         self._emitter.emit("user_message", text)
+        # 记录当前任务句柄：abort_current_reply 从其他线程取消它实现"停止回复"
+        self._send_task = asyncio.current_task()
         try:
             await self._query_loop.run(text, self._ctx)
         except Exception as e:
             self._emitter.emit("error", f"运行出错: {type(e).__name__}: {e}")
         finally:
+            self._send_task = None
             self._ui.assistant_done()
             self._after_turn()
+
+    def abort_current_reply(self) -> bool:
+        """停止当前回复（桌面壳发送按钮二次点击）：线程安全取消 send 任务。
+
+        不走指令队列：_command_loop 串行 await 当前 _handle_send，队列型
+        abort 会像 answer_user 一样自死锁。CancelledError 沿 _stream_once /
+        工具层优雅退出（bash 子进程被回收），_handle_send 的 finally 仍发
+        assistant_done 让前端收尾，_command_loop 捕获后继续服务。
+
+        @author aceFelix
+        """
+        task = self._send_task
+        loop = self._loop
+        if task is None or task.done() or loop is None:
+            return False
+        loop.call_soon_threadsafe(task.cancel)
+        return True
 
     def _after_turn(self) -> None:
         """一轮对话后的持久化：增量保存 + 标题生成（与 REPL 同规则）。"""
@@ -302,6 +403,9 @@ class ChatEngine:
         if getattr(self, "_talk_task", None) is not None:
             self._emitter.emit("info", "实时对话已在运行")
             return
+        # 与 /voice 互斥：进入实时语音前先停半双工语音，避免麦克风/扬声器冲突
+        if getattr(self, "_voice_task", None) is not None:
+            await self._handle_stop_voice()
         s = self._settings
         api_key = (
             s.dashscope_api_key
@@ -353,11 +457,110 @@ class ChatEngine:
             self._talk_task = None
         self._emitter.emit("talk_stopped", "")
 
+    # ---- /voice 半双工语音 ----
+
+    async def _handle_start_voice(self) -> None:
+        """启动 /voice 半双工：独立 asyncio task 跑解耦 voice_loop。
+
+        与 /talk 互斥（先停实时语音）；麦克风 barge-in watcher 挂接
+        interrupt_event（播报中开口自动打断），桌面壳按钮另走
+        interrupt_voice 指令置位同一 event（双通道）。
+
+        @author aceFelix
+        """
+        if getattr(self, "_voice_task", None) is not None:
+            self._emitter.emit("info", "半双工语音已在运行")
+            return
+        # 与 /talk 互斥：进入半双工前先停实时语音，避免麦克风/扬声器冲突
+        if getattr(self, "_talk_task", None) is not None:
+            await self._handle_stop_talk()
+        await self._ensure_session()
+        s = self._settings
+        adapter = ServeVoiceAdapter(self._emitter)
+        self._voice_interrupt = threading.Event()
+        self._voice_stop = threading.Event()
+        # 麦克风 barge-in（双通道之一）：TTS 播报中检测用户开口自动打断
+        self._voice_mic_watcher = None
+        if getattr(s, "voice_barge_in", True):
+            try:
+                from agent.voice.barge_in import _BargeInWatcher
+                w = _BargeInWatcher(lambda: self._voice_interrupt.set())
+                if getattr(w, "available", True):
+                    w.start()
+                    self._voice_mic_watcher = w
+            except Exception:
+                self._voice_mic_watcher = None
+
+        async def _voice_main() -> None:
+            try:
+                from agent.voice.voice_loop import voice_loop
+                await voice_loop(
+                    adapter, s, self._query_loop, self._ctx,
+                    stop_event=self._voice_stop,
+                    interrupt_event=self._voice_interrupt,
+                )
+            except Exception as e:
+                self._emitter.emit("error", f"半双工语音异常: {type(e).__name__}: {e}")
+            finally:
+                self._voice_task = None
+                self._stop_voice_watchers()
+                self._emitter.emit(_EVT_VOICE_STOPPED, "")
+
+        self._voice_task = asyncio.get_event_loop().create_task(_voice_main())
+        self._emitter.emit(_EVT_VOICE_STARTED, "")
+
+    async def _handle_stop_voice(self) -> None:
+        """停止半双工语音：置 stop_event + 中断阻塞录音，让 voice_loop 干净退出。"""
+        stop_ev = getattr(self, "_voice_stop", None)
+        if stop_ev is not None:
+            stop_ev.set()
+        # 中断可能阻塞在 pyaudio 的 stt.listen()（C 扩展不吃 asyncio 取消）
+        try:
+            from agent.voice import stt as stt_module
+            stt_module._request_stop()
+        except Exception:
+            pass
+        task = getattr(self, "_voice_task", None)
+        if task is not None:
+            # 给 voice_loop 一点时间走干净退出（释放语音锁 / 音频）
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+            except Exception:
+                task.cancel()
+            self._voice_task = None
+        self._stop_voice_watchers()
+        self._emitter.emit(_EVT_VOICE_STOPPED, "")
+
+    async def _handle_interrupt_voice(self) -> bool:
+        """打断当前播报 / 推理（桌面壳按钮通道）：置位 interrupt_event。"""
+        intr = getattr(self, "_voice_interrupt", None)
+        if intr is None:
+            return False
+        intr.set()
+        # 聆听阶段打断：同时中断阻塞的 stt.listen()
+        try:
+            from agent.voice import stt as stt_module
+            stt_module._request_stop()
+        except Exception:
+            pass
+        return True
+
+    def _stop_voice_watchers(self) -> None:
+        """停止麦克风 barge-in watcher（voice 退出时回收）。"""
+        w = getattr(self, "_voice_mic_watcher", None)
+        if w is not None:
+            try:
+                w.stop()
+            except Exception:
+                pass
+            self._voice_mic_watcher = None
+
     # ---- 收尾 ----
 
     async def _shutdown(self) -> None:
-        """引擎退出：停实时语音、关 provider。"""
+        """引擎退出：停实时语音、停半双工语音、关 provider。"""
         await self._handle_stop_talk()
+        await self._handle_stop_voice()
         provider = getattr(self, "_provider", None)
         if provider is not None:
             try:

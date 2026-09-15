@@ -43,13 +43,13 @@
 | `agent/ui/realtime_window/`（process.py 子进程 + JSBridge + 事件队列） | /talk 独立窗口在用 | 进程模型蓝本：GUI 主进程 + 事件队列通信 |
 | `WebviewRealtimeTalkUI` 桥接 | /talk 已验证 | 中栏实时模式直接复用 |
 | `RealtimeTalk`（DashScope 全双工，AEC/打断/工具调用） | 稳定 | 左栏 /talk 模式后端 |
-| `voice_loop`（STT→LLM→TTS） | 深度耦合 RichCLI（二期解耦） | 左栏 /voice 模式后端 |
+| `voice_loop`（STT→LLM→TTS） | ✅ 已解耦（VoiceSessionEvents + 双适配器，2026-09） | /voice 模式后端（REPL + jarvis-desktop） |
 | `agent/voice/voice_state.py` 互斥锁 | 心跳+TTL 刚重写 | 模式切换时的麦克风独占仲裁 |
 | `agent/daemon/hotkey*.py` | 已保留 | 热键召唤窗口 |
-| `agent/core/daemon/`（调度/简报/监控/视觉/日历） | 休眠态 | 右栏指标 + 主动通知渠道重接线 |
+| `agent/core/daemon/`（调度/简报/监控/视觉/日历） | 休眠态 | 右栏指标 + 主动通知渠道重接线（2026-09 注：调度/简报/截止改由 serve 宿主 ProactiveHub 接线、经 jarvis-desktop 播报，非工作台右栏；监控/视觉/日历仍休眠，见 [proactive-desktop.md](proactive-desktop.md)） |
 | QueryLoop + ToolRegistry | REPL 在用 | 中栏文本对话后端（复用，只换 UI 适配器） |
 
-预估复用率 60-70%；最大工作量在 **/voice 从 RichCLI 解耦**。
+预估复用率 60-70%；最大工作量在 **/voice 从 RichCLI 解耦**（✅ 2026-09 完成，见二期落地注）。
 
 ## 三、视觉风格（用户拍板）
 
@@ -77,10 +77,11 @@
 
 ### 二期：/voice 解耦 + 右栏系统指标 + 主动感知接线
 
-1. **/voice 事件适配器**（核心难点）：
+1. **/voice 事件适配器**（核心难点）✅ 已落地（2026-09）：
    - 抽 `VoiceSessionEvents` 协议（状态迁移：聆听/思考/播报/待机；文本增量；打断）
    - `voice_loop` 的 `RichCLI` 依赖改为协议注入：`RichCLIVoiceAdapter`（REPL 不回归）+ `WorkbenchVoiceAdapter`（GUI）
    - REPL `/voice` 与新 UI 共用同一引擎，互斥锁保证不双开
+   - **落地注（2026-09）**：解耦实现为 `agent/voice/voice_events.py`（`VoiceSessionEvents` 协议 + `VoiceEventsBase` 空实现基类）；`voice_loop` 改收 `events + interrupt_event`（打断不再自 new 键盘 watcher，改由宿主适配器挂接）；REPL 走 `agent/voice/repl_adapter.py::RichCLIVoiceAdapter`（行为保底测试通过）。GUI 侧最终未接 pywebview 工作台，而是照 `/talk` 模式经 `--serve` 桥接进 **jarvis-desktop**：`engine.ServeVoiceAdapter` 把事件转 `voice_*` WS 事件，指令 `voice.{start,stop,interrupt}`，与 `/talk` 互斥（音频 I/O 留 serve 本机 pyaudio）。详见 [jarvis-desktop.md](jarvis-desktop.md) 协议契约。
 2. **左栏 /voice 模式接入**：模型/音色选择直接改 Settings 生效；**待机电源驻留低功耗聆听保留，加开关控制**（配置项）
 3. **右栏系统指标**：拉起休眠的 `monitor.py`，通知回调改为窗口内横幅 + 语音播报
 4. **主动感知回归**：调度器/简报/截止/日历接到工作台生命周期，通知走窗口内渠道
