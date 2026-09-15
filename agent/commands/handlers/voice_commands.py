@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -100,13 +101,29 @@ def _listen(ui, settings, loop, ctx) -> None:
 
 
 async def _voice_mode(ui, settings, loop, ctx) -> None:
-    """进入语音对话模式。/voice 命令的执行体。"""
+    """进入语音对话模式。/voice 命令的执行体。
+
+    二期解耦：voice_loop 不再直接依赖 RichCLI，这里构造 REPL 适配器
+    （RichCLIVoiceAdapter）把事件映射回终端输出，并挂接键盘 ESC 打断
+    （置位 interrupt_event 由 voice_loop 轮询响应）；voice_loop 退出后
+    回收键盘 watcher。serve / 桌面壳路径用 ServeVoiceAdapter，不走本函数。
+
+    @author aceFelix
+    """
     try:
         from agent.voice.voice_loop import voice_loop
+        from agent.voice.repl_adapter import RichCLIVoiceAdapter
     except ImportError as e:
         ui.error(f"语音模块不可用: {e}")
         return
-    await voice_loop(ui, settings, loop, ctx)
+    adapter = RichCLIVoiceAdapter(ui)
+    interrupt_event = threading.Event()
+    if not adapter.start_key_watcher(interrupt_event):
+        ui.info("   ⚠ keyboard 库未安装，ESC 打断不可用（pip install keyboard）")
+    try:
+        await voice_loop(adapter, settings, loop, ctx, interrupt_event=interrupt_event)
+    finally:
+        adapter.stop_key_watcher()
 
 
 async def _realtime_talk(ui, settings) -> None:
