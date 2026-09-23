@@ -87,7 +87,7 @@ vitest **75 用例**全通过：`test/main/backend.test.ts`（握手解析/状�
 
 - 传输：WebSocket，JSON 文本帧；握手（stdout 单行）：`{"type":"jarvis-serve-ready","port","http_port","token","pid"}`。
 - 指令（客户端→服务端）：`{"type":"<cmd>",...params}`；事件（服务端→客户端）：`{"event":"<name>","data":<payload>}`；回执：`{"event":"reply","data":{"type","ok","result"|"error"}}`。
-- 13 条桌面指令：`message` / `sessions.{list,open,new}` / `models.{list,select}` / `voices.{list,select}` / `metrics.get` / `state.get` / `answer_user` / `talk.{start,stop}`。（后续「主动播报桌面接线」新增第 14 条 `proactive.ack` 与 `proactive_notify` 事件，见 [proactive-desktop.md](proactive-desktop.md)；「/voice 半双工解耦桥接」新增第 15-17 条 `voice.{start,stop,interrupt}` 与 `voice_started` / `voice_stopped` / `voice_state`（listening/thinking/speaking/standby/exited）/ `voice_user_transcript` / `voice_ai_text_delta` / `voice_ai_text` 六事件——音频 I/O 留 serve 本机 pyaudio，桌面壳只做遥控器 + 状态/文字显示；「停止回复与 serve 卡死修复」新增第 18 条 `reply.abort`（线程安全取消引擎 send 任务，发送按钮 busy 时变「■ 停止」，见 docs/fixlogs/serve-bash-hang-fix.md）。）
+- 13 条桌面指令：`message` / `sessions.{list,open,new}` / `models.{list,select}` / `voices.{list,select}` / `metrics.get` / `state.get` / `answer_user` / `talk.{start,stop}`。（后续「主动播报桌面接线」新增第 14 条 `proactive.ack` 与 `proactive_notify` 事件，见 [proactive-desktop.md](proactive-desktop.md)；「/voice 半双工解耦桥接」新增第 15-17 条 `voice.{start,stop,interrupt}` 与 `voice_started` / `voice_stopped` / `voice_state`（listening/thinking/speaking/standby/exited）/ `voice_user_transcript` / `voice_ai_text_delta` / `voice_ai_text` 六事件——音频 I/O 留 serve 本机 pyaudio，桌面壳只做遥控器 + 状态/文字显示；「停止回复与 serve 卡死修复」新增第 18 条 `reply.abort`（线程安全取消引擎 send 任务，发送按钮 busy 时变「■ 停止」，见 docs/fixlogs/serve-bash-hang-fix.md）；「右栏五区块」新增第 19-20 条 `schedule.list`（任务中心：提醒 + 截止日期）与 `cost.get`（会话用量卡），`state.get` 同步扩 `mcp` 连接快照（运行健康区块）。）
 
 ## 七、风险与对策
 
@@ -96,7 +96,7 @@ vitest **75 用例**全通过：`test/main/backend.test.ts`（握手解析/状�
 | 壳与引擎进程生命周期错配（孤儿 Python 占端口） | 握手带 pid；退出 `taskkill /T` 杀进程树；stdin EOF 双向联动停机 |
 | token 泄露 | 仅内存传递、不落盘；WS 仅绑 127.0.0.1 随机端口，不对局域网暴露 |
 | 本机无 Python 环境 | 一期 env 可配 + 失败弹窗诊断；二期 PyInstaller 捆绑运行时 |
-| 前后端协议漂移 | protocol.py 为唯一来源 + contracts.ts 镜像；测试校验全部桌面指令注册（现 18 条） |
+| 前后端协议漂移 | protocol.py 为唯一来源 + contracts.ts 镜像；测试校验全部桌面指令注册（现 20 条） |
 | Electron 二进制下载失败（证书/代理） | README/development.md 记录国内镜像 workaround |
 
 ## 八、一期落地复盘（2026-09）

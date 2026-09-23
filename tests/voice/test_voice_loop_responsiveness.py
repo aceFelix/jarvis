@@ -78,7 +78,7 @@ class _FakeQueryLoop:
     def set_thinking_enabled(self, on: bool) -> None:
         self._thinking = on
 
-    async def run(self, text, ctx):
+    async def run(self, text, ctx, images=None):
         return SimpleNamespace(stopped_reason="end", iterations=1, tool_calls=0)
 
 

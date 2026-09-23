@@ -131,7 +131,7 @@ def test_engine_abort_current_reply(monkeypatch):
     class _HangingLoop:
         """假 QueryLoop：run 长睡模拟长回复，等待被取消。"""
 
-        async def run(self, text, ctx):
+        async def run(self, text, ctx, images=None):
             await asyncio.sleep(60)
 
     # 预置会话状态跳过重型装配（与既有引擎测试同法）

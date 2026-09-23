@@ -98,8 +98,8 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 17 个 rpc = 18（增减须同步双仓文档）。"""
-    assert len(protocol.DESKTOP_COMMANDS) == 18
+    """指令总数契约：message + 19 个 rpc = 20（增减须同步双仓文档）。"""
+    assert len(protocol.DESKTOP_COMMANDS) == 20
 
 
 # ---- proactive.ack RPC ----

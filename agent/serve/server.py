@@ -30,6 +30,13 @@ from agent.serve import protocol
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.metrics import collect_metrics
 
+# 附件上限（与桌面壳前端同一口径）：防单条消息超大 payload 打爆 WS/上下文。
+# 超限在入队前快速失败（reply ok=False），不进引擎队列。@author aceFelix
+_MAX_ATTACH_IMAGES = 8
+_MAX_IMAGE_B64_CHARS = 10_000_000
+_MAX_ATTACH_FILES = 5
+_MAX_FILE_CHARS = 200_000
+
 
 class DesktopBridgeServer(BridgeServer):
     """桌面壳 API 服务器：BridgeServer 传输层 + ChatEngine 指令路由。
@@ -96,6 +103,8 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_VOICES_SELECT, self._rpc_voices_select)
         self._register_rpc(protocol.CMD_METRICS_GET, lambda data: collect_metrics())
         self._register_rpc(protocol.CMD_STATE_GET, lambda data: self._api.get_state())
+        self._register_rpc(protocol.CMD_SCHEDULE_LIST, self._rpc_schedule_list)
+        self._register_rpc(protocol.CMD_COST_GET, lambda data: self._api.get_cost())
         self._register_rpc(protocol.CMD_ANSWER_USER, self._rpc_answer_user)
         # reply.abort：停止当前回复（线程安全取消引擎 send 任务，不入队列）
         self._register_rpc(protocol.CMD_REPLY_ABORT, lambda data: self._api.abort_reply())
@@ -129,14 +138,63 @@ class DesktopBridgeServer(BridgeServer):
     # ---- 需要参数加工/校验的指令 ----
 
     async def _cmd_message(self, ws: Any, data: dict) -> None:
-        """message 指令：文本入引擎队列，回执确认（流式结果走事件泵）。"""
+        """message 指令：文本（可带 images/files 附件）入引擎队列，回执确认（流式结果走事件泵）。
+
+        附件校验（快速失败，垃圾数据不进引擎队列）：
+        - images：≤8 张，每条 {data: base64 串（≤10M 字符）, media_type}；
+        - files：≤5 个，每条 {name, content（≤20 万字符）}。
+
+        @author aceFelix
+        """
         text = (data.get("text") or "").strip()
-        if not text:
+        images = data.get("images") or []
+        files = data.get("files") or []
+        if not isinstance(images, list) or len(images) > _MAX_ATTACH_IMAGES:
+            await self._send_json(
+                ws, protocol.build_reply(
+                    protocol.CMD_MESSAGE, ok=False, error=f"图片附件过多（上限 {_MAX_ATTACH_IMAGES} 张）"
+                )
+            )
+            return
+        for item in images:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("data"), str)
+                or not item["data"]
+                or len(item["data"]) > _MAX_IMAGE_B64_CHARS
+            ):
+                await self._send_json(
+                    ws, protocol.build_reply(
+                        protocol.CMD_MESSAGE, ok=False, error="图片附件非法或超大（base64 上限 10M 字符）"
+                    )
+                )
+                return
+        if not isinstance(files, list) or len(files) > _MAX_ATTACH_FILES:
+            await self._send_json(
+                ws, protocol.build_reply(
+                    protocol.CMD_MESSAGE, ok=False, error=f"文件附件过多（上限 {_MAX_ATTACH_FILES} 个）"
+                )
+            )
+            return
+        for item in files:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or not isinstance(item.get("content"), str)
+                or len(item["content"]) > _MAX_FILE_CHARS
+            ):
+                await self._send_json(
+                    ws, protocol.build_reply(
+                        protocol.CMD_MESSAGE, ok=False, error="文本文件附件非法或超大（上限 20 万字符）"
+                    )
+                )
+                return
+        if not text and not images and not files:
             await self._send_json(
                 ws, protocol.build_reply(protocol.CMD_MESSAGE, ok=False, error="空消息")
             )
             return
-        self._api.send_message(text)
+        self._api.send_message(text, images=images or None, files=files or None)
         await self._send_json(ws, protocol.build_reply(protocol.CMD_MESSAGE, ok=True))
 
     def _rpc_sessions_open(self, data: dict) -> None:
@@ -163,6 +221,41 @@ class DesktopBridgeServer(BridgeServer):
     def _rpc_answer_user(self, data: dict) -> None:
         """answer_user：回填引擎 ask_user 弹窗（权限确认等）。"""
         self._api.answer_user(data.get("text") or "")
+
+    def _rpc_schedule_list(self, data: dict) -> dict:
+        """schedule.list：右栏任务中心数据源（待触发提醒 + 活跃截止日期）。
+
+        hub 未装配时返回空列表（ok=true，前端显示空态而非报错）。
+        字段口径：
+        - reminders：{id, content, trigger_at, repeat}（trigger_at 为 ISO 串，按时间升序）；
+        - deadlines：{id, title, due_date, days_left, status}（days_left 负数=已逾期）。
+
+        @author aceFelix
+        """
+        reminders: list[dict] = []
+        deadlines: list[dict] = []
+        hub = self._hub
+        if hub is not None:
+            for task in hub.scheduler.list_pending():
+                reminders.append(
+                    {
+                        "id": task.id,
+                        "content": task.content,
+                        "trigger_at": task.trigger_at,
+                        "repeat": task.repeat,
+                    }
+                )
+            for item in hub.deadline_tracker.list_active():
+                deadlines.append(
+                    {
+                        "id": item.id,
+                        "title": item.title,
+                        "due_date": item.due_date,
+                        "days_left": item.days_left,
+                        "status": item.status,
+                    }
+                )
+        return {"reminders": reminders, "deadlines": deadlines}
 
     def _rpc_proactive_ack(self, data: dict) -> bool:
         """proactive.ack：确认提醒任务（停止升级重发）。

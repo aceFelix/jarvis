@@ -103,6 +103,13 @@ class ChatEngine:
         self._event_queue = event_queue
         self._command_queue = command_queue
         self._registry_hook = registry_hook
+        # MCP client 引用（_connect_mcp 保留防 GC 断连，对齐 realtime_talk 的做法）
+        # @author aceFelix
+        self._mcp_client: Any = None
+        # MCP 连接结果快照（state.get 供右栏运行健康展示；None=MCP 未启用/未装配）
+        # 结构：{"connected": [server 名...], "failed": [...], "tools": int}
+        # @author aceFelix
+        self._mcp_status: dict[str, Any] | None = None
         self._emitter = _EventEmitter(event_queue)
         self._ui = WorkbenchUI(self._emitter)
         self._realtime_ui = WorkbenchRealtimeUI(self._emitter)
@@ -111,6 +118,44 @@ class ChatEngine:
         self._stop_event = threading.Event()
         # 当前 send 轮次的任务句柄（reply.abort 从其他线程线程安全地取消它）
         self._send_task: asyncio.Task | None = None
+
+    # ---- 只读状态快照（serve 右栏数据源：cost.get / state.get 经 WorkbenchAPI 读取） ----
+
+    @property
+    def session_usage(self) -> dict[str, int]:
+        """会话级累计 token 用量（cost.get 数据源；引擎未装配/假 loop 时全 0）。
+
+        @author aceFelix
+        """
+        usage = getattr(getattr(self, "_query_loop", None), "session_usage", None)
+        if usage is None:
+            return {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+            }
+        return {
+            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+            "cache_read_tokens": int(getattr(usage, "cache_read_tokens", 0) or 0),
+            "cache_creation_tokens": int(getattr(usage, "cache_creation_tokens", 0) or 0),
+        }
+
+    @property
+    def dialog_count(self) -> int:
+        """已完成对话轮数（cost.get 数据源；未装配时为 0）。"""
+        return int(getattr(self, "_dialog_count", 0) or 0)
+
+    @property
+    def message_count(self) -> int:
+        """当前会话消息条数（cost.get 数据源；未装配时为 0）。"""
+        return len(getattr(self, "_messages", None) or [])
+
+    @property
+    def mcp_status(self) -> dict[str, Any] | None:
+        """MCP 连接结果快照（state.get 数据源；None=MCP 未启用或未装配）。"""
+        return self._mcp_status
 
     # ---- 生命周期 ----
 
@@ -178,7 +223,9 @@ class ChatEngine:
         action = cmd.get("cmd")
         if action == "send":
             await self._ensure_session()
-            await self._handle_send(cmd.get("text", ""))
+            await self._handle_send(
+                cmd.get("text", ""), cmd.get("images"), cmd.get("files")
+            )
         elif action == "load_session":
             await self._ensure_session()
             await self._handle_load(cmd.get("name", ""))
@@ -227,6 +274,12 @@ class ChatEngine:
                 self._registry_hook(registry)
             except Exception as e:
                 self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
+        # MCP 接入：对齐 main.repl() 的连接步骤——连接 ~/.jarvis/mcp.json 配置的
+        # server 并注册其工具。此前 workbench/serve 装配路径漏掉该步骤，导致桌面壳
+        # 永远缺少 MCP 工具（如 mcp__amap-maps__*），见
+        # docs/fixlogs/serve-mcp-truncation-fix.md。@author aceFelix
+        if s.enable_mcp:
+            await self._connect_mcp(registry)
         # harness 动态工具后台加载，避免阻塞首轮对话
         threading.Thread(
             target=lambda: self._register_harness(registry, s.workdir), daemon=True
@@ -285,16 +338,84 @@ class ChatEngine:
         except Exception:
             pass
 
-    async def _handle_send(self, text: str) -> None:
-        """执行一轮文本对话：loop.run → 事件流已在 UI 适配器中推给前端。"""
+    async def _connect_mcp(self, registry: Any) -> None:
+        """连接配置的 MCP server 并把其工具注册进 registry（对齐 main.repl 的 MCP 接入）。
+
+        - connect_all 内部并发连接且每 server 有超时，不会把引擎装配拖成无限等待；
+        - client 引用保留在 self._mcp_client，防 GC 回收导致子进程连接断开；
+        - 任何异常静默降级（仅 info 提示），不阻断文本对话装配。
+
+        @author aceFelix
+        """
+        try:
+            from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
+            from agent.core.tool import register_dynamic_tools
+
+            client = MCPClient()
+            if not client.available:
+                return
+            config = load_mcp_config()
+            if not config:
+                return
+            self._emitter.emit("status", f"正在连接 {len(config)} 个 MCP server...")
+            results = await client.connect_all(config)
+            connected = sum(1 for v in results.values() if v)
+            if not connected:
+                self._mcp_status = {
+                    "connected": [],
+                    "failed": list(config.keys()),
+                    "tools": 0,
+                }
+                self._emitter.emit(
+                    "info", f"⚠ MCP: 所有 server 连接失败（{', '.join(config.keys())}）"
+                )
+                return
+            self._mcp_client = client
+            count = register_dynamic_tools(registry, client)
+            failed = [name for name, ok in results.items() if not ok]
+            # 连接结果快照：供 state.get 右栏运行健康展示（成功/失败名单 + 工具数）
+            self._mcp_status = {
+                "connected": [name for name, ok in results.items() if ok],
+                "failed": failed,
+                "tools": count,
+            }
+            msg = f"MCP: {connected}/{len(config)} server 已连接，注册 {count} 个工具"
+            if failed:
+                msg += f"（{', '.join(failed)} 连接失败，对应工具不可用）"
+            self._emitter.emit("info", msg)
+        except ImportError:
+            pass  # MCP SDK 未安装，跳过接入
+        except Exception as e:
+            self._emitter.emit("info", f"⚠ MCP 接入异常: {type(e).__name__}: {e}")
+
+    async def _handle_send(
+        self,
+        text: str,
+        images: list[dict[str, Any]] | None = None,
+        files: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """执行一轮对话：loop.run → 事件流已在 UI 适配器中推给前端。
+
+        附件（桌面壳 📎 按钮 / 粘贴，见 docs/architecture/07-UI层.md）：
+        - images：base64 图片块列表，转 ImageContent 走 loop.run 的 vision 参数；
+        - files：文本文件内容列表，拼进消息正文的「附带文件」代码块（超长截断），
+          模型直接读到文件内容，无需额外工具。
+
+        @author aceFelix
+        """
         text = (text or "").strip()
-        if not text:
+        img_blocks = _parse_images(images)
+        if not text and not img_blocks and not files:
             return
+        composed = _compose_with_files(text, files)
+        if not composed.strip():
+            # 纯图片消息：补一句最小指令文本，让模型有回应落点
+            composed = "请结合附带的图片回答。"
         self._emitter.emit("user_message", text)
         # 记录当前任务句柄：abort_current_reply 从其他线程取消它实现"停止回复"
         self._send_task = asyncio.current_task()
         try:
-            await self._query_loop.run(text, self._ctx)
+            await self._query_loop.run(composed, self._ctx, images=img_blocks or None)
         except Exception as e:
             self._emitter.emit("error", f"运行出错: {type(e).__name__}: {e}")
         finally:
@@ -569,29 +690,85 @@ class ChatEngine:
                 pass
 
 
+# 单个附带文本文件的正文上限（字符）：防一个巨型文件撑爆单轮上下文，
+# 截断保留头部并附提示（与 serve/server.py 的入队校验上限独立，双保险）。
+# @author aceFelix
+_MAX_ATTACH_FILE_CHARS = 20_000
+
+
+def _parse_images(images: Any) -> list[Any]:
+    """把 message 指令的 images 字段（[{data, media_type}]）转 ImageContent 列表。
+
+    非法条目（非 dict / 缺 data）静默跳过；base64 合法性校验留给 provider 层。
+    @author aceFelix
+    """
+    from agent.core.message import ImageContent
+
+    out: list[Any] = []
+    for item in images or []:
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data")
+        if not isinstance(data, str) or not data:
+            continue
+        out.append(ImageContent(data=data, media_type=str(item.get("media_type") or "image/png")))
+    return out
+
+
+def _compose_with_files(text: str, files: Any) -> str:
+    """把文本文件附件（[{name, content}]）以代码块形式拼进消息正文。
+
+    超长文件截断到 _MAX_ATTACH_FILE_CHARS 并附提示；空内容文件跳过。
+    @author aceFelix
+    """
+    composed = text
+    for item in files or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "未命名.txt")
+        content = str(item.get("content") or "")
+        if not content.strip():
+            continue
+        if len(content) > _MAX_ATTACH_FILE_CHARS:
+            content = (
+                content[:_MAX_ATTACH_FILE_CHARS]
+                + f"\n…（文件过长，仅展示前 {_MAX_ATTACH_FILE_CHARS} 字符）"
+            )
+        composed += f"\n\n【附带文件 {name}】\n```\n{content}\n```"
+    return composed
+
+
 def _messages_to_render(messages: list[Message]) -> list[dict[str, Any]]:
     """把历史消息转成前端渲染结构（只保留文本块，工具块折叠为提示）。
 
+    图片块（用户附件）折叠为「[图片×N]」标记行，历史回放不传 base64。
     @author aceFelix
     """
-    from agent.core.message import TextContent, ToolResultContent, ToolUseContent
+    from agent.core.message import ImageContent, TextContent, ToolResultContent, ToolUseContent
 
     out: list[dict[str, Any]] = []
     for m in messages:
         texts: list[str] = []
         tool_count = 0
+        img_count = 0
         for b in m.content:
             if isinstance(b, TextContent) and b.text.strip():
                 texts.append(b.text)
             elif isinstance(b, (ToolUseContent, ToolResultContent)):
                 tool_count += 1
-        if not texts and not tool_count:
+            elif isinstance(b, ImageContent):
+                img_count += 1
+        if not texts and not tool_count and not img_count:
             continue
         # 纯工具结果消息（role=user 的工具回填）不进历史回放；
         # assistant 纯工具消息保留为"工具调用 ×N"提示行。
-        if not texts and m.role != "assistant":
+        if not texts and not img_count and m.role != "assistant":
             continue
-        item: dict[str, Any] = {"role": m.role, "text": "\n\n".join(texts)}
+        body = "\n\n".join(texts)
+        if img_count:
+            marker = f"[图片×{img_count}]"
+            body = f"{body}\n{marker}" if body else marker
+        item: dict[str, Any] = {"role": m.role, "text": body}
         if tool_count:
             item["tool_count"] = tool_count
         out.append(item)

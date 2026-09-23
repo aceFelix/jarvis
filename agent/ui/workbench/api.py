@@ -78,9 +78,26 @@ class WorkbenchAPI:
 
     # ---- 文本对话 ----
 
-    def send_message(self, text: str) -> None:
-        """发送一条文本消息给对话引擎。"""
-        self._post({"cmd": "send", "text": text})
+    def send_message(
+        self,
+        text: str,
+        images: list[dict[str, Any]] | None = None,
+        files: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """发送一条消息（可带图片/文本文件附件）给对话引擎。
+
+        - images：[{data: base64, media_type}]，走 vision 链路；
+        - files：[{name, content}]，引擎拼进消息正文。
+        校验在 serve/server.py 入队前完成，这里只做透传。
+
+        @author aceFelix
+        """
+        payload: dict[str, Any] = {"cmd": "send", "text": text}
+        if images:
+            payload["images"] = images
+        if files:
+            payload["files"] = files
+        self._post(payload)
 
     def new_session(self) -> None:
         """新建会话（清空中栏气泡）。"""
@@ -148,7 +165,7 @@ class WorkbenchAPI:
     # ---- 左栏：模型与音色 ----
 
     def get_state(self) -> dict[str, Any]:
-        """窗口初始状态：当前模型/音色/厂商等（前端首屏渲染）。"""
+        """窗口初始状态：当前模型/音色/厂商 + MCP 连接快照（前端首屏与右栏渲染）。"""
         s = self._settings
         return {
             "provider": s.provider,
@@ -157,6 +174,26 @@ class WorkbenchAPI:
             "realtime_model": getattr(s, "realtime_model", ""),
             "realtime_voice": getattr(s, "realtime_voice", ""),
             "workdir": s.workdir,
+            # MCP 连接快照：{"connected": [...], "failed": [...], "tools": int}
+            # 或 None（MCP 未启用/未装配）——右栏运行健康区块据此渲染
+            "mcp": self._engine.mcp_status,
+        }
+
+    def get_cost(self) -> dict[str, Any]:
+        """会话用量统计（serve cost.get 指令数据源，桌面壳右栏用量卡）。
+
+        口径与 REPL /cost 一致：token 四类累计（输入/输出/缓存读/缓存写）
+        取自引擎 QueryLoop.session_usage，另附对话轮数与消息条数。
+
+        @author aceFelix
+        """
+        s = self._settings
+        return {
+            "provider": s.provider,
+            "model": s.model or "",
+            **self._engine.session_usage,
+            "dialogs": self._engine.dialog_count,
+            "messages": self._engine.message_count,
         }
 
     def list_models(self) -> list[dict[str, Any]]:

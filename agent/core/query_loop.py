@@ -331,8 +331,13 @@ class QueryLoop:
             if isinstance(stop_event, Stop):
                 stats.usage = stop_event.usage
 
-            # 输出截断恢复
-            if isinstance(stop_event, Stop) and stop_event.reason == "length":
+            # 输出截断恢复。
+            # reason 口径：openai 协议 finish_reason="length"；anthropic 协议原生
+            # stop_reason="max_tokens"（含推理预算耗尽的截断）。此前只认 "length"，
+            # 导致 anthropic 协议下截断轮被静默当作最终答案（只剩 thinking、
+            # 无正文无工具调用），见 docs/fixlogs/serve-mcp-truncation-fix.md。
+            # @author aceFelix
+            if isinstance(stop_event, Stop) and stop_event.reason in ("length", "max_tokens"):
                 if ctx.ui:
                     ctx.ui.warn("⚠ 输出被截断（max_tokens），自动续写...")
                 layered.append(Message(

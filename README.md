@@ -131,6 +131,12 @@ pip install -e .
 pip install -e ".[all]"
 ```
 
+> **注意**：`jarvis` 命令入口生成在**当前环境**的 Scripts/bin 目录。
+> 在 venv 里安装后必须先激活虚拟环境，否则终端会报 `jarvis: command not found`：
+> - Windows Git Bash：`source .venv/Scripts/activate`
+> - Windows PowerShell：`.venv\Scripts\Activate.ps1`
+> - Linux/macOS：`source .venv/bin/activate`
+
 ### 用 uv 安装（更快）
 
 [uv](https://docs.astral.sh/uv/) 是 Rust 编写的高性能 Python 包管理器，推荐新用户尝试：
@@ -1043,9 +1049,11 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
 - **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。
+- **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
+- **右栏五区块（桌面壳）**：快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）、任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）。刷新时机：init 六路齐刷、assistant_done 刷用量、proactive_notify 刷任务列表。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：18 条桌面指令（`message` / `sessions.*` / `models.*` / `voices.*` / `metrics.get` / `state.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：20 条桌面指令（`message` / `sessions.*` / `models.*` / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 

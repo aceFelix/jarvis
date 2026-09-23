@@ -591,6 +591,28 @@ class TestRunEdgeCases:
         # 最后一条 assistant 消息为续写内容
         assert msgs[-1].role == "assistant" and msgs[-1].get_text() == "续写完成"
 
+    async def test_stop_reason_max_tokens_auto_continue(self, registry):
+        """anthropic 原生 stop_reason=max_tokens（含推理预算耗尽截断）→ 同样自动续写。
+
+        回归：此前只认 openai 口径 "length"，anthropic 协议下截断轮被静默当作
+        最终答案（只剩 thinking、无正文无工具调用），
+        见 docs/fixlogs/serve-mcp-truncation-fix.md。@author aceFelix
+        """
+        provider = ScriptedProvider([
+            [TextDelta("推理的前半段"), Stop(reason="max_tokens", usage=Usage())],
+            [TextDelta("续写完成"), Stop(reason="stop")],
+        ])
+        loop = make_loop(provider, FakeOrchestrator(), registry)
+        ui = FakeUI()
+        ctx, msgs = make_ctx(ui=ui)
+
+        stats = await loop.run("写长文", ctx)
+
+        assert stats.stopped_reason == "stop"
+        assert provider.stream_calls == 2
+        assert any("自动续写" in w for w in ui.warns)
+        assert msgs[-1].role == "assistant" and msgs[-1].get_text() == "续写完成"
+
 
 # ---------------------------------------------------------------------------
 # 思考内容 / 图片 / hooks

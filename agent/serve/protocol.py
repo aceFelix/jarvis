@@ -27,6 +27,10 @@
 指令                参数                        result
 ==================  ==========================  =============================
 message             text: str                   null（结果走流式事件）
+                      [, images: [{data,
+                      media_type}]（≤8 张）
+                      , files: [{name, content}]
+                      （≤5 个文本文件）]
 sessions.list       —                           [{name, updated_at, ...}]
 sessions.open       name: str                   null（结果走 session_loaded）
 sessions.new        —                           null（结果走 session_new）
@@ -35,7 +39,11 @@ models.select       name: str                   bool（是否持久化成功）
 voices.list         —                           [{name, current, ...}]
 voices.select       name: str                   bool
 metrics.get         —                           {cpu, memory, disk}
-state.get           —                           {provider, model, ...}
+state.get           —                           {provider, model, mcp, ...}
+schedule.list       —                           {reminders: [...],
+                                                 deadlines: [...]}
+cost.get            —                           {model, input_tokens,
+                                                 output_tokens, ...}
 answer_user         text: str                   null（回填 ask_user 弹窗）
 talk.start          —                           null（结果走 talk_started）
 talk.stop           —                           null（结果走 talk_stopped）
@@ -84,6 +92,8 @@ CMD_VOICES_LIST = "voices.list"
 CMD_VOICES_SELECT = "voices.select"
 CMD_METRICS_GET = "metrics.get"
 CMD_STATE_GET = "state.get"
+CMD_SCHEDULE_LIST = "schedule.list"
+CMD_COST_GET = "cost.get"
 CMD_ANSWER_USER = "answer_user"
 CMD_REPLY_ABORT = "reply.abort"
 CMD_TALK_START = "talk.start"
@@ -105,6 +115,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_VOICES_SELECT,
     CMD_METRICS_GET,
     CMD_STATE_GET,
+    CMD_SCHEDULE_LIST,
+    CMD_COST_GET,
     CMD_ANSWER_USER,
     CMD_REPLY_ABORT,
     CMD_TALK_START,

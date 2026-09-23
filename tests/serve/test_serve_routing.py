@@ -3,6 +3,7 @@
 覆盖：
 - message：入引擎队列 + ok 回执；空文本 → 失败回执
 - request/response 型指令：sessions/models/voices/metrics/state 正常路径
+- schedule.list / cost.get：右栏任务中心与用量卡数据源（hub 缺失降级空列表）
 - 参数校验：sessions.open / models.select / voices.select 缺 name → 失败回执
 - 事件泵：引擎事件 → broadcast 信封映射；stop 幂等
 
@@ -17,6 +18,8 @@ import queue
 import time
 
 from agent.config.settings import Settings
+from agent.core.daemon.deadline import Deadline
+from agent.core.daemon.scheduler import ScheduleTask
 from agent.serve.server import DesktopBridgeServer
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.engine import ChatEngine
@@ -70,6 +73,46 @@ def test_message_empty_text_rejected():
     reply = _call(server, "message", {"text": "   "})
     assert reply["data"]["ok"] is False
     assert reply["data"]["error"] == "空消息"
+    assert command_queue.empty()
+
+
+def test_message_with_attachments_passthrough():
+    """images/files 随 message 透传入引擎队列（桌面壳 📎 附件链路）。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "message", {
+        "text": "看图",
+        "images": [{"data": "QUJD", "media_type": "image/png"}],
+        "files": [{"name": "a.md", "content": "# x"}],
+    })
+    assert reply["data"]["ok"] is True
+    cmd = command_queue.get_nowait()
+    assert cmd["images"] == [{"data": "QUJD", "media_type": "image/png"}]
+    assert cmd["files"] == [{"name": "a.md", "content": "# x"}]
+
+
+def test_message_images_only_ok():
+    """纯图片（空文本）也入队：引擎会补最小指令文本。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "message", {"text": "", "images": [{"data": "QUJD"}]})
+    assert reply["data"]["ok"] is True
+    assert command_queue.get_nowait()["cmd"] == "send"
+
+
+def test_message_too_many_images_rejected():
+    """图片超 8 张：失败回执，不入队。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "message", {"text": "x", "images": [{"data": "QQ"}] * 9})
+    assert reply["data"]["ok"] is False
+    assert command_queue.empty()
+
+
+def test_message_oversized_file_rejected():
+    """单文件内容超 20 万字符：失败回执，不入队。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "message", {
+        "text": "x", "files": [{"name": "b.txt", "content": "y" * 200_001}]
+    })
+    assert reply["data"]["ok"] is False
     assert command_queue.empty()
 
 
@@ -130,6 +173,103 @@ def test_state_get_reply():
     reply = _call(server, "state.get", {})
     assert reply["data"]["ok"] is True
     assert isinstance(reply["data"]["result"], dict)
+
+
+def test_state_get_includes_mcp_key():
+    """state.get 带 mcp 键（右栏运行健康数据源；引擎未装配 MCP 时为 None）。"""
+    server, _, _, _ = _make()
+    reply = _call(server, "state.get", {})
+    assert reply["data"]["ok"] is True
+    assert "mcp" in reply["data"]["result"]
+    assert reply["data"]["result"]["mcp"] is None
+
+
+# ---- schedule.list / cost.get（右栏任务中心 + 用量卡） ----
+
+
+class _StubScheduler:
+    """Scheduler 替身：返回固定的待触发任务列表。"""
+
+    def __init__(self, tasks: list[ScheduleTask]) -> None:
+        self._tasks = tasks
+
+    def list_pending(self) -> list[ScheduleTask]:
+        return list(self._tasks)
+
+
+class _StubDeadlineTracker:
+    """DeadlineTracker 替身：返回固定的活跃截止日期列表。"""
+
+    def __init__(self, items: list[Deadline]) -> None:
+        self._items = items
+
+    def list_active(self) -> list[Deadline]:
+        return list(self._items)
+
+
+class _StubHub:
+    """ProactiveHub 替身：仅暴露 schedule.list 需要的两个只读属性。"""
+
+    def __init__(self, tasks: list[ScheduleTask], items: list[Deadline]) -> None:
+        self.scheduler = _StubScheduler(tasks)
+        self.deadline_tracker = _StubDeadlineTracker(items)
+
+
+def test_schedule_list_no_hub_returns_empty():
+    """hub 未装配时返回空列表（ok=true，前端空态而非报错）。"""
+    server, _, _, _ = _make()
+    reply = _call(server, "schedule.list", {})
+    assert reply["data"]["ok"] is True
+    assert reply["data"]["result"] == {"reminders": [], "deadlines": []}
+
+
+def test_schedule_list_with_hub_maps_fields():
+    """hub 装配时字段映射正确（reminder 取 content/trigger_at，deadline 取 title/days_left）。"""
+    settings = Settings()
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
+    hub = _StubHub(
+        tasks=[ScheduleTask(id="t1", trigger_at="2026-09-23T09:00:00", content="开会", repeat="daily")],
+        items=[Deadline(id="d1", title="Q3 交付", due_date="2099-01-01")],
+    )
+    server = DesktopBridgeServer(api, settings, hub=hub)
+    reply = _call(server, "schedule.list", {})
+    assert reply["data"]["ok"] is True
+    result = reply["data"]["result"]
+    assert result["reminders"] == [
+        {"id": "t1", "content": "开会", "trigger_at": "2026-09-23T09:00:00", "repeat": "daily"}
+    ]
+    assert len(result["deadlines"]) == 1
+    item = result["deadlines"][0]
+    assert item["id"] == "d1"
+    assert item["title"] == "Q3 交付"
+    assert item["due_date"] == "2099-01-01"
+    assert item["status"] == "active"
+    # 到期日在未来：days_left 应为正整数
+    assert isinstance(item["days_left"], int) and item["days_left"] > 0
+
+
+def test_cost_get_shape_defaults_zero():
+    """cost.get 返回用量统计（引擎未装配时 token/轮数/消息数全 0）。"""
+    server, _, _, _ = _make()
+    reply = _call(server, "cost.get", {})
+    assert reply["data"]["ok"] is True
+    result = reply["data"]["result"]
+    assert {
+        "provider",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+        "dialogs",
+        "messages",
+    } <= set(result.keys())
+    assert result["input_tokens"] == 0
+    assert result["dialogs"] == 0
+    assert result["messages"] == 0
 
 
 def test_answer_user_enqueues():
