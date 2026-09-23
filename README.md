@@ -1530,19 +1530,20 @@ Jarvis 通过 **GitHub Actions + Git Tag** 实现一键自动发布到 PyPI 和 
 ### 触发方式
 
 ```bash
-# 1. 更新版本号（pyproject.toml 的 version 字段 + npm/package.json 的 version 字段）
+# 1. 更新版本号（pyproject.toml 的 version 字段 + npm/package.json 的 version 字段
+#    + agent/__init__.py 的 __version__，供 jarvis --version 读取）
 # 2. 提交版本变更
-git add pyproject.toml npm/package.json
-git commit -m "chore: bump version to 2.0.6"
+git add pyproject.toml npm/package.json agent/__init__.py
+git commit -m "chore: bump version to 2.1.0"
 
 # 3. 打 tag 并推送（v 前缀必须）
-git tag v2.0.6
-git push github v2.0.6
+git tag v2.1.0
+git push github v2.1.0
 ```
 
 推送 `v*` tag 后，[publish.yml](.github/workflows/publish.yml) 自动执行：
 1. **测试** — 跑全量 pytest，失败则中止发布
-2. **版本一致性校验** — tag 版本号必须与 `pyproject.toml` / `npm/package.json` 一致，否则报错
+2. **版本一致性校验** — tag 版本号必须与 `pyproject.toml` / `npm/package.json` 一致，否则报错（`agent/__init__.py` 不在 CI 校验范围内，需手动同步）
 3. **构建** — `python -m build` 生成 wheel + sdist
 4. **发布 PyPI** — 通过 Trusted Publisher（OIDC 无凭证）上传
 5. **发布 npm** — 通过 `NPM_TOKEN` 上传 npm wrapper 包

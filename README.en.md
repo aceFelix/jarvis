@@ -1481,19 +1481,20 @@ Jarvis uses **GitHub Actions + Git Tag** to publish to PyPI and npm with one com
 ### Trigger
 
 ```bash
-# 1. Update version (pyproject.toml version field + npm/package.json version field)
+# 1. Update version (pyproject.toml version field + npm/package.json version field
+#    + agent/__init__.py __version__, read by `jarvis --version`)
 # 2. Commit the version bump
-git add pyproject.toml npm/package.json
-git commit -m "chore: bump version to 2.0.6"
+git add pyproject.toml npm/package.json agent/__init__.py
+git commit -m "chore: bump version to 2.1.0"
 
 # 3. Tag and push (the v prefix is required)
-git tag v2.0.6
-git push github v2.0.6
+git tag v2.1.0
+git push github v2.1.0
 ```
 
 Pushing a `v*` tag triggers [publish.yml](.github/workflows/publish.yml), which automatically:
 1. **Tests** — runs full pytest; aborts on failure
-2. **Version consistency check** — tag version must match `pyproject.toml` / `npm/package.json`, else error
+2. **Version consistency check** — tag version must match `pyproject.toml` / `npm/package.json`, else error (`agent/__init__.py` is not covered by the CI check and must be synced manually)
 3. **Builds** — `python -m build` produces wheel + sdist
 4. **Publishes to PyPI** — via Trusted Publisher (OIDC, no API token)
 5. **Publishes to npm** — via `NPM_TOKEN`
