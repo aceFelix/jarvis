@@ -79,8 +79,8 @@ enable_thinking = true
 |---|---|---|
 | `tts_model` | `"cosyvoice-v3-flash"` | TTS 模型 |
 | `tts_voice` | `"longanlang_v3"` | 音色 |
-| `tts_volume` | `50` | 音量（0-100） |
-| `tts_speech_rate` | `1.0` | 语速倍率 |
+| `tts_volume` | `50` | 音量（0-100）；桌面壳设置面板可运行时调（`settings.set` 滑杆，先落盘再改运行时） |
+| `tts_speech_rate` | `1.0` | 语速倍率（0.5-2.0）；桌面壳设置面板可运行时调 |
 | `tts_pitch_rate` | `1.0` | 音调倍率 |
 
 ### STT（语音 → 文字）
@@ -166,11 +166,12 @@ enable_thinking = true
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `briefing_enabled` | `true` | 每日简报开关 |
-| `briefing_time` | `"08:30"` | 每日简报时间 HH:MM |
+| `briefing_enabled` | `true` | 每日简报开关；桌面壳设置面板可运行时开关（`settings.set` 落盘 + ProactiveHub 调度热重注册，无需重启） |
+| `briefing_time` | `"08:30"` | 每日简报时间 HH:MM；桌面壳设置面板可运行时改（同上，改完即按新时间重注册） |
 | `briefing_catchup_window_min` | `120` | 简报补播窗口（分钟）：启动时错过 ≤ 此值才补播一次；≤0 关闭补播 |
-| `deadline_enabled` | `true` | 截止日期分级提醒开关 |
-| `deadline_check_time` | `"09:00"` | 每日检查截止日期的时间 HH:MM |
+| `proactive_tts_enabled` | `true` | 待机 TTS 朗读：到期播报并行用本机 CosyVoice 朗读；对话/语音忙时跳过不打断；提醒加「先生，提醒您：」前缀，简报/截止日期只读前 200 字；音色/音量复用 `tts_model`/`tts_voice`/`tts_volume` 等，API Key 走 `_voice_api_key`（DashScope 专用）；需 `pip install "jarvis-agent[voice]"` 依赖，缺失时静默降级不影响事件通道；桌面壳设置面板可运行时开关（`settings.set` 先落盘本字段再改运行时，重启保持） |
+| `deadline_enabled` | `true` | 截止日期分级提醒开关；桌面壳设置面板可运行时开关（调度热重注册） |
+| `deadline_check_time` | `"09:00"` | 每日检查截止日期的时间 HH:MM；桌面壳设置面板可运行时改 |
 | `calendar_enabled` | `false` | 日历集成（本期未接线，保留） |
 
 > 定时任务持久化在 `~/.jarvis/schedule.json`；对话里说“提醒我…”即可创建一次性任务（需桌面壳/`--serve` 在跑）。

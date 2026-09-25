@@ -227,6 +227,10 @@ class Settings:
     briefing_enabled: bool = True
     briefing_time: str = "08:30"           # 每日简报时间（HH:MM）
     briefing_catchup_window_min: int = 120  # 简报补播窗口（分钟）：启动时错过 ≤ 此值才补播一次
+    # 主动播报 TTS（二期 2026-09）：proactive_notify 触发时并行用本机 CosyVoice 朗读，
+    # 复活老 daemon 三通道播报中的「待机 TTS」通道；对话/语音忙时跳过朗读（不打断），
+    # 事件通道（桌面壳气泡 + 系统通知）不受此开关影响。作者：aceFelix
+    proactive_tts_enabled: bool = True
     # 截止日期追踪：注册 deadline，分级提醒（7/3/1/0 天 + 逾期每天）
     deadline_enabled: bool = True
     deadline_check_time: str = "09:00"     # 每日检查截止日期的时间
@@ -647,6 +651,8 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("briefing_enabled", "briefing_enabled"),
             ("briefing_time", "briefing_time"),
             ("briefing_catchup_window_min", "briefing_catchup_window_min"),
+            # 二期：主动播报 TTS 待机语音总开关
+            ("proactive_tts_enabled", "proactive_tts_enabled"),
         ):
             if sub_key in daemon_table:
                 updates[field] = daemon_table[sub_key]

@@ -4,6 +4,7 @@
 - _apply_toml: TOML dict → Settings 字段映射（顶层、子表、权限模式）
 - apply_env_overrides: 环境变量覆盖（JARVIS_* / MY_AGENT_*）
 - save_last_model / save_custom_model: 模型 TOML 持久化
+- save_proactive_tts_enabled: 主动播报 TTS 开关 [daemon] 节持久化
 - _read_toml: UTF-8 BOM 兼容
 
 @author aceFelix
@@ -21,6 +22,7 @@ import pytest
 from agent.config.settings import Settings, _apply_toml, _read_toml, load_settings
 from agent.config.env import apply_env_overrides
 from agent.config.model_registry import save_last_model, save_custom_model
+from agent.config.model_registry import save_proactive_tts_enabled
 from agent.permissions.modes import PermissionMode
 
 
@@ -342,3 +344,74 @@ class TestModelPersistence:
                 content = toml_path.read_text(encoding="utf-8")
                 assert 'my-gpt' in content
                 assert 'api_key = "sk-xxx"' in content
+
+
+# ── Proactive TTS Switch Persistence ──
+
+class TestProactiveTtsPersistence:
+    """[daemon] proactive_tts_enabled 持久化（桌面壳设置面板 settings.set 落盘路径）。"""
+
+    def test_save_new_file(self) -> None:
+        """文件不存在 → 创建最小文件（[daemon] 节 + 开关行）。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with patch.object(Path, "home", return_value=home):
+                assert save_proactive_tts_enabled(False) is True
+                content = (home / ".jarvis" / "settings.toml").read_text(encoding="utf-8")
+                assert "[daemon]" in content
+                assert "proactive_tts_enabled = false" in content
+
+    def test_save_insert_into_existing_section(self) -> None:
+        """[daemon] 节存在但无该字段 → 插在节头后，不动其他节字段。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with patch.object(Path, "home", return_value=home):
+                toml_path = home / ".jarvis" / "settings.toml"
+                toml_path.parent.mkdir(parents=True, exist_ok=True)
+                toml_path.write_text(
+                    'model = "qwen-plus"\n\n[daemon]\nbriefing_time = "08:30"\n\n[tts]\nvoice = "v"\n',
+                    encoding="utf-8",
+                )
+
+                assert save_proactive_tts_enabled(True) is True
+
+                content = toml_path.read_text(encoding="utf-8")
+                assert 'briefing_time = "08:30"' in content
+                assert 'voice = "v"' in content
+                # 开关行落在 [daemon] 节内（节头之后、[tts] 之前）
+                assert content.index("proactive_tts_enabled = true") > content.index("[daemon]")
+                assert content.index("proactive_tts_enabled = true") < content.index("[tts]")
+
+    def test_save_update_existing_field(self) -> None:
+        """字段已存在 → 替换值且全文仅一处，注释保留。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with patch.object(Path, "home", return_value=home):
+                toml_path = home / ".jarvis" / "settings.toml"
+                toml_path.parent.mkdir(parents=True, exist_ok=True)
+                toml_path.write_text(
+                    "# 用户注释\n[daemon]\nproactive_tts_enabled = true\n",
+                    encoding="utf-8",
+                )
+
+                assert save_proactive_tts_enabled(False) is True
+
+                content = toml_path.read_text(encoding="utf-8")
+                assert content.count("proactive_tts_enabled") == 1
+                assert "proactive_tts_enabled = false" in content
+                assert "# 用户注释" in content
+
+    def test_save_append_section(self) -> None:
+        """无 [daemon] 节 → 文件末尾追加新节。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with patch.object(Path, "home", return_value=home):
+                toml_path = home / ".jarvis" / "settings.toml"
+                toml_path.parent.mkdir(parents=True, exist_ok=True)
+                toml_path.write_text('model = "qwen-plus"\n', encoding="utf-8")
+
+                assert save_proactive_tts_enabled(False) is True
+
+                content = toml_path.read_text(encoding="utf-8")
+                assert '[daemon]\nproactive_tts_enabled = false' in content
+                assert 'model = "qwen-plus"' in content

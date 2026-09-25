@@ -5,6 +5,7 @@
 - save_last_model: 持久化最近使用的模型名
 - save_custom_voice: 保存自定义 TTS 音色
 - save_tts_voice: 持久化当前 TTS 音色选择
+- save_proactive_tts_enabled: 持久化主动播报 TTS 开关（[daemon] 节）
 
 从 settings.py 拆分出来，独立维护模型持久化逻辑。
 
@@ -227,3 +228,18 @@ def save_tts_voice(voice_id: str) -> bool:
 
     toml_path.write_text(content, encoding="utf-8")
     return True
+
+
+def save_proactive_tts_enabled(enabled: bool) -> bool:
+    """持久化主动播报 TTS 开关到 ~/.jarvis/settings.toml 的 [daemon] 节 proactive_tts_enabled 字段。
+
+    桌面壳设置面板经 settings.set 指令调用：运行时改 Settings 实例立即生效，
+    本函数负责重启后仍生效的落盘部分。2026-09 起委托 desktop_settings.save_setting
+    （通用外科式 writer，与 save_* 族同口径：保留注释与其他字段）。
+    返回 True 表示保存成功；IO 失败返回 False（调用方据此回执报错，不改运行时）。
+
+    @author aceFelix
+    """
+    from agent.config.desktop_settings import SPEC_BY_KEY, save_setting
+
+    return save_setting(SPEC_BY_KEY["proactive_tts_enabled"], bool(enabled))
