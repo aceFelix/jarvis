@@ -71,7 +71,9 @@ ProactiveHub，并把老 `NotificationMixin` 的三通道播报（终端日志 +
 
 ## 四、明确排除（二期）
 
-- TTS 待机语音播报（`proactive_notify` 已带全文，届时加通道不改协议）；
+- ~~TTS 待机语音播报~~ ✅ 2026-09 二期已接线：`hub._spawn_tts` 并行朗读（开关
+  `proactive_tts_enabled`、忙时探针跳过、协议零改动），详见
+  [docs/architecture/07-UI层.md](../architecture/07-UI层.md)；
 - `SystemMonitor` 系统告警接线；
 - 日历源（`CalendarSource`）接线；
 - pywebview 工作台宿主的主动感知接线。

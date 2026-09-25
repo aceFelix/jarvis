@@ -27,7 +27,7 @@
 | [core/daemon/holidays.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/holidays.py) | 节假日识别 | 💤 休眠 |
 
 > 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
-> ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报；**仅 `--serve` / 桌面壳运行期间生效**，pywebview 工作台宿主仍未接。
+> ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报，并行用本机 CosyVoice 做待机 TTS 朗读（二期，`proactive_tts_enabled`，忙时跳过）；**仅 `--serve` / 桌面壳运行期间生效**，pywebview 工作台宿主仍未接。
 > 注：右栏 CPU/内存/磁盘三件套一期已由工作台 `workbench/metrics.py` 轻量采集落地；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）、`vision_watcher.py`、`holidays.py` 待二期接线。
 
 ## 二、桌面入口（当前形态：三栏工作台）
@@ -109,5 +109,5 @@ python -m agent.daemon.autostart status             # 查看状态
 | 无窗口后台分离 | ❌ 移除 | 单窗口进程模型更简单：最小化到任务栏即可，无需 DETACHED_PROCESS |
 | 文本终端派生 | ❌ 移除 | 文本对话已进入工作台中栏，不再弹独立终端 |
 | 全局热键 | ✅ 保留 | 工作台「热键召唤窗口」场景复用（待接线） |
-| 主动感知全家桶 | ✅ 部分复活 | 调度/简报/截止三件套 2026-09 由 serve 宿主 `ProactiveHub` 装配、经 jarvis-desktop 桌面壳播报（`proactive_notify` 事件 + 系统通知）；监控/日历/视觉/节假日仍休眠待二期 |
+| 主动感知全家桶 | ✅ 部分复活 | 调度/简报/截止三件套 2026-09 由 serve 宿主 `ProactiveHub` 装配、经 jarvis-desktop 桌面壳播报（`proactive_notify` 事件 + 系统通知），二期补齐待机 TTS 朗读通道（老 daemon 三通道中的「待机语音」复活，忙时跳过）；监控/日历/视觉/节假日仍休眠待二期 |
 | 语音互斥锁 | ✅ 迁移 | 麦克风独占需求与形态无关，迁入 `agent/voice/` |

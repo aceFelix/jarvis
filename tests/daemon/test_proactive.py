@@ -3,6 +3,7 @@
 覆盖:
 - ProactiveConfig 配置字段
 - ProactiveEngine 生命周期：start / stop / 幂等注册
+- update_schedule_config 热更新：改时间重注册 / 关开关撤任务 / 未 start 仅改配置
 - 任务分发：handle_task_fire / is_proactive_task
 - 每日简报组装：问候语 / 节假日 / 今日提醒 / 截止日期 / 系统状态 / 日历
 - 截止日期检查 / 日历检查的触发与容错
@@ -153,6 +154,80 @@ class TestLifecycle:
         """未 start 直接 stop 不应抛异常。"""
         engine, _, _ = make_engine()
         engine.stop()
+
+
+class TestHotUpdateSchedule:
+    """update_schedule_config：桌面 settings.set 改简报/截止日期后热重注册。
+
+    调度任务是 start() 时快照，热更新必须先撤旧任务再按新配置重注册，
+    否则新开关/新时间要到重启才生效。
+    """
+
+    def test_update_briefing_time_reregisters(self, make_engine):
+        """改简报时间 → 旧任务取消、新任务按新时间触发（不重启生效）。"""
+        engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
+        engine.start()
+        engine.update_schedule_config(
+            briefing_enabled=True, briefing_time="07:15",
+            deadline_enabled=True, deadline_check_time="09:00",
+        )
+        briefings = [t for t in scheduler.list_pending() if t.note == _BRIEFING_NOTE]
+        assert len(briefings) == 1
+        assert briefings[0].trigger_at.endswith("T07:15:00")
+        assert engine._config.briefing_time == "07:15"
+
+    def test_disable_briefing_cancels_task(self, make_engine):
+        """关简报开关 → 简报任务撤销，截止日期/画像任务不受影响。"""
+        engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
+        engine.start()
+        engine.update_schedule_config(
+            briefing_enabled=False, briefing_time="08:30",
+            deadline_enabled=True, deadline_check_time="09:00",
+        )
+        notes = {t.note for t in scheduler.list_pending()}
+        assert _BRIEFING_NOTE not in notes
+        assert {_DEADLINE_NOTE, _PROFILE_MAINT_NOTE} <= notes
+
+    def test_reenable_after_disable(self, make_engine):
+        """关了再开 → 简报任务恢复注册（开关可反复热切换）。"""
+        engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
+        engine.start()
+        engine.update_schedule_config(
+            briefing_enabled=False, briefing_time="08:30",
+            deadline_enabled=True, deadline_check_time="09:00",
+        )
+        engine.update_schedule_config(
+            briefing_enabled=True, briefing_time="08:30",
+            deadline_enabled=True, deadline_check_time="09:00",
+        )
+        briefings = [t for t in scheduler.list_pending() if t.note == _BRIEFING_NOTE]
+        assert len(briefings) == 1
+
+    def test_update_deadline_check_time(self, make_engine):
+        """改截止日期检查时间 → 旧任务换新时间重注册。"""
+        engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
+        engine.start()
+        engine.update_schedule_config(
+            briefing_enabled=True, briefing_time="08:30",
+            deadline_enabled=True, deadline_check_time="21:45",
+        )
+        deadlines = [t for t in scheduler.list_pending() if t.note == _DEADLINE_NOTE]
+        assert len(deadlines) == 1
+        assert deadlines[0].trigger_at.endswith("T21:45:00")
+
+    def test_update_before_start_only_sets_config(self, make_engine):
+        """未 start 时热更新仅改配置字段，start 后按新值注册（无重复任务）。"""
+        engine, scheduler, _ = make_engine(tracker=DeadlineTracker())
+        engine.update_schedule_config(
+            briefing_enabled=True, briefing_time="06:00",
+            deadline_enabled=False, deadline_check_time="09:00",
+        )
+        assert scheduler.list_pending() == []
+        engine.start()
+        notes = {t.note for t in scheduler.list_pending()}
+        assert _DEADLINE_NOTE not in notes
+        briefing = next(t for t in scheduler.list_pending() if t.note == _BRIEFING_NOTE)
+        assert briefing.trigger_at.endswith("T06:00:00")
 
 
 # ---------------------------------------------------------------------------

@@ -152,6 +152,38 @@ class ProactiveEngine:
             self._scheduler.cancel_task(task_id)
         self._task_ids.clear()
 
+    def update_schedule_config(
+        self,
+        *,
+        briefing_enabled: bool,
+        briefing_time: str,
+        deadline_enabled: bool,
+        deadline_check_time: str,
+    ) -> None:
+        """热更新简报/截止日期配置并重注册每日任务（桌面 settings.set 运行时生效）。
+
+        调度任务是 start() 时的快照：改配置后必须先按 note 撤旧任务再重注册，
+        否则新开关/新时间要到重启才生效。未 start() 时仅更新配置字段。
+
+        @author aceFelix
+        """
+        self._config.briefing_enabled = briefing_enabled
+        self._config.briefing_time = briefing_time
+        self._config.deadline_enabled = deadline_enabled
+        self._config.deadline_check_time = deadline_check_time
+        if not self._started:
+            return
+        for note in (_BRIEFING_NOTE, _DEADLINE_NOTE):
+            task = self._find_task_by_note(note)
+            if task is not None:
+                self._scheduler.cancel_task(task.id)
+                if task.id in self._task_ids:
+                    self._task_ids.remove(task.id)
+        if self._config.briefing_enabled:
+            self._register_briefing()
+        if self._config.deadline_enabled and self._deadline_tracker:
+            self._register_deadline_check()
+
     # ---- 注册定时任务 ----
 
     def _register_briefing(self) -> None:

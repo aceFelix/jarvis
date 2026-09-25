@@ -7,8 +7,10 @@
 
 - 装配 ``Scheduler``（定时轮询）+ ``ProactiveEngine``（每日简报/截止日期）
   + ``DeadlineTracker``（截止日期追踪），配置字段沿用 settings 既有口径；
-- 到期/通知不再走托盘与 TTS，而是投递 ``proactive_notify`` 事件进 serve
-  事件队列，由事件泵 broadcast 给桌面壳（聊天气泡 + 系统通知）；
+- 到期/通知投 ``proactive_notify`` 事件进 serve 事件队列，由事件泵 broadcast
+  给桌面壳（聊天气泡 + 系统通知）；并行复活老 daemon「待机 TTS」语音通道
+  （二期：开关 ``proactive_tts_enabled``，对话/语音忙时跳过朗读，朗读失败
+  静默降级，不影响事件通道）；
 - 提醒工具（ScheduleReminder 等）经 ChatEngine registry_hook 挂载同一
   Scheduler 实例，对话里说「提醒我」即可创建任务。
 
@@ -25,7 +27,7 @@ from __future__ import annotations
 import queue
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.daemon.deadline import DeadlineTracker
@@ -43,6 +45,12 @@ CATCHUP_DELAY_SEC = 5.0
 # 截止日期提醒文本前缀（ProactiveEngine._fire_deadline_check 的固定格式），
 # 用于在 on_notify 单一回调里区分简报与截止日期两类内容
 _DEADLINE_PREFIX = "📋 截止日期提醒"
+
+# TTS 朗读口径（复刻老 daemon NotificationMixin）：简报/截止日期文本较长，
+# 只播前 200 字 + 引导后缀；提醒类加称呼前缀整段播。
+_TTS_TEXT_LIMIT = 200
+_TTS_MORE_SUFFIX = "……详细内容请查看桌面壳。"
+_REMINDER_PREFIX = "先生，提醒您："
 
 
 class ProactiveHub:
@@ -62,14 +70,22 @@ class ProactiveHub:
         self,
         settings: Settings,
         event_queue: queue.Queue[dict[str, Any]],
+        busy_probe: Callable[[], bool] | None = None,
     ) -> None:
         """
         Args:
-            settings: 全局配置（取 briefing_*/deadline_* 字段）。
+            settings: 全局配置（取 briefing_*/deadline_*/proactive_tts_enabled/tts_* 字段）。
             event_queue: serve 事件队列（与 ChatEngine 共用，事件泵消费）。
+            busy_probe: 「贾维斯忙吗」探针（serve 宿主传 engine.is_busy）；
+                返回 True 时主动播报只推事件、不做 TTS 朗读。也可事后经
+                set_busy_probe 注入（hub 先于 engine 装配的场景）。
         """
         self._settings = settings
         self._event_queue = event_queue
+        self._busy_probe = busy_probe
+        # TTS 朗读串行锁 + 当前朗读实例：多条播报排队播不叠音，停机时可打断
+        self._tts_lock = threading.Lock()
+        self._current_tts: Any = None
         self._scheduler = Scheduler(on_fire=self._on_fire)
         self._deadline_tracker = DeadlineTracker()
         self._engine = ProactiveEngine(
@@ -123,11 +139,33 @@ class ProactiveHub:
         if not self._started:
             return
         self._started = False
+        # 打断正在朗读的 TTS（避免停机后残留语音播完才停）
+        tts = self._current_tts
+        if tts is not None:
+            try:
+                tts.stop()
+            except Exception:
+                pass
         if self._catchup_timer is not None:
             self._catchup_timer.cancel()
             self._catchup_timer = None
         self._engine.stop()
         self._scheduler.stop()
+
+    def hot_update_schedule(self) -> None:
+        """桌面 settings.set 改 briefing/deadline 后：同步 Settings 现值并重注册每日任务。
+
+        调度任务是引擎启动时快照，不重注册则新开关/新时间需重启才生效；
+        tts/proactive_tts 等项每次播报现读 Settings，无需在此同步。
+
+        @author aceFelix
+        """
+        self._engine.update_schedule_config(
+            briefing_enabled=self._settings.briefing_enabled,
+            briefing_time=self._settings.briefing_time,
+            deadline_enabled=self._settings.deadline_enabled,
+            deadline_check_time=self._settings.deadline_check_time,
+        )
 
     def acknowledge(self, task_id: str) -> bool:
         """确认提醒任务（桌面壳 proactive.ack 指令入口，停止升级重发）。"""
@@ -157,7 +195,7 @@ class ProactiveHub:
         self._emit(kind=kind, title="贾维斯主动提醒", text=message)
 
     def _emit(self, *, kind: str, title: str, text: str, task_id: str = "") -> None:
-        """投递 proactive_notify 事件进 serve 事件队列（线程安全）。"""
+        """投递 proactive_notify 事件进 serve 事件队列（线程安全），并并行触发 TTS 朗读通道。"""
         self._event_queue.put_nowait(
             {
                 "type": protocol.EVT_PROACTIVE_NOTIFY,
@@ -169,6 +207,83 @@ class ProactiveHub:
                 },
             }
         )
+        self._spawn_tts(kind, text)
+
+    # ---- TTS 待机朗读通道（二期：复活老 daemon「待机 TTS」，开关 proactive_tts_enabled） ----
+
+    def set_busy_probe(self, probe: Callable[[], bool] | None) -> None:
+        """注入「贾维斯忙吗」探针（serve 宿主传 ``lambda: engine.is_busy``）。
+
+        探针返回 True（对话轮次 / 语音会话进行中）时主动播报只推事件、
+        不做 TTS 朗读，避免打断正在进行的对话或抢占语音通道；探针抛
+        异常按忙处理（保守跳过朗读，事件通道不受影响）。
+
+        @author aceFelix
+        """
+        self._busy_probe = probe
+
+    def _spawn_tts(self, kind: str, text: str) -> None:
+        """开关/忙时判定通过后，起独立守护线程朗读（不阻塞 Scheduler 线程）。"""
+        if not getattr(self._settings, "proactive_tts_enabled", False):
+            return
+        if self._busy_probe is not None:
+            try:
+                if self._busy_probe():
+                    return
+            except Exception:
+                return
+        thread = threading.Thread(
+            target=self._speak_worker,
+            args=(kind, text),
+            name="proactive-tts",
+            daemon=True,
+        )
+        thread.start()
+
+    def _speak_worker(self, kind: str, text: str) -> None:
+        """TTS 朗读工作线程：清洗文本 → 按 kind 截断 → CosyVoice 整段播放。
+
+        口径复刻老 daemon NotificationMixin：reminder 加「先生，提醒您：」
+        前缀整段播；briefing/deadline 超 200 字只播前 200 字 + 引导后缀。
+        语音依赖缺失（dashscope/pyaudio 未装）或朗读失败静默降级，
+        不影响事件通道与调度器。
+
+        @author aceFelix
+        """
+        try:
+            from agent.voice.tts import CosyVoiceTTS
+            from agent.voice.tts_text import clean_for_tts
+            from agent.voice.voice_config import _voice_api_key
+        except ImportError:
+            return
+        try:
+            cleaned = clean_for_tts(text or "").strip()
+            if not cleaned:
+                return
+            if kind == "reminder":
+                speak_text = f"{_REMINDER_PREFIX}{cleaned}"
+            else:
+                speak_text = cleaned[:_TTS_TEXT_LIMIT]
+                if len(cleaned) > _TTS_TEXT_LIMIT:
+                    speak_text += _TTS_MORE_SUFFIX
+            s = self._settings
+            tts = CosyVoiceTTS(
+                api_key=_voice_api_key(s),
+                model=s.tts_model,
+                voice=s.tts_voice,
+                volume=s.tts_volume,
+                speech_rate=s.tts_speech_rate,
+                pitch_rate=s.tts_pitch_rate,
+            )
+            # 串行朗读：多条播报先后到期时排队播，避免 pyaudio 叠音
+            with self._tts_lock:
+                self._current_tts = tts
+                try:
+                    tts.speak(speak_text)
+                finally:
+                    self._current_tts = None
+        except Exception:
+            pass
 
     # ---- 简报补播 ----
 

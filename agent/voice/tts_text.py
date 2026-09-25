@@ -216,3 +216,23 @@ class _TTSFeeder:
         text = _EMPHASIS.sub("", text)
         text = _STANDBY_TAG.sub("", text)  # 剥除退下标记（用户听不到）
         return text
+
+
+def clean_for_tts(text: str) -> str:
+    """整段文本一次性清洗（非流式场景：主动播报 TTS 朗读等）。
+
+    与 _TTSFeeder（流式增量状态机）的差异：不做句子级缓冲，直接返回
+    清洗后的整段文本；代码围栏内容 / <think> / 工具占位标签按
+    整段正则一次性丢弃（流式版需跨 chunk 状态机，整段版无需）。
+
+    @author aceFelix
+    """
+    if not text:
+        return ""
+    text = _THINK_TAG.sub("", text)
+    text = _THINK_OPEN_TAG.sub("", text)
+    text = _TOOL_TAG_PAIR.sub("", text)
+    text = _TOOL_TAG_ANY.sub("", text)
+    # 代码围栏：split 后偶数下标段在围栏外，只保留这些段（围栏内代码不朗读）
+    text = "".join(text.split(_FENCE)[0::2])
+    return _TTSFeeder._clean_inline(text)
