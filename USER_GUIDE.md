@@ -483,6 +483,7 @@ hotkey = "ctrl+shift+j"
 briefing_enabled = true        # 每日简报开关（仅 --serve / 桌面壳运行期间生效）
 briefing_time = "08:30"        # 每日简报时间 HH:MM
 briefing_catchup_window_min = 120  # 简报补播窗口（分钟）：启动时错过 ≤ 此值补播一次；≤0 关闭补播
+proactive_tts_enabled = true   # 待机 TTS 朗读（忙时跳过；音色/音量复用 tts_model/tts_voice 等配置；桌面壳设置面板可运行时开关，经 settings.get/set 写回本字段）
 
 # 截止日期分级提醒（❗段名是 deadline、key 是 enabled/check_time；勿写进 [daemon]，否则不生效）
 [deadline]

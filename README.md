@@ -884,7 +884,10 @@ work_break_interval = 7200 # 连续工作 2 小时提醒休息
 主动感知能力（`agent.core.daemon` 下 Scheduler / ProactiveEngine / DeadlineTracker）
 原由常驻 daemon 拉起，2026-08 随托盘下线休眠，**2026-09 已由 serve 宿主的
 `ProactiveHub` 重新接线**：每日简报 / 对话内「提醒我」定时任务 / 截止日期检查到期后，
-经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报（聊天气泡 + Windows 系统通知）。
+经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报（聊天气泡 + Windows 系统通知），
+**2026-09 二期起并行用本机 CosyVoice 做待机 TTS 朗读**（复活老 daemon「待机语音」通道：
+对话/语音忙时跳过不打断，提醒加「先生，提醒您：」前缀，简报/截止日期只读前 200 字，
+`proactive_tts_enabled` 可关，桌面壳设置面板亦可运行时开关——经 `settings.get/set` 写回 settings.toml）。
 因 serve 随桌面壳启停，**播报仅在 `--serve` / 桌面壳运行期间生效**（错过依赖
 `schedule.json` 补偿 + 简报补播窗口，默认 2 小时、`briefing_catchup_window_min` 可配）；pywebview 工作台宿主与日历集成暂未接（二期）。
 详见 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。能力清单：
@@ -902,6 +905,7 @@ work_break_interval = 7200 # 连续工作 2 小时提醒休息
 briefing_enabled = true
 briefing_time = "08:30"    # 每日简报时间
 briefing_catchup_window_min = 120  # 简报补播窗口（分钟）：错过 ≤ 此值启动补播一次；≤0 关闭
+proactive_tts_enabled = true  # 待机 TTS 朗读（忙时跳过；TTS 参数复用 tts_model/tts_voice 等）
 
 [deadline]
 enabled = true
@@ -1046,14 +1050,15 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 
 - **停机信号**：stdin EOF（父进程退出 / 杀管道）或 `SIGINT` 触发优雅停机（先关传输层，再停采集与引擎）。
 - **依赖**：`websockets` 已为核心依赖（随 `pip install` 自动安装，2026-09 起）；仍保留缺失降级：import 失败时以退出码 `3` 报错退出。
-- **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
+- **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知），二期起并行待机 TTS 朗读（`proactive_tts_enabled`，忙时跳过）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
 - **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
-- **右栏五区块（桌面壳）**：快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）、任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）。刷新时机：init 六路齐刷、assistant_done 刷用量、proactive_notify 刷任务列表。
+- **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表。
+- **设置面板（桌面壳，2026-09；同年 09 第一批扩键）**：设置独立成面板（标题栏齿轮进入，整体替换右栏信息面板）：外观（主题/语言，纯前端 localStorage 偏好）+ 后端联动三组（经 `settings.get`/`settings.set` 与 serve 联动：校验→先外科式落盘 settings.toml 对应节→再改运行时，失败回滚）：语音播报（待机 TTS 开关 + 音量/语速）、每日简报（开关 + 时间）、截止日期追踪（开关 + 检查时间）；简报/截止日期改动额外触发 `ProactiveHub` 调度热重注册（无需重启）。白名单单一真源在 `agent/config/desktop_settings.py`（密钥/自由路径永不入协议）。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：20 条桌面指令（`message` / `sessions.*` / `models.*` / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：24 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*` / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 

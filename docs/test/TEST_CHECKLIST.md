@@ -720,7 +720,7 @@
 |------|---------|---------|---------|
 | T-330 | message 流式 | 发 `{"type":"message","text":"你好"}` | 回执 ok=true；随后 `assistant_text` 流式增量 + `assistant_done` |
 | T-331 | message 空文本 | 发 `{"type":"message","text":""}` | 回执 ok=false，error="空消息" |
-| T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` | list 返回会话数组；open 触发 `session_loaded`；new 触发 `session_new` |
+| T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` / `sessions.rename`(name,new_name) / `sessions.delete`(name) | list 返回会话数组（每项含 current 标记，与引擎当前会话名相等者为 true）；open 触发 `session_loaded`；new 触发 `session_new`；rename 触发 `session_renamed`（目标名占用/源不存在回 `warn`；改当前会话名取消自动标题任务）；delete 触发 `session_deleted`（删当前会话另触 `session_new`） |
 | T-333 | models 指令 | `models.list` / `models.select`(name) | list 返回模型数组（含 current）；select 返回 bool 且持久化 |
 | T-334 | voices/metrics/state | `voices.list`/`voices.select`/`metrics.get`/`state.get` | 各自返回对应结构（metrics 含 cpu/memory/disk） |
 | T-335 | answer_user / talk | `answer_user`(text) 回填 ask_user；`talk.start`/`talk.stop` | ask_user 弹窗被回填；talk 触发 `talk_started`/`talk_stopped` |

@@ -865,10 +865,13 @@ high_cpu_duration = 600    # Abnormal process: CPU > 50% for how many seconds to
 work_break_interval = 7200 # Work 2 hours continuously, remind to rest
 ```
 
-### Proactive Reminder System (P2-3, Dormant)
+### Proactive Reminder System (P2-3, Rewired)
 
 Proactive perception code is fully kept (`agent.core.daemon`); it was started by the resident daemon,
-now in dormant state, to be re-wired by the new GUI workbench. Capability list:
+and since 2026-09 is re-wired by the serve host's `ProactiveHub`: due events are pushed to the
+jarvis-desktop shell via `proactive_notify` (chat bubble + system notification), and in parallel
+read aloud by local CosyVoice TTS on standby (skipped while a chat/voice turn is busy,
+`proactive_tts_enabled` to disable; also toggleable at runtime in the desktop shell's Settings panel, written back to settings.toml via `settings.get/set` — the panel's first batch of backend-linked settings also covers daily briefing (switch + time), deadline tracking (switch + check time) and TTS volume/speech-rate sliders, whitelisted in `agent/config/desktop_settings.py`; briefing/deadline changes hot-reschedule ProactiveHub tasks without restart). Capability list:
 
 **Daily Briefing**: Auto-broadcasts today's overview at 08:30 daily (pending reminders, holidays, system status, deadlines, calendar events).
 
@@ -882,6 +885,7 @@ now in dormant state, to be re-wired by the new GUI workbench. Capability list:
 [daemon]
 briefing_enabled = true
 briefing_time = "08:30"    # Daily briefing time
+proactive_tts_enabled = true  # Standby TTS broadcast (skipped when busy)
 
 [deadline]
 enabled = true
