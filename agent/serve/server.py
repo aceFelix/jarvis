@@ -5,7 +5,7 @@
 
 - ``message`` 不再走手机端"共享 REPL 上下文"路径，而是转发给
   workbench 的 ChatEngine 指令队列（与 pywebview 工作台同一引擎）；
-- 注册 request/response 型桌面指令（sessions/models/voices/metrics/state），
+- 注册 request/response 型桌面指令（sessions/models/voices/metrics/state/settings），
   能力口径与 ``agent.ui.workbench.api.WorkbenchAPI`` 一一对齐；
 - 事件泵线程消费引擎事件队列，逐条 broadcast 给所有 WS 客户端，
   事件名与 payload 保持 workbench 原样（前端渲染逻辑可对齐 app.js）。
@@ -25,6 +25,15 @@ import threading
 from typing import Any, Callable
 
 from agent.bridge.server import BridgeServer
+from agent.config.desktop_settings import (
+    DESKTOP_SETTING_SPECS,
+    SCHEDULE_KEYS,
+    SPEC_BY_KEY,
+    apply_setting,
+    read_setting,
+    save_setting,
+    validate_setting,
+)
 from agent.config.settings import Settings
 from agent.serve import protocol
 from agent.ui.workbench.api import WorkbenchAPI
@@ -97,6 +106,8 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_SESSIONS_LIST, lambda data: self._api.list_sessions())
         self._register_rpc(protocol.CMD_SESSIONS_OPEN, self._rpc_sessions_open)
         self._register_rpc(protocol.CMD_SESSIONS_NEW, lambda data: self._api.new_session())
+        self._register_rpc(protocol.CMD_SESSIONS_RENAME, self._rpc_sessions_rename)
+        self._register_rpc(protocol.CMD_SESSIONS_DELETE, self._rpc_sessions_delete)
         self._register_rpc(protocol.CMD_MODELS_LIST, lambda data: self._api.list_models())
         self._register_rpc(protocol.CMD_MODELS_SELECT, self._rpc_models_select)
         self._register_rpc(protocol.CMD_VOICES_LIST, lambda data: self._api.list_voices())
@@ -114,6 +125,8 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_VOICE_STOP, lambda data: self._api.stop_voice())
         self._register_rpc(protocol.CMD_VOICE_INTERRUPT, lambda data: self._api.interrupt_voice())
         self._register_rpc(protocol.CMD_PROACTIVE_ACK, self._rpc_proactive_ack)
+        self._register_rpc(protocol.CMD_SETTINGS_GET, self._rpc_settings_get)
+        self._register_rpc(protocol.CMD_SETTINGS_SET, self._rpc_settings_set)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -204,6 +217,27 @@ class DesktopBridgeServer(BridgeServer):
             raise ValueError("缺少会话名 name")
         self._api.load_session(name)
 
+    def _rpc_sessions_rename(self, data: dict) -> None:
+        """sessions.rename：校验新旧名后入引擎队列（结果走 session_renamed 事件）。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        new_name = (data.get("new_name") or "").strip()
+        if not name or not new_name:
+            raise ValueError("缺少会话名 name 或新名 new_name")
+        self._api.rename_session(name, new_name)
+
+    def _rpc_sessions_delete(self, data: dict) -> None:
+        """sessions.delete：校验 name 后入引擎队列（结果走 session_deleted 事件）。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("缺少会话名 name")
+        self._api.delete_session(name)
+
     def _rpc_models_select(self, data: dict) -> bool:
         """models.select：切换文本模型并持久化（重启引擎后生效，与工作台一致）。"""
         name = (data.get("name") or "").strip()
@@ -271,6 +305,55 @@ class DesktopBridgeServer(BridgeServer):
         if self._hub is None:
             raise RuntimeError("主动播报中枢未装配")
         return self._hub.acknowledge(task_id)
+
+    def _rpc_settings_get(self, data: dict) -> dict:
+        """settings.get：桌面壳设置面板数据源（白名单可改项的运行时值）。
+
+        白名单见 agent/config/desktop_settings.py（第一批：主动播报 TTS/简报/
+        截止日期/TTS 语速音量）；主题/语言等纯前端偏好不入此协议（桌面壳
+        localStorage 自治）。属性缺失的项返回 None，桌面壳据此显离线态。
+
+        @author aceFelix
+        """
+        return {spec.key: read_setting(self._settings, spec) for spec in DESKTOP_SETTING_SPECS}
+
+    def _rpc_settings_set(self, data: dict) -> dict:
+        """settings.set：修改单个白名单设置项（校验 → 落盘 → 运行时生效）。
+
+        顺序：先持久化 settings.toml 对应节，再改运行时 Settings 实例；
+        briefing/deadline 类额外触发 ProactiveHub 重注册调度任务（调度任务
+        是启动快照，不重注册新开关/新时间不生效）；落盘失败则回执报错且
+        不动运行时，避免「本次生效、重启回退」的口径分裂。
+
+        @author aceFelix
+        """
+        keys = [k for k in data if k in SPEC_BY_KEY]
+        if len(keys) != 1:
+            raise ValueError("settings.set 需且仅需一个白名单设置项")
+        key = keys[0]
+        spec = SPEC_BY_KEY[key]
+        value = validate_setting(key, data[key])
+        if not save_setting(spec, value):
+            raise RuntimeError("settings.toml 落盘失败，请检查磁盘写权限")
+        apply_setting(self._settings, spec, value)
+        if key in SCHEDULE_KEYS and self._hub is not None:
+            self._hub.hot_update_schedule()
+        return {key: value}
+
+    # ---- 每连接首帧 ----
+
+    async def _on_client_connected(self, ws: Any) -> None:
+        """连接建立即推 init 事件（payload 与 workbench get_state 同构，前端首屏渲染）。
+
+        协议契约是「连接建立后首推」（见 protocol.py 事件表）：启动期一次性
+        broadcast 在无在线客户端时会被丢弃，桌面壳的首屏七路刷新（含设置面板
+        settings.get 回填）将永不触发；改为按连接推送，同时覆盖断线重连场景。
+
+        @author aceFelix
+        """
+        await self._send_json(
+            ws, {"event": protocol.EVT_INIT, "data": self._api.get_state()}
+        )
 
     # ---- 事件泵 ----
 

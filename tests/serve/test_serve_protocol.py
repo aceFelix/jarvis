@@ -5,6 +5,8 @@
 - build_reply 回执信封（ok / 失败两路）
 - DESKTOP_COMMANDS 与 DesktopBridgeServer 处理器表一一对应（防漏注册）
 - proactive.ack RPC：hub 缺失/参数缺失报错、正常路径透传
+- settings.get/set RPC：白名单全键取值、校验、先落盘后生效、调度键热更新、
+  落盘失败不动运行时
 
 @author aceFelix
 """
@@ -17,6 +19,7 @@ import pytest
 
 from agent.config.settings import Settings
 from agent.serve import protocol
+from agent.serve import server as server_mod
 from agent.serve.server import DesktopBridgeServer
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.engine import ChatEngine
@@ -98,8 +101,8 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 19 个 rpc = 20（增减须同步双仓文档）。"""
-    assert len(protocol.DESKTOP_COMMANDS) == 20
+    """指令总数契约：message + 23 个 rpc = 24（增减须同步双仓文档）。"""
+    assert len(protocol.DESKTOP_COMMANDS) == 24
 
 
 # ---- proactive.ack RPC ----
@@ -146,3 +149,97 @@ def test_proactive_ack_without_hub_raises():
     server = _make_server()  # 无 hub
     with pytest.raises(RuntimeError):
         server._rpc_proactive_ack({"task_id": "abc123"})
+
+
+# ---- settings.get / settings.set RPC ----
+
+class _StubSettingsHub(_StubHub):
+    """带 hot_update_schedule 的 hub 替身：记录调度热更新触发次数。"""
+
+    def __init__(self):
+        super().__init__()
+        self.hot_updates = 0
+
+    def hot_update_schedule(self):
+        self.hot_updates += 1
+
+
+def test_settings_get_returns_all_whitelist_keys():
+    """settings.get 返回全部白名单键的运行时值（Settings 默认值）。"""
+    server = _make_server()
+    result = server._rpc_settings_get({})
+    assert set(result) == {
+        "proactive_tts_enabled", "briefing_enabled", "briefing_time",
+        "deadline_enabled", "deadline_check_time", "tts_volume", "tts_speech_rate",
+    }
+    assert result["proactive_tts_enabled"] is True
+    assert result["briefing_time"] == "08:30"
+    assert result["tts_volume"] == 50
+    assert result["tts_speech_rate"] == 1.0
+
+
+def test_settings_set_persist_then_runtime(monkeypatch):
+    """settings.set：先落盘成功后运行时 Settings 立即生效（hub 每次播报现读）。"""
+    calls: list = []
+    monkeypatch.setattr(
+        server_mod, "save_setting", lambda spec, v: calls.append((spec.key, v)) or True
+    )
+    server = _make_server()
+    result = server._rpc_settings_set({"proactive_tts_enabled": False})
+    assert result == {"proactive_tts_enabled": False}
+    assert calls == [("proactive_tts_enabled", False)]
+    assert server._settings.proactive_tts_enabled is False
+
+
+def test_settings_set_new_keys(monkeypatch):
+    """第一批新键：简报时间 / TTS 音量 / 语速——落盘 + 运行时同步。"""
+    monkeypatch.setattr(server_mod, "save_setting", lambda spec, v: True)
+    server = _make_server()
+    assert server._rpc_settings_set({"briefing_time": "07:15"}) == {"briefing_time": "07:15"}
+    assert server._settings.briefing_time == "07:15"
+    assert server._rpc_settings_set({"tts_volume": 80}) == {"tts_volume": 80}
+    assert server._settings.tts_volume == 80
+    assert server._rpc_settings_set({"tts_speech_rate": 1.25}) == {"tts_speech_rate": 1.25}
+    assert server._settings.tts_speech_rate == 1.25
+
+
+def test_settings_set_schedule_key_triggers_hot_update(monkeypatch):
+    """调度键（briefing/deadline）改动触发 hub.hot_update_schedule 重注册；
+    非调度键（tts_volume）不触发。"""
+    monkeypatch.setattr(server_mod, "save_setting", lambda spec, v: True)
+    hub = _StubSettingsHub()
+    server = _make_server_with_hub(hub)
+    server._rpc_settings_set({"briefing_enabled": False})
+    assert hub.hot_updates == 1
+    server._rpc_settings_set({"tts_volume": 60})
+    assert hub.hot_updates == 1  # 非调度键不重注册
+
+
+def test_settings_set_validation(monkeypatch):
+    """缺键 / 多键 / 非白名单键 / 类型不符 / 超范围 / 时间格式错 → ValueError。"""
+    monkeypatch.setattr(server_mod, "save_setting", lambda spec, v: True)
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({})
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({"tts_volume": 10, "briefing_enabled": True})
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({"not_in_whitelist": 1})
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({"proactive_tts_enabled": "yes"})
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({"tts_volume": 101})
+    with pytest.raises(ValueError):
+        server._rpc_settings_set({"briefing_time": "25:00"})
+
+
+def test_settings_set_persist_failure_keeps_runtime(monkeypatch):
+    """落盘失败 → RuntimeError 且运行时值不变（避免本次生效重启回退分裂）。"""
+    monkeypatch.setattr(server_mod, "save_setting", lambda spec, v: False)
+    server = _make_server()
+    with pytest.raises(RuntimeError):
+        server._rpc_settings_set({"proactive_tts_enabled": False})
+    assert server._settings.proactive_tts_enabled is True
+    with pytest.raises(RuntimeError):
+        server._rpc_settings_set({"briefing_time": "07:00"})
+    assert server._settings.briefing_time == "08:30"

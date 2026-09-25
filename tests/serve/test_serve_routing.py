@@ -288,6 +288,24 @@ def test_unknown_command_not_registered():
     assert "not.a.command" not in server._ws_handlers
 
 
+# ---- 每连接首帧 ----
+
+def test_init_pushed_per_client_connect():
+    """init 首帧按连接推送：新连接立即收到 init 信封（payload 同 get_state）。
+
+    启动期一次性 broadcast 在无客户端时会被丢弃，首帧只能走每连接钩子；
+    桌面壳首屏七路刷新（含设置面板 settings.get 回填）全挂在该事件上。
+
+    @author aceFelix
+    """
+    server, api, _, _ = _make()
+    ws = _FakeWS()
+    asyncio.run(server._on_client_connected(ws))
+    assert len(ws.sent) == 1
+    assert ws.sent[0]["event"] == "init"
+    assert ws.sent[0]["data"] == api.get_state()
+
+
 # ---- 事件泵 ----
 
 def test_event_pump_broadcasts_and_stops():

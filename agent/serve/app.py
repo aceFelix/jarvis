@@ -78,6 +78,9 @@ async def _serve_main(settings: Settings) -> None:
         register_deadline_tools(registry, hub.deadline_tracker)
 
     engine = ChatEngine(settings, event_queue, command_queue, registry_hook=_register_proactive_tools)
+    # 主动播报 TTS「忙时跳过」探针：引擎处于对话轮次 / 语音会话时，hub 只推
+    # proactive_notify 事件、不做 TTS 朗读（复刻老 daemon「对话中不打断」语义）
+    hub.set_busy_probe(lambda: engine.is_busy)
     metrics = MetricsCollector(event_queue)
     api = WorkbenchAPI(event_queue, command_queue, engine, settings)
     server = DesktopBridgeServer(api, settings, hub=hub)
@@ -92,8 +95,9 @@ async def _serve_main(settings: Settings) -> None:
         # 主动播报中枢：调度器轮询 + 每日简报/截止日期任务注册（事件泵启动后，
         # 确保到期事件有消费方；补播定时器延迟 5 秒等桌面壳 WS 连上）
         hub.start()
-        # 首推 init 事件（payload 与工作台 get_state 同构，前端首屏渲染）
-        event_queue.put_nowait({"type": protocol.EVT_INIT, "payload": api.get_state()})
+        # init 事件改为按连接推送（DesktopBridgeServer._on_client_connected）：
+        # 启动期一次性 broadcast 在无在线客户端时会被静默丢弃，桌面壳首屏
+        # （含设置面板回填）将永不触发。@author aceFelix
         # 就绪握手：单行 JSON 打到 stdout，Electron 逐行解析识别
         handshake = protocol.build_handshake(
             server.ws_port, server.http_port, server.token, os.getpid()

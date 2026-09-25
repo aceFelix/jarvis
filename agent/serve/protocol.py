@@ -86,6 +86,8 @@ CMD_MESSAGE = "message"
 CMD_SESSIONS_LIST = "sessions.list"
 CMD_SESSIONS_OPEN = "sessions.open"
 CMD_SESSIONS_NEW = "sessions.new"
+CMD_SESSIONS_RENAME = "sessions.rename"
+CMD_SESSIONS_DELETE = "sessions.delete"
 CMD_MODELS_LIST = "models.list"
 CMD_MODELS_SELECT = "models.select"
 CMD_VOICES_LIST = "voices.list"
@@ -102,6 +104,8 @@ CMD_VOICE_START = "voice.start"
 CMD_VOICE_STOP = "voice.stop"
 CMD_VOICE_INTERRUPT = "voice.interrupt"
 CMD_PROACTIVE_ACK = "proactive.ack"
+CMD_SETTINGS_GET = "settings.get"
+CMD_SETTINGS_SET = "settings.set"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -109,6 +113,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_SESSIONS_LIST,
     CMD_SESSIONS_OPEN,
     CMD_SESSIONS_NEW,
+    CMD_SESSIONS_RENAME,
+    CMD_SESSIONS_DELETE,
     CMD_MODELS_LIST,
     CMD_MODELS_SELECT,
     CMD_VOICES_LIST,
@@ -125,6 +131,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_VOICE_STOP,
     CMD_VOICE_INTERRUPT,
     CMD_PROACTIVE_ACK,
+    CMD_SETTINGS_GET,
+    CMD_SETTINGS_SET,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

@@ -144,6 +144,16 @@ class BridgeServer:
         # 桌面 serve 模式经 register_ws_handler 追加指令。
         self._ws_handlers: dict[str, Any] = {"message": self._handle_message_command}
 
+    async def _on_client_connected(self, ws: Any) -> None:
+        """新 WS 连接通过认证后的钩子（默认空实现）。
+
+        供子类推送「每连接首帧」（如 agent.serve 每条新连接推 init 事件）：
+        启动期一次性 broadcast 在无在线客户端时会被 broadcast 静默丢弃，
+        首帧只能按连接推送才能保证送达（并覆盖断线重连场景）。
+
+        @author aceFelix
+        """
+
     def register_ws_handler(self, msg_type: str, handler: Any) -> None:
         """注册一个 WS 指令处理器（扩展点，供 agent.serve 等子类使用）。
 
@@ -396,6 +406,9 @@ class BridgeServer:
 
         # 注册客户端：用于主线程 broadcast 推送电脑端消息
         self._clients.add(ws)
+        # 每连接首帧钩子：启动期一次性 broadcast 在无在线客户端时会被静默丢弃，
+        # 首帧（serve 模式的 init 事件）必须按连接推送。@author aceFelix
+        await self._on_client_connected(ws)
         try:
             # 2. 接收循环与查询并发：
             #    reader 持续读 ws（abort 直接 set 事件，其余入队），

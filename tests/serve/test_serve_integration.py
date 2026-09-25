@@ -64,8 +64,12 @@ async def _e2e() -> None:
             async with websockets.connect(base) as ws:
                 await ws.recv()
 
-        # 3. 正确 token：指令 → reply 回执
+        # 3. 正确 token：按连接首推 init 首帧 → 指令 → reply 回执
         async with websockets.connect(base + "?token=test-token") as ws:
+            # 每连接首帧：init 事件（payload 同 state.get，桌面壳首屏/设置回填数据源）
+            init_evt = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            assert init_evt["event"] == "init"
+            assert "provider" in init_evt["data"]
             await ws.send(json.dumps({"type": "state.get"}))
             reply = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
             assert reply["event"] == "reply"
