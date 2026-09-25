@@ -22,6 +22,15 @@ from typing import Any, Callable
 from agent.config.settings import Settings
 from agent.core.message import Message
 from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
+# 附件/渲染纯函数拆到 render.py（控本文件行数）；此处再导出保持
+# tests/ui 既有导入路径（from engine import _messages_to_render）不变。
+# @author aceFelix
+from agent.ui.workbench.render import (  # noqa: F401
+    _MAX_ATTACH_FILE_CHARS,
+    _compose_with_files,
+    _messages_to_render,
+    _parse_images,
+)
 from agent.voice.voice_events import VoiceEventsBase
 
 # 半双工语音 WS 事件名（与 agent/serve/protocol.py 的 EVT_VOICE_* 字面量对齐；
@@ -118,6 +127,16 @@ class ChatEngine:
         self._stop_event = threading.Event()
         # 当前 send 轮次的任务句柄（reply.abort 从其他线程线程安全地取消它）
         self._send_task: asyncio.Task | None = None
+        # 启动后台预热：registry（+宿主钩子）与 MCP 连接提前到启动空窗完成，
+        # 首条消息不再同步等 MCP（实测 7 server 并发约 9s）；_ensure_session
+        # 等 _registry_ready 后复用 _registry，预热失败降级回同步装配。
+        # @author aceFelix
+        self._registry: Any = None
+        self._registry_ready = asyncio.Event()
+        self._prewarm_task: asyncio.Task | None = None
+        # 自动标题任务句柄：用户改名时取消未落地任务，防自动标题覆盖自定义名。
+        # @author aceFelix
+        self._title_task: asyncio.Task | None = None
 
     # ---- 只读状态快照（serve 右栏数据源：cost.get / state.get 经 WorkbenchAPI 读取） ----
 
@@ -153,9 +172,37 @@ class ChatEngine:
         return len(getattr(self, "_messages", None) or [])
 
     @property
+    def session_name(self) -> str:
+        """当前会话名（sessions.list 的 current 标记数据源；未装配时为空串）。
+
+        会话名在新建/恢复/标题改名时都会变（_session_name），
+        列表每次刷新现读现比，前端无需跟踪事件序列。@author aceFelix
+        """
+        return str(getattr(self, "_session_name", "") or "")
+
+    @property
     def mcp_status(self) -> dict[str, Any] | None:
         """MCP 连接结果快照（state.get 数据源；None=MCP 未启用或未装配）。"""
         return self._mcp_status
+
+    @property
+    def is_busy(self) -> bool:
+        """是否处于对话轮次或语音会话（主动播报 TTS「忙时跳过」探针）。
+
+        三路任一未结束即忙：文本 send 轮次（_send_task）、半双工语音
+        （_voice_task）、实时双工（_talk_task）。忙时主动播报只推事件、
+        不做 TTS 朗读，避免打断正在进行的对话或抢占语音通道。
+
+        @author aceFelix
+        """
+        task = self._send_task
+        if task is not None and not task.done():
+            return True
+        for attr in ("_voice_task", "_talk_task"):
+            t = getattr(self, attr, None)
+            if t is not None and not t.done():
+                return True
+        return False
 
     # ---- 生命周期 ----
 
@@ -182,6 +229,8 @@ class ChatEngine:
         """线程入口：建独立事件循环并消费指令。"""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        # 启动预热任务：registry + MCP 连接在启动空窗后台完成（首条消息秒进）
+        self._prewarm_task = self._loop.create_task(self._prewarm())
         try:
             self._loop.run_until_complete(self._command_loop())
         except Exception as e:
@@ -194,6 +243,34 @@ class ChatEngine:
             self._loop.close()
 
     # ---- 指令消费主循环 ----
+
+    async def _prewarm(self) -> None:
+        """启动后台预装配：registry（+宿主钩子）→ MCP 连接。
+
+        MCP 多 server 并发连接实测约 9s，把它从首条消息的 _ensure_session
+        前移到启动空窗后台：用户开始打字时 MCP 通常已就绪，首条消息秒进
+        LLM；预热窗口内就发消息也只是先少 MCP 工具聊（工具连上自动补挂，
+        与 harness 后台加载同口径）。任何异常置位 _registry_ready 后由
+        _ensure_session 降级同步装配，对话链路始终可用。@author aceFelix
+        """
+        try:
+            from agent.core.tool import build_default_registry
+
+            registry = build_default_registry()
+            if self._registry_hook is not None:
+                try:
+                    self._registry_hook(registry)
+                except Exception as e:
+                    self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
+            self._registry = registry
+            if self._settings.enable_mcp:
+                await self._connect_mcp(registry)
+        except Exception as e:
+            self._emitter.emit(
+                "info", f"⚠ 启动预热失败（首条消息同步装配兜底）: {type(e).__name__}: {e}"
+            )
+        finally:
+            self._registry_ready.set()
 
     async def _command_loop(self) -> None:
         """消费前端指令队列；空闲时让出事件循环。"""
@@ -232,6 +309,12 @@ class ChatEngine:
         elif action == "new_session":
             await self._ensure_session()
             self._handle_new_session()
+        elif action == "rename_session":
+            await self._ensure_session()
+            self._handle_rename(cmd.get("name", ""), cmd.get("new_name", ""))
+        elif action == "delete_session":
+            await self._ensure_session()
+            self._handle_delete(cmd.get("name", ""))
         elif action == "start_talk":
             await self._handle_start_talk()
         elif action == "stop_talk":
@@ -266,20 +349,26 @@ class ChatEngine:
         s = self._settings
         self._emitter.emit("status", "正在初始化对话引擎...")
         provider = _build_provider(s, model_type=_model_type_for(s))
-        registry: ToolRegistry = build_default_registry()
-        # 宿主钩子：挂载额外工具（serve 宿主在此接提醒/截止日期工具），
-        # 在系统提示词生成前执行，使 LLM 能感知新工具；失败不阻断装配
-        if self._registry_hook is not None:
-            try:
-                self._registry_hook(registry)
-            except Exception as e:
-                self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
-        # MCP 接入：对齐 main.repl() 的连接步骤——连接 ~/.jarvis/mcp.json 配置的
-        # server 并注册其工具。此前 workbench/serve 装配路径漏掉该步骤，导致桌面壳
-        # 永远缺少 MCP 工具（如 mcp__amap-maps__*），见
-        # docs/fixlogs/serve-mcp-truncation-fix.md。@author aceFelix
-        if s.enable_mcp:
-            await self._connect_mcp(registry)
+        # 复用启动预热的 registry（MCP 已在后台连接/连完）；预热未产出
+        # （超时/失败）才同步装配兜底，含 MCP 连接，保证能力不缺失。
+        # @author aceFelix
+        registry: ToolRegistry | None = None
+        try:
+            await asyncio.wait_for(self._registry_ready.wait(), timeout=30)
+            registry = self._registry
+        except asyncio.TimeoutError:
+            registry = None
+        if registry is None:
+            registry = build_default_registry()
+            # 宿主钩子：挂载额外工具（serve 宿主在此接提醒/截止日期工具），
+            # 在系统提示词生成前执行，使 LLM 能感知新工具；失败不阻断装配
+            if self._registry_hook is not None:
+                try:
+                    self._registry_hook(registry)
+                except Exception as e:
+                    self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
+            if s.enable_mcp:
+                await self._connect_mcp(registry)
         # harness 动态工具后台加载，避免阻塞首轮对话
         threading.Thread(
             target=lambda: self._register_harness(registry, s.workdir), daemon=True
@@ -475,7 +564,8 @@ class ChatEngine:
                 # 复用会把刚渲染的回复清掉（桌面端/工作台均踩过），改名只刷列表
                 self._emitter.emit("session_renamed", {"name": self._session_name})
 
-            asyncio.get_event_loop().create_task(_gen_first())
+            # 句柄留存：用户改名时取消未落地任务，防自动标题覆盖自定义名
+            self._title_task = asyncio.get_event_loop().create_task(_gen_first())
         elif self._dialog_count == 2 and len(self._messages) >= 4 and not self._title_generated:
             self._title_generated = True
 
@@ -486,7 +576,8 @@ class ChatEngine:
                 # 同上：改名推送 session_renamed，前端只刷新会话列表不清屏
                 self._emitter.emit("session_renamed", {"name": self._session_name})
 
-            asyncio.get_event_loop().create_task(_gen_llm())
+            # 同上：LLM 标题任务句柄留存供改名取消
+            self._title_task = asyncio.get_event_loop().create_task(_gen_llm())
 
     async def _handle_load(self, name: str) -> None:
         """恢复历史会话：载入消息并把历史渲染给前端。"""
@@ -514,6 +605,57 @@ class ChatEngine:
         self._dialog_count = 0
         self._title_generated = False
         self._emitter.emit("session_new", {"name": self._session_name})
+
+    def _handle_rename(self, name: str, new_name: str) -> None:
+        """会话改名：同步存盘文件与当前会话名，成功推 session_renamed 刷列表。
+
+        用户改名优先于自动标题：改名当前会话后置 _title_generated 并取消
+        未落地的标题任务，防自动标题覆盖用户自定义名；目标名已占用
+        （存盘文件存在）一律拒绝。@author aceFelix
+        """
+        from agent.core.memory.store import rename_session as _store_rename
+        from agent.core.memory.store import session_exists
+
+        name = (name or "").strip()
+        new_name = (new_name or "").strip()
+        if not name or not new_name or new_name == name:
+            self._emitter.emit("warn", "改名已忽略：会话名为空或未变化")
+            return
+        if session_exists(new_name):
+            self._emitter.emit("warn", f"改名失败：目标会话名已存在: {new_name}")
+            return
+        if session_exists(name):
+            _store_rename(name, new_name)
+        elif name != self._session_name:
+            self._emitter.emit("warn", f"改名失败：会话不存在: {name}")
+            return
+        # 盘上完成（或当前会话尚未落盘）：同步引擎态
+        if name == self._session_name:
+            task = self._title_task
+            if task is not None and not task.done():
+                task.cancel()
+            self._session_name = new_name
+            self._title_generated = True
+        self._emitter.emit("session_renamed", {"name": new_name})
+
+    def _handle_delete(self, name: str) -> None:
+        """会话删除：移除存盘文件并推 session_deleted 刷列表。
+
+        删除当前会话时复用 _handle_new_session 语义（清消息开新会话），
+        前端聊天区与存盘列表一致归空。@author aceFelix
+        """
+        from agent.core.memory.store import delete_session as _store_delete
+
+        name = (name or "").strip()
+        if not name:
+            return
+        existed = _store_delete(name)
+        if not existed and name != self._session_name:
+            self._emitter.emit("warn", f"删除失败：会话不存在: {name}")
+            return
+        self._emitter.emit("session_deleted", {"name": name})
+        if name == self._session_name:
+            self._handle_new_session()
 
     # ---- /talk 实时语音 ----
 
@@ -679,7 +821,17 @@ class ChatEngine:
     # ---- 收尾 ----
 
     async def _shutdown(self) -> None:
-        """引擎退出：停实时语音、停半双工语音、关 provider。"""
+        """引擎退出：停预热、停实时语音、停半双工语音、关 provider。"""
+        task = self._prewarm_task
+        if task is not None and not task.done():
+            task.cancel()
+            # 必须等取消落地再关 loop：否则 loop.close() 时预热任务仍 pending，
+            # 报 "Task was destroyed but it is pending" 且 MCP 子进程回收不全。
+            # @author aceFelix
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
         await self._handle_stop_talk()
         await self._handle_stop_voice()
         provider = getattr(self, "_provider", None)
@@ -688,88 +840,3 @@ class ChatEngine:
                 await provider.close()
             except Exception:
                 pass
-
-
-# 单个附带文本文件的正文上限（字符）：防一个巨型文件撑爆单轮上下文，
-# 截断保留头部并附提示（与 serve/server.py 的入队校验上限独立，双保险）。
-# @author aceFelix
-_MAX_ATTACH_FILE_CHARS = 20_000
-
-
-def _parse_images(images: Any) -> list[Any]:
-    """把 message 指令的 images 字段（[{data, media_type}]）转 ImageContent 列表。
-
-    非法条目（非 dict / 缺 data）静默跳过；base64 合法性校验留给 provider 层。
-    @author aceFelix
-    """
-    from agent.core.message import ImageContent
-
-    out: list[Any] = []
-    for item in images or []:
-        if not isinstance(item, dict):
-            continue
-        data = item.get("data")
-        if not isinstance(data, str) or not data:
-            continue
-        out.append(ImageContent(data=data, media_type=str(item.get("media_type") or "image/png")))
-    return out
-
-
-def _compose_with_files(text: str, files: Any) -> str:
-    """把文本文件附件（[{name, content}]）以代码块形式拼进消息正文。
-
-    超长文件截断到 _MAX_ATTACH_FILE_CHARS 并附提示；空内容文件跳过。
-    @author aceFelix
-    """
-    composed = text
-    for item in files or []:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "未命名.txt")
-        content = str(item.get("content") or "")
-        if not content.strip():
-            continue
-        if len(content) > _MAX_ATTACH_FILE_CHARS:
-            content = (
-                content[:_MAX_ATTACH_FILE_CHARS]
-                + f"\n…（文件过长，仅展示前 {_MAX_ATTACH_FILE_CHARS} 字符）"
-            )
-        composed += f"\n\n【附带文件 {name}】\n```\n{content}\n```"
-    return composed
-
-
-def _messages_to_render(messages: list[Message]) -> list[dict[str, Any]]:
-    """把历史消息转成前端渲染结构（只保留文本块，工具块折叠为提示）。
-
-    图片块（用户附件）折叠为「[图片×N]」标记行，历史回放不传 base64。
-    @author aceFelix
-    """
-    from agent.core.message import ImageContent, TextContent, ToolResultContent, ToolUseContent
-
-    out: list[dict[str, Any]] = []
-    for m in messages:
-        texts: list[str] = []
-        tool_count = 0
-        img_count = 0
-        for b in m.content:
-            if isinstance(b, TextContent) and b.text.strip():
-                texts.append(b.text)
-            elif isinstance(b, (ToolUseContent, ToolResultContent)):
-                tool_count += 1
-            elif isinstance(b, ImageContent):
-                img_count += 1
-        if not texts and not tool_count and not img_count:
-            continue
-        # 纯工具结果消息（role=user 的工具回填）不进历史回放；
-        # assistant 纯工具消息保留为"工具调用 ×N"提示行。
-        if not texts and not img_count and m.role != "assistant":
-            continue
-        body = "\n\n".join(texts)
-        if img_count:
-            marker = f"[图片×{img_count}]"
-            body = f"{body}\n{marker}" if body else marker
-        item: dict[str, Any] = {"role": m.role, "text": body}
-        if tool_count:
-            item["tool_count"] = tool_count
-        out.append(item)
-    return out

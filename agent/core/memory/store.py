@@ -266,6 +266,27 @@ def load_session(name: str) -> SessionData | None:
     return SessionData(meta=meta, messages=messages)
 
 
+def session_exists(name: str) -> bool:
+    """会话存盘文件是否存在（改名冲突/删除前置的轻量检查）。
+
+    @author aceFelix
+    """
+    return _session_path(name).exists()
+
+
+def rename_session(old: str, new: str) -> bool:
+    """改名会话存盘文件。源不存在或目标名已占用（不覆盖）返回 False。
+
+    @author aceFelix
+    """
+    src = _session_path(old)
+    dst = _session_path(new)
+    if not src.exists() or dst.exists():
+        return False
+    src.rename(dst)
+    return True
+
+
 def list_sessions() -> list[SessionMeta]:
     """列出所有已保存会话，按更新时间倒序。"""
     sessions: list[SessionMeta] = []

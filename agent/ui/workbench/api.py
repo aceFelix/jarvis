@@ -107,17 +107,31 @@ class WorkbenchAPI:
         """恢复指定历史会话到中栏。"""
         self._post({"cmd": "load_session", "name": name})
 
+    def rename_session(self, name: str, new_name: str) -> None:
+        """会话改名（成功由引擎推 session_renamed 刷列表）。@author aceFelix"""
+        self._post({"cmd": "rename_session", "name": name, "new_name": new_name})
+
+    def delete_session(self, name: str) -> None:
+        """删除会话（成功推 session_deleted；删当前会话另推 session_new）。@author aceFelix"""
+        self._post({"cmd": "delete_session", "name": name})
+
     def list_sessions(self) -> list[dict[str, Any]]:
-        """历史会话列表（左栏面板数据源，按更新时间倒序）。"""
+        """历史会话列表（左栏面板数据源，按更新时间倒序）。
+
+        每项带 current 标记（与引擎当前会话名现比），
+        左栏据此渲染选中态：恢复/新建/改名后任一次刷新即自愈。@author aceFelix
+        """
         try:
             from agent.core.memory.store import list_sessions
 
+            current = self._engine.session_name
             return [
                 {
                     "name": s.name,
                     "updated_at": s.updated_at,
                     "message_count": s.message_count,
                     "model": s.model,
+                    "current": s.name == current,
                 }
                 for s in list_sessions()
             ]

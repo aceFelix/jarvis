@@ -174,14 +174,96 @@
         const list = document.getElementById('session-list');
         const sessions = await callApi(api => api.list_sessions()) || [];
         list.innerHTML = '';
+        pendingDeleteName = null;
+        // 空白处右键收起删除按钮（项内右键已 stopPropagation 不会误触）。@author aceFelix
+        if (!list.dataset.ctxBound) {
+            list.dataset.ctxBound = '1';
+            list.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                clearSessionDeleteBtn();
+            });
+        }
         sessions.slice(0, 60).forEach(s => {
             const time = new Date(s.updated_at * 1000).toLocaleString();
             const item = makeListItem(s.name, `${time} · ${s.message_count} 条消息`, false);
+            item.classList.add('session-item');
+            item.firstChild.className = 'session-title';
+            // 单击延时：双击（改名）会先清掉该定时器，避免「想改名却先加载一次」
+            let clickTimer = null;
             item.addEventListener('click', () => {
-                callApi(api => api.load_session(s.name));
+                if (clickTimer) clearTimeout(clickTimer);
+                clickTimer = setTimeout(() => callApi(api => api.load_session(s.name)), 220);
+            });
+            item.addEventListener('dblclick', () => {
+                if (clickTimer) clearTimeout(clickTimer);
+                clearSessionDeleteBtn();
+                startSessionRename(item, s.name);
+            });
+            item.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const on = pendingDeleteName === s.name;
+                clearSessionDeleteBtn();
+                if (on) return;
+                pendingDeleteName = s.name;
+                const btn = document.createElement('button');
+                btn.className = 'del-btn';
+                btn.title = '删除会话';
+                btn.textContent = '[DEL]';
+                btn.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    clearSessionDeleteBtn();
+                    callApi(api => api.delete_session(s.name));
+                });
+                btn.addEventListener('dblclick', ev => ev.stopPropagation());
+                btn.addEventListener('contextmenu', ev => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                });
+                item.appendChild(btn);
             });
             list.appendChild(item);
         });
+    }
+
+    // 会话项交互态：pendingDeleteName=右键待删会话名（删除按钮仅其时存在）。
+    // 与桌面壳 SessionItem 同口径。@author aceFelix
+    let pendingDeleteName = null;
+
+    function clearSessionDeleteBtn() {
+        document.querySelectorAll('#session-list .del-btn').forEach(b => b.remove());
+        pendingDeleteName = null;
+    }
+
+    /** 双击内联改名：标题换成输入框，Enter/失焦提交、Esc 取消；
+     *  空名或未变化视为取消（重拉列表复原）。@author aceFelix */
+    function startSessionRename(item, name) {
+        const title = item.querySelector('.session-title');
+        if (!title) return;
+        const input = document.createElement('input');
+        input.className = 'rename-input';
+        input.value = name;
+        item.replaceChild(input, title);
+        input.focus();
+        input.select();
+        let done = false;
+        const finish = (commit) => {
+            if (done) return;
+            done = true;
+            const v = input.value.trim();
+            if (commit && v && v !== name) {
+                callApi(api => api.rename_session(name, v));
+            }
+            refreshSessionList();
+        };
+        input.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') finish(true);
+            else if (e.key === 'Escape') finish(false);
+        });
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('click', e => e.stopPropagation());
+        input.addEventListener('dblclick', e => e.stopPropagation());
     }
 
     async function refreshModelList() {
@@ -379,17 +461,26 @@
                 break;
             // ---- 会话管理 ----
             case 'session_renamed':
-                // 标题生成改名：只刷新会话列表，不清空气泡
-                // （session_ready 带清屏初始化语义，复用会擦除刚渲染的回复）
+                // 标题生成改名：只刷新会话列表，不清空气泡 @author aceFelix
+                refreshSessionList();
+                break;
+            case 'session_deleted':
+                // 会话删除完成：只刷列表（删当前会话时引擎另发 session_new 清屏）。
                 // @author aceFelix
                 refreshSessionList();
                 break;
             case 'session_ready':
+                // 引擎装配完成通知：只刷新会话列表，不清屏——首条 send 触发
+                // 本事件，清屏语义会吞掉乐观上屏的首发用户气泡（桌面端实测
+                // 首发消息气泡消失）；清屏初始化由页面加载空屏与 session_new
+                // 兜底。@author aceFelix
+                refreshSessionList();
+                break;
             case 'session_new':
                 chatHistory.innerHTML = '';
                 streamingBody = null;
                 thinkingBlock = null;
-                if (type === 'session_new') addSystemMessage('已开启新会话');
+                addSystemMessage('已开启新会话');
                 refreshSessionList();
                 break;
             case 'session_loaded':

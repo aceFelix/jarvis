@@ -3,6 +3,7 @@
 覆盖：
 - _messages_to_render 历史消息渲染结构（文本/工具块折叠）
 - ChatEngine 启停生命周期（不触发重型装配）
+- ChatEngine.is_busy 忙时探针（send 轮次 / 半双工 / 实时双工三路）
 - WorkbenchAPI 事件轮询、状态与模型/音色列表
 - main.py --gui/--talk 参数解析
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+from types import SimpleNamespace
 
 from agent import session_manager as session_manager_mod
 from agent.config.settings import Settings
@@ -52,8 +54,13 @@ def test_messages_to_render_empty():
 # ---- 引擎生命周期 ----
 
 def test_engine_start_stop_without_heavy_init():
-    """引擎可启动并干净退出（未发任何指令时不做重型装配）。"""
+    """引擎可启动并干净退出（同步重型装配仍懒到首条指令）。
+
+    启动时后台预热会建 registry/连 MCP（首条消息秒进优化），
+    测试关 enable_mcp 保 hermetic，不真连用户 MCP server。@author aceFelix
+    """
     settings = Settings()
+    settings.enable_mcp = False
     event_queue: queue.Queue = queue.Queue()
     command_queue: queue.Queue = queue.Queue()
     engine = ChatEngine(settings, event_queue, command_queue)
@@ -63,9 +70,39 @@ def test_engine_start_stop_without_heavy_init():
     assert engine._thread is None
 
 
+# ---- 忙时探针（主动播报 TTS「忙时跳过」用） ----
+
+def test_engine_is_busy_idle():
+    """无 send 轮次、无语音会话 → is_busy False。"""
+    engine = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    assert engine.is_busy is False
+
+
+def test_engine_is_busy_send_turn():
+    """send 任务未结束 → 忙；结束 → 空闲。"""
+    engine = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    engine._send_task = SimpleNamespace(done=lambda: False)
+    assert engine.is_busy is True
+    engine._send_task = SimpleNamespace(done=lambda: True)
+    assert engine.is_busy is False
+
+
+def test_engine_is_busy_voice_sessions():
+    """半双工语音 / 实时双工任务未结束 → 同样判忙。"""
+    engine = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    engine._voice_task = SimpleNamespace(done=lambda: False)
+    assert engine.is_busy is True
+    engine._voice_task = None
+    engine._talk_task = SimpleNamespace(done=lambda: False)
+    assert engine.is_busy is True
+    engine._talk_task = SimpleNamespace(done=lambda: True)
+    assert engine.is_busy is False
+
+
 def test_engine_new_session_resets_state():
     """new_session 指令清空轮数并推送 session_new 事件。"""
     settings = Settings()
+    settings.enable_mcp = False  # 预热不真连用户 MCP server（hermetic）
     event_queue: queue.Queue = queue.Queue()
     command_queue: queue.Queue = queue.Queue()
     engine = ChatEngine(settings, event_queue, command_queue)
@@ -229,6 +266,33 @@ def test_api_list_sessions_returns_list():
     assert isinstance(sessions, list)
     for s in sessions:
         assert {"name", "updated_at", "message_count", "model"} <= set(s.keys())
+
+
+def test_api_list_sessions_marks_current(monkeypatch) -> None:
+    """sessions.list 每项带 current 标记：与引擎当前会话名相等的为 True，其余 False。
+
+    左栏选中态数据源：恢复/新建/改名后任一次刷新即自愈，
+    前端无需跟踪 session_* 事件序列。@author aceFelix
+    """
+    from agent.core.memory import store as store_mod
+    from agent.core.memory.store import SessionMeta
+
+    monkeypatch.setattr(
+        store_mod,
+        "list_sessions",
+        lambda: [
+            SessionMeta(name="opened", workdir="", message_count=2, updated_at=200),
+            SessionMeta(name="other", workdir="", message_count=1, updated_at=100),
+        ],
+    )
+    api, _, _ = _make_api()
+    api._engine._session_name = "opened"
+    by_name = {s["name"]: s for s in api.list_sessions()}
+    assert by_name["opened"]["current"] is True
+    assert by_name["other"]["current"] is False
+    # 引擎未装配/无当前会话时全 False（不误标）
+    api._engine._session_name = ""
+    assert all(s["current"] is False for s in api.list_sessions())
 
 
 # ---- 命令行参数 ----

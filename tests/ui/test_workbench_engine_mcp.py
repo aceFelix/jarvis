@@ -5,6 +5,8 @@
 模型查天气等场景只能"念叨"计划而拿不到专业工具。
 修复：_ensure_session 在系统提示词生成前 await _connect_mcp(registry)。
 见 docs/fixlogs/serve-mcp-truncation-fix.md。
+后续优化：MCP 连接前移到启动后台预热（_prewarm），首条消息复用预热
+registry 不再同步等 MCP；见 docs/fixlogs/mcp-prewarm-first-send.md。
 
 @author aceFelix
 """
@@ -125,3 +127,85 @@ async def test_connect_mcp_exception_degrades_to_info(monkeypatch) -> None:
     assert engine._mcp_client is None
     infos = [e["payload"] for e in _drain(event_queue) if e["type"] == "info"]
     assert any("MCP 接入异常" in t for t in infos)
+
+
+# ---- 启动预热（_prewarm）回归：首条消息不再同步等 MCP ----
+
+
+async def test_prewarm_builds_registry_and_hooks(monkeypatch) -> None:
+    """预热：registry 提前建好 + 宿主钩子挂载 + ready 置位；enable_mcp=False 不连 MCP。"""
+    engine, event_queue = _make_engine()
+    engine._settings.enable_mcp = False
+    sentinel = ToolRegistry()
+    monkeypatch.setattr(tool_mod, "build_default_registry", lambda: sentinel)
+
+    await engine._prewarm()
+
+    assert engine._registry is sentinel
+    assert engine._registry_ready.is_set()
+    assert engine._mcp_client is None  # 未启用 MCP 时不连接
+
+    # 宿主钩子在预热阶段挂载（serve 的提醒/截止日期工具靠它进注册表）
+    hooked: dict = {}
+    engine2, _ = _make_engine()
+    engine2._settings.enable_mcp = False
+    engine2._registry_hook = lambda r: hooked.setdefault("r", r)
+    sentinel2 = ToolRegistry()
+    monkeypatch.setattr(tool_mod, "build_default_registry", lambda: sentinel2)
+    await engine2._prewarm()
+    assert hooked["r"] is sentinel2
+
+
+async def test_prewarm_failure_degrades_ready(monkeypatch) -> None:
+    """预热异常：ready 仍置位 + info 告知，_ensure_session 可同步兜底。"""
+    engine, event_queue = _make_engine()
+
+    def boom() -> ToolRegistry:
+        raise OSError("registry 构建失败")
+
+    monkeypatch.setattr(tool_mod, "build_default_registry", boom)
+
+    await engine._prewarm()  # 不抛异常即通过
+
+    assert engine._registry is None
+    assert engine._registry_ready.is_set()
+    infos = [e["payload"] for e in _drain(event_queue) if e["type"] == "info"]
+    assert any("启动预热失败" in t for t in infos)
+
+
+async def test_ensure_session_reuses_prewarmed_registry(monkeypatch) -> None:
+    """首条消息装配：复用预热 registry，不重建、不同步连 MCP。"""
+    import agent.bootstrap as boot_mod
+    import agent.core.orchestrator as orch_mod
+    import agent.core.query_loop as ql_mod
+    import agent.prompts.system as sp_mod
+
+    engine, _ = _make_engine()
+    engine._settings.model = "m"
+    sentinel = ToolRegistry()
+    engine._registry = sentinel
+    engine._registry_ready.set()
+
+    monkeypatch.setattr(boot_mod, "_build_provider", lambda s, model_type: object())
+    monkeypatch.setattr(boot_mod, "_model_type_for", lambda s: "text")
+    monkeypatch.setattr(boot_mod, "_build_checker", lambda s: None)
+    monkeypatch.setattr(boot_mod, "_build_recovery_executor", lambda s: None)
+    monkeypatch.setattr(boot_mod, "_build_context", lambda s, ui, msgs: None)
+    monkeypatch.setattr(orch_mod, "ToolOrchestrator", lambda **kw: None)
+    captured: dict = {}
+    monkeypatch.setattr(
+        ql_mod, "QueryLoop", lambda **kw: captured.setdefault("registry", kw["registry"])
+    )
+    monkeypatch.setattr(sp_mod, "build_system_prompt", lambda *a, **k: "sys")
+
+    def boom(*a: object, **k: object) -> object:
+        raise AssertionError("预热 registry 存在时不应重建/连 MCP")
+
+    monkeypatch.setattr(tool_mod, "build_default_registry", boom)
+    monkeypatch.setattr(ChatEngine, "_connect_mcp", boom)
+    monkeypatch.setattr(ChatEngine, "_register_harness", lambda self_, r, w: None)
+
+    await engine._ensure_session()
+
+    assert captured["registry"] is sentinel
+    assert engine._session_ready is True

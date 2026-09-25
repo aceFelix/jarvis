@@ -260,6 +260,48 @@ html, body {
     color: #9cc4e0;
 }
 
+/* 会话项交互（右键删除 / 双击改名）：项为定位容器，删除按钮绝对定位
+   右侧仅右键后出现；改名输入框撑满项宽。与桌面壳 main.css 同口径。
+   @author aceFelix */
+.session-item {
+    position: relative;
+    padding-right: 56px; /* 给删除按钮预留位，标题不被压到按钮下 */
+}
+
+.session-item .session-title {
+    display: block;
+}
+
+.session-item .del-btn {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    padding: 2px 6px;
+    font: inherit;
+    font-size: 12px;
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.12);
+    border: 1.2px solid #ff6b6b;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.session-item .del-btn:hover {
+    background: rgba(255, 107, 107, 0.28);
+}
+
+.session-item .rename-input {
+    width: 100%;
+    font: inherit;
+    color: #e6f4ff;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1.2px solid #5bc8ff;
+    border-radius: 8px;
+    padding: 4px 6px;
+    outline: none;
+}
+
 /* 左栏新建会话按钮：悬停字体同变蓝（中栏发送按钮不受影响，另有主色样式） */
 #new-session-btn:hover { color: #5bc8ff; }
 

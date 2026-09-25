@@ -124,6 +124,7 @@ def test_engine_abort_current_reply(monkeypatch):
     """send 进行中 abort → 任务被取消、assistant_done 仍收尾、
     info『已停止回复』外抛，且后续指令继续被消费（循环未死）。"""
     settings = Settings()
+    settings.enable_mcp = False  # 启动预热不真连用户 MCP server（hermetic）
     event_queue: queue.Queue = queue.Queue()
     command_queue: queue.Queue = queue.Queue()
     engine = ChatEngine(settings, event_queue, command_queue)

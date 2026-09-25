@@ -31,7 +31,9 @@ from agent.core.memory.store import (
     load_session,
     memory_section,
     project_memory_path,
+    rename_session,
     save_session,
+    session_exists,
     user_memory_path,
 )
 
@@ -233,6 +235,40 @@ class TestDeleteSession:
 
     def test_delete_missing_returns_false(self, jarvis_home) -> None:
         assert delete_session("never-existed") is False
+
+
+class TestSessionExists:
+    """会话存盘存在性检查（改名冲突/删除前置）。"""
+
+    def test_exists_true_after_save(self, jarvis_home) -> None:
+        save_session("存在的会话", [Message.user_text("x")])
+        assert session_exists("存在的会话") is True
+
+    def test_exists_false_when_missing(self, jarvis_home) -> None:
+        assert session_exists("never-existed") is False
+
+
+class TestRenameSession:
+    """会话改名（存盘文件重命名）。"""
+
+    def test_rename_existing(self, jarvis_home) -> None:
+        """改名成功：旧名消失、新名可加载。"""
+        save_session("旧名字", [Message.user_text("x")])
+        assert rename_session("旧名字", "新名字") is True
+        assert session_exists("旧名字") is False
+        assert load_session("新名字") is not None
+
+    def test_rename_target_occupied_no_overwrite(self, jarvis_home) -> None:
+        """目标名已占用：拒绝（不覆盖），返回 False，两会话均保留。"""
+        save_session("源会话", [Message.user_text("a")])
+        save_session("目标会话", [Message.user_text("b")])
+        assert rename_session("源会话", "目标会话") is False
+        assert session_exists("源会话") is True
+        assert session_exists("目标会话") is True
+
+    def test_rename_missing_source_returns_false(self, jarvis_home) -> None:
+        """源会话不存在：返回 False。"""
+        assert rename_session("never-existed", "新名字") is False
 
 
 class TestSessionPath:
