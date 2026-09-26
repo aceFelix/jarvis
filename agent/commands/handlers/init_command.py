@@ -165,7 +165,7 @@ def _ask_api_key(ui: RichCLI, vendor: dict) -> str | None:
     """询问 API Key。"""
     ui._console.print(f"\n[bold]厂商:[/bold] {vendor['name']}")
     ui._console.print(
-        "[dim]API Key 不会明文存储，仅保存在本地 ~/.jarvis/settings.toml[/dim]"
+        "[dim]API Key 仅保存在本地 ~/.jarvis/models.toml（并同步写入系统凭据管理器）[/dim]"
     )
 
     try:
@@ -239,98 +239,26 @@ async def _test_connection(vendor: dict, api_key: str) -> tuple[bool, str]:
 
 
 def _save_config(vendor: dict, api_key: str, model_type: str = "text") -> Path:
-    """保存配置到 ~/.jarvis/settings.toml。
+    """保存配置到 ~/.jarvis/models.toml（模型域专属文件）。
 
-    写入逻辑与 /models 添加自定义模型一致：
+    2026-09 模型域拆分后，写入实现统一在 agent/config/models_config.py
+    （save_init_model），与 /models 添加自定义模型同口径：
     1. 在 [llm.custom_models] 中写入模型完整配置
     2. 设置 last_model 让下次启动默认使用该模型
-    3. 保留已有的 LLM 顶层字段（provider/api_format）作兜底
+    3. 兜底 provider/api_format 顶层键（仅缺失时补写）
+
+    @author aceFelix
     """
-    import re
+    from agent.config.models_config import save_init_model
 
-    model_name = vendor.get("default_model", "")
-    base_url = vendor.get("default_base_url", "")
-    api_fmt = vendor.get("api_format", "openai")
-
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    toml_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # 构建 custom_models 子表条目
-    entry_lines = [
-        f'[llm.custom_models."{model_name}"]',
-        f'name = "{model_name}"',
-    ]
-    if base_url:
-        entry_lines.append(f'base_url = "{base_url}"')
-    if api_key:
-        entry_lines.append(f'api_key = "{api_key}"')
-    entry_lines += [
-        f'provider_type = "{api_fmt}"',
-        f'model_type = "{model_type}"',
-        f'vendor = "{vendor["key"]}"',
-    ]
-    entry = "\n".join(entry_lines)
-
-    if toml_path.exists():
-        content = toml_path.read_text(encoding="utf-8")
-    else:
-        content = "# J.A.R.V.I.S 配置（由 jarvis init 生成）\n"
-
-    # ── 更新/添加 [llm.custom_models."model"] ──
-    marker = f'[llm.custom_models."{model_name}"]'
-    if marker in content:
-        start = content.index(marker)
-        rest = content[start + len(marker):]
-        m = re.search(r'\n\[', rest)
-        if m:
-            end = start + len(marker) + m.start()
-            while end < len(content) and content[end] == '\n':
-                end += 1
-            content = content[:start].rstrip() + "\n" + entry.strip() + "\n" + content[end:]
-        else:
-            content = content[:start].rstrip() + "\n" + entry.strip()
-    else:
-        if "[llm.custom_models" not in content:
-            content = content.rstrip() + "\n\n# 自定义模型（通过 jarvis init 添加）\n"
-        content = content.rstrip() + "\n" + entry.strip() + "\n"
-
-    # ── 设置 last_model（下次启动默认使用该模型）──
-    # 在第一个 [...] 节头之前操作顶层字段
-    first_section = re.search(r'^\[', content, re.MULTILINE)
-    top_end = first_section.start() if first_section else len(content)
-    top_part = content[:top_end]
-    rest_part = content[top_end:]
-    if re.search(r'^last_model\s*=', top_part, re.MULTILINE):
-        top_part = re.sub(
-            r'^last_model\s*=.*$',
-            f'last_model = "{model_name}"',
-            top_part,
-            flags=re.MULTILINE,
-        )
-    else:
-        top_part = top_part.rstrip() + f'\nlast_model = "{model_name}"\n'
-    content = top_part + rest_part
-
-    # ── 兜底：确保 provider/api_format 存在 ──
-    # 重新计算分割点（last_model 修改后内容长度可能变了）
-    first_section = re.search(r'^\[', content, re.MULTILINE)
-    top_end = first_section.start() if first_section else len(content)
-    top_part = content[:top_end]
-    rest_part = content[top_end:]
-    for field, value in (("provider", vendor["key"]), ("api_format", api_fmt)):
-        if not re.search(rf'^{field}\s*=', top_part, re.MULTILINE):
-            top_part = top_part.rstrip() + f'\n{field} = "{value}"\n'
-    content = top_part + rest_part
-
-    toml_path.write_text(content, encoding="utf-8")
-    # S-01: 尝试存储 API Key 到系统 keyring（透明加密，TOML 中的 api_key 作降级兜底）
-    if api_key:
-        try:
-            from agent.config.keyring_store import store_api_key
-            store_api_key(vendor["key"], api_key)
-        except Exception:
-            pass
-    return toml_path
+    return save_init_model(
+        vendor_key=vendor["key"],
+        model_name=vendor.get("default_model", ""),
+        api_key=api_key,
+        base_url=vendor.get("default_base_url", ""),
+        api_format=vendor.get("api_format", "openai"),
+        model_type=model_type,
+    )
 
 
 async def handle_init(ctx: CommandContext, stripped: str) -> bool:
@@ -367,7 +295,7 @@ async def handle_init(ctx: CommandContext, stripped: str) -> bool:
     ui._console.print(f"\n[bold]API 格式:[/bold] {vendor['api_format_desc']}")
     api_key = _ask_api_key(ui, vendor)
     if api_key is None:
-        ui.info("跳过 API Key（可稍后在 ~/.jarvis/settings.toml 中手动配置）")
+        ui.info("跳过 API Key（可稍后在 ~/.jarvis/models.toml 中手动配置）")
     api_key = api_key or ""
 
     # 5. 测试连接

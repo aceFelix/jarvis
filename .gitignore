@@ -16,7 +16,9 @@ venv/
 .env.*
 *.key
 *.pem
+# 模型域配置文件（含 api_key 明文，永不外传）
 configs/settings.toml
+configs/models.toml
 
 # ---- IDE ----
 .idea/

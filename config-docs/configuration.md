@@ -8,17 +8,23 @@
 
 ```
 1. 内置默认值（Settings 数据类字段默认值）
-2. configs/settings.toml（项目级，随仓库分发）
-3. ~/.jarvis/settings.toml（用户级；兼容 ~/.my-agent/）
-4. 环境变量（JARVIS_* 前缀；兼容 MY_AGENT_*）
-5. CLI 参数（--model / --provider 等）
+2. configs/settings.toml（项目级通用配置，随仓库分发）
+3. configs/models.toml（项目级模型域，同层覆盖上一项）
+4. ~/.jarvis/settings.toml（用户级通用配置；兼容 ~/.my-agent/）
+5. ~/.jarvis/models.toml（用户级模型域，同层覆盖上一项）
+6. 环境变量（JARVIS_* 前缀 + 厂商专属 *_API_KEY；兼容 MY_AGENT_*）
+7. CLI 参数（--model / --provider / --api-key 等）
 ```
 
 查看最终生效配置：`jarvis --config-show` 或 REPL 内 `/config show`。
 
 ---
 
-## LLM
+## LLM（写在 `models.toml`）
+
+> 本表字段的落盘位置是 **`models.toml`**（项目级 `configs/models.toml` / 用户级 `~/.jarvis/models.toml`）。
+> 写在 `settings.toml` 里同样生效（向后兼容），但 `/models`、`jarvis init`、切换模型的回写一律落到 `models.toml`。
+> 顶层键必须写在任何 `[section]` 之前（写进 `[llm.models]` 之后会被 TOML 静默解析进该子表）。
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -36,6 +42,8 @@
 | `vendor_fallback` | str | `""` | 主模型挂了自动切备选厂商。如 `"deepseek"` |
 
 ### 示例
+
+`~/.jarvis/models.toml`：
 
 ```toml
 provider = "deepseek"

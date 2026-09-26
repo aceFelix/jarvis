@@ -155,7 +155,8 @@ async def _realtime_talk(ui, settings) -> None:
         ui.error(
             "实时双工语音依赖阿里云 DashScope 服务，需要 DashScope API Key"
             "（不能拿 deepseek/openai 等其它厂商的 key 混用）。请任选其一配置：\n"
-            "  1. ~/.jarvis/settings.toml 中添加 dashscope_api_key = \"sk-...\"\n"
+            "  1. ~/.jarvis/models.toml 中添加 dashscope_api_key = \"sk-...\""
+            "（旧配置写在 settings.toml 里也仍然生效）\n"
             "  2. 设置环境变量 DASHSCOPE_API_KEY\n"
             "并确认百炼账号无欠费、已开通实时语音模型"
             "（qwen-audio-3.0-realtime-flash）。"

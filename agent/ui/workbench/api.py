@@ -268,7 +268,7 @@ class WorkbenchAPI:
         return items
 
     def set_model(self, name: str) -> bool:
-        """切换文本对话模型：持久化到 settings.toml（重启引擎生效）。"""
+        """切换文本对话模型：持久化到 ~/.jarvis/models.toml（重启引擎生效）。"""
         try:
             from agent.config.model_registry import save_last_model
 

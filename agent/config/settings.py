@@ -6,9 +6,14 @@ v0.1 用 TOML 文件 + 环境变量两层即可。
 配置查找顺序（后者覆盖前者）:
 1. 内置默认值
 2. configs/settings.toml（项目级，随仓库分发）
-3. ~/.jarvis/settings.toml（用户级；兼容回退 ~/.my-agent/）
-4. 环境变量（JARVIS_* 前缀；兼容 MY_AGENT_*）
-5. CLI 参数（在 main.py 里处理）
+3. configs/models.toml（项目级模型域，同层覆盖 settings.toml）
+4. ~/.jarvis/settings.toml（用户级；兼容回退 ~/.my-agent/）
+5. ~/.jarvis/models.toml（用户级模型域，同层覆盖 settings.toml）
+6. 环境变量（JARVIS_* 前缀；兼容 MY_AGENT_*）
+7. CLI 参数（在 main.py 里处理）
+
+模型域（provider/model/api_key/custom_models 等）独立成 models.toml，
+动机与读写实现见 agent/config/models_config.py。
 """
 
 from __future__ import annotations
@@ -23,6 +28,11 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
+from agent.config.models_config import (
+    auto_split_user_config,
+    models_path_for,
+    user_config_paths,
+)
 from agent.permissions.modes import PermissionMode, parse_mode
 
 
@@ -54,7 +64,7 @@ class Settings:
     # 可选模型列表 {model_name: description}，/model 命令列出并切换
     models: dict[str, str] = field(default_factory=dict)
     # 用户自定义模型配置 {model_name: {provider, base_url, api_key, api_format, model_type}}
-    # 通过 /models → 添加其他模型 创建，持久化到 ~/.jarvis/settings.toml [llm.custom_models]
+    # 通过 /models → 添加其他模型 创建，持久化到 ~/.jarvis/models.toml [llm.custom_models]
     custom_models: dict[str, dict] = field(default_factory=dict)
     # 用户自定义 TTS 音色 {voice_name: {voice_id, description, vendor}}
     # 通过 /tts-voice → 添加音色 创建，持久化到 ~/.jarvis/settings.toml [tts.custom_voices]
@@ -297,6 +307,9 @@ def load_settings(workdir: str | None = None) -> Settings:
     1. ``<workdir>/configs/settings.toml`` — 先从工作目录找（支持多项目各自配置）
     2. ``<agent_pkg>/../configs/settings.toml`` — 回退到 agent 包同级（贾维斯自身配置）
     3. 不存在则使用默认值
+
+    同层模型域文件 ``models.toml`` 紧随其后应用（模型域专属文件优先）；
+    用户级同样先 settings.toml 后 models.toml，整体覆盖项目级。
     """
     cwd = Path(workdir or os.getcwd()).resolve()
     # agent 包所在的项目根目录（用于回退查找配置）
@@ -326,11 +339,14 @@ def load_settings(workdir: str | None = None) -> Settings:
         if example_cfg.is_file():
             project_cfg = example_cfg
     s = _apply_toml(s, _read_toml(project_cfg))
+    # 2b. 项目级同层 models.toml（模型域：模型选择/密钥/可选模型/自定义模型）
+    # 拆分动机见 agent/config/models_config.py——模型配置与程序回写内容独立成文件，
+    # 避免顶层键落进 [llm.models] 或重复 section 破坏整份配置。作者：aceFelix
+    s = _apply_toml(s, _read_toml(models_path_for(project_cfg)))
 
     # 3. 用户级 ~/.jarvis/settings.toml（兼容 ~/.my-agent/）
-    user_cfg = Path.home() / ".jarvis" / "settings.toml"
-    if not user_cfg.exists():
-        user_cfg = Path.home() / ".my-agent" / "settings.toml"
+    # 成对解析 settings/models 路径：两者必须同目录，否则模型域配置会读不到。
+    user_cfg, user_models_cfg = user_config_paths()
     # 迁移用户级配置（schema 升级时自动应用，失败不阻塞启动）
     if user_cfg.exists():
         try:
@@ -338,7 +354,11 @@ def load_settings(workdir: str | None = None) -> Settings:
             run_migrations(user_cfg)
         except Exception:
             pass  # 迁移失败不影响启动，诊断日志已记录
+        # 模型域内容拆分到同层 models.toml（幂等；老配置留在原处仍生效，失败静默）
+        auto_split_user_config(user_cfg)
     s = _apply_toml(s, _read_toml(user_cfg))
+    # 3b. 用户级 models.toml（同层覆盖 settings.toml，用户级整体覆盖项目级）
+    s = _apply_toml(s, _read_toml(user_models_cfg))
 
     # 4. 环境变量
     from agent.config.env import apply_env_overrides
@@ -629,15 +649,18 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             if sub_key in email_table:
                 updates[field] = email_table[sub_key]
     # [lsp] 表 → LSP 集成字段
-    lsp_table = data.get("lsp", {})
+    # 注意：必须区分「没有 [lsp] 表」与「[lsp] 表为空」——models.toml 等模型域文件
+    # 不含 [lsp] 表，若无条件写 updates["lsp_servers"]，会把先从 settings.toml 读到的
+    # lsp_servers 清空（2026-09 模型域拆分后暴露）。作者：aceFelix
+    lsp_table = data.get("lsp")
     if isinstance(lsp_table, dict):
         for sub_key, field in (
             ("enable", "enable_lsp"),
         ):
             if sub_key in lsp_table:
                 updates[field] = lsp_table[sub_key]
-        # [lsp.servers.<name>] → lsp_servers
-        servers_table = lsp_table.get("servers", {})
+        # [lsp.servers.<name>] → lsp_servers（子表存在才覆盖，显式空子表可表达清空）
+        servers_table = lsp_table.get("servers")
         if isinstance(servers_table, dict):
             updates["lsp_servers"] = dict(servers_table)
     # [daemon] 表 → 常驻模式字段
@@ -748,3 +771,9 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
 # ── 以下函数已拆分到独立模块，此处保留重导出以兼容现有导入 ──
 from agent.config.model_registry import save_custom_model, save_last_model  # noqa: E402, F401
 from agent.config.model_registry import save_custom_voice, save_tts_voice  # noqa: E402, F401
+from agent.config.models_config import (  # noqa: E402, F401
+    auto_split_user_config as auto_split_user_config,
+    models_path_for as models_path_for,
+    split_model_config as split_model_config,
+    user_config_paths as user_config_paths,
+)

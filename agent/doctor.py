@@ -240,11 +240,12 @@ def _build_system_rows() -> list[tuple[str, str, str]]:
 
 
 def _check_settings_toml() -> tuple[bool, str, Path | None]:
-    """检查用户级 settings.toml 是否存在。
+    """检查用户级配置文件是否存在（settings.toml 或模型域 models.toml）。
 
-    检查 ~/.jarvis/settings.toml（兼容回退 ~/.my-agent/settings.toml）。
+    检查 ~/.jarvis/（兼容回退 ~/.my-agent/）。2026-09 模型域拆分为 models.toml
+    （模型选择/密钥/自定义模型），两者任一存在都不算缺失。
 
-    @return (是否存在, 说明文本, 文件路径)
+    @return (是否存在, 说明文本, settings.toml 路径，缺失为 None)
     """
     user_cfg = Path.home() / ".jarvis" / "settings.toml"
     if user_cfg.exists():
@@ -253,13 +254,18 @@ def _check_settings_toml() -> tuple[bool, str, Path | None]:
     legacy_cfg = Path.home() / ".my-agent" / "settings.toml"
     if legacy_cfg.exists():
         return True, f"已存在（旧路径）: {legacy_cfg}", legacy_cfg
+    # 只有 models.toml（模型配置已拆分，其余走默认值）也算已初始化
+    for models_cfg in (Path.home() / ".jarvis" / "models.toml", Path.home() / ".my-agent" / "models.toml"):
+        if models_cfg.exists():
+            return True, f"未见 settings.toml，模型配置在: {models_cfg}", None
     return False, "未找到，运行: jarvis --init", None
 
 
 def _check_api_key(settings_path: Path | None) -> tuple[bool, str]:
-    """检查 settings.toml 中是否配置了 api_key（不显示 key 内容）。
+    """检查配置文件中是否配置了 api_key（不显示 key 内容）。
 
-    也会检查 DashScope 专属 key（realtime_talk.api_key）以及常见环境变量。
+    依次查常见环境变量与用户级配置文件；2026-09 起模型密钥随模型配置住在
+    models.toml，settings.toml 仍兼容（老配置未迁移时照常生效）。
     仅判断"已配置/未配置"，绝不输出 key 本身。
 
     @return (是否配置, 说明文本)
@@ -281,34 +287,49 @@ def _check_api_key(settings_path: Path | None) -> tuple[bool, str]:
         if val:
             return True, f"已配置（环境变量 {env_name}）"
 
-    # 2. 查 settings.toml 文件中的 api_key 字段
-    if settings_path is None or not settings_path.exists():
-        return False, "未配置，运行: jarvis --init"
+    # 2. 查配置文件中的 api_key（模型域 models.toml 优先，兼容 settings.toml）
+    home = Path.home()
+    candidates: list[Path] = []
+    for d in (home / ".jarvis", home / ".my-agent"):
+        candidates.append(d / "models.toml")
+        candidates.append(d / "settings.toml")
+    if settings_path is not None and settings_path not in candidates:
+        candidates.insert(0, settings_path)
+    for path in dict.fromkeys(candidates):
+        msg = _api_key_in_file(path)
+        if msg:
+            return True, msg
 
+    return False, "未配置，运行: jarvis --init 或设置环境变量"
+
+
+def _api_key_in_file(path: Path) -> str | None:
+    """读单个配置文件，返回其中 api_key 的说明文本；未命中返回 None。
+
+    分别认顶层 api_key 与 [realtime_talk].api_key（DashScope 实时语音专用）；
+    解析失败只提示格式问题，绝不把异常信息（可能含 key）透出。
+    """
+    if not path.exists():
+        return None
     try:
         if sys.version_info >= (3, 11):
             import tomllib
         else:  # pragma: no cover
             import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-        with open(settings_path, "rb") as f:
+        with open(path, "rb") as f:
             data = tomllib.load(f)
     except Exception:
         # 解析失败视为未配置（避免把异常栈当 key 泄露）
-        return False, f"settings.toml 解析失败，请检查格式"
+        return f"{path.name} 解析失败，请检查格式"
 
-    # 顶层 api_key
-    top_key = str(data.get("api_key", "")).strip()
-    if top_key:
-        return True, "已配置（settings.toml [api_key]）"
+    if str(data.get("api_key", "")).strip():
+        return f"已配置（{path.name} [api_key]）"
 
-    # realtime_talk.api_key（DashScope 实时语音）
     realtime = data.get("realtime_talk", {})
-    if isinstance(realtime, dict):
-        rt_key = str(realtime.get("api_key", "")).strip()
-        if rt_key:
-            return True, "已配置（settings.toml [realtime_talk.api_key]）"
+    if isinstance(realtime, dict) and str(realtime.get("api_key", "")).strip():
+        return f"已配置（{path.name} [realtime_talk.api_key]）"
 
-    return False, "未配置，运行: jarvis --init 或设置环境变量"
+    return None
 
 
 def _check_permissions_yaml() -> tuple[bool, str]:
@@ -351,6 +372,15 @@ def _build_config_rows() -> list[tuple[str, str, str]]:
     cfg_ok, cfg_msg, cfg_path = _check_settings_toml()
     cfg_status = "[green]✓[/green]" if cfg_ok else "[red]✗[/red]"
     rows.append(("settings.toml", cfg_status, cfg_msg))
+
+    # models.toml（2026-09 模型域拆分：模型选择/密钥/可选模型/自定义模型）
+    models_path = Path.home() / ".jarvis" / "models.toml"
+    if not models_path.exists():
+        models_path = Path.home() / ".my-agent" / "models.toml"
+    if models_path.exists():
+        rows.append(("models.toml", "[green]✓[/green]", f"已存在: {models_path}"))
+    else:
+        rows.append(("models.toml", "[yellow]ℹ[/yellow]", "未使用（模型配置可留在 settings.toml，首次切换模型时自动生成）"))
 
     # API Key
     key_ok, key_msg = _check_api_key(cfg_path)

@@ -13,7 +13,7 @@
 | 维度 | 当前状态 | 成熟度 |
 |---|---|---|
 | **1. 基础对话** | REPL 多轮对话、流式输出、Markdown 渲染、prompt_toolkit 补全、Shift+Enter 换行（Windows 自动 Escape+Enter 转换）、会话标题自动生成（15 字限制）、启动动画（方舟反应炉粒子） | ⭐⭐⭐⭐ |
-| **2. 模型管理** | `/models` 命令、内置模型列表、自定义模型添加（持久化到 `~/.jarvis/settings.toml [llm.custom_models]`）、内置模型空格键修改/删除、`last_model` 跨重启恢复、自定义模型自动恢复 provider/base_url/api_key、内置模型切回时重置默认值、Provider 故障转移（`vendor_fallback`）、已自定义配置标记"✎" | ⭐⭐⭐⭐ |
+| **2. 模型管理** | `/models` 命令、内置模型列表、自定义模型添加（持久化到 `~/.jarvis/models.toml [llm.custom_models]`）、内置模型空格键修改/删除、`last_model` 跨重启恢复、自定义模型自动恢复 provider/base_url/api_key、内置模型切回时重置默认值、Provider 故障转移（`vendor_fallback`）、已自定义配置标记"✎" | ⭐⭐⭐⭐ |
 | **3. 深度思考** | `enable_thinking` 开关、`/think on\|off` 命令、Qwen 系列用 `extra_body["enable_thinking"]`、DeepSeek-V4 用 `reasoning_effort`、DeepSeek-R1 用 `thinking.type`、思考模式动态切换重生成 system prompt、Provider 层按需过滤 `reasoning_content`、语音模式强制启用思考防 TTS 读推理 | ⭐⭐⭐⭐ |
 | **4. 多模态输入** | `/image` `/img` `/paste` `/p` 四种图片命令、剪贴板自动检测、MD5 去重、图片缩放到 1280px 最长边、JPEG 质量 85、Tab 补全集成、`pending_images` 暂存随下次消息发送 | ⭐⭐⭐⭐ |
 | **5. 工具执行** | 61 内置工具 + 71 CLI-Anything harness：文件读写编辑、Bash（Windows Git Bash 自动检测）、浏览器、GUI 操作（点击/拖拽/等待/窗口相对坐标/视觉定位）、屏幕截图、摄像头、视觉监控、MCP 工具集成；ToolRegistry 注册中心、并发安全分组、文件访问追踪、工具结果截断落盘、ToolOrchestrator 编排 | ⭐⭐⭐⭐ |
@@ -24,7 +24,7 @@
 | **10. 记忆系统** | 动态水位压缩（30%/60%/80% 三档）、9 段结构化摘要提示词（用户请求/技术决策/文件代码/错误修复/用户反馈/消息列表/待办/当前状态/下一步）、token 估算、图片剥离、工具结果折叠、压缩后文件回灌（5 个/5000 字）、会话记忆自动持久化（`.jarvis/SESSION_MEMORY.md`）、长期记忆（`~/.jarvis/MEMORY.md` + 项目级）、`auto_resume_session` + `/resume` 命令 | ⭐⭐⭐⭐ |
 | **11. 多 Agent 协作** | 子代理 Subagent（独立 QueryLoop + 工具子集 + 隔离权限）、Team 团队、Mailbox 邮箱通信、共享 TaskList 任务列表、Plan 模式（只读白名单规划） | ⭐⭐ |
 | **12. 扩展生态** | MCP 集成（`~/.jarvis/mcp.json`）、Skill 技能包（`~/.jarvis/skills/*/SKILL.md` + 项目级）、CLI-Anything harness（71 个软件，多级市场源，pip 型/目录型安装）、Plugin 插件系统（`/plugin search\|install\|uninstall`）、LSP 代码智能（`[lsp.servers.<name>]`）、Hook 钩子系统 | ⭐⭐⭐⭐ |
-| **13. 配置系统** | 三层合并（默认值 → 项目级 `configs/settings.toml` → 用户级 `~/.jarvis/settings.toml` → 环境变量 `JARVIS_*` → CLI 参数）；`api_format`/`provider` 规范化（vendor 与协议分离）；Settings dataclass；配置迁移（schema 升级自动应用）；多表分段 | ⭐⭐⭐⭐ |
+| **13. 配置系统** | 四文件分层合并（默认值 → 项目级 `configs/settings.toml` + `configs/models.toml` → 用户级 `~/.jarvis/settings.toml` + `~/.jarvis/models.toml` → 环境变量 `JARVIS_*` → CLI 参数）；模型域拆分独立 `models.toml`（密钥与模型配置同文件、程序回写不污染通用配置、启动期幂等拆分迁移 + `.bak` 备份、老配置向后兼容）；`api_format`/`provider` 规范化（vendor 与协议分离）；Settings dataclass；配置迁移（schema 升级自动应用）；多表分段 | ⭐⭐⭐⭐ |
 
 ### REPL 命令体系
 

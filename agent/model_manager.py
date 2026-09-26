@@ -7,9 +7,7 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 from agent.config.settings import Settings
@@ -121,7 +119,7 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
 
     用一个终端内联表单完成全部输入（不再切 5 次全屏）:
     模型名 → 接口类型 → Base URL → API Key → 模型类型
-    持久化到 ~/.jarvis/settings.toml，同时更新 settings.custom_models。
+    持久化到 ~/.jarvis/models.toml，同时更新 settings.custom_models。
 
     Returns:
         True 表示添加成功（settings.custom_models 已更新）。
@@ -214,7 +212,7 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
             ui.info(f"模型「{name}」已添加并保存（{mlabel}）")
             return True
         else:
-            ui.warn("保存失败：找不到 ~/.jarvis/settings.toml")
+            ui.warn("保存失败：无法写入 ~/.jarvis/models.toml")
             return False
     except Exception as e:
         ui.error(f"保存模型失败: {e}")
@@ -314,12 +312,12 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
 def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
     """编辑内置模型（qwen 系列等）的覆盖配置。
 
-    内置模型名固定不可改（来自项目级 configs/settings.toml 的 [llm.models]），
-    这里编辑的是"用户级覆盖配置"：保存到 ~/.jarvis/settings.toml 的
+    内置模型名固定不可改（来自项目级 configs/models.toml 的 [llm.models]），
+    这里编辑的是"用户级覆盖配置"：保存到 ~/.jarvis/models.toml 的
     [llm.custom_models."{name}"] 节，启动时和 /models 切换时会优先使用此配置
     而非内置默认（settings 顶层的 provider/base_url/api_key）。
 
-    默认值取自 settings 顶层字段（即 settings.toml 原始的 provider/base_url/api_key），
+    默认值取自 settings 顶层字段（即 models.toml 原始的 provider/base_url/api_key），
     若 last_model 曾覆盖到自定义模型，则用 default_* 字段恢复原始值作为默认。
     """
     from agent.ui.terminal_picker import form_input
@@ -405,7 +403,7 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
         settings.custom_models[name] = config
         ui.info(f"内置模型「{name}」已添加自定义覆盖配置（重启或切换后生效）")
     else:
-        ui.warn("保存失败：找不到 ~/.jarvis/settings.toml")
+        ui.warn("保存失败：无法写入 ~/.jarvis/models.toml")
 
 
 def _delete_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
@@ -427,28 +425,15 @@ def _delete_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
 
 
 def _remove_custom_model_from_toml(name: str) -> None:
-    """从 ~/.jarvis/settings.toml 中移除指定自定义模型段。"""
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    if not toml_path.exists():
-        return
-    content = toml_path.read_text(encoding="utf-8")
-    marker = f'[llm.custom_models."{name}"]'
-    if marker not in content:
-        return
-    start = content.index(marker)
-    rest = content[start + len(marker):]
-    m = re.search(r'\n\[', rest)
-    if m:
-        end = start + len(marker) + m.start()
-    else:
-        end = len(content)
-    # 去掉前导空行
-    while start > 0 and content[start - 1] == '\n':
-        start -= 1
-    content = content[:start] + content[end:]
-    # 清理可能的空 custom_models 注释
-    content = re.sub(r'\n# 自定义模型（通过 /models 添加）\n+$', '', content)
-    toml_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+    """从 ~/.jarvis/models.toml 中移除指定自定义模型段（/models 删除）。
+
+    2026-09 模型域拆分后，写入/删除实现统一在 agent/config/models_config.py。
+
+    @author aceFelix
+    """
+    from agent.config.models_config import remove_custom_model
+
+    remove_custom_model(name)
 
 
 def _switch_model(
@@ -506,7 +491,7 @@ def _switch_model(
             if hasattr(new_provider, "set_model_type"):
                 new_provider.set_model_type(mtype)
     else:
-        # 内置模型 → 用 settings.toml 原始 api_format/base_url 重建 provider
+        # 内置模型 → 用 models.toml 原始 api_format/base_url 重建 provider
         # 若启动时 last_model 是自定义模型，settings 字段已被覆盖，
         # 需用 default_* 字段恢复原始值，否则内置模型会错误地连到自定义模型端点
         if settings.default_provider or settings.default_base_url or settings.default_api_key:
@@ -566,9 +551,9 @@ def _list_models(ui: RichCLI, settings: Settings, current: str) -> None:
     models = settings.models
     if not models:
         if ui._console:
-            ui._console.print("[dim]暂无配置的可选模型（在 settings.toml [llm.models] 里添加）[/dim]")
+            ui._console.print("[dim]暂无配置的可选模型（在 models.toml [llm.models] 里添加）[/dim]")
         else:
-            print("暂无配置的可选模型（在 settings.toml [llm.models] 里添加）")
+            print("暂无配置的可选模型（在 models.toml [llm.models] 里添加）")
         return
 
     if ui._console:

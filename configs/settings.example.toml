@@ -3,23 +3,12 @@
 # 项目级配置。会被 ~/.jarvis/settings.toml 和环境变量覆盖。
 # 所有字段都可以省略（用默认值）。
 
-# ---- LLM ----
-# 默认接阿里云百炼 DashScope（OpenAI 兼容接口），用 qwen3.7-plus（带视觉）。
-# api_key 不写这里，走环境变量 DASHSCOPE_API_KEY。
-# provider = 模型提供商（vendor），仅显示用途
-# api_format = API 协议格式（openai / anthropic），控制用哪个 Provider 类
-provider = "dashscope"
-api_format = "openai"
-model = "qwen3.7-plus"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "sk-your-dashscope-key-1"  # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
-# temperature = 0.7
-max_tokens = 20480
-# enable_thinking: 启用 qwen3.7-plus 原生深度思考（思维链），模型在回复前先输出 reasoning_content。
-# thinking_budget: 限制思考过程的 Token 上限（默认 800，0=不限制）。
-# 关闭思考: enable_thinking = false（或设环境变量 JARVIS_ENABLE_THINKING=0）。
-enable_thinking = true
-thinking_budget = 800
+# ---- 模型（LLM）----
+# 模型域配置已拆分到同层 models.example.toml（复制为 configs/models.toml 使用）：
+#   provider / api_format / model / last_model / base_url / api_key / max_tokens /
+#   temperature / thinking_budget / enable_thinking / vendor_fallback 等顶层键，
+#   以及 [llm.models]（可选模型列表）与 [llm.custom_models.*]（自定义模型）。
+# 未拆分前写在 settings.toml 里的模型键仍会被加载（向后兼容）。
 
 # ---- 运行时 ----
 # workdir: 贾维斯默认工作目录。开发/文件操作/项目管理都在此目录下进行。
@@ -38,19 +27,6 @@ max_iterations = 50
 # ---- 调试 ----
 debug = false
 verbose = false
-
-# 可选模型列表（/model 命令列出并切换）。添加新模型只需往这里追加。
-# 也可以在 ~/.jarvis/settings.toml 里覆盖此列表。
-# 注意：[llm.models] 之后的顶层键都会被 TOML 解析进 llm.models。
-# 所以运行时/调试等顶层键必须放在 [llm.models] 前面。
-# ⚠️ 表头 [llm.models] 一行不可省略！缺了它，模型条目会被解析进 [llm]，
-#    /models 列表退回内置默认模型，新增模型不生效（解析失败还会被静默忽略）。
-[llm.models]
-"qwen3.7-plus" = "通义千问 3.7 Plus（默认，带视觉）"
-"qwen3.6-plus" = "通义千问 3.6 Plus"
-"qwen3.6-flash" = "通义千问 3.6 Flash（快）"
-"qwen3.5-plus" = "通义千问 3.5 Plus"
-"qwen3.5-flash" = "通义千问 3.5 Flash（快）"
 
 # ---- 语音 ----
 # 基于 DashScope。复用 DASHSCOPE_API_KEY。

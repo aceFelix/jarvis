@@ -454,8 +454,16 @@ def _doctor(ui: RichCLI, settings: Any, provider, model: str, messages: list[Mes
     render_table(prov_rows, headers=["项", "值"], title="Provider 状态")
 
     user_cfg = Path.home() / ".jarvis" / "settings.toml"
+    # 模型域配置（2026-09 拆分到 models.toml，密钥与模型定义同处）
+    models_cfg = Path.home() / ".jarvis" / "models.toml"
+    if not models_cfg.exists():
+        models_cfg = Path.home() / ".my-agent" / "models.toml"
     cfg_rows = [
         ["用户配置", "存在" if user_cfg.exists() else "不存在（用默认值）"],
+        [
+            "模型配置",
+            str(models_cfg) if models_cfg.exists() else "未拆分（模型键仍在 settings.toml）",
+        ],
         ["API key", mask_key(settings.api_key)],
         ["Base URL", settings.base_url or "(默认)"],
     ]

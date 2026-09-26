@@ -3,9 +3,12 @@
 测试覆盖:
 - _apply_toml: TOML dict → Settings 字段映射（顶层、子表、权限模式）
 - apply_env_overrides: 环境变量覆盖（JARVIS_* / MY_AGENT_*）
-- save_last_model / save_custom_model: 模型 TOML 持久化
+- save_last_model / save_custom_model: 模型 TOML 持久化（2026-09 起落盘 ~/.jarvis/models.toml，不再写 settings.toml）
 - save_proactive_tts_enabled: 主动播报 TTS 开关 [daemon] 节持久化
 - _read_toml: UTF-8 BOM 兼容
+
+模型持久化落盘测试用 patch Path.home 重定向到临时目录，不触碰真实 ~/.jarvis；
+系统 keyring 替换为 no-op，避免测试用的假 api_key 写入真实凭据管理器。
 
 @author aceFelix
 """
@@ -24,6 +27,15 @@ from agent.config.env import apply_env_overrides
 from agent.config.model_registry import save_last_model, save_custom_model
 from agent.config.model_registry import save_proactive_tts_enabled
 from agent.permissions.modes import PermissionMode
+
+
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """隔离系统 keyring：读写替换为 no-op（凭据管理器是进程外状态）。"""
+    import agent.config.keyring_store as ks
+
+    monkeypatch.setattr(ks, "store_api_key", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(ks, "load_api_key", lambda *a, **k: None, raising=False)
 
 
 # ── _read_toml ──
@@ -76,6 +88,33 @@ class TestReadToml:
 
 class TestApplyToml:
     """TOML → Settings 字段映射测试。"""
+
+    def test_absent_section_does_not_wipe_existing_values(self) -> None:
+        """没有该表时不得清空已读入的字段（分层加载下后者会覆盖前者）。
+
+        回归：models.toml 不含 [lsp] 表，曾导致 lsp_servers 被无条件清空。
+        """
+        s = _apply_toml(
+            Settings(),
+            {"lsp": {"enable": True, "servers": {"python": {"command": "pylsp"}}}},
+        )
+        assert s.lsp_servers == {"python": {"command": "pylsp"}}
+
+        # 随后叠加一份只有模型域的 TOML（模拟 models.toml）
+        s = _apply_toml(
+            s, {"model": "qwen3.7-plus", "llm": {"models": {"qwen3.7-plus": "Qwen"}}}
+        )
+        assert s.model == "qwen3.7-plus"
+        assert s.lsp_servers == {"python": {"command": "pylsp"}}
+
+        # [lsp] 表存在但无 servers 子表：同样保留已有值
+        s = _apply_toml(s, {"lsp": {"enable": False}})
+        assert s.enable_lsp is False
+        assert s.lsp_servers == {"python": {"command": "pylsp"}}
+
+        # 显式空子表表达清空
+        s = _apply_toml(s, {"lsp": {"servers": {}}})
+        assert s.lsp_servers == {}
 
     def test_top_level_fields(self) -> None:
         """顶层字段应直接映射。"""
@@ -280,16 +319,20 @@ class TestEnvOverrides:
 # ── Model Persistence ──
 
 class TestModelPersistence:
-    """模型 TOML 持久化测试。"""
+    """模型 TOML 持久化测试。
+
+    2026-09 模型域拆分后，last_model / 自定义模型统一落盘 ~/.jarvis/models.toml，
+    settings.toml 不再接收模型写入（语音/守护进程等仍写 settings.toml）。
+    """
 
     def test_save_last_model_new_file(self) -> None:
-        """新文件写入 last_model。"""
+        """新文件写入 last_model（落盘 models.toml，且不创建 settings.toml）。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
             with patch.object(Path, "home", return_value=home):
                 jarvis_dir = home / ".jarvis"
                 jarvis_dir.mkdir(parents=True, exist_ok=True)
-                toml_path = jarvis_dir / "settings.toml"
+                toml_path = jarvis_dir / "models.toml"
 
                 # 首次保存到不存在的文件
                 result = save_last_model("qwen-plus")
@@ -298,17 +341,20 @@ class TestModelPersistence:
 
                 content = toml_path.read_text(encoding="utf-8")
                 assert 'last_model = "qwen-plus"' in content
+                # 模型写入不得污染 settings.toml
+                assert not (jarvis_dir / "settings.toml").exists()
 
     def test_save_last_model_update_existing(self) -> None:
-        """已有文件应更新 last_model 而非重复插入。"""
+        """已有文件应更新 last_model 而非重复插入，其他内容原样保留。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
             with patch.object(Path, "home", return_value=home):
                 jarvis_dir = home / ".jarvis"
                 jarvis_dir.mkdir(parents=True, exist_ok=True)
-                toml_path = jarvis_dir / "settings.toml"
+                toml_path = jarvis_dir / "models.toml"
                 toml_path.write_text(
-                    'model = "qwen-plus"\nlast_model = "gpt-4o"\n\n[tts]\nmodel = "cosyvoice"\n',
+                    'model = "qwen-plus"\nlast_model = "gpt-4o"\n'
+                    '\n[llm.models]\n"qwen-plus" = "Qwen"\n',
                     encoding="utf-8",
                 )
 
@@ -319,17 +365,19 @@ class TestModelPersistence:
                 assert 'last_model = "deepseek-chat"' in content
                 # 不应有两个 last_model
                 assert content.count("last_model") == 1
+                # 既有段与注释不受影响
+                assert '"qwen-plus" = "Qwen"' in content
 
     def test_save_custom_model_new(self) -> None:
-        """新增自定义模型到 [llm.custom_models]。"""
+        """新增自定义模型到 models.toml 的 [llm.custom_models]。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
             with patch.object(Path, "home", return_value=home):
                 jarvis_dir = home / ".jarvis"
                 jarvis_dir.mkdir(parents=True, exist_ok=True)
-                toml_path = jarvis_dir / "settings.toml"
+                toml_path = jarvis_dir / "models.toml"
                 toml_path.write_text(
-                    'model = "qwen-plus"\n\n[tts]\nmodel = "cosyvoice"\n',
+                    'model = "qwen-plus"\n\n[llm.models]\n"qwen-plus" = "Qwen"\n',
                     encoding="utf-8",
                 )
 
@@ -338,12 +386,13 @@ class TestModelPersistence:
                     "api_key": "sk-xxx",
                     "provider_type": "openai",
                 })
-                # save_custom_model 要求文件已存在
                 assert result is True
 
                 content = toml_path.read_text(encoding="utf-8")
-                assert 'my-gpt' in content
+                # 密钥与模型配置同文件（用户明确要求：模型密钥跟着模型配置走）
+                assert '[llm.custom_models."my-gpt"]' in content
                 assert 'api_key = "sk-xxx"' in content
+                assert '"qwen-plus" = "Qwen"' in content
 
 
 # ── Proactive TTS Switch Persistence ──

@@ -1,0 +1,55 @@
+# jarvis 模型配置（示例模板）
+# 复制为 configs/models.toml（项目级）或 ~/.jarvis/models.toml（用户级）并修改。
+#
+# 与同层 settings.toml 成对加载，顺序（后者覆盖前者）：
+#   configs/settings.toml → configs/models.toml
+#   → ~/.jarvis/settings.toml → ~/.jarvis/models.toml
+#   → 环境变量（JARVIS_* / DASHSCOPE_API_KEY 等）→ CLI 参数
+#
+# ⚠️ 本文件的顶层键必须写在任何 [section] 之前。[llm.models] 之后的顶层键会被
+#    TOML 静默解析进该子表，表现为「配置写了不生效」。
+# ⚠️ [llm.custom_models."xxx"] 与 last_model 由程序回写（/models、jarvis init、
+#    切换模型），手动编辑时保留其结构即可。
+
+# ---- 模型（LLM）----
+# 默认接阿里云百炼 DashScope（OpenAI 兼容接口），用 qwen3.7-plus（带视觉）。
+# provider = 模型提供商（vendor），仅显示用途
+# api_format = API 协议格式（openai / anthropic / dashscope / zai），控制用哪个 Provider 类
+provider = "dashscope"
+api_format = "openai"
+model = "qwen3.7-plus"
+last_model = "qwen3.7-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-your-dashscope-key-1"  # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
+max_tokens = 20480
+# temperature = 0.7
+# enable_thinking: 启用 qwen3.7-plus 原生深度思考（思维链），模型在回复前先输出 reasoning_content。
+# thinking_budget: 限制思考过程的 Token 上限（默认 2000，0=不限制）。
+# 关闭思考: enable_thinking = false（或设环境变量 JARVIS_ENABLE_THINKING=0）。
+enable_thinking = true
+thinking_budget = 800
+# vendor_fallback: 主模型失败后自动尝试的备选厂商（如 "deepseek"），留空不启用。
+# vendor_fallback = ""
+
+# ---- 可选模型列表（/model 命令列出并切换）----
+# 添加新模型只需往这里追加，格式：「模型名」=「显示名」。
+# ⚠️ 表头 [llm.models] 一行不可省略！缺了它，模型条目会被解析进 [llm]，
+#    /models 列表退回内置默认模型，新增模型不生效（解析失败还会被静默忽略）。
+[llm.models]
+"qwen3.7-plus" = "通义千问 3.7 Plus（默认，带视觉）"
+"qwen3.6-plus" = "通义千问 3.6 Plus"
+"qwen3.6-flash" = "通义千问 3.6 Flash（快）"
+"qwen3.5-plus" = "通义千问 3.5 Plus"
+"qwen3.5-flash" = "通义千问 3.5 Flash（快）"
+
+# ---- 自定义模型（/models 添加，或按下面格式手写）----
+# provider_type = 接口协议（openai / anthropic / dashscope / zai）
+# model_type    = text（纯文本）/ multimodal（支持图片）
+# vendor        = 厂商名，用于 /models 列表分组与 keyring 取键
+# [llm.custom_models."my-model"]
+# name = "my-model"
+# base_url = "https://api.example.com/v1"
+# api_key = "sk-..."
+# provider_type = "openai"
+# model_type = "text"
+# vendor = "openai"

@@ -313,7 +313,7 @@ python -m agent.daemon.autostart status     # 查看状态
 
 ### 添加自定义模型
 
-通过 `/models` 交互式添加，或手动编辑 `~/.jarvis/settings.toml`：
+通过 `/models` 交互式添加，或手动编辑 `~/.jarvis/models.toml`：
 
 ```toml
 [llm.custom_models."deepseek-v4"]
@@ -449,14 +449,21 @@ model_type = "text"       # "text" 纯文本 / "multimodal" 多模态
 
 | 优先级 | 位置 | 说明 |
 |--------|------|------|
-| 最高 | 环境变量 `JARVIS_*` | 临时覆盖 |
-| 中 | `~/.jarvis/settings.toml` | 个人持久配置 |
+| 最高 | CLI 参数（`--model` / `--provider` / `--api-key`） | 本次启动生效 |
+| 高 | 环境变量 `JARVIS_*` / 厂商专属 `*_API_KEY` | 临时覆盖 |
+| 中高 | `~/.jarvis/models.toml` | 个人模型配置（模型选择 + 密钥） |
+| 中 | `~/.jarvis/settings.toml` | 个人持久配置（运行时/语音/记忆等） |
+| 低 | `configs/models.toml` | 项目模型默认 |
 | 最低 | `configs/settings.toml` | 项目默认 |
+
+> 同层的 `models.toml` 覆盖 `settings.toml`；用户级整体覆盖项目级。
+> 2026-09 起模型配置（含 API Key）从 `settings.toml` 拆到 `models.toml`，
+> 老配置把模型键留在 `settings.toml` 里仍然生效，首次启动会自动整理过去。
 
 ### 核心配置项
 
 ```toml
-# LLM
+# LLM（写在 ~/.jarvis/models.toml）
 provider = "dashscope"
 model = "qwen3.7-plus"
 max_tokens = 20480

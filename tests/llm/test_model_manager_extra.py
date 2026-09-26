@@ -58,17 +58,15 @@ class StubProvider:
 
 
 @pytest.fixture
-def fake_home(tmp_path, monkeypatch):
-    """把 model_manager.Path.home() 重定向到 tmp_path（用于 TOML 持久化测试）。"""
-    import agent.model_manager as mm
+def fake_home(tmp_path):
+    """把 pathlib.Path.home() 重定向到 tmp_path（用于 TOML 持久化测试）。
 
-    class _FakePath(type(Path())):
-        @classmethod
-        def home(cls):
-            return tmp_path
-
-    monkeypatch.setattr(mm, "Path", _FakePath)
-    return tmp_path
+    2026-09 模型域拆分后，模型写入实现移出 model_manager（委托
+    agent/config/models_config.py），不再需要 patch model_manager.Path；
+    改为直接 patch Path.home，与 tests/llm/test_config_loading.py 同口径。
+    """
+    with mock.patch.object(Path, "home", return_value=tmp_path):
+        yield tmp_path
 
 
 def _make_settings(**overrides) -> Settings:
@@ -388,13 +386,13 @@ class TestDeleteCustomModel:
 
 
 class TestRemoveCustomModelFromToml:
-    """从 settings.toml 移除自定义模型段。"""
+    """从 models.toml 移除自定义模型段。"""
 
     def test_no_file_no_error(self, fake_home) -> None:
         _remove_custom_model_from_toml("m1")  # 不抛异常
 
     def test_no_marker_no_change(self, fake_home) -> None:
-        toml = fake_home / ".jarvis" / "settings.toml"
+        toml = fake_home / ".jarvis" / "models.toml"
         toml.parent.mkdir(parents=True, exist_ok=True)
         toml.write_text('last_model = "x"\n\n[llm]\napi_format = "openai"\n', encoding="utf-8")
         _remove_custom_model_from_toml("ghost")
@@ -402,7 +400,7 @@ class TestRemoveCustomModelFromToml:
         assert "[llm]\napi_format" in content
 
     def test_remove_section(self, fake_home) -> None:
-        toml = fake_home / ".jarvis" / "settings.toml"
+        toml = fake_home / ".jarvis" / "models.toml"
         toml.parent.mkdir(parents=True, exist_ok=True)
         toml.write_text(
             'last_model = "m2"\n\n'
@@ -420,7 +418,7 @@ class TestRemoveCustomModelFromToml:
         assert 'custom_models."m2"' in content
 
     def test_remove_last_section(self, fake_home) -> None:
-        toml = fake_home / ".jarvis" / "settings.toml"
+        toml = fake_home / ".jarvis" / "models.toml"
         toml.parent.mkdir(parents=True, exist_ok=True)
         toml.write_text(
             '[llm.custom_models."only"]\nname = "only"\n',

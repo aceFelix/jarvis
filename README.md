@@ -184,7 +184,8 @@ jarvis
 
 | 内容 | 路径 |
 |---|---|
-| 配置（`settings.toml`，含 API key） | `~/.jarvis/settings.toml`（Windows: `C:\Users\<用户名>\.jarvis`） |
+| 通用配置（`settings.toml`：运行时/语音/记忆/沙箱等） | `~/.jarvis/settings.toml`（Windows: `C:\Users\<用户名>\.jarvis`） |
+| 模型配置（`models.toml`：模型选择 / Base URL / **API key** / 可选模型 / 自定义模型） | `~/.jarvis/models.toml`（同上目录，2026-09 从 settings.toml 拆出） |
 | daemon 日志 | `~/.jarvis/daemon.log` |
 | 插件 / 技能 / 会话记忆 | `~/.jarvis/` |
 | 截图临时目录 | `%TEMP%\jarvis-shots`（Windows）`/tmp/jarvis-shots`（Linux/macOS） |
@@ -256,7 +257,7 @@ jarvis
 
 > Windows PowerShell 用 `$env:DASHSCOPE_API_KEY = "sk-xxx"` 设置环境变量。
 
-默认配置在 `configs/settings.toml`，环境变量 `JARVIS_*` 和 CLI 参数可覆盖。
+默认配置在 `configs/settings.toml`（通用）+ `configs/models.toml`（模型，含密钥），环境变量 `JARVIS_*` 和 CLI 参数可覆盖。
 各厂商专属环境变量：`DASHSCOPE_API_KEY` / `DEEPSEEK_API_KEY` / `ZAI_API_KEY` / `ANTHROPIC_API_KEY` / `KIMI_API_KEY` / `MINIMAX_API_KEY` / `MIMO_API_KEY`。
 
 启动后进入 REPL 终端界面，输入问题即可与 AI 对话：
@@ -291,23 +292,30 @@ jarvis --doctor
 
 ## 配置指南
 
-Jarvis 使用三层配置合并：
+Jarvis 配置按「同层 settings.toml → models.toml，用户级整体覆盖项目级」四文件分层合并：
 
 1. **项目默认配置** — `configs/settings.toml`（随项目分发）
-2. **用户级覆盖** — `~/.jarvis/settings.toml`（自动创建，持久化个人设置）
-3. **环境变量覆盖** — `JARVIS_*` 前缀的环境变量（优先级最高）
+2. **项目模型配置** — `configs/models.toml`（模型域独立文件，同层覆盖上一项）
+3. **用户级覆盖** — `~/.jarvis/settings.toml`（自动创建，持久化个人设置）
+4. **用户级模型配置** — `~/.jarvis/models.toml`（模型选择 + 密钥，同层覆盖上一项）
+5. **环境变量覆盖** — `JARVIS_*` 前缀 + 厂商专属 `*_API_KEY`（优先级更高）
+6. **CLI 参数** — `--model` / `--provider` / `--api-key`（最高）
+
+> **模型配置为什么单独一个文件**：模型域（`provider` / `api_format` / `model` / `last_model` / `api_key` / `base_url` / `max_tokens` / `enable_thinking` / `thinking_budget` / `vendor_fallback` + `[llm.models]` + `[llm.custom_models.*]`）由程序频繁回写（`/models`、`jarvis init`、切换模型）且含明文密钥，独立成文件后与运行时配置互不牵连，也便于单独备份/轮换密钥。
+> **向后兼容**：老配置把模型键留在 `settings.toml` 里仍然生效；首次启动会自动整理到 `models.toml`（幂等，原文件留 `.bak` 备份）。
 
 ### 核心配置项
 
 ```toml
-# ---- LLM ----
+# ---- LLM（写在 configs/models.toml 或 ~/.jarvis/models.toml）----
 provider = "dashscope"          # 模型提供商
 api_format = "openai"           # 协议格式（openai / anthropic / dashscope / zai）
 model = "qwen3.7-plus"          # 默认模型（多模态视觉）
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_tokens = 20480              # 单次输出最大 Token
+# ⚠️ 顶层键必须写在任何 [section] 之前：写进 [llm.models] 之后会被 TOML 静默解析进该子表（表现为配置不生效）
 
-# ---- 运行时 ----
+# ---- 运行时（写在 settings.toml）----
 workdir = "E:\\J.A.R.V.I.S_Work" # 默认工作目录
 permission_mode = "yolo"         # 权限模式（default / plan / accept_edits / yolo）
 max_iterations = 50              # 单轮最大工具调用次数
@@ -579,9 +587,11 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | **DashScope SDK** | qwen 系列原生协议 | 支持 MultiModalConversation 和 Generation 双端点 |
 | **智谱 ZhipuAi SDK** | GLM 系列原生协议 | 绕过 OpenAI 兼容层，获得更稳定的响应 |
 
-配置会自动保存到 `~/.jarvis/settings.toml` 的 `[llm.custom_models]` 中，重启后保持。
+配置会自动保存到 `~/.jarvis/models.toml` 的 `[llm.custom_models]` 中（密钥跟随模型配置同文件，并同步写入系统 keyring），重启后保持。
 
 ### 自定义模型配置示例
+
+写入 `~/.jarvis/models.toml`：
 
 ```toml
 [llm.custom_models."deepseek-v4"]
