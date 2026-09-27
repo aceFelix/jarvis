@@ -35,6 +35,7 @@ Provider 的装配与厂商识别由 [provider_registry.py](file:///e:/2.MyProje
 | [provider_registry.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/provider_registry.py) | 厂商注册表（配置表驱动装配 + URL 检测） |
 | [thinking.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/thinking.py) | 思考模式参数配置表（策略化取代 if-else） |
 | [errors.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/errors.py) | LLM 错误分类（鉴权/限流/模型不存在等 → 可操作提示） |
+| [text_tool_calls.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/text_tool_calls.py) | 文本态工具调用兜底解析（DSML/XML 泄漏 → 真实 ToolCall） |
 
 ## 三、流式事件类型
 
@@ -154,6 +155,9 @@ class ProviderMeta:
 - **多模态图片**：image content → OpenAI image_url 格式；`model_type="text"` 时跳过图片
 - **厂商参数差异化**：通过 `_derive_name()`（现由 `lookup_by_url()` 支持）识别厂商，
   按 `THINKING_CONFIGS` 注入对应思考参数
+- **文本态工具调用兜底**：模型偶发把工具调用以 DSML/XML 文本形式吐进 `content`（无结构化
+  `delta.tool_calls`）时，由 [text_tool_calls.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/text_tool_calls.py)
+  过滤裸码回显并解析成真实 `ToolCall`（见下方「文本态工具调用兜底」）
 
 **思考模式过滤**：
 ```python
@@ -161,6 +165,22 @@ class ProviderMeta:
 if self.is_thinking_enabled() and hasattr(delta, "reasoning_content"):
     yield ThinkingDelta(text=delta.reasoning_content)
 ```
+
+**文本态工具调用兜底**（deepseek DSML 泄漏修复）：
+
+DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke name="X">…`，`｜` 为全角
+竖线 U+FF5D）偶发不被后端拦截转结构化，而是当正文漏进 `delta.content`，jarvis 只认
+结构化 `delta.tool_calls`，就会把裸码原样显示、工具不触发（表现为“抽风，重新说一句才好使”）。
+`openai_provider.stream()` 逐块把 `content` 喂给 `StreamingLeakFilter`：
+
+- 命中标记 `<｜｜` 前的正文照常 `TextDelta` 输出，标记起的后续文本转入缓存不返回显；
+- 流结束时若无结构化 `tool_calls` 且发生过抑制，则用 `parse_textual_tool_calls()`
+  （先归一化 DSML→XML，再抽 invoke/parameter）解析成 `ToolCall`，并用已注册工具名校验；
+- 正文里正常的 `<`/HTML 不会误触发（仅全角竖线组合 `<｜｜` 作为信号）。
+
+此兜底只接在 `OpenAIProvider` 一处，即覆盖 deepseek / dashscope 兼容 / moonshot / 智谱
+兼容 / openai 等所有走该 Provider 的厂商。Anthropic / Zai 原生 Provider 自带结构化工具块，
+暂不接入。详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)。
 
 ### 2. Anthropic Provider
 

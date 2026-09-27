@@ -11,6 +11,11 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
+from agent.llm.text_tool_calls import (
+    StreamingLeakFilter,
+    parse_textual_tool_calls,
+)
+
 from agent.core.message import (
     ImageContent,
     Message,
@@ -292,6 +297,10 @@ class OpenAIProvider(LLMProvider):
 
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}
+        # 文本态工具调用兜底：过滤泄漏进 content 的 DSML/XML，避免裸码回显
+        # @author aceFelix
+        leak_filt = StreamingLeakFilter()
+        valid_names = {t.name for t in tools}
 
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
@@ -320,7 +329,10 @@ class OpenAIProvider(LLMProvider):
                 if reasoning and self.is_thinking_enabled():
                     yield ThinkingDelta(text=reasoning)
                 if delta.content:
-                    yield TextDelta(text=delta.content)
+                    # 走泄漏过滤器：正常文本即时放行，命中 DSML 标记后转入缓存不回显
+                    _safe = leak_filt.feed(delta.content)
+                    if _safe:
+                        yield TextDelta(text=_safe)
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index
@@ -340,6 +352,10 @@ class OpenAIProvider(LLMProvider):
                             tool_acc[idx]["args"] += tc.function.arguments
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
+            # 释放过滤器里尾缓冲的剩余安全文本
+            _tail = leak_filt.flush()
+            if _tail:
+                yield TextDelta(text=_tail)
             # 发出累积的工具调用
             for entry in tool_acc.values():
                 raw_args = entry["args"] or ""
@@ -354,6 +370,12 @@ class OpenAIProvider(LLMProvider):
                     input=parsed,
                 )
                 yield ToolCallEnd(id=entry["id"] or f"call_{name or 'unknown'}")
+            # 兜底：无结构化 tool_calls 但正文泄漏了工具调用标记 → 解析成真实调用
+            # （DeepSeek DSML / 部分兼容网关把调用吐进 content 文本，见 text_tool_calls.py）
+            if not tool_acc and leak_filt.suppressed:
+                for pc in parse_textual_tool_calls(leak_filt.call_text, valid_names):
+                    yield ToolCall(id=pc.id, name=pc.name, input=pc.input)
+                    yield ToolCallEnd(id=pc.id)
             yield Stop(reason=finish_reason or "stop", usage=final_usage)
         except Exception as e:
             from agent.llm.errors import classify

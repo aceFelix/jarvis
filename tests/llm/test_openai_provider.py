@@ -376,3 +376,72 @@ class TestParseToolArgs:
     def test_garbled_text_fallback(self) -> None:
         """乱码文本应返回空字典。"""
         assert _parse_tool_args("not json at all") == {}
+
+
+class TestTextualToolCallFallback:
+    """DSML 泄漏进 content 文本时的端到端兜底（stream() 层）。
+
+    复现 deepseek-flash 偶发把工具调用以 DSML 文本形式吐进正文、无结构化
+    tool_calls 的场景：provider 应过滤掉裸码回显并解析成真实 ToolCall。
+
+    @author aceFelix
+    """
+
+    @pytest.mark.asyncio
+    async def test_dsml_leak_becomes_real_toolcall(self, provider: OpenAIProvider) -> None:
+        P = chr(0xFF5D)
+        DO = "<" + P * 2 + "DSML" + P * 2 + " "
+        DC = "</" + P * 2 + "DSML" + P * 2 + " "
+        leak = (
+            "我来查一下您所在地。"
+            + DO + "calls>"
+            + DO + 'invoke name="Bash">'
+            + DO + 'parameter name="command" string="true">ls -l' + DC + "parameter>"
+            + DC + "invoke>"
+            + DC + "calls>"
+        )
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(content=leak, finish_reason="stop",
+                           usage=_MockUsage(prompt_tokens=10, completion_tokens=5))
+            )
+        )
+        msgs = [Message(role="user", content=[TextContent(text="列目录")])]
+        tools = [ToolDef(name="Bash", description="d", input_schema={})]
+        events = [
+            e async for e in provider.stream(
+                model="deepseek-chat", system="sys", messages=msgs,
+                tools=tools, max_tokens=100
+            )
+        ]
+        calls = [e for e in events if isinstance(e, ToolCall)]
+        assert len(calls) == 1
+        assert calls[0].name == "Bash"
+        assert calls[0].input == {"command": "ls -l"}
+        # 前言正常回显，裸 DSML 不得出现在任何 TextDelta
+        texts = "".join(e.text for e in events if isinstance(e, TextDelta))
+        assert "我来查一下您所在地。" in texts
+        assert "DSML" not in texts and P not in texts
+        assert any(isinstance(e, Stop) for e in events)
+
+    @pytest.mark.asyncio
+    async def test_angle_bracket_in_normal_text_not_suppressed(
+        self, provider: OpenAIProvider
+    ) -> None:
+        """正文里正常的 `<` / HTML 标签不应误触发抑制。"""
+        body = "比较 a<b 与 <code>x</code>"
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(content=body, finish_reason="stop",
+                           usage=_MockUsage(prompt_tokens=10, completion_tokens=5))
+            )
+        )
+        msgs = [Message(role="user", content=[TextContent(text="hi")])]
+        events = [
+            e async for e in provider.stream(
+                model="gpt-4o", system="sys", messages=msgs, tools=[], max_tokens=100
+            )
+        ]
+        texts = "".join(e.text for e in events if isinstance(e, TextDelta))
+        assert texts == body
+        assert not any(isinstance(e, ToolCall) for e in events)
