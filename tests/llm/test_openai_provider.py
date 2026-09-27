@@ -341,16 +341,23 @@ class TestMessagesToOpenAI:
         assert "2026-07-30" in result[2]["content"]
 
     def test_tool_result_with_images_in_text_mode(self) -> None:
-        """纯文本模式下，tool result 中的图片应替换为文字说明。"""
+        """纯文本模式下，tool result 中的图片应替换为文字说明。
+
+        输入含配对的 assistant tool_use：孤儿 tool_result 会被
+        ensure_tool_pairing 丢弃（协议不允许没有调用的结果）。
+        """
         from agent.core.message import ImageContent
         img = ImageContent(media_type="image/jpeg", data="fake")
         msgs = [
+            Message(role="assistant", content=[
+                ToolUseContent(id="call_1", name="ScreenShot", input={})
+            ]),
             Message(role="user", content=[
                 ToolResultContent(tool_use_id="call_1", content="截图", images=[img])
             ]),
         ]
         result = _messages_to_openai(msgs, "system", skip_images=True)
-        tool_content = result[1]["content"]
+        tool_content = result[2]["content"]
         assert "纯文本模型" in tool_content
 
 

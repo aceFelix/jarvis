@@ -11,6 +11,8 @@ Agent 运行时是 J.A.R.V.I.S 的"大脑"，负责驱动整个对话循环、�
 | **Tool 协议** | [tool.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool.py) | Tool 基类、ToolRegistry、PermissionMatcher |
 | **Message** | [message.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/message.py) | 消息/内容块数据结构 |
 | **ToolContext** | [context.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/context.py) | 工具执行上下文 + UI 协议 |
+| **ToolPairing** | [tool_pairing.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_pairing.py) | 配对不变量：`tool_use` ↔ `tool_result` 补齐/去孤儿 |
+| **TeamNotify** | [team_notify.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/team_notify.py) | 多 Agent 邮箱同步注入 |
 | **Hooks** | [hooks.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/hooks.py) | 钩子系统（扩展点） |
 
 ## 二、QueryLoop 主循环
@@ -31,6 +33,43 @@ while True:
 
 这就是 **ReAct（Reasoning + Acting）循环**：Think → Act → Observe → Think → ...
 
+### 配对不变量（重要约束）
+
+LLM 协议（Anthropic / OpenAI 一致）要求 `tool_use` 与 `tool_result` **双向配对**：
+
+- 每个 `assistant.tool_use` 必须在**紧随的下一条消息**里有 `tool_result`
+- 每个 `tool_result` 必须有对应的 `tool_use`
+
+违反的后果不是"这一轮报错"，而是**整个请求在受理前被 API 拒收**（报 `tool_use ids were found without tool_result blocks`）。由于残缺片段已经落进会话历史，**该会话此后每次请求都失败**——重试、换措辞、换模型都无效。工具**执行失败**反而是安全的（走正常路径，会产出 `is_error=True` 的结果）；真正中毒的只有"调用已记录、结果未写入"这半截状态。
+
+因此产生了四条必须在源头堵住的悬空路径：
+
+| 路径 | 处理方式 |
+|---|---|
+| 工具执行中被用户中断（`CancelledError`） | 补 `REASON_ABORTED` 占位结果后再 break |
+| 工具执行抛非取消异常 | 补 `REASON_EXEC_ERROR` 占位结果 + UI 报错 + `stopped_reason="tool_error"` 后 break |
+| 输出被截断（`length` / `max_tokens`）且含 `tool_use` | 补 `REASON_TRUNCATED` 占位结果，与续写提示合并成**一条** user 消息 |
+| 编排器调度缺项 | 结果对齐改为"缺失补占位"，输出与输入严格等长 |
+
+另有一道**出口兜底**：两个 provider 的消息转换入口（`_messages_to_openai` / `_messages_to_anthropic`）都会先跑 `ensure_tool_pairing()`，兜住主循环之外的所有 LLM 请求路径（压缩、标题生成、realtime 语音等），并能自愈已中毒的旧会话。
+
+详见 [tool_pairing.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_pairing.py) 与 [docs/fixlogs/dangling-tool-use-fix.md](../fixlogs/dangling-tool-use-fix.md)。
+
+### `ensure_tool_pairing()` 关键设计
+
+```python
+def ensure_tool_pairing(messages: list[Message]) -> list[Message]:
+    # 健康历史（无悬空/无孤儿）→ 返回同一个列表对象（零拷贝）
+    # 有违规 → 重建副本：
+    #   · 悬空 tool_use → 注入 is_error=True 占位结果（文案说明该调用已失效）
+    #   · 孤儿 tool_result → 丢弃（协议同样不允许）
+    #   · 重复 tool_result → 只留第一条
+    #   · 占位结果优先并入紧随其后的 user 消息（块前置），否则另起一条 user
+    #   · 重建时保留原 id / timestamp
+```
+
+**为什么只改发送副本、绝不就地改历史**：冻结前缀被 `cache_control` 锁定，就地改会破坏 LLM 服务端前缀缓存。健康历史返回同一对象、`id`/`timestamp` 不变，前缀缓存不受影响。
+
 ### 分层上下文（冻结前缀 + 滑动窗口）
 
 [LayeredContext](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/layered_context.py) 是 P 系列性能改进后 QueryLoop 的上下文管理器：
@@ -45,7 +84,7 @@ while True:
 
 ### 运行流程详解
 
-[QueryLoop.run()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L170-L364) 的完整流程：
+[QueryLoop.run()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L231-L504) 的完整流程：
 
 1. **Hook: USER_PROMPT** — 钩子可修改用户输入
 2. **追加用户消息**（文本 + 可选图片 + **Skill 按需加载**）
@@ -63,12 +102,13 @@ while True:
    - 若无 tool_use → 本轮结束
    - 若有 tool_use → 调用 `orchestrator.execute_calls()` 执行
    - 工具结果作为新 user 消息回灌到窗口
-   - 多 Agent 邮箱自动同步
+   - 多 Agent 邮箱自动同步（`team_notify.inject_teammate_notifications()`）
 5. **异常处理**：
    - `ProviderError` 且包含 context 超长关键词 → `layered.compact_reactive()` 后重试
    - **网络错误自动重试**：每轮最多重试 1 次（1.5s 退避）
    - Provider 故障转移：切到备选厂商模型（重建 provider 时同步思考模式覆盖状态）
    - `stop_reason="length"` → 输出截断，自动续写
+   - **工具执行被取消 / 抛异常** → 先补齐 `tool_result` 占位再退出，确保历史不留悬空调用（见「配对不变量」）
 6. **Hook: ASSISTANT_RESPONSE** — 钩子可后处理响应
 
 ### Skill 按需加载集成
@@ -102,7 +142,7 @@ ctx.messages.append(Message(role="user", content=content_blocks))
 
 ### 单轮流式推理 _stream_once()
 
-[_stream_once()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L366-L454) 处理 LLM 流式事件：
+[_stream_once()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L526-L614) 处理 LLM 流式事件：
 
 ```python
 async for event in self._provider.stream(...):
@@ -141,7 +181,7 @@ async for event in self._provider.stream(...):
 
 ## 三、ToolOrchestrator 工具编排器
 
-[ToolOrchestrator](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/orchestrator.py#L33-L109) 负责把模型返回的 tool_use 批量调度执行。
+[ToolOrchestrator](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/orchestrator.py#L35-L374) 负责把模型返回的 tool_use 批量调度执行。
 
 ### 执行流程
 
@@ -159,7 +199,7 @@ async for event in self._provider.stream(...):
    - 超长结果截断（默认 20000 字符）+ 落盘持久化
    - Hook: TOOL_AFTER
    - Hook: FILE_CHANGED（文件类工具触发）
-4. **结果对齐**：按输入顺序返回
+4. **结果对齐（严格等长）**：按输入顺序逐项取结果，**缺失项补占位**（`REASON_ORPHAN`）——输出长度与输入严格一致，不会让模型收到"少了几条工具结果"的历史
 
 ### 关键设计
 
@@ -422,3 +462,4 @@ messages.append(user([tool_result]))
 | 扩展机制 | Hooks | 避免硬编码，解耦 |
 | 错误处理 | 分类自愈 + 网络重试 | 工具错误自动恢复，网络抖动自动重试 |
 | 结果截断 | 落盘+预览 | 防 token 爆炸，模型知道去哪看完整结果 |
+| 工具结果缺失 | 补占位而非留空 | `tool_use`/`tool_result` 必须配对，悬空调用会让整个请求被拒收 |

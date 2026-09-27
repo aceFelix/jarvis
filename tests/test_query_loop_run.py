@@ -1,21 +1,13 @@
-"""QueryLoop.run() 全流程单元测试。
+"""QueryLoop.run() 主流程与异常路径单元测试。
 
-覆盖主流程（纯文本回复 / 工具调用循环 / 多轮工具 / 同轮多工具）、
+覆盖：主流程（纯文本回复 / 工具调用循环 / 多轮工具 / 同轮多工具）、
 中断（abort_event 预置 / LLM 流式被取消 / 工具执行被取消）、
 错误处理（上下文过长触发压缩重试、网络错误重试一次、provider 故障转移、
-无 fallback 结束）、空 assistant 消息、max_iterations 强制停止、
-输出截断（stop reason=length）自动续写、思考内容累积、图片输入、
-hooks（user_prompt 改输入 / assistant_response 触发）、in-place 切片同步
-回归点（调用方持有的列表引用必须能看到完整对话历史），以及
-set_thinking_enabled / is_thinking_enabled / compact_now / _stream_once
-等辅助方法。
+无 fallback 结束）、边界场景（空 assistant 消息、max_iterations 强制停止、
+输出截断自动续写、图片输入、工具执行异常补占位）。
 
-测试策略：
-- ScriptedProvider：按预设脚本序列输出 LLMEvent（支持异常脚本），完全
-  控制 LLM 流式行为，并可记录每次调用收到的 messages/tools。
-- FakeOrchestrator：记录工具调用并返回固定工具结果。
-- 默认 enable_compaction=False 专注主流程；压缩路径单独用
-  monkeypatch 验证（compact_reactive / compact_messages / freeze_if_needed）。
+测试替身与工厂见 tests/_query_loop_fakes.py；其余分支见
+tests/test_query_loop_stream.py / _branches.py / _session.py。
 
 @author aceFelix
 """
@@ -24,201 +16,28 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
-from agent.core.context import ToolContext
-from agent.core.hooks import HookEvent, HookRegistry, HookResult
 from agent.core.layered_context import LayeredContext
-from agent.core.message import (
-    ImageContent,
-    Message,
-    TextContent,
-    ThinkingContent,
-    ToolResultContent,
-    ToolUseContent,
-)
-from agent.core.query_loop import QueryLoop, _inject_teammate_notifications
-from agent.core.result import ToolResult
-from agent.core.tool import Tool, ToolRegistry
+from agent.core.message import TextContent, ToolResultContent
+from agent.core.query_loop import QueryLoop
 from agent.llm.base import (
-    LLMEvent,
-    LLMProvider,
     ProviderError,
     Stop,
     TextDelta,
-    ThinkingDelta,
     ToolCall,
     ToolCallEnd,
     Usage,
 )
 
-
-class ScriptedProvider(LLMProvider):
-    """按预设脚本输出事件序列的可控 provider。
-
-    每次 stream() 调用消费脚本列表中的下一个元素：
-    - 事件序列（list[LLMEvent]）：逐个 yield
-    - 异常实例（BaseException）：直接 raise（模拟 ProviderError / CancelledError）
-    - 可调用对象：先以 messages 为参调用，再按其返回值输出
-    """
-
-    name = "scripted"
-    default_model = "scripted-1"
-
-    def __init__(self, scripts) -> None:
-        self.scripts = list(scripts)
-        self.stream_calls = 0
-        self.last_messages: list[Message] = []
-        self.last_tools: list = []
-        self._thinking = False
-
-    async def stream(
-        self,
-        *,
-        model: str,
-        system: str,
-        messages: list[Message],
-        tools: list,
-        max_tokens: int = 4096,
-        temperature: float | None = None,
-    ):
-        """每次调用消费一个脚本元素。"""
-        self.stream_calls += 1
-        self.last_messages = list(messages)
-        self.last_tools = list(tools)
-        if not self.scripts:
-            yield Stop(reason="stop", usage=Usage())
-            return
-        script = self.scripts.pop(0)
-        if isinstance(script, BaseException):
-            raise script
-        if callable(script):
-            script = script(messages)
-        for ev in script:
-            yield ev
-
-    def set_thinking_enabled(self, enabled: bool) -> None:
-        """记录思考模式开关。"""
-        self._thinking = enabled
-
-    def is_thinking_enabled(self) -> bool:
-        """返回当前思考模式状态。"""
-        return self._thinking
-
-
-class FakeOrchestrator:
-    """记录工具调用并返回固定工具结果的假编排器。"""
-
-    def __init__(self, result_content: str = "工具执行结果") -> None:
-        self.calls: list[list[ToolUseContent]] = []
-        self.result_content = result_content
-        self.raise_cancelled = False
-
-    async def execute_calls(self, tool_uses, ctx):
-        """按输入顺序为每个 tool_use 生成一条固定结果。"""
-        self.calls.append(list(tool_uses))
-        if self.raise_cancelled:
-            raise asyncio.CancelledError()
-        return [
-            ToolResultContent(tool_use_id=tu.id, content=self.result_content)
-            for tu in tool_uses
-        ]
-
-
-class FakeTool(Tool):
-    """最小可用工具，供注册表使用。"""
-
-    name = "fake_tool"
-    description = "测试工具"
-    input_schema = {"type": "object", "properties": {}}
-
-    async def call(self, args, ctx):
-        """返回固定成功结果。"""
-        return ToolResult.ok("fake_result")
-
-
-class FakeUI:
-    """记录 UI 回调的桩。"""
-
-    def __init__(self) -> None:
-        self.infos: list[str] = []
-        self.warns: list[str] = []
-        self.errors: list[str] = []
-        self.thinkings: list[str] = []
-
-    def info(self, text: str) -> None:
-        self.infos.append(text)
-
-    def warn(self, text: str) -> None:
-        self.warns.append(text)
-
-    def error(self, text: str) -> None:
-        self.errors.append(text)
-
-    def assistant_text(self, text: str) -> None:
-        pass
-
-    def assistant_thinking(self, text: str) -> None:
-        self.thinkings.append(text)
-
-    def tool_use(self, tool_name, tool_input, tool_use_id) -> None:
-        pass
-
-    def tool_result(self, tool_name, tool_use_id, content, *, is_error=False) -> None:
-        pass
-
-    def ask_user(self, prompt: str) -> str:
-        """默认拒绝。"""
-        return "n"
-
-
-async def _noop_sleep(*args, **kwargs):
-    """替代 asyncio.sleep 的 no-op，加速网络重试测试。"""
-    return None
-
-
-@pytest.fixture
-def registry():
-    """注册了一个 FakeTool 的工具注册表。"""
-    reg = ToolRegistry()
-    reg.register(FakeTool())
-    return reg
-
-
-def make_loop(provider, orchestrator, reg, **kwargs):
-    """快捷构造 QueryLoop，默认关闭压缩/延迟加载/聊天检测以专注主流程。
-
-    kwargs 可覆盖默认值（如 enable_compaction=True）。
-    """
-    defaults = {
-        "enable_compaction": False,
-        "deferred_loading": False,
-        "chat_detection": False,
-    }
-    defaults.update(kwargs)
-    return QueryLoop(
-        provider=provider,
-        registry=reg,
-        orchestrator=orchestrator,
-        **defaults,
-    )
-
-
-def make_ctx(ui=None) -> tuple[ToolContext, list[Message]]:
-    """构造 ToolContext，messages 由外部持有（模拟 repl 调用方）。"""
-    messages: list[Message] = []
-    ctx = ToolContext(workdir=".", messages=messages, ui=ui)
-    return ctx, messages
-
-
-def _tool_script(tool_id: str = "t1", tool_name: str = "fake_tool") -> list[LLMEvent]:
-    """构造一个"发起工具调用"的事件脚本。"""
-    return [
-        TextDelta("我来调用工具"),
-        ToolCall(id=tool_id, name=tool_name, input={}),
-        ToolCallEnd(id=tool_id),
-        Stop(reason="stop", usage=Usage(input_tokens=10, output_tokens=20)),
-    ]
+from tests._query_loop_fakes import (
+    FakeOrchestrator,
+    FakeUI,
+    ScriptedProvider,
+    _noop_sleep,
+    _tool_script,
+    make_ctx,
+    make_loop,
+    registry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -372,12 +191,17 @@ class TestRunAbort:
         assert provider.stream_calls == 1
 
     async def test_cancelled_during_orchestrator(self, registry):
-        """工具执行阶段被取消（Ctrl+C）：优雅退出本轮，不 re-raise。"""
+        """工具执行阶段被取消（Ctrl+C）：优雅退出本轮，不 re-raise。
+
+        必须给这批 tool_use 留下配对结果——否则历史里出现悬空调用，
+        该会话此后每次请求都会被 API 拒收（见
+        docs/fixlogs/dangling-tool-use-fix.md）。
+        """
         provider = ScriptedProvider([_tool_script()])
         orch = FakeOrchestrator()
         orch.raise_cancelled = True
         loop = make_loop(provider, orch, registry)
-        ctx, _ = make_ctx()
+        ctx, msgs = make_ctx()
         old_event = ctx.abort_event
 
         stats = await loop.run("干活", ctx)
@@ -385,10 +209,14 @@ class TestRunAbort:
         assert stats.stopped_reason == "aborted"
         assert old_event.is_set()
         assert ctx.abort_event is not old_event
+        # 悬空调用已被占位结果回收
+        results = [b for m in msgs for b in m.content if isinstance(b, ToolResultContent)]
+        assert [r.tool_use_id for r in results] == ["t1"]
+        assert results[0].is_error is True
 
 
 # ---------------------------------------------------------------------------
-# ProviderError 处理
+# Provider 错误与故障转移
 # ---------------------------------------------------------------------------
 
 
@@ -531,7 +359,7 @@ class TestRunProviderError:
 
 
 # ---------------------------------------------------------------------------
-# 边界情况
+# 边界场景
 # ---------------------------------------------------------------------------
 
 
@@ -613,838 +441,49 @@ class TestRunEdgeCases:
         assert any("自动续写" in w for w in ui.warns)
         assert msgs[-1].role == "assistant" and msgs[-1].get_text() == "续写完成"
 
-
-# ---------------------------------------------------------------------------
-# 思考内容 / 图片 / hooks
-# ---------------------------------------------------------------------------
-
-
-class TestRunContent:
-    """思考内容累积、图片输入、hooks 测试。"""
-
-    async def test_thinking_delta_accumulated(self, registry):
-        """ThinkingDelta 累积为 ThinkingContent，TextDelta 为 TextContent。"""
-        provider = ScriptedProvider([
-            [ThinkingDelta("我先分析需求"), TextDelta("正式回答"), Stop(reason="stop")],
-        ])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-
-        await loop.run("分析一下", ctx)
-
-        assistant = msgs[-1]
-        assert assistant.role == "assistant"
-        assert assistant.get_thinking() == "我先分析需求"
-        assert assistant.get_text() == "正式回答"
-        assert any(isinstance(b, ThinkingContent) for b in assistant.content)
-
-    async def test_run_with_images(self, registry):
-        """传入 images 时，user 消息应包含图片内容块。"""
-        provider = ScriptedProvider([[TextDelta("看到图片了"), Stop(reason="stop")]])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-        img = ImageContent(data="aGVsbG8=", media_type="image/png")
-
-        await loop.run("看下这个", ctx, images=[img])
-
-        assert any(isinstance(b, ImageContent) for b in msgs[0].content)
-
-    async def test_hooks_triggered(self, registry, monkeypatch):
-        """user_prompt 钩子可修改输入，assistant_response 钩子在回复后触发。"""
-        reg = HookRegistry()
-        calls = {"user_prompt": 0, "assistant": 0}
-
-        def on_user_prompt(payload):
-            calls["user_prompt"] += 1
-            return HookResult(modify_input="被钩子修改的输入")
-
-        async def on_assistant_response(payload):
-            calls["assistant"] += 1
-
-        reg.register(HookEvent.USER_PROMPT, on_user_prompt, name="u")
-        reg.register(HookEvent.ASSISTANT_RESPONSE, on_assistant_response, name="a")
-        monkeypatch.setattr("agent.core.hooks.get_hooks", lambda: reg)
-
-        provider = ScriptedProvider([[TextDelta("好"), Stop(reason="stop")]])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-
-        await loop.run("原始输入", ctx)
-
-        assert calls["user_prompt"] == 1
-        assert calls["assistant"] == 1
-        # 钩子改写的输入进入对话历史
-        assert msgs[0].get_text() == "被钩子修改的输入"
-
-
-# ---------------------------------------------------------------------------
-# 辅助方法
-# ---------------------------------------------------------------------------
-
-
-class TestHelperMethods:
-    """set_thinking_enabled / compact_now / _build_tool_defs / _is_chat_only。"""
-
-    async def test_set_thinking_enabled(self, registry):
-        """set_thinking_enabled 同步 provider 并记录 override。"""
-        provider = ScriptedProvider([])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-
-        # 未设置 override：回退到 provider 默认（不支持思考 → False）
-        assert loop._thinking_override is None
-        assert loop.is_thinking_enabled() is False
-        # 设置 override：同步 provider 并记录
-        loop.set_thinking_enabled(True)
-        assert provider.is_thinking_enabled() is True
-        assert loop.is_thinking_enabled() is True
-        # 关闭思考
-        loop.set_thinking_enabled(False)
-        assert loop.is_thinking_enabled() is False
-        # None 清除 override：回退到 provider 当前状态（保持上次设置，不会回滚）
-        loop.set_thinking_enabled(None)
-        assert loop._thinking_override is None
-        assert loop.is_thinking_enabled() is False
-
-    async def test_compact_now_disabled(self, registry):
-        """enable_compaction=False 时 compact_now 直接返回 False。"""
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-        ctx, _ = make_ctx()
-        assert await loop.compact_now(ctx) is False
-
-    async def test_compact_now_success(self, registry, monkeypatch):
-        """compact_now 成功：ctx.messages 被替换为压缩结果，返回 True。"""
-        from agent.core.memory.compactor import CompactResult
-
-        new_msg = Message(role="user", content=[TextContent(text="摘要")])
-
-        async def _fake_compact_messages(**kwargs):
-            return CompactResult(
-                new_messages=[new_msg],
-                summary="s",
-                pre_compact_tokens=100,
-                post_compact_tokens=10,
-                messages_summarized=3,
-                messages_kept=1,
-            )
-
-        monkeypatch.setattr("agent.core.query_loop.compact_messages", _fake_compact_messages)
-
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry, enable_compaction=True)
-        ctx, msgs = make_ctx()
-        msgs.append(Message(role="user", content=[TextContent(text="old")]))
-
-        assert await loop.compact_now(ctx) is True
-        assert ctx.messages == [new_msg]
-        assert msgs == [new_msg]  # 调用方引用同步
-
-    async def test_compact_now_no_summary_returns_false(self, registry, monkeypatch):
-        """压缩结果 messages_summarized == 0 → 返回 False。"""
-        from agent.core.memory.compactor import CompactResult
-
-        async def _fake_compact_messages(**kwargs):
-            return CompactResult(
-                new_messages=[],
-                summary="",
-                pre_compact_tokens=10,
-                post_compact_tokens=10,
-                messages_summarized=0,
-                messages_kept=2,
-            )
-
-        monkeypatch.setattr("agent.core.query_loop.compact_messages", _fake_compact_messages)
-
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry, enable_compaction=True)
-        ctx, _ = make_ctx()
-        assert await loop.compact_now(ctx) is False
-
-    async def test_compact_now_exception_returns_false(self, registry, monkeypatch):
-        """压缩抛异常 → 返回 False 并 warn（不影响主流程）。"""
-
-        async def _boom_compact(**kwargs):
-            raise RuntimeError("摘要模型挂了")
-
-        monkeypatch.setattr("agent.core.query_loop.compact_messages", _boom_compact)
-
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry, enable_compaction=True)
-        ui = FakeUI()
-        ctx, _ = make_ctx(ui=ui)
-        assert await loop.compact_now(ctx) is False
-        assert any("上下文压缩失败" in w for w in ui.warns)
-
-    async def test_build_tool_defs_full_mode(self, registry):
-        """deferred_loading=False 时返回注册表全部工具定义。"""
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-        ctx, _ = make_ctx()
-        defs = loop._build_tool_defs(ctx)
-        assert {d.name for d in defs} == {"fake_tool"}
-
-    async def test_is_chat_only_logic(self, registry):
-        """纯聊天检测：短消息无关键词 → True；长消息/关键词/历史工具 → False。"""
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-
-        ctx, _ = make_ctx()
-        ctx.messages.append(Message(role="user", content=[TextContent(text="你好")]))
-        assert loop._is_chat_only(ctx) is True
-
-        ctx, _ = make_ctx()
-        ctx.messages.append(Message(role="user", content=[TextContent(text="今天天气怎么样")]))
-        assert loop._is_chat_only(ctx) is False  # 含动作词"天气"
-
-        ctx, _ = make_ctx()
-        ctx.messages.append(Message(role="user", content=[TextContent(text="请给我写一篇关于人工智能的详细报告，要求不少于五百字，还要举例说明各个技术细节。")]))
-        assert loop._is_chat_only(ctx) is False  # 长消息
-
-        ctx, _ = make_ctx()
-        ctx.messages.append(Message(role="user", content=[TextContent(text="你好")]))
-        ctx.messages.append(Message(role="assistant", content=[ToolUseContent(id="t1", name="fake_tool", input={})]))
-        assert loop._is_chat_only(ctx) is False  # 历史有工具调用
-
-    async def test_chat_detection_suppresses_tools(self, registry):
-        """chat_detection=True 且输入为纯聊天 → 发给 LLM 的工具列表为空。"""
-        provider = ScriptedProvider([[TextDelta("嗨"), Stop(reason="stop")]])
-        loop = QueryLoop(
-            provider=provider,
-            registry=registry,
-            orchestrator=FakeOrchestrator(),
-            enable_compaction=False,
-            deferred_loading=True,
-            chat_detection=True,
-        )
-        ctx, _ = make_ctx()
-        await loop.run("你好", ctx)
-        assert provider.last_tools == []
-
-        # 含动作词的输入 → 正常携带工具
-        await loop.run("帮我查一下", ctx)
-        assert provider.last_tools != []
-
-
-# ---------------------------------------------------------------------------
-# _stream_once
-# ---------------------------------------------------------------------------
-
-
-class TestStreamOnce:
-    """_stream_once 事件累积与异常处理。"""
-
-    async def test_stream_once_accumulates_events(self, registry):
-        """思考/文本/工具调用/结束事件按序累积成 assistant 消息。"""
-        provider = ScriptedProvider([
-            [
-                ThinkingDelta("思考"),
-                TextDelta("文本"),
-                ToolCall(id="t1", name="fake_tool", input={"a": 1}),
-                ToolCallEnd(id="t1"),
-                TextDelta("尾部"),
-                Stop(reason="stop", usage=Usage()),
-            ],
-        ])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, _ = make_ctx()
-
-        msg, last = await loop._stream_once(ctx)
-
-        assert last.reason == "stop"
-        assert isinstance(msg.content[0], ThinkingContent)
-        assert msg.content[0].text == "思考"
-        texts = [b for b in msg.content if isinstance(b, TextContent)]
-        assert texts[0].text == "文本"
-        assert texts[1].text == "尾部"
-        uses = msg.get_tool_uses()
-        assert len(uses) == 1 and uses[0].name == "fake_tool" and uses[0].input == {"a": 1}
-
-    async def test_stream_once_provider_error_empty_blocks(self, registry):
-        """ProviderError 且无任何内容块：不追加消息，直接传播异常。"""
-        provider = ScriptedProvider([ProviderError("网络错误: boom")])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-        msgs.append(Message(role="user", content=[TextContent(text="hi")]))
-
-        with pytest.raises(ProviderError):
-            await loop._stream_once(ctx)
-
-        assert len(msgs) == 1  # 未追加
-
-    async def test_stream_once_provider_error_partial_blocks(self, registry):
-        """ProviderError 但已产出部分内容：部分内容先落盘再抛异常。"""
-
-        class PartialProvider(LLMProvider):
-            """中途失败、已输出部分文本的 provider。"""
-
-            name = "partial"
-            default_model = "m"
-
-            async def stream(self, *, model, system, messages, tools, max_tokens=4096, temperature=None):
-                yield TextDelta("部分输出")
-                raise ProviderError("中途断流")
-
-        loop = make_loop(PartialProvider(), FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-        msgs.append(Message(role="user", content=[TextContent(text="hi")]))
-
-        with pytest.raises(ProviderError):
-            await loop._stream_once(ctx)
-
-        # 部分 assistant 内容被追加到 msgs
-        assert len(msgs) == 2
-        assert msgs[-1].role == "assistant" and msgs[-1].get_text() == "部分输出"
-
-
-# ---------------------------------------------------------------------------
-# 回归点与协作同步
-# ---------------------------------------------------------------------------
-
-
-class TestRunRegression:
-    """in-place 切片同步回归点与队友消息注入。"""
-
-    async def test_inplace_slice_sync_keeps_outer_reference(self, registry):
-        """回归点：run() 用 in-place 切片同步而非重绑定，
-        调用方持有的列表引用必须能看到完整对话历史。
-
-        修复背景：之前用 ctx.messages = layered.messages 重绑定导致
-        调用方列表脱钩，第 2 轮 LLM 标题永不触发、自动保存丢回复。
+    async def test_truncated_tool_use_gets_placeholder_result(self, registry):
+        """截断轮已含 tool_use → 补占位结果后再续写，不留悬空调用。
+
+        回归：provider 对残缺 JSON 也会产出工具调用块（anthropic 侧对截断的
+        input_json 会容错补全或退化为 {"_raw": ...}），而截断分支不执行工具；
+        若不补结果，悬空 tool_use 会让该会话此后每次请求都被 API 拒收。
         """
-        holder: list[Message] = []
         provider = ScriptedProvider([
-            [TextDelta("第一轮回复"), Stop(reason="stop")],
-            [TextDelta("第二轮回复"), Stop(reason="stop")],
+            [ToolCall(id="t1", name="fake_tool", input={}),
+             Stop(reason="length", usage=Usage())],
+            [TextDelta("续写完成"), Stop(reason="stop")],
         ])
         loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx = ToolContext(workdir=".", messages=holder, ui=None)
+        ctx, msgs = make_ctx()
 
-        await loop.run("第 1 轮", ctx)
+        stats = await loop.run("干活", ctx)
 
-        # 引用未被重绑定
-        assert ctx.messages is holder
-        # 第 1 轮后 user + assistant 消息都在
-        assert len(holder) == 2
-        assert holder[0].role == "user" and holder[0].get_text() == "第 1 轮"
-        assert holder[1].role == "assistant" and holder[1].get_text() == "第一轮回复"
+        assert stats.stopped_reason == "stop"
+        results = [b for m in msgs for b in m.content if isinstance(b, ToolResultContent)]
+        assert [r.tool_use_id for r in results] == ["t1"]
+        assert results[0].is_error is True
+        assert "截断" in results[0].content
+        # 截断轮未执行工具，只补了占位结果
+        assert stats.tool_calls == 0
+        assert msgs[-1].role == "assistant"
 
-        # 第 2 轮后历史继续累积在同一引用上
-        await loop.run("第 2 轮", ctx)
-        assert len(holder) == 4
-        assert holder[2].role == "user" and holder[2].get_text() == "第 2 轮"
-        assert holder[3].role == "assistant" and holder[3].get_text() == "第二轮回复"
+    async def test_orchestrator_exception_padded_and_stopped(self, registry):
+        """工具执行期抛非取消异常 → 补占位后结束本轮（不冒泡、不留悬空）。
 
-    async def test_teammate_injection_hook_invoked(self, registry, monkeypatch):
-        """工具执行后队友通知注入点应被触发，且注入消息进入对话历史。
-
-        修复前: run() 中 _inject_teammate_notifications 读到的 ctx.messages
-        不含刚追加到 layered 的工具结果，且注入后长度比较基准错误，
-        导致注入消息无法同步回 layered（死代码）。
-        修复后: 调用注入前先同步 ctx.messages 到 layered 最新状态，
-        注入的额外消息能正确追加到 layered 并保留在对话历史中。
+        回归：以前异常直接冒泡出 run()，而 assistant 消息已入历史，
+        结果缺失 → 悬空调用污染会话。
         """
-        calls = {"n": 0}
-
-        def fake_inject(ctx):
-            calls["n"] += 1
-            ctx.messages.append(Message(role="user", content=[TextContent(text="[队友状态更新]")]))
-
-        monkeypatch.setattr("agent.core.query_loop._inject_teammate_notifications", fake_inject)
-
-        provider = ScriptedProvider([
-            _tool_script(),
-            [TextDelta("完成"), Stop(reason="stop")],
-        ])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-
-        await loop.run("干活", ctx)
-
-        # 工具轮后注入点被触发
-        assert calls["n"] == 1
-        # 注入的队友消息现在能正确进入对话历史
-        texts = [b.text for m in msgs for b in m.content if isinstance(b, TextContent)]
-        assert any("队友状态更新" in t for t in texts)
-
-    async def test_freeze_if_needed_notifies_ui(self, registry, monkeypatch):
-        """压缩开启时 freeze_if_needed 返回 True → UI 收到冻结提示。"""
-
-        async def _fake_freeze(self, provider, model, *, window_limit=None, keep_recent=None, base_tokens=0, on_progress=None, based_on_total=False, refreeze_growth=None, max_output_tokens=None):
-            return True
-
-        monkeypatch.setattr(LayeredContext, "freeze_if_needed", _fake_freeze)
-
-        provider = ScriptedProvider([[TextDelta("hi"), Stop(reason="stop")]])
-        loop = make_loop(provider, FakeOrchestrator(), registry, enable_compaction=True)
+        provider = ScriptedProvider([_tool_script()])
+        orch = FakeOrchestrator()
+        orch.raise_error = RuntimeError("调度器异常")
+        loop = make_loop(provider, orch, registry)
         ui = FakeUI()
-        ctx, _ = make_ctx(ui=ui)
-
-        await loop.run("你好", ctx)
-
-        assert any("上下文冻结完成" in i for i in ui.infos)
-
-
-# ---------------------------------------------------------------------------
-# _inject_teammate_notifications
-# ---------------------------------------------------------------------------
-
-
-class TestInjectTeammateNotifications:
-    """队友邮箱消息注入（多 Agent 团队）测试。"""
-
-    def _make_msg(self, mtype, **kwargs):
-        """构造一个简单的邮箱消息对象。"""
-        defaults = dict(
-            type=mtype, summary=None, from_name="队友A", task_subject=None,
-            task_id=None, status=None, text=None, request_id=None,
-            action=None, tool=None, approve=True,
-        )
-        defaults.update(kwargs)
-        return type("MailMsg", (), defaults)()
-
-    def test_inject_various_types(self, monkeypatch):
-        """各类队友消息应渲染成文本注入对话。"""
-        from agent.collaboration import mailbox as mailbox_mod
-        from agent.collaboration import team as team_mod
-
-        mgr = type("Mgr", (), {"active_team": "proj"})()
-        monkeypatch.setattr(team_mod, "get_team_manager", lambda: mgr)
-
-        messages = [
-            self._make_msg("idle_notification", summary="空闲等待任务"),
-            self._make_msg("task_claimed", task_subject="修复登录 bug", task_id=7),
-            self._make_msg("task_completed", status="completed", summary="已完成重构", task_id=8),
-            self._make_msg("plan_approval_request", text="计划详情", request_id="r1"),
-            self._make_msg("permission_request", action="写文件", tool="FileWrite"),
-            self._make_msg("shutdown_response", approve=False),
-            self._make_msg("heartbeat"),  # 心跳不渲染
-        ]
-        monkeypatch.setattr(mailbox_mod, "read_mailbox", lambda *a, **k: messages)
-
-        ctx = ToolContext(workdir=".", messages=[], ui=None)
-        _inject_teammate_notifications(ctx)
-
-        text = "".join(
-            b.text for m in ctx.messages for b in m.content if isinstance(b, TextContent)
-        )
-        assert "空闲等待任务" in text
-        assert "领取任务" in text and "#7" in text
-        assert "[completed]" in text
-        assert "请求审批计划" in text
-        assert "请求权限" in text
-        assert "拒绝关闭" in text
-        # 心跳不出现
-        assert "心跳" not in text and "heartbeat" not in text
-
-    def test_no_active_team_returns(self, monkeypatch):
-        """没有活跃团队时直接返回，不注入任何消息。"""
-        from agent.collaboration import team as team_mod
-
-        mgr = type("Mgr", (), {"active_team": None})()
-        monkeypatch.setattr(team_mod, "get_team_manager", lambda: mgr)
-
-        ctx = ToolContext(workdir=".", messages=[], ui=None)
-        _inject_teammate_notifications(ctx)
-        assert ctx.messages == []
-
-    def test_no_messages_returns(self, monkeypatch):
-        """邮箱为空时直接返回。"""
-        from agent.collaboration import mailbox as mailbox_mod
-        from agent.collaboration import team as team_mod
-
-        mgr = type("Mgr", (), {"active_team": "proj"})()
-        monkeypatch.setattr(team_mod, "get_team_manager", lambda: mgr)
-        monkeypatch.setattr(mailbox_mod, "read_mailbox", lambda *a, **k: [])
-
-        ctx = ToolContext(workdir=".", messages=[], ui=None)
-        _inject_teammate_notifications(ctx)
-        assert ctx.messages == []
-
-    def test_inject_only_heartbeat_returns(self, monkeypatch):
-        """邮箱里只有心跳消息（不渲染）→ 不注入任何文本。"""
-        from agent.collaboration import mailbox as mailbox_mod
-        from agent.collaboration import team as team_mod
-
-        mgr = type("Mgr", (), {"active_team": "proj"})()
-        monkeypatch.setattr(team_mod, "get_team_manager", lambda: mgr)
-        monkeypatch.setattr(
-            mailbox_mod, "read_mailbox", lambda *a, **k: [self._make_msg("heartbeat")]
-        )
-
-        ctx = ToolContext(workdir=".", messages=[], ui=None)
-        _inject_teammate_notifications(ctx)
-        assert ctx.messages == []
-
-    def test_inject_import_error_returns(self, monkeypatch):
-        """协作模块导入失败 → 静默返回，不注入。"""
-        import sys
-
-        monkeypatch.setitem(sys.modules, "agent.collaboration.team", None)
-
-        ctx = ToolContext(workdir=".", messages=[], ui=None)
-        _inject_teammate_notifications(ctx)
-        assert ctx.messages == []
-
-
-# ---------------------------------------------------------------------------
-# 补充覆盖：hooks 故障 / on_assistant_text / 延迟工具 / 清理函数
-# ---------------------------------------------------------------------------
-
-
-class TestExtraCoverage:
-    """补充分支覆盖（hooks 故障容错、on_assistant_text、延迟工具、清理函数）。"""
-
-    class _BrokenHooks:
-        """trigger 整体抛异常的 hooks 系统桩。"""
-
-        async def trigger(self, *args, **kwargs):
-            raise RuntimeError("hooks 系统故障")
-
-    async def test_hooks_broken_do_not_break_run(self, registry, monkeypatch):
-        """hooks 系统整体故障 → user_prompt / assistant_response 异常被吞，
-        主流程照常完成。"""
-        monkeypatch.setattr("agent.core.hooks.get_hooks", lambda: self._BrokenHooks())
-
-        provider = ScriptedProvider([[TextDelta("正常回复"), Stop(reason="stop")]])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, msgs = make_ctx()
-
-        stats = await loop.run("你好", ctx)
-
-        assert stats.stopped_reason == "stop"
-        assert len(msgs) == 2  # user + assistant 都保留
-
-    async def test_on_assistant_text_callback(self, registry):
-        """TextDelta 同时喂给 on_assistant_text 回调；回调异常被吞不影响主流程。"""
-        received: list[str] = []
-
-        def cb(text: str) -> None:
-            received.append(text)
-
-        provider = ScriptedProvider([[TextDelta("流式文本"), Stop(reason="stop")]])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ctx, _ = make_ctx()
-        ctx.on_assistant_text = cb
-
-        stats = await loop.run("hi", ctx)
-
-        assert stats.stopped_reason == "stop"
-        assert received == ["流式文本"]
-
-        # 回调抛异常 → 被吞掉，不影响主流程
-        def bad_cb(text: str) -> None:
-            raise RuntimeError("tts 故障")
-
-        ctx2, _ = make_ctx()
-        ctx2.on_assistant_text = bad_cb
-        provider2 = ScriptedProvider([[TextDelta("继续"), Stop(reason="stop")]])
-        loop2 = make_loop(provider2, FakeOrchestrator(), registry)
-
-        stats2 = await loop2.run("hi", ctx2)
-        assert stats2.stopped_reason == "stop"
-
-    async def test_ui_receives_thinking_deltas(self, registry):
-        """带 UI 时 ThinkingDelta 实时推送给 ui.assistant_thinking。"""
-        provider = ScriptedProvider([[ThinkingDelta("思考中"), TextDelta("回答"), Stop()]])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-        ui = FakeUI()
-        ctx, _ = make_ctx(ui=ui)
-
-        await loop.run("分析", ctx)
-
-        assert ui.thinkings == ["思考中"]
-
-    async def test_failover_build_provider_fails(self, registry, monkeypatch):
-        """构建备选 provider 失败 → 不故障转移，以 provider_error 结束。"""
-
-        def _boom(*args, **kwargs):
-            raise RuntimeError("构建 provider 失败")
-
-        monkeypatch.setattr("agent.bootstrap._build_provider", _boom)
-
-        provider = ScriptedProvider([ProviderError("api error")])
-        loop = make_loop(
-            provider,
-            FakeOrchestrator(),
-            registry,
-            vendor_fallback="deepseek",
-            custom_models={"ds-model": {"vendor": "deepseek", "base_url": "http://x", "api_key": "k"}},
-        )
-        ui = FakeUI()
-        ctx, _ = make_ctx(ui=ui)
-
-        stats = await loop.run("你好", ctx)
-
-        assert stats.stopped_reason == "provider_error"
-        assert loop._provider is provider  # 未切换
-        assert any("LLM 调用失败" in e for e in ui.errors)
-
-    async def test_deferred_tool_discovered(self, registry):
-        """deferred_loading=True：核心工具始终携带，延迟工具仅在发现后携带。"""
-        deferred_tool = FakeTool()
-        deferred_tool.name = "lazy_tool"
-        deferred_tool.deferred = True
-        registry.register(deferred_tool)  # fake_tool（deferred=False）已注册
-
-        loop = QueryLoop(
-            provider=ScriptedProvider([]),
-            registry=registry,
-            orchestrator=FakeOrchestrator(),
-            enable_compaction=False,
-            deferred_loading=True,
-            chat_detection=False,
-        )
-        ctx, _ = make_ctx()
-
-        # 未发现延迟工具 → 只有核心工具
-        assert {d.name for d in loop._build_tool_defs(ctx)} == {"fake_tool"}
-        # 发现后 → 携带完整 schema
-        ctx.extra["discovered_tools"] = {"lazy_tool"}
-        assert {d.name for d in loop._build_tool_defs(ctx)} == {"fake_tool", "lazy_tool"}
-
-    def test_evict_old_images_multiple(self):
-        """多图消息：只保留最新一张，旧图替换为文字占位；
-        非 user 消息与非 ToolResultContent block 跳过。"""
-        from agent.core.query_loop import _evict_old_images
-
-        img1 = ImageContent(data="fake1", media_type="image/jpeg")
-        img2 = ImageContent(data="fake2", media_type="image/jpeg")
-        msgs = [
-            Message(role="user", content=[ToolResultContent(tool_use_id="c1", content="第一张", images=[img1])]),
-            Message(role="assistant", content=[TextContent(text="assistant 消息")]),  # 非 user → 跳过
-            Message(role="user", content=[TextContent(text="纯文本 user 消息")]),      # 非 tool_result → 跳过
-            Message(role="user", content=[ToolResultContent(tool_use_id="c2", content="第二张", images=[img2])]),
-        ]
-        _evict_old_images(msgs)
-
-        assert msgs[3].content[0].images == [img2]  # 最新保留
-        assert msgs[0].content[0].images == []      # 旧图被清
-        assert "截图已处理" in msgs[0].content[0].content
-        # 非图片消息未被改动
-        assert msgs[1].content[0].text == "assistant 消息"
-        assert msgs[2].content[0].text == "纯文本 user 消息"
-
-    def test_collapse_old_tool_results(self):
-        """旧工具结果折叠为占位，最近 N 条保留完整。"""
-        from agent.core.query_loop import _collapse_old_tool_results
-
-        msgs = [
-            Message(role="user", content=[ToolResultContent(tool_use_id="c1", content="r1")]),
-            Message(role="user", content=[ToolResultContent(tool_use_id="c2", content="r2")]),
-            Message(role="user", content=[ToolResultContent(tool_use_id="c3", content="r3")]),
-        ]
-        _collapse_old_tool_results(msgs, keep_recent=2)
-
-        assert "已完成" in msgs[0].content[0].content
-        assert msgs[1].content[0].content == "r2"
-        assert msgs[2].content[0].content == "r3"
-
-
-# ---------------------------------------------------------------------------
-# 会话记忆链路：压缩后摘要必须真实落盘 SESSION_MEMORY.md
-# ---------------------------------------------------------------------------
-
-
-class TestSessionMemoryPersist:
-    """链路级测试：压缩成功后，摘要必须持久化到 <workdir>/.jarvis/SESSION_MEMORY.md。
-
-    修复背景：update_session_memory 之前在 query_loop 中被 import 却从未在
-    运行时被调用——三个压缩路径（freeze_if_needed / compact_reactive /
-    compact_now）都调用了 compact_messages，但没有把 CompactResult 落盘到
-    会话记忆文件。函数级测试直接调用 update_session_memory 是"假绿"，
-    掩盖了链路断裂。本类断言"压缩之后记忆文件真的被更新"。
-
-    测试策略：不 mock 掉压缩方法本身，而是 mock compact_messages 返回真实
-    CompactResult，让三个压缩路径完整执行，再断言 SESSION_MEMORY.md 被创建
-    且包含摘要内容。
-    """
-
-    # 模拟摘要内容（对应 compactor 的 9 段式输出片段）
-    _SUMMARY = "关键决策：采用分层上下文；错误修复：补全 import os"
-
-    def _fake_result(self):
-        """构造一个 messages_summarized > 0 的压缩结果。"""
-        from agent.core.memory.compactor import CompactResult
-
-        summary_msg = Message(role="user", content=[TextContent(text=f"[摘要] {self._SUMMARY}")])
-        return CompactResult(
-            new_messages=[summary_msg],
-            summary=self._SUMMARY,
-            pre_compact_tokens=12000,
-            post_compact_tokens=2000,
-            messages_summarized=30,
-            messages_kept=6,
-        )
-
-    def _assert_memory_file(self, tmp_path, *, must_exist=True):
-        """断言 <workdir>/.jarvis/SESSION_MEMORY.md 存在且包含摘要。"""
-        mem_file = tmp_path / ".jarvis" / "SESSION_MEMORY.md"
-        if not must_exist:
-            return not mem_file.exists()
-        assert mem_file.exists(), f"SESSION_MEMORY.md 未被创建: {mem_file}"
-        content = mem_file.read_text(encoding="utf-8")
-        assert "关键决策：采用分层上下文" in content, f"摘要未写入记忆文件:\n{content}"
-        return True
-
-    async def test_freeze_persists_session_memory(self, registry, monkeypatch, tmp_path):
-        """冻结路径：每轮 run() 前 freeze_if_needed 压缩成功 → 摘要落盘。"""
-        async def _fake_compact(**kwargs):
-            return self._fake_result()
-
-        # freeze_if_needed 内部 `from agent.core.memory.compactor import compact_messages`
-        monkeypatch.setattr("agent.core.memory.compactor.compact_messages", _fake_compact)
-
-        provider = ScriptedProvider([[TextDelta("你好"), Stop(reason="stop")]])
-        # context_window 传 2（比例 0.5 → 阈值 1），保证总 token 必然超限触发冻结
-        loop = make_loop(
-            provider, FakeOrchestrator(), registry,
-            enable_compaction=True, context_window=2, compact_ratio=0.5,
-        )
-        ui = FakeUI()
-        # workdir 指向临时目录，SESSION_MEMORY.md 会真实写到磁盘
-        messages: list[Message] = [
-            Message(role="user", content=[TextContent(text="旧消息")]),
-        ]
-        ctx = ToolContext(workdir=str(tmp_path), messages=messages, ui=ui)
-
-        stats = await loop.run("你好", ctx)
-
-        assert stats.stopped_reason == "stop"
-        self._assert_memory_file(tmp_path)
-
-    async def test_reactive_persists_session_memory(self, registry, monkeypatch, tmp_path):
-        """反应式路径：LLM 报 context_too_long → compact_reactive 成功 → 摘要落盘。"""
-        from agent.core.memory.compactor import compact_messages
-
-        async def _fake_compact(**kwargs):
-            return self._fake_result()
-
-        monkeypatch.setattr("agent.core.memory.compactor.compact_messages", _fake_compact)
-
-        provider = ScriptedProvider([
-            ProviderError("Request failed: prompt_too_long tokens ..."),
-            [TextDelta("压缩后正常回复"), Stop(reason="stop")],
-        ])
-        loop = make_loop(
-            provider, FakeOrchestrator(), registry,
-            enable_compaction=True,
-        )
-        ui = FakeUI()
-        ctx = ToolContext(workdir=str(tmp_path), messages=[
-            Message(role="user", content=[TextContent(text="旧消息")]),
-        ], ui=ui)
-
-        stats = await loop.run("写个报告", ctx)
-
-        assert stats.stopped_reason == "stop"
-        assert provider.stream_calls == 2  # 压缩重试后成功
-        self._assert_memory_file(tmp_path)
-
-    async def test_compact_now_persists_session_memory(self, registry, monkeypatch, tmp_path):
-        """手动路径：/compact 触发 compact_now 成功 → 摘要落盘。"""
-        async def _fake_compact(**kwargs):
-            return self._fake_result()
-
-        # compact_now 调用的是 query_loop 模块顶部绑定的 compact_messages 引用
-        monkeypatch.setattr("agent.core.query_loop.compact_messages", _fake_compact)
-
-        loop = make_loop(
-            ScriptedProvider([]), FakeOrchestrator(), registry,
-            enable_compaction=True,
-        )
-        ui = FakeUI()
-        ctx = ToolContext(workdir=str(tmp_path), messages=[
-            Message(role="user", content=[TextContent(text="旧消息")]),
-        ], ui=ui)
-
-        assert await loop.compact_now(ctx) is True
-        self._assert_memory_file(tmp_path)
-
-    async def test_compact_no_summary_no_memory(self, registry, monkeypatch, tmp_path):
-        """压缩结果 messages_summarized == 0（无摘要）→ 不写记忆文件。"""
-        from agent.core.memory.compactor import CompactResult
-
-        async def _fake_compact(**kwargs):
-            return CompactResult(
-                new_messages=[],
-                summary="",
-                pre_compact_tokens=100,
-                post_compact_tokens=100,
-                messages_summarized=0,
-                messages_kept=6,
-            )
-
-        monkeypatch.setattr("agent.core.query_loop.compact_messages", _fake_compact)
-
-        loop = make_loop(
-            ScriptedProvider([]), FakeOrchestrator(), registry,
-            enable_compaction=True,
-        )
-        ui = FakeUI()
-        ctx = ToolContext(workdir=str(tmp_path), messages=[
-            Message(role="user", content=[TextContent(text="旧消息")]),
-        ], ui=ui)
-
-        assert await loop.compact_now(ctx) is False
-        mem_file = tmp_path / ".jarvis" / "SESSION_MEMORY.md"
-        assert not mem_file.exists(), "无摘要时不应创建记忆文件"
-
-
-# ---------------------------------------------------------------------------
-# 模型热切换（工作台 models.select → 引擎线程内串行调用）
-# ---------------------------------------------------------------------------
-
-
-class TestSwitchModel:
-    """QueryLoop.switch_model：就地换 provider / 模型，保留会话级状态。"""
-
-    def test_replaces_provider_and_model(self, registry) -> None:
-        """换 provider / 模型并返回旧 provider（调用方负责 close）。"""
-        old = ScriptedProvider([])
-        new = ScriptedProvider([])
-        loop = make_loop(old, FakeOrchestrator(), registry)
-        loop._model = "old-model"
-        usage = loop.session_usage
-
-        returned = loop.switch_model(new, "new-model")
-
-        assert returned is old
-        assert loop._provider is new
-        assert loop._model == "new-model"
-        assert loop.session_usage is usage  # 未重建 QueryLoop：会话 token 累计保留
-
-    def test_same_provider_returns_none(self, registry) -> None:
-        """复用同一 provider：返回 None（调用方不 close），模型名照常更新。"""
-        provider = ScriptedProvider([])
-        loop = make_loop(provider, FakeOrchestrator(), registry)
-
-        assert loop.switch_model(provider, "m2") is None
-        assert loop._provider is provider
-        assert loop._model == "m2"
-
-    def test_resets_failover_budget(self, registry) -> None:
-        """手动切换复位厂商回退预算：新模型仍可触发一次故障转移。"""
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-        loop._failover_tried = True
-
-        loop.switch_model(ScriptedProvider([]), "new-model")
-
-        assert loop._failover_tried is False
-
-    def test_inherits_thinking_override(self, registry, monkeypatch) -> None:
-        """语音模式强制关闭思考时，新 provider 必须继承该覆盖。"""
-        new = ScriptedProvider([])
-        calls: list[bool] = []
-        monkeypatch.setattr(new, "set_thinking_enabled", lambda enabled: calls.append(enabled))
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-        loop._thinking_override = False
-
-        loop.switch_model(new, "new-model")
-
-        assert calls == [False]
-
-    def test_without_override_keeps_provider_default(self, registry, monkeypatch) -> None:
-        """无覆盖（None）→ 不强制写新 provider，用其自身默认思考态。"""
-        new = ScriptedProvider([])
-        calls: list[bool] = []
-        monkeypatch.setattr(new, "set_thinking_enabled", lambda enabled: calls.append(enabled))
-        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
-        assert loop._thinking_override is None
-
-        loop.switch_model(new, "new-model")
-
-        assert calls == []
+        ctx, msgs = make_ctx(ui=ui)
+
+        stats = await loop.run("干活", ctx)
+
+        assert stats.stopped_reason == "tool_error"
+        assert any("工具执行异常" in e for e in ui.errors)
+        results = [b for m in msgs for b in m.content if isinstance(b, ToolResultContent)]
+        assert [r.tool_use_id for r in results] == ["t1"]
+        assert results[0].is_error is True

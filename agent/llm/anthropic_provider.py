@@ -13,6 +13,9 @@ import json
 from typing import Any, AsyncIterator
 
 from agent.core.message import ImageContent, Message, TextContent, ToolResultContent, ToolUseContent
+# 发送前修复 tool_use / tool_result 配对（悬空调用会被 Anthropic 兼容端点整体拒收）
+# @author aceFelix
+from agent.core.tool_pairing import ensure_tool_pairing
 from agent.llm.base import (
     LLMEvent,
     LLMProvider,
@@ -83,7 +86,13 @@ def _block_to_anthropic(block: Any) -> dict[str, Any]:
 
 
 def _messages_to_anthropic(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
-    """转换对话历史。system 消息提取出来单独返回（Anthropic API 要求）。"""
+    """转换对话历史。system 消息提取出来单独返回（Anthropic API 要求）。
+
+    出口兜底：转换前先跑 ensure_tool_pairing，保证每个 tool_use 后面都有配对的
+    tool_result（悬空调用会让请求在受理前就被拒收，用户表现为该会话永久失败，
+    见 docs/fixlogs/dangling-tool-use-fix.md）。
+    """
+    messages = ensure_tool_pairing(messages)
     from agent.core.message import ThinkingContent
     system_parts: list[str] = []
     api_msgs: list[dict[str, Any]] = []
@@ -96,6 +105,10 @@ def _messages_to_anthropic(messages: list[Message]) -> tuple[str, list[dict[str,
         # 传过去会报 "Unknown content block" 错误
         blocks = [_block_to_anthropic(b) for b in msg.content
                   if not isinstance(b, ThinkingContent)]
+        if not blocks:
+            # 空 content 会被 Anthropic 拒收（如只含 thinking 的消息）。补占位文本
+            # 而不是跳过：跳过会破坏 user/assistant 交替（同样被拒收）。
+            blocks = [{"type": "text", "text": "(此消息不含可发送内容)"}]
         api_msgs.append(
             {
                 "role": msg.role,

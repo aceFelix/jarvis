@@ -99,20 +99,28 @@ class TestMessageSerialization:
         兼容接口对 list content 会挂起），因此工具结果图片以文本描述附加，
         不生成 image_url；user 消息中的独立图片才走 image_url（多模态）。
         此前的断言期望 tool 消息含 image_url，与实现设计相悖，已修正。
+        输入含配对的 assistant tool_use：孤儿 tool_result 会被
+        ensure_tool_pairing 丢弃（协议不允许没有调用的结果）。
         """
+        from agent.core.message import ToolUseContent
         from agent.llm.openai_provider import _messages_to_openai
         img = ImageContent(media_type="image/jpeg", data="fakebase64")
-        msg = Message(role="user", content=[
-            ToolResultContent(tool_use_id="call_1", content="截图", images=[img])
-        ])
+        msgs = [
+            Message(role="assistant", content=[
+                ToolUseContent(id="call_1", name="ScreenShot", input={})
+            ]),
+            Message(role="user", content=[
+                ToolResultContent(tool_use_id="call_1", content="截图", images=[img])
+            ]),
+        ]
         # 多模态：tool 消息 content 为 string，图片以文本描述附加
-        result_mm = _messages_to_openai([msg], "system", skip_images=False)
+        result_mm = _messages_to_openai(msgs, "system", skip_images=False)
         tool_msg = [m for m in result_mm if m.get("role") == "tool"][0]
         assert isinstance(tool_msg["content"], str), "tool 消息 content 必须是 string"
         assert "附带 1 张图片" in tool_msg["content"]
 
         # 纯文本：同样 string content，且有"图片已省略"提示
-        result_text = _messages_to_openai([msg], "system", skip_images=True)
+        result_text = _messages_to_openai(msgs, "system", skip_images=True)
         tool_msg_text = [m for m in result_text if m.get("role") == "tool"][0]
         assert isinstance(tool_msg_text["content"], str)
         assert "图片已省略" in tool_msg_text["content"]

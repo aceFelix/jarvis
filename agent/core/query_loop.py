@@ -67,6 +67,18 @@ from agent.core.memory.prune import (  # noqa: F401
     collapse_old_tool_results as _collapse_old_tool_results,
     evict_old_images as _evict_old_images,
 )
+# 多 Agent 团队邮箱注入已迁到 agent/core/team_notify.py（职责拆分），
+# 此处保留旧名绑定：既有的调用点与测试 monkeypatch 路径不变。
+# @author aceFelix
+from agent.core.team_notify import (  # noqa: F401
+    inject_teammate_notifications as _inject_teammate_notifications,
+)
+from agent.core.tool_pairing import (
+    REASON_ABORTED,
+    REASON_EXEC_ERROR,
+    REASON_TRUNCATED,
+    make_placeholder_results,
+)
 
 
 @dataclass
@@ -373,12 +385,24 @@ class QueryLoop:
             # 无正文无工具调用），见 docs/fixlogs/serve-mcp-truncation-fix.md。
             # @author aceFelix
             if isinstance(stop_event, Stop) and stop_event.reason in ("length", "max_tokens"):
+                # 截断轮若已含 tool_use，必须补占位结果后再续写：provider 侧的
+                # JSON 容错会让残缺工具调用照样产出（anthropic_provider 对
+                # input_json 截断会补 } 或退化为 {"_raw": ...}），而这里不执行
+                # 工具 → 不补结果就会留下悬空 tool_use，让该会话所有后续请求被
+                # API 拒收（见 docs/fixlogs/dangling-tool-use-fix.md）。
+                # 占位结果与续写指令合并进同一条 user 消息，保持 role 交替合法。
+                continuation: list[ContentBlock] = []
+                truncated_uses = assistant_msg.get_tool_uses()
+                if truncated_uses:
+                    continuation.extend(
+                        make_placeholder_results(truncated_uses, reason=REASON_TRUNCATED)
+                    )
+                continuation.append(TextContent(
+                    text="[输出被截断，请从中断处继续，不要重复已输出的内容]"
+                ))
                 if ctx.ui:
                     ctx.ui.warn("⚠ 输出被截断（max_tokens），自动续写...")
-                layered.append(Message(
-                    role="user",
-                    content=[TextContent(text="[输出被截断，请从中断处继续，不要重复已输出的内容]")],
-                ))
+                layered.append(Message(role="user", content=continuation))
                 continue
 
             tool_uses = assistant_msg.get_tool_uses()
@@ -389,13 +413,34 @@ class QueryLoop:
 
             # 执行工具
             stats.tool_calls += len(tool_uses)
+            # 工具执行期退出（中断/异常）必须给这批 tool_use 留下配对结果：
+            # assistant 消息已在上面入历史，缺失结果会留下悬空调用，使该会话
+            # 所有后续请求被 API 拒收（DeepSeek/Anthropic 报 "tool_use ids were
+            # found without tool_result blocks"）。详见
+            # docs/fixlogs/dangling-tool-use-fix.md。
+            # @author aceFelix
             try:
                 tool_results = await self._orchestrator.execute_calls(tool_uses, ctx)
             except asyncio.CancelledError:
                 # 用户 Ctrl+C → 不再 re-raise，优雅退出本轮
+                layered.append(Message(
+                    role="user",
+                    content=make_placeholder_results(tool_uses, reason=REASON_ABORTED),
+                ))
                 stats.stopped_reason = "aborted"
                 ctx.abort_event.set()
                 ctx.abort_event = asyncio.Event()  # 重置，否则后续 run() 直接跳过
+                break
+            except Exception as e:
+                # 编排器自身异常（恢复执行器/hook 等非工具内异常）：补齐占位结果
+                # 后结束本轮，不让半截历史污染会话
+                layered.append(Message(
+                    role="user",
+                    content=make_placeholder_results(tool_uses, reason=REASON_EXEC_ERROR),
+                ))
+                if ctx.ui:
+                    ctx.ui.error(f"工具执行异常: {type(e).__name__}: {e}")
+                stats.stopped_reason = "tool_error"
                 break
 
             # 工具结果追加到分层上下文
@@ -708,80 +753,5 @@ class QueryLoop:
         return True
 
 
-# ---- 多 Agent 团队邮箱自动同步 (Phase 1+) ----
-
-
-def _inject_teammate_notifications(ctx: ToolContext) -> None:
-    """自动读取 team-lead 邮箱，将队友状态更新注入对话。
-
-    队友完成一轮工作后通过文件邮箱发 idle_notification。
-    leader 的主循环每轮工具执行后调用此函数，确保 leader "看到"队友动向，
-    无需 Sleep 轮询或手动检查。
-
-    支持的消息类型：idle_notification、task_claimed、task_completed、
-    plan_approval_request、permission_request、shutdown_response。
-    """
-    try:
-        from agent.collaboration.team import get_team_manager
-        from agent.collaboration.mailbox import read_mailbox
-    except ImportError:
-        return
-
-    mgr = get_team_manager()
-    team_name = mgr.active_team
-    if team_name is None:
-        return
-
-    messages = read_mailbox("team-lead", team_name, unread_only=True, mark_read=True)
-    if not messages:
-        return
-
-    # 构造注入文本
-    lines = ["[以下来自团队队友的状态更新]"]
-    has_info = False
-
-    for msg in messages:
-        if msg.type == "idle_notification":
-            summary = msg.summary or "空闲，等待新任务"
-            lines.append(f"- {msg.from_name}: {summary}")
-            has_info = True
-        elif msg.type == "task_claimed":
-            subject = msg.task_subject or "未命名任务"
-            lines.append(f"- {msg.from_name}: 领取任务 #{msg.task_id} {subject}")
-            has_info = True
-        elif msg.type == "task_completed":
-            status = msg.status or "completed"
-            summary = msg.summary or f"完成任务 #{msg.task_id}"
-            lines.append(f"- {msg.from_name}: [{status}] {summary}")
-            has_info = True
-        elif msg.type == "plan_approval_request":
-            plan_text = (msg.text or "未提供计划详情")[:200]
-            lines.append(
-                f"- {msg.from_name}: 请求审批计划 (request_id={msg.request_id})\n"
-                f"  计划: {plan_text}"
-            )
-            has_info = True
-        elif msg.type == "permission_request":
-            action = msg.action or "执行操作"
-            tool = msg.tool or "未知工具"
-            lines.append(
-                f"- {msg.from_name}: 请求权限 (request_id={msg.request_id})\n"
-                f"  操作: {action} | 工具: {tool}"
-            )
-            has_info = True
-        elif msg.type == "shutdown_response":
-            action = "同意关闭" if msg.approve else "拒绝关闭"
-            lines.append(f"- {msg.from_name}: {action}")
-            has_info = True
-        elif msg.type == "heartbeat":
-            # 心跳不渲染到对话，仅内部更新健康时间戳（如后续需要）
-            continue
-
-    if not has_info:
-        return
-
-    lines.append("[以上为团队状态更新，请据此调整任务分配]")
-
-    ctx.messages.append(
-        Message(role="user", content=[TextContent(text="\n".join(lines))])
-    )
+# 多 Agent 团队邮箱自动同步（Phase 1+）已迁到 agent/core/team_notify.py，
+# 导入别名见文件头部：_inject_teammate_notifications = inject_teammate_notifications

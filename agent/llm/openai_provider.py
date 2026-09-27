@@ -24,6 +24,10 @@ from agent.core.message import (
     ToolResultContent,
     ToolUseContent,
 )
+# 发送前修复 tool_use / tool_result 配对：历史里的悬空调用会让 API 拒收整个
+# 请求（用户表现为该会话永久失败）。见 docs/fixlogs/dangling-tool-use-fix.md。
+# @author aceFelix
+from agent.core.tool_pairing import ensure_tool_pairing
 from agent.llm.base import (
     LLMEvent,
     LLMProvider,
@@ -49,7 +53,11 @@ def _messages_to_openai(
 
     skip_images=True 时（纯文本模型），图片块转为文本占位符，
     避免 API 报错（很多文本模型不接受 image_url content part）。
+
+    出口兜底：转换前先跑 ensure_tool_pairing，保证每个 tool_call 后面都有配对的
+    role="tool" 消息（悬空调用会被 OpenAI 兼容接口整体拒收）。
     """
+    messages = ensure_tool_pairing(messages)
     out: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for msg in messages:
         if msg.role == "system":
@@ -81,6 +89,10 @@ def _messages_to_openai(
                 # OpenAI 规范要求 assistant message with tool_calls 的 content 字段存在且为 null；
                 # 智谱 GLM 等兼容接口在字段缺失时可能挂起或报错。
                 entry["content"] = None
+            else:
+                # 只含 thinking 的消息：过滤后无内容可发，补空串占位。
+                # 缺 content 字段的 assistant 消息会被部分兼容端点判为非法请求。
+                entry["content"] = ""
             if tool_calls:
                 entry["tool_calls"] = tool_calls
             out.append(entry)
@@ -112,9 +124,11 @@ def _messages_to_openai(
                 # 纯文本模型：用文字描述替代图片
                 user_content[0]["text"] += "\n[附带图片（当前为纯文本模型，图片已省略）]"
 
-            if user_content:
-                out.append({"role": "user", "content": user_content})
-
+            # 顺序铁律：role="tool" 消息必须紧跟 assistant 的 tool_calls，
+            # 故先输出 tool 消息、再输出 user 消息。配对修复会把占位 tool_result
+            # 前置进既有 user 消息（同一条消息同时含结果与文本），顺序颠倒会被
+            # 兼容接口判为「tool 消息不在 tool_calls 之后」。
+            # @author aceFelix
             for b in tool_results:
                 if b.images:
                     if skip_images:
@@ -143,6 +157,9 @@ def _messages_to_openai(
                             "content": b.content,
                         }
                     )
+
+            if user_content:
+                out.append({"role": "user", "content": user_content})
     return out
 
 

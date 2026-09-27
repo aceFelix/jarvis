@@ -1139,6 +1139,18 @@ tool_retry_backoff_max = 30.0
 /doctor              # 查看自愈统计与系统诊断
 ```
 
+### 会话历史自愈（悬空工具调用）
+
+LLM 协议要求每个 `assistant.tool_use` 在**紧随的下一条消息**里都有配对的 `tool_result`。若只写了调用、没写结果（如工具执行中被用户中断、输出被截断），残缺片段会留在会话历史里，导致该会话**此后每次请求都被 API 拒收**——重试、换措辞、换模型均无效。
+
+Jarvis 用「三道源头 + 一道出口」自动修好：
+
+- **源头补齐**：工具执行被中断 / 抛异常 / 输出被截断 / 编排器缺项 → 立即注入 `is_error=True` 的占位结果（说明该调用已失效）
+- **出口兜底**：所有发往 LLM 的消息在 provider 转换入口先跑 `ensure_tool_pairing()` 校验配对，并可**自愈已中毒的旧会话**（无需丢弃历史）
+- **不破坏缓存**：仅在有违规时重建发送副本，健康历史零拷贝返回（`id`/`timestamp` 不变），冻结前缀的 prompt cache 不受影响
+
+详见 [docs/fixlogs/dangling-tool-use-fix.md](docs/fixlogs/dangling-tool-use-fix.md)。
+
 ---
 
 ## 多 Agent 协作
@@ -1393,6 +1405,8 @@ agent/
 │   ├── tool.py        # Tool 协议定义
 │   ├── context.py     # 工具上下文 + UI 协议（RealtimeTalkUI）
 │   ├── message.py     # 消息/内容块类型（Message / ContentBlock）
+│   ├── tool_pairing.py # 配对不变量（tool_use ↔ tool_result 补齐/去孤儿）
+│   ├── team_notify.py # 多 Agent 邮箱同步注入
 │   ├── result.py      # 工具调用结果（ToolResult）
 │   ├── hooks.py       # 钩子系统
 │   ├── diag.py        # 诊断日志
@@ -1500,14 +1514,18 @@ agent/
 └── utils/             # 通用工具
     └── mask.py        # API Key 脱敏
 
-tests/                 # 测试套件（1599 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
+tests/                 # 测试套件（1993 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试
 ├── core/ tools/ daemon/ voice/ # 各模块单元测试
 ├── test_command_router.py # 命令路由集成测试
 ├── test_query_loop.py     # 上下文压缩/图片淘汰测试
+├── _query_loop_fakes.py   # QueryLoop 测试共享替身与工厂
 ├── test_query_loop_run.py # QueryLoop.run 主流程/工具循环/故障转移测试
+├── test_query_loop_stream.py  # 内容累积/Hooks/辅助方法/_stream_once 测试
+├── test_query_loop_branches.py # 团队邮箱注入/hooks 容错/延迟工具测试
+├── test_query_loop_session.py # 会话持久化/模型切换测试
 ├── test_orchestrator.py   # 工具编排器测试
 ├── test_session_manager.py# 会话标题生成/保存测试
 ├── test_permissions.py    # 五层权限系统测试
@@ -1527,7 +1545,7 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **1599 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
+项目配备 **1993 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
 
 ```bash
 # 运行全部测试

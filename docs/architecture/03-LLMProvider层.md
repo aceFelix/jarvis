@@ -302,7 +302,7 @@ THINKING_CONFIGS = {
 
 ### QueryLoop 统一开关
 
-[QueryLoop.set_thinking_enabled()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L131-L140) 统一开关：
+[QueryLoop.set_thinking_enabled()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L161-L170) 统一开关：
 - 同步到当前 provider
 - 记录到 `_thinking_override`，故障转移后能同步到新 provider
   （语音模式强制关闭思考，避免故障转移后意外恢复）
@@ -346,6 +346,20 @@ def classify(exc) -> ClassifiedError:
 | Zai | `tools` | `delta.tool_calls` |
 
 Provider 把它们统一转成 `ToolCall(id, name, input)` 事件，QueryLoop 不需要关心差异。
+
+### 出口兜底：消息配对校验（重要）
+
+`_messages_to_openai()` 与 `_messages_to_anthropic()` 在转换前都会先调 `ensure_tool_pairing()`（[tool_pairing.py](../agent/core/tool_pairing.py)），保证发出的消息满足协议配对不变量：每个 `tool_use` 后有 `tool_result`，且无孤儿结果。
+
+**为什么放在这里**：悬空调用（如工具执行被用户中断）会让请求在受理前就被拒收，且残缺片段一旦落进历史，该会话每次请求都失败。放在转换入口可一次兜住所有发 LLM 请求的路径（主循环、压缩、标题生成、realtime 语音），并能自愈已中毒的旧会话。
+
+同批消息的输出顺序也很关键：
+
+- **OpenAI**：`role="tool"` 消息必须**先于**同批的 user 文本消息输出（tool 回执必须紧跟 `tool_calls`）
+- **Anthropic**：`tool_result` 块排在 user 消息 content 的**前置**位置
+- 空 assistant 消息（既无正文也无 tool_calls）→ 补空串/占位文本，**不跳过**（跳过会破坏 role 交替）
+
+详见 [docs/fixlogs/dangling-tool-use-fix.md](../fixlogs/dangling-tool-use-fix.md)。
 
 ## 十一、多模态图片处理
 

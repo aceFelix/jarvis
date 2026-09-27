@@ -20,6 +20,7 @@ from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.tool import Tool, ToolRegistry
+from agent.core.tool_pairing import REASON_ORPHAN, make_placeholder_result
 from agent.permissions import PermissionChecker
 
 
@@ -103,8 +104,17 @@ class ToolOrchestrator:
             for tu_id, content in executed.items():
                 results_by_id[tu_id] = content
 
-        # 3. 按输入顺序对齐输出
-        results = [results_by_id[tu.id] for tu in tool_uses if tu.id in results_by_id]
+        # 3. 按输入顺序对齐输出（缺失项补占位结果，保证与输入等长）
+        # 调度异常/中断可能让个别调用拿不到结果；若直接过滤掉，历史里就会留下
+        # 悬空 tool_use，使该会话所有后续请求被 API 拒收。
+        # 见 docs/fixlogs/dangling-tool-use-fix.md。
+        # @author aceFelix
+        results: list[ToolResultContent] = []
+        for tu in tool_uses:
+            content = results_by_id.get(tu.id)
+            if content is None:
+                content = make_placeholder_result(tu, reason=REASON_ORPHAN)
+            results.append(content)
 
         # 4. 记录文件访问（供压缩后回灌）
         _track_file_accesses(tool_uses, ctx)

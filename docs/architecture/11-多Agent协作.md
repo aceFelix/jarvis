@@ -223,12 +223,14 @@ class TeammateMessage:
 
 ### 自动注入
 
-[query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L557-L601) 的 `_inject_teammate_notifications()`：
+[team_notify.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/team_notify.py#L15-L86) 的 `inject_teammate_notifications()`：
+
+（原为 `query_loop.py` 的模块级私有函数 `_inject_teammate_notifications()`，因职责单一拆分到本模块；`query_loop.py` 保留同名 re-export 兼容旧引用。）
 
 每轮工具执行后自动读取 leader 邮箱，注入到对话：
 
 ```python
-def _inject_teammate_notifications(ctx):
+def inject_teammate_notifications(ctx):
     messages = read_mailbox("team-lead", team_name, unread_only=True, mark_read=True)
     if messages:
         lines = ["[以下来自团队队友的状态更新]"]
@@ -417,7 +419,7 @@ leader 向 teammate 发送 `shutdown_request`，teammate 回复 `shutdown_respon
   5. 主 Agent 继续其他工作
 
   6. reviewer 完成 → 邮箱发 task_completed
-     → _inject_teammate_notifications 注入:
+     → inject_teammate_notifications 注入:
        "[reviewer: 完成任务 #1]"
 
   7. tester 完成 → 邮箱发 task_completed

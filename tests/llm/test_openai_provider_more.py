@@ -78,22 +78,37 @@ class TestMessagesToOpenAI:
         assert "图片已省略" in out[1]["content"][0]["text"]
 
     def test_tool_result_images_multimodal(self) -> None:
-        """多模态下 tool_result 图片以文本描述附加。"""
+        """多模态下 tool_result 图片以文本描述附加。
+
+        输入必须含配对的 assistant tool_use——孤儿 tool_result（引用了不存在的
+        调用）会被 ensure_tool_pairing 丢弃，无调用可配的结果在协议上非法。
+        """
         img = ImageContent(data="BBB", media_type="image/jpeg")
-        msgs = [Message(role="user", content=[
-            ToolResultContent(tool_use_id="call_1", content="截图", images=[img]),
-        ])]
+        msgs = [
+            Message(role="assistant", content=[
+                ToolUseContent(id="call_1", name="ScreenShot", input={}),
+            ]),
+            Message(role="user", content=[
+                ToolResultContent(tool_use_id="call_1", content="截图", images=[img]),
+            ]),
+        ]
         out = _messages_to_openai(msgs, "sys")
-        assert out[1]["role"] == "tool"
-        assert "[附带 1 张图片]" in out[1]["content"]
+        assert out[1]["role"] == "assistant"
+        assert out[2]["role"] == "tool"
+        assert "[附带 1 张图片]" in out[2]["content"]
 
     def test_tool_result_without_images(self) -> None:
-        """无图片的 tool_result 直接透传 content。"""
-        msgs = [Message(role="user", content=[
-            ToolResultContent(tool_use_id="call_1", content="2026-07-30"),
-        ])]
+        """无图片的 tool_result 直接透传 content（需有配对调用）。"""
+        msgs = [
+            Message(role="assistant", content=[
+                ToolUseContent(id="call_1", name="Bash", input={}),
+            ]),
+            Message(role="user", content=[
+                ToolResultContent(tool_use_id="call_1", content="2026-07-30"),
+            ]),
+        ]
         out = _messages_to_openai(msgs, "sys")
-        assert out[1]["content"] == "2026-07-30"
+        assert out[2]["content"] == "2026-07-30"
 
     def test_system_message_in_list_skipped(self) -> None:
         """消息列表里的 system 消息跳过（system 已作为独立参数）。"""
@@ -103,14 +118,24 @@ class TestMessagesToOpenAI:
         assert out[1]["role"] == "user"
 
     def test_user_tool_result_and_text_combined(self) -> None:
-        """同一 user 消息里既有文本又有 tool_result → 分开成两条。"""
-        msgs = [Message(role="user", content=[
-            TextContent(text="处理结果如下"),
-            ToolResultContent(tool_use_id="c1", content="done"),
-        ])]
+        """同一 user 消息里既有文本又有 tool_result → 分开成两条。
+
+        顺序铁律：role="tool" 消息必须紧跟 assistant 的 tool_calls，所以
+        tool 消息先输出、user 文本后输出。输入含配对调用，否则结果会被
+        ensure_tool_pairing 当孤儿丢弃。
+        """
+        msgs = [
+            Message(role="assistant", content=[
+                ToolUseContent(id="c1", name="Bash", input={}),
+            ]),
+            Message(role="user", content=[
+                TextContent(text="处理结果如下"),
+                ToolResultContent(tool_use_id="c1", content="done"),
+            ]),
+        ]
         out = _messages_to_openai(msgs, "sys")
         roles = [m["role"] for m in out]
-        assert roles == ["system", "user", "tool"]
+        assert roles == ["system", "assistant", "tool", "user"]
 
 
 class TestParseToolArgs:
