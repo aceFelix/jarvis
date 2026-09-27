@@ -151,6 +151,47 @@ def _encode_image_file(path: Path, max_size: int = _IMAGE_MAX_SIZE) -> ImageCont
         return None
 
 
+# argparse 典型报错特征：命中时在回执里附正确传参格式，引导模型自我纠正
+_ARGPARSE_ERROR_MARKERS = (
+    "invalid choice",
+    "expected one argument",
+    "the following arguments are required",
+    "unrecognized arguments",
+    "required",
+)
+
+
+def _build_usage_hint(harness: Harness) -> str:
+    """根据 harness 参数定义生成正确传参格式提示（供失败回执使用）。
+
+    重点展示位置参数（如 subcommand）及其枚举值，非位置参数只列名称，
+    让模型能一眼看出「参数要分开传、不能把整串命令塞进一个参数」。
+
+    @author aceFelix
+    """
+    positional = [a for a in harness.args if a.positional]
+    if not positional:
+        return ""
+    parts = []
+    for a in positional:
+        desc = a.name.upper()
+        if a.enum:
+            desc = " | ".join(a.enum)
+        parts.append(desc)
+    others = [a.name for a in harness.args if not a.positional and a.required]
+    hint = "正确传参格式: " + _join_positional(parts)
+    if others:
+        hint += "，其余参数（如 " + ", ".join(others) + "）需单独传，不要拼进位置参数字符串"
+    else:
+        hint += "；各参数需分开传，不要拼进位置参数字符串"
+    return "\n" + hint
+
+
+def _join_positional(parts: list[str]) -> str:
+    """单个位置参数直接展示，多个用空格连接。"""
+    return parts[0] if len(parts) == 1 else " ".join(parts)
+
+
 class CliAnythingTool(Tool):
     """CLI-Anything harness 的工具封装。
 
@@ -228,6 +269,10 @@ class CliAnythingTool(Tool):
                 msg += f": {stderr}"
             elif stdout:
                 msg += f": {stdout}"
+            # argparse 类参数错误：附加正确传参格式提示，避免模型反复重试同一错误传法
+            combined = stderr + stdout
+            if any(marker in combined for marker in _ARGPARSE_ERROR_MARKERS):
+                msg += _build_usage_hint(self.harness)
             return ToolResult(data=msg, is_error=True)
 
         # 尝试把 stdout 当 JSON 解析，提升 LLM 可读性

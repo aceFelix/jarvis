@@ -63,6 +63,8 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
     - 参数名转换为 ``--<name>`` 形式。
     - 布尔值 true 时只传标志（如 ``--force``），false 时忽略。
     - 列表用逗号分隔（后续可扩展为多次传入同一参数）。
+    - 位置参数值含空格时自动拆成多个 token（兼容 LLM 把整串命令塞进
+      subcommand 的传法，如 "writer --help" → ["writer", "--help"]）。
     - 字符串参数中的 Git Bash 路径（/e/...）自动转为 Windows 路径（E:\\...）。
     """
     result: list[str] = []
@@ -98,7 +100,26 @@ def _build_args(harness: Harness, kwargs: dict[str, Any]) -> list[str]:
 
         # 位置参数：只传值，不加 --name 前缀
         if arg.positional:
-            result.append(str(value))
+            value_str = str(value)
+            # LLM 常把整串命令（如 "writer --help"）塞进单个位置参数，
+            # 而 argparse 把每个 argv token 当作一个值，导致 invalid choice。
+            # 这里自动拆成多个 token，让其至少能到达 harness 的子命令解析层。
+            # 含引号时用 shlex 保留带空格的单个值（如文件路径），无引号时 split() 更安全
+            # （避免 shlex 把未闭合引号后的内容整段吞进一个 token）。
+            if " " in value_str and not any(q in value_str for q in ("'", '"')):
+                result.extend(value_str.split())
+            elif " " in value_str:
+                # 含引号：按「引号段 / 非空白段」切分并去引号。
+                # 不用 shlex posix 模式（会把 Windows 路径反斜杠当转义），
+                # 也不用 posix=False（会保留引号，subprocess argv 不需要引号）。
+                import re as _re
+                tokens = _re.findall(r'"([^"]*)"|\'([^\']*)\'|([^\s"\']+)', value_str)
+                for t in tokens:
+                    tok = t[0] or t[1] or t[2]
+                    if tok:
+                        result.append(tok)
+            else:
+                result.append(value_str)
             continue
 
         # CLI 惯例：flag 用连字符，arg 名用下划线。如 output_path → --output-path
