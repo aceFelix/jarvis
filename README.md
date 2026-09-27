@@ -303,6 +303,7 @@ Jarvis 配置按「同层 settings.toml → models.toml，用户级整体覆盖�
 
 > **模型配置为什么单独一个文件**：模型域（`provider` / `api_format` / `model` / `last_model` / `api_key` / `base_url` / `max_tokens` / `enable_thinking` / `thinking_budget` / `vendor_fallback` + `[llm.models]` + `[llm.custom_models.*]`）由程序频繁回写（`/models`、`jarvis init`、切换模型）且含明文密钥，独立成文件后与运行时配置互不牵连，也便于单独备份/轮换密钥。
 > **向后兼容**：老配置把模型键留在 `settings.toml` 里仍然生效；首次启动会自动整理到 `models.toml`（幂等，原文件留 `.bak` 备份）。
+> **模型切换何时生效**：`/model`（REPL）与工作台 / 桌面壳左栏点选都写 `last_model`（重启自动恢复），**并立即热切换运行中的引擎** —— 工作台 / 桌面壳把 `switch_model` 指令发给引擎线程，就地换 provider / 模型（保留会话上下文，正有一轮回复在跑时在该轮结束后落地），无需重启进程；TTS 音色仍是「下次语音会话生效」。
 
 ### 核心配置项
 
@@ -812,7 +813,7 @@ jarvis --gui           # 启动三栏工作台窗口（--talk 与 --gui 等价�
 透明背景透出桌面，方舟反应炉淡蓝动效居中律动（核心呼吸 + 三角线圈轮流点亮，说话时加速）。
 
 - **左栏**：模式切换（💬 文本 / 🎙️ 实时）+ 三面板切换（📜 历史会话 ⇄ 🤖 模型 ⇄ 🎵 音色）
-- **中栏**：气泡对话流（流式渲染 + 工具卡片折叠）+ 文本输入框，支持历史会话恢复
+- **中栏**：气泡对话流（流式渲染；思考块与本轮连续工具调用在回复结束后各自折叠成一行，可点开查看）+ 文本输入框，支持历史会话恢复
 - **右栏**：CPU / 内存 / 磁盘实时指标
 - **窗口行为**：无边框铺满工作区启动（不盖任务栏；自绘标题栏可拖动，带最小化/关闭按钮，不提供全屏）、单实例（二次双击唤起已驻留窗口）
 - 日志位于 `~/.jarvis/workbench.log`
@@ -1065,10 +1066,13 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
 - **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表。
+- **添加模型（桌面壳，2026-09）**：左栏模型面板列表末项「＋ 添加模型」（虚线框）→ 点击后独立组件 `ModelForm` 整体替换列表（同右栏设置面板模式），六个字段（模型厂商/模型名/API Key/接口类型/Base URL/模型类型）与 REPL `/models` → 添加其他模型完全同口径；提交走 `models.add` 指令：serve 二次校验（模型名必填、接口类型/模型类型白名单）→ 复用 `save_custom_model` 写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（API Key 同步系统 keyring）+ `_infer_base_url` 推断空 Base URL → 成功后壳刷 `models.list` 并提示「模型「X」已添加」，失败保持表单打开可修正。
+- **修改与删除模型配置（桌面壳，2026-09）**：左栏模型项交互对齐会话列表 —— **双击**模型项进 `ModelForm` 编辑该模型（预填 `models.list` 每项 `config` 现值），**右键**模型项则项内出现删除按钮、再点才真删（二次确认）。编辑走 `models.edit` 指令（`name` 必填，`new_name`/`vendor`/`api_format`/`base_url`/`api_key`/`model_type` 留空表示不改）：内置模型（命中项目级 `[llm.models]`）**名字锁定不可改**（改名只会产生「幽灵模型」），自定义模型可改名（写新段删旧段，`api_key` 留空则**保持原 Key** —— 桌面壳不回显密钥，与 REPL「留空即清空」刻意不同）；改的是当前运行模型时 serve 侧入队 `{"cmd": "switch_model", "force": true}` **强制重建 provider**，端点/接口类型改动立即生效（回执带 `hot_switched`，壳提示「当前会话已按新配置重连」）。删除走 `models.remove`：仅自定义模型可删（内置模型与「用户级 models.toml 无该段」均回 ok=false，后者防「删不掉但重启复活」），删的是当前模型时回执 `was_current` 且**不动运行中的 provider**（提示用户另选）。
 - **设置面板（桌面壳，2026-09；同年 09 第一批扩键）**：设置独立成面板（标题栏齿轮进入，整体替换右栏信息面板）：外观（主题/语言，纯前端 localStorage 偏好）+ 后端联动三组（经 `settings.get`/`settings.set` 与 serve 联动：校验→先外科式落盘 settings.toml 对应节→再改运行时，失败回滚）：语音播报（待机 TTS 开关 + 音量/语速）、每日简报（开关 + 时间）、截止日期追踪（开关 + 检查时间）；简报/截止日期改动额外触发 `ProactiveHub` 调度热重注册（无需重启）。白名单单一真源在 `agent/config/desktop_settings.py`（密钥/自由路径永不入协议）。
+- **未知指令失败回执（2026-09 加固）**：WS 分发对**未注册**的指令 type 立即回 `{"event":"reply","data":{"type","ok":false,"error"}}`（旧行为是静默忽略，既不回 ok 也不回 error），错误文案为「后端不支持指令 X（后端进程可能未加载最新代码，请重启后端后重试）」；缺 `type` 字段同样回失败回执。原因是前端（Vite 热更新）可能先支持新指令、而后端进程仍是旧代码（`python -m agent.serve` 不热重载），静默丢弃只会让桌面壳干等到 15s 超时、用户看不到任何原因（典型症状「指令 models.add 回执超时」）；手机 PWA 不消费 `reply` 事件，行为不受影响。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：24 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*` / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：27 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 

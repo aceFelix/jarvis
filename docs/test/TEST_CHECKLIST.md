@@ -352,12 +352,14 @@
 | T-177 | 透明效果 | Windows 下打开工作台观察背景 | 桌面壁纸从窗口透出（非白/灰底） |
 | T-178 | 自绘标题栏 | 拖动标题栏空白区 / 点最小化 / 点关闭 | 窗口整体可拖；最小化到任务栏；关闭后进程退出（无全屏按钮：启动即铺满工作区不盖任务栏） |
 | T-179 | 任务栏图标 | 打开工作台看任务栏/Alt-Tab 图标 | 深蓝实底反应炉图标（与桌面图标同图案，不发白/不白板） |
-| T-171 | 文本对话 | 中栏输入框发消息 | 气泡流式渲染，工具调用卡片折叠展示 |
+| T-171 | 文本对话 | 中栏输入框发消息 | 气泡流式渲染；工具调用卡片可展开查看 |
 | T-172 | 历史会话恢复 | 左栏切到历史面板点击某会话 | 中栏载入历史消息（工具块折叠为计数） |
 | T-173 | 模型/音色选择 | 左栏面板切换后点选模型/音色 | 后续对话生效，配置持久化 |
 | T-174 | /talk 实时模式 | 左栏切换到实时模式并开始 | 窗口内实时双工对话，说话时波纹加速 |
 | T-175 | 右栏指标 | 窗口打开后观察右栏 | CPU/内存/磁盘三件套每 2 秒刷新 |
 | T-176 | 未安装降级 | 不安装 pywebview 时 `--gui` | 提示缺少依赖并退出（退出码 3） |
+| T-180 | 思考块折叠 | 发一条会触发深度思考的消息（`/think on` 或复杂问题），观察回复结束前后 | 思考中思考块展开、标题显示「思考过程 · N 字」；回复结束自动收起成一行标题；点标题可展开/收起，且不被自动拨回 |
+| T-181 | 工具组折叠 | 发一条会连续调用多个工具的任务（如「列出目录并统计文件数」） | 连续工具调用聚合成一条「工具调用 ×N」框：执行中显示「执行中：<工具名>」，全部完成后自动收起并显示 ✓；有失败仍收起、标题标红「✗M 失败」；整轮仅一条工具时不包组；历史回放的「历史工具调用 ×N」汇总卡不并入组 |
 
 ### 16.2 语音互斥锁（替代原托盘多模式互斥）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -696,7 +698,7 @@
 
 ## 35. serve 模式（外部前端接入）
 
-> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 6 + 路由 11 + 集成 2 = 19 项）。
+> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 21 + 路由 32 + 集成 2 + hub 27 = 82 项），工作台侧模型管理另见 `tests/ui/test_workbench_model_admin.py` 与 `tests/ui/test_workbench_engine_model_switch.py`；中栏降噪（思考块/工具组折叠）契约另见 `tests/ui/test_workbench_chat_fold.py`（`tests/ui/` 合计 126 项）。
 
 ### 35.1 启动与握手
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -713,7 +715,7 @@
 | T-326 | token 认证通过 | `ws://127.0.0.1:<port>/?token=<正确>` | 连接建立，首推 `init` 事件 |
 | T-327 | token 认证拒绝 | 用错误/缺失 token 连接 | 服务端以 `4401` 关闭连接 |
 | T-328 | init 事件 | 连接后观察首个事件 | `{"event":"init","data":{provider,model,...}}`（同 state.get） |
-| T-329 | 未知指令 | 发送未注册 type | 不回执/不崩溃，连接保持 |
+| T-329 | 未知指令 | 发送未注册 type（如 `{"type":"models.unknown"}`）、发送缺 `type` 的帧 | 立即回 `event=reply` + `ok=false`，error 含「不支持指令 X（…重启后端后重试）」；不回则客户端干等到超时；连接保持不崩溃 |
 
 ### 35.3 桌面指令（request/response）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -721,7 +723,7 @@
 | T-330 | message 流式 | 发 `{"type":"message","text":"你好"}` | 回执 ok=true；随后 `assistant_text` 流式增量 + `assistant_done` |
 | T-331 | message 空文本 | 发 `{"type":"message","text":""}` | 回执 ok=false，error="空消息" |
 | T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` / `sessions.rename`(name,new_name) / `sessions.delete`(name) | list 返回会话数组（每项含 current 标记，与引擎当前会话名相等者为 true）；open 触发 `session_loaded`；new 触发 `session_new`；rename 触发 `session_renamed`（目标名占用/源不存在回 `warn`；改当前会话名取消自动标题任务）；delete 触发 `session_deleted`（删当前会话另触 `session_new`） |
-| T-333 | models 指令 | `models.list` / `models.select`(name) | list 返回模型数组（含 current）；select 返回 bool 且持久化 |
+| T-333 | models 指令 | `models.list` / `models.select`(name) / `models.add`(name,vendor,api_format,base_url,api_key,model_type) / `models.edit`(name［,new_name,vendor,api_format,base_url,api_key,model_type］) / `models.remove`(name) | list 返回模型数组（含 current，current 取引擎实时模型；每项另带 source(builtin/custom) / editable / removable / config **不回传明文 api_key**，只给 `has_key`）；select 返回 bool 且持久化**并触发引擎热切换**（写盘成功后列表 current 立刻跟随、无需重启；写盘失败 result=false 且不入队切换）；add 返回 `{name, vendor, api_format, base_url, model_type}` 且写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（base_url 留空按厂商推断、api_key 入系统 keyring）、随后 `models.list` 可见；edit 返回 `{name, vendor, api_format, base_url, model_type, hot_switched}`（name 必填、非空枚举落白名单；内置模型传 new_name、目标名已占用、名字不存在回 ok=false 且不动磁盘/内存；api_key 留空 = **保持原 Key**；改的是当前运行模型时强制重建 provider 并置 hot_switched=true）；remove 返回 `{name, was_current}`（仅用户级自定义段真的存在时才删：内置模型、磁盘无该段均回 ok=false；删当前模型**不动运行中的 provider** 仅提示另选）；缺 name / 非法 api_format / 非法 model_type 回 ok=false |
 | T-334 | voices/metrics/state | `voices.list`/`voices.select`/`metrics.get`/`state.get` | 各自返回对应结构（metrics 含 cpu/memory/disk） |
 | T-335 | answer_user / talk | `answer_user`(text) 回填 ask_user；`talk.start`/`talk.stop` | ask_user 弹窗被回填；talk 触发 `talk_started`/`talk_stopped` |
 
