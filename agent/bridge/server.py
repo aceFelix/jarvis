@@ -15,6 +15,8 @@
 扩展点（供 agent.serve 桌面 API 模式复用）：
 - WS 指令分发采用处理器表 ``_ws_handlers``，子类/外部经
   ``register_ws_handler(type, handler)`` 注册新指令，内置 ``message`` 行为不变。
+  未注册的 type 回一条 ``{"event": "reply", "data": {ok: false, error}}`` 失败回执
+  （不静默忽略：客户端按回执等待，静默只会让新指令对旧后端表现为「回执超时」）。
 - ``host`` 参数控制绑定地址（手机协同默认 0.0.0.0；桌面 serve 模式传 127.0.0.1）。
 - 端口传 0 时由系统分配随机可用端口，start() 后回填真实端口到
   ``http_port`` / ``ws_port`` 属性。
@@ -381,6 +383,27 @@ class BridgeServer:
 
     # ---- WebSocket 服务 ----
 
+    async def _send_reply_error(self, ws, cmd_type: str, error: str) -> None:
+        """向单个客户端回一条失败回执（协议级错误：未注册指令 / 缺 type 字段）。
+
+        回执信封与 ``agent.serve.protocol.build_reply`` 同构；bridge 是下层通用协同层，
+        不反向依赖 serve，故此处直接组装。发送失败静默（连接清理由主循环负责）。
+
+        @author aceFelix
+        """
+        try:
+            await ws.send(
+                json.dumps(
+                    {
+                        "event": "reply",
+                        "data": {"type": cmd_type, "ok": False, "error": error},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
+
     async def _handle_ws(self, ws, path: str | None = None) -> None:
         """处理单个 WebSocket 连接：认证 → 接收消息 → 跑查询 → 推送结果。
 
@@ -459,11 +482,24 @@ class BridgeServer:
                     except Exception:
                         pass
                     continue
-                # 指令处理器表分发：内置 message + 子类注册的扩展指令；
-                # 未注册的 type 静默忽略（与旧 MVP 行为一致）
+                # 指令处理器表分发：内置 message + 子类注册的扩展指令。
+                # 未注册的 type 回失败回执而非静默忽略：客户端（桌面壳 / 手机端）都按
+                # request/response 发指令并等回执，静默丢弃只会让它干等到超时（桌面壳
+                # 15s）且看不到原因——典型场景是前端已加载新代码（Vite 热更新）而后端
+                # 进程仍是旧版（python -m agent.serve 不热重载）时，用户只看到
+                # 「指令 X 回执超时」。@author aceFelix
+                if not isinstance(t, str) or not t:
+                    await self._send_reply_error(ws, "", "指令缺少 type 字段")
+                    continue
                 handler = self._ws_handlers.get(t)
-                if handler is not None:
-                    await handler(ws, data)
+                if handler is None:
+                    await self._send_reply_error(
+                        ws,
+                        t,
+                        f"后端不支持指令 {t}（后端进程可能未加载最新代码，请重启后端后重试）",
+                    )
+                    continue
+                await handler(ws, data)
         finally:
             self._clients.discard(ws)
             reader_task.cancel()
