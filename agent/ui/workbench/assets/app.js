@@ -2,7 +2,7 @@
  * 工作台前端主逻辑（三栏）
  *
  * - 轮询 pywebview.api.poll_events() 消费引擎事件
- * - 中栏：气泡渲染（流式文本/思考块/工具卡片）+ 文本输入发送 + ask_user 条
+ * - 中栏：气泡渲染（流式文本 + 折叠思考块 + 工具组，2026-09 降噪）+ 文本输入发送 + ask_user 条
  * - 左栏：模式切换（文本/实时）、双面板切换（历史会话 ⇄ 模型音色）
  * - 右栏：CPU/内存/磁盘指标渲染
  * - 标题栏：自绘窗口控制按钮（最小化/全屏/关闭，无边框窗口）
@@ -26,9 +26,15 @@
     const askInput = document.getElementById('ask-user-input');
     const askSend = document.getElementById('ask-user-send');
 
-    // 当前流式中的 AI 气泡正文元素与思考块元素
+    // 当前流式中的 AI 气泡正文元素与思考块元素（thinkingBlock 为 details 折叠块）
     let streamingBody = null;
     let thinkingBlock = null;
+    // 思考块累计字数（用于折叠标题「思考过程 · N 字」）
+    let thinkingChars = 0;
+    // 本轮正在采集的工具组容器（连续工具调用聚合框，延迟创建）；null = 无进行中的组
+    let openToolGroup = null;
+    // 上一张已平铺、尚未成组的工具卡（第二条连续工具到来时回捞进新组）
+    let lastToolCard = null;
     // 当前模式：text（文本对话）| talk（实时语音）
     let mode = 'text';
     let talkActive = false;
@@ -53,6 +59,7 @@
     }
 
     function addUserBubble(text) {
+        endToolRun();
         const div = makeMessage('user', '你');
         const body = document.createElement('div');
         body.textContent = text;
@@ -69,61 +76,189 @@
     }
 
     function appendAssistantText(text) {
-        // 流式增量：追加到当前 AI 气泡（不存在则新建）
+        // 流式增量：追加到当前 AI 气泡（不存在则新建）。文本上屏即切断工具连续性，
+        // 使后一批工具调用另起一组（与「按连续段聚合」口径一致）。@author aceFelix
+        endToolRun();
         if (!streamingBody) streamingBody = startAiBubble();
         streamingBody.textContent += text;
         scrollBottom();
     }
 
     function appendThinking(text) {
-        // 思考链增量：浅色斜体块，位于当前气泡顶部
+        // 思考链增量（2026-09 折叠化）：details 折叠块，位于当前气泡顶部；
+        // 思考进行中保持展开，本轮结束由 finishAssistant 收起成一行标题。
+        // @author aceFelix
         if (!streamingBody) streamingBody = startAiBubble();
         const parent = streamingBody.parentElement;
         if (!thinkingBlock) {
-            thinkingBlock = document.createElement('div');
+            thinkingBlock = document.createElement('details');
             thinkingBlock.className = 'thinking-block';
+            thinkingBlock.open = true;
+            const summary = document.createElement('summary');
+            const body = document.createElement('div');
+            body.className = 'thinking-body';
+            thinkingBlock.appendChild(summary);
+            thinkingBlock.appendChild(body);
             parent.insertBefore(thinkingBlock, streamingBody);
+            thinkingChars = 0;
         }
-        thinkingBlock.textContent += text;
+        thinkingChars += text.length;
+        thinkingBlock.querySelector('.thinking-body').textContent += text;
+        thinkingBlock.querySelector('summary').textContent = `思考过程 · ${thinkingChars} 字`;
         scrollBottom();
     }
 
     function finishAssistant() {
+        // 本轮回复结束：思考块收起成一行（此后再无自动拨动，用户手点展开能留住），
+        // 并结算本轮工具组。@author aceFelix
+        if (thinkingBlock) thinkingBlock.open = false;
+        endToolRun();
+        resetStreamState();
+    }
+
+    /** 清空本轮流式引用（本轮结束 / 会话清屏时调用，不触碰已上屏 DOM）。@author aceFelix */
+    function resetStreamState() {
         streamingBody = null;
         thinkingBlock = null;
+        thinkingChars = 0;
+        openToolGroup = null;
+        lastToolCard = null;
     }
 
     function addSystemMessage(text, isError) {
+        endToolRun();
         const div = makeMessage('system' + (isError ? ' error-msg' : ''), '');
         div.textContent = text;
         scrollBottom();
     }
 
     function addToolCard(name, toolUseId, inputJson) {
-        // 可折叠工具卡片：details/summary 原生组件
+        // 可折叠工具卡片：details/summary 原生组件（既可能平铺，也可能作为
+        // 工具组内的单条，由 registerToolCard 决定）。@author aceFelix
         const card = document.createElement('details');
         card.className = 'tool-card';
         card.dataset.toolId = toolUseId;
+        card.dataset.name = name;
         const summary = document.createElement('summary');
-        summary.textContent = name;
+        summary.textContent = `${name} …`; // 执行中标记，结果到达后换 ✓ / ✗（对齐桌面壳）
         const body = document.createElement('div');
         body.className = 'tool-body';
         body.textContent = inputJson;
         card.appendChild(summary);
         card.appendChild(body);
-        chatHistory.appendChild(card);
+        registerToolCard(card, toolUseId);
         scrollBottom();
+        return card;
+    }
+
+    /**
+     * 工具卡上屏 + 连续性聚合（2026-09 降噪，口径对齐桌面壳）。
+     *
+     * - 无 toolUseId 的卡（历史回放「历史工具调用 ×N」汇总卡）不入组，且切断连续性；
+     * - 单条工具不包组：首条先平铺，第二条连续工具到来时才回捞成组（避免
+     *   「工具调用 ×1」冗余层级与成组/拆组抖动）；
+     * - 非工具内容（AI 文本/系统提示/用户消息）上屏即切断连续性（见 endToolRun
+     *   在各渲染函数中的调用），下一批工具另起一组。
+     *
+     * @author aceFelix
+     */
+    function registerToolCard(card, toolUseId) {
+        if (!toolUseId) {
+            endToolRun();
+            chatHistory.appendChild(card);
+            return;
+        }
+        if (openToolGroup) {
+            openToolGroup.querySelector('.tool-group-body').appendChild(card);
+            refreshToolGroup(openToolGroup);
+            return;
+        }
+        if (lastToolCard) {
+            openToolGroup = createToolGroup();
+            const groupBody = openToolGroup.querySelector('.tool-group-body');
+            groupBody.appendChild(lastToolCard); // 回捞首条（appendChild 即移动节点）
+            groupBody.appendChild(card);
+            lastToolCard = null;
+            refreshToolGroup(openToolGroup);
+            return;
+        }
+        lastToolCard = card;
+        chatHistory.appendChild(card);
+    }
+
+    /** 新建工具组容器（details + summary + 正文），追加到中栏并返回。@author aceFelix */
+    function createToolGroup() {
+        const root = document.createElement('details');
+        root.className = 'tool-group';
+        root.open = true; // 采集期间保持展开，全部完成后自动收起
+        const summary = document.createElement('summary');
+        const body = document.createElement('div');
+        body.className = 'tool-group-body';
+        root.appendChild(summary);
+        root.appendChild(body);
+        chatHistory.appendChild(root);
+        return root;
+    }
+
+    /**
+     * 刷新工具组标题（计数 / 失败计数 / 执行中名字）与折叠态。
+     * 组内卡全部拿到结果时自动收起且只收一次（此后再无自动拨动，用户手点
+     * 展开能留住）；失败时仍收起，仅标题标红计数。@author aceFelix
+     */
+    function refreshToolGroup(root) {
+        const cards = root.querySelectorAll('.tool-card');
+        const total = cards.length;
+        if (!total) return;
+        let done = 0;
+        let failed = 0;
+        let running = '';
+        cards.forEach(c => {
+            if (c.dataset.state) done += 1;
+            if (c.dataset.state === 'error') failed += 1;
+            if (!c.dataset.state && !running) running = c.dataset.name || '';
+        });
+
+        root.classList.toggle('error', failed > 0);
+        const summary = root.querySelector('summary');
+        summary.textContent = `工具调用 ×${total}`;
+        if (failed) {
+            const failSpan = document.createElement('span');
+            failSpan.className = 'tool-group-fail';
+            failSpan.textContent = ` · ✗${failed} 失败`;
+            summary.appendChild(failSpan);
+        } else if (running) {
+            const runSpan = document.createElement('span');
+            runSpan.className = 'tool-group-run';
+            runSpan.textContent = ` · 执行中：${running}`;
+            summary.appendChild(runSpan);
+        } else {
+            summary.appendChild(document.createTextNode(' ✓'));
+        }
+
+        if (done === total && root.dataset.autoCollapsed !== '1') {
+            root.open = false;
+            root.dataset.autoCollapsed = '1';
+        }
+    }
+
+    /** 结束本轮工具连续性：结算进行中的组并清空回捞锚点。@author aceFelix */
+    function endToolRun() {
+        if (openToolGroup) refreshToolGroup(openToolGroup);
+        openToolGroup = null;
+        lastToolCard = null;
     }
 
     function fillToolResult(toolUseId, name, content, isError) {
         let card = chatHistory.querySelector(`.tool-card[data-tool-id="${CSS.escape(toolUseId)}"]`);
-        if (!card) {
-            addToolCard(name, toolUseId, '');
-            card = chatHistory.querySelector(`.tool-card[data-tool-id="${CSS.escape(toolUseId)}"]`);
-        }
+        if (!card) card = addToolCard(name, toolUseId, '');
         if (isError) card.classList.add('error');
+        // 标记完成态：工具组据此统算计数并在全部就绪时自动收起 @author aceFelix
+        card.dataset.state = isError ? 'error' : 'ok';
+        card.querySelector('summary').textContent = `${card.dataset.name || name} ${isError ? '✗' : '✓'}`;
         const body = card.querySelector('.tool-body');
         body.textContent = content || '(无输出)';
+        const group = card.closest('.tool-group');
+        if (group) refreshToolGroup(group);
     }
 
     function showAskUser(prompt) {
@@ -276,8 +411,10 @@
             const item = makeListItem(m.name, sub, m.current);
             if (!m.current) {
                 item.addEventListener('click', async () => {
+                    // 切换立即生效：引擎把运行中的模型热切换，落地后推 model_switched
+                    // （刷列表让「当前」移动）+ info 气泡；故此处不再本地提示，
+                    // 避免与引擎气泡重复。@author aceFelix
                     await callApi(api => api.set_model(m.name));
-                    addSystemMessage(`模型已切换为 ${m.name}（下次对话生效）`);
                     refreshModelList();
                 });
             }
@@ -459,6 +596,12 @@
             case 'ask_user':
                 showAskUser(payload);
                 break;
+            // ---- 模型热切换（models.select）----
+            case 'model_switched':
+                // 引擎已把运行中的模型换成 payload.model：刷模型列表让「当前」移动；
+                // 成功气泡由引擎的 info 事件上屏，此处不重复提示。@author aceFelix
+                refreshModelList();
+                break;
             // ---- 会话管理 ----
             case 'session_renamed':
                 // 标题生成改名：只刷新会话列表，不清空气泡 @author aceFelix
@@ -478,16 +621,14 @@
                 break;
             case 'session_new':
                 chatHistory.innerHTML = '';
-                streamingBody = null;
-                thinkingBlock = null;
+                resetStreamState();
                 addSystemMessage('已开启新会话');
                 refreshSessionList();
                 break;
             case 'session_loaded':
                 // 恢复历史会话：清空并回放历史消息
                 chatHistory.innerHTML = '';
-                streamingBody = null;
-                thinkingBlock = null;
+                resetStreamState();
                 (payload.messages || []).forEach(m => {
                     if (m.role === 'assistant') {
                         // 无文本的纯工具轮次不生成空气泡，只留工具提示行

@@ -423,14 +423,33 @@ html, body {
 .message.user .message-label { color: #5bc8ff; }
 .message.ai .message-label { color: #7fe3ff; }
 
+/* 思考块（2026-09 折叠化）：思考中展开，本轮结束自动收起成一行标题 */
 .thinking-block {
+    margin-bottom: 6px;
+    border-left: 2px solid rgba(91, 200, 255, 0.6);
+}
+
+.thinking-block > summary {
+    cursor: pointer;
+    list-style: none;
+    padding-left: 8px;
+    font-size: 12px;
+    color: #8fb8d8;
+    opacity: 0.85;
+}
+
+.thinking-block > summary::before { content: "▸ "; }
+.thinking-block[open] > summary::before { content: "▾ "; }
+
+.thinking-block .thinking-body {
+    padding-left: 10px;
+    margin-top: 4px;
     font-size: 12px;
     color: #8fb8d8;
     font-style: italic;
-    border-left: 2px solid rgba(91, 200, 255, 0.6);
-    padding-left: 8px;
-    margin-bottom: 6px;
     white-space: pre-wrap;
+    max-height: 240px;
+    overflow-y: auto;
 }
 
 .tool-card {
@@ -460,6 +479,38 @@ html, body {
 }
 
 .tool-card.error { border-color: rgba(255, 90, 90, 0.45); }
+
+/* 工具组（2026-09 降噪）：本轮连续工具调用聚合成一条框，全部完成自动收起 */
+.tool-group {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #b8d8f0;
+    background: rgba(8, 18, 32, 0.55);
+    border: 1px solid var(--edge-soft);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tool-group > summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    list-style: none;
+}
+
+.tool-group > summary::before { content: "⚙ "; }
+
+.tool-group .tool-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--edge-soft);
+}
+
+.tool-group .tool-card { margin: 0; }
+.tool-group.error { border-color: rgba(255, 90, 90, 0.45); }
+.tool-group-fail { color: #ff8a8a; }
+.tool-group-run { opacity: 0.75; }
 
 /* ---- 输入区 / ask-user 条 ---- */
 .glass-bar {
