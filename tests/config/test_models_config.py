@@ -567,3 +567,39 @@ class TestLoadSettingsLayering:
                 "extensions": ["py"],
             }
         }
+
+
+class TestExampleTemplateLayer:
+    """发布模板充当「零项目配置」时的项目层，不得携带运行时状态键。
+
+    CI 上 configs/settings.toml 与 configs/models.toml 都不存在（两者在
+    .gitignore 里），load_settings 会回落到 agent/configs/*.example.toml 当项目
+    层。模板里写 last_model 就会以最高优先级覆盖 model，使分层加载用例读到的不是
+    自己写入的值（2026-09 CI 踩过：期望 deepseek-chat / user-model，实得
+    qwen3.7-plus）。
+
+    @author aceFelix
+    """
+
+    _REPO = Path(__file__).resolve().parents[2]
+
+    def test_models_template_carries_no_last_model(self) -> None:
+        """模板顶层不含 last_model，默认模型只由 model 提供。"""
+        data = tomllib.loads(
+            (self._REPO / "agent" / "configs" / "models.example.toml")
+            .read_text(encoding="utf-8")
+        )
+        assert "last_model" not in data
+        assert data["model"]  # 不能顺手把默认模型也删了
+
+    def test_models_templates_stay_identical(self) -> None:
+        """仓库根 configs/ 与包内 agent/configs/ 两份模板必须逐字一致。
+
+        打包分发只用 agent/configs 那份，仓库根那份是用户复制的样板；改一处漏一
+        处会让两条路径语义分叉。
+        """
+        pkg = (self._REPO / "agent" / "configs" / "models.example.toml").read_text(
+            encoding="utf-8"
+        )
+        root = (self._REPO / "configs" / "models.example.toml").read_text(encoding="utf-8")
+        assert root == pkg

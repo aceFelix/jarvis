@@ -9,7 +9,7 @@
 # ⚠️ 本文件的顶层键必须写在任何 [section] 之前。[llm.models] 之后的顶层键会被
 #    TOML 静默解析进该子表，表现为「配置写了不生效」。
 # ⚠️ [llm.custom_models."xxx"] 与 last_model 由程序回写（/models、jarvis init、
-#    切换模型），手动编辑时保留其结构即可。
+#    切换模型），手动编辑时保留其结构即可。模板本身不预置 last_model，见下方说明。
 
 # ---- 模型（LLM）----
 # 默认接阿里云百炼 DashScope（OpenAI 兼容接口），用 qwen3.7-plus（带视觉）。
@@ -18,7 +18,9 @@
 provider = "dashscope"
 api_format = "openai"
 model = "qwen3.7-plus"
-last_model = "qwen3.7-plus"
+# 模板故意不写 last_model：它是「上次手动切换的模型」这类运行时状态，由程序写入
+# 用户级配置，且优先级高于 model。写进模板会让复制者改 model 无效（没有项目级
+# configs/*.toml 时本模板就是项目层，last_model 会一路压住用户层的 model）。
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 # api_key = "sk-your-dashscope-key-1"  # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
 max_tokens = 20480
