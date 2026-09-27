@@ -135,6 +135,9 @@ async for event in self._provider.stream(...):
 - **单轮失败不炸主循环**：错误回灌给模型让它自我修正
 - **网络重试**：网络错误每轮自动重试 1 次
 - **故障转移**：`_try_failover()` 切到备选厂商（`_thinking_override` 同步到新 provider）
+- **手动切模型**：`switch_model()` 就地换 `_provider` / `_model`（REPL `/model` 与工作台/桌面壳
+  `models.select` 共用同一链路：不重建 QueryLoop，会话 token 累计 / 思考模式覆盖 / 消息上下文
+  全保留，旧 provider 交调用方 `close()`；见 [07-UI层.md](07-UI层.md) 「模型热切换」）
 
 ## 三、ToolOrchestrator 工具编排器
 

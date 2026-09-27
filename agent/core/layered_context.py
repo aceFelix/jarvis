@@ -257,15 +257,15 @@ class LayeredContext:
     def evict_old_images(self) -> None:
         """淘汰活跃窗口中的旧图片（仅影响活跃窗口，冻结区不可变）。
 
-        延迟导入避免循环依赖。
+        实现见 agent/core/memory/prune.py（与 QueryLoop 共用）。
         """
-        from agent.core.query_loop import _evict_old_images  # noqa: PLC0415
-        _evict_old_images(self._active)
+        from agent.core.memory.prune import evict_old_images  # noqa: PLC0415
+        evict_old_images(self._active)
 
     def collapse_old_tool_results(self, keep_recent: int = 4) -> None:
         """折叠活跃窗口中的旧工具结果（仅影响活跃窗口，冻结区不可变）。
 
-        延迟导入避免循环依赖。
+        实现见 agent/core/memory/prune.py（与 QueryLoop 共用）。
         """
-        from agent.core.query_loop import _collapse_old_tool_results  # noqa: PLC0415
-        _collapse_old_tool_results(self._active, keep_recent=keep_recent)
+        from agent.core.memory.prune import collapse_old_tool_results  # noqa: PLC0415
+        collapse_old_tool_results(self._active, keep_recent=keep_recent)

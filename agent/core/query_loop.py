@@ -60,6 +60,13 @@ from agent.llm.base import (
     Usage,
 )
 from agent.llm.base import ProviderError
+# 历史裁剪纯函数已迁到 agent/core/memory/prune.py（LayeredContext 与 QueryLoop
+# 共用）；此处保留旧名导入，维持既有导入路径（tests 与历史文档引用）。
+# @author aceFelix
+from agent.core.memory.prune import (  # noqa: F401
+    collapse_old_tool_results as _collapse_old_tool_results,
+    evict_old_images as _evict_old_images,
+)
 
 
 @dataclass
@@ -155,6 +162,34 @@ class QueryLoop:
         if self._thinking_override is not None:
             return self._thinking_override
         return self._provider.is_thinking_enabled()
+
+    def switch_model(self, provider: LLMProvider, model: str) -> LLMProvider | None:
+        """就地热切换 provider / 模型（工作台与桌面壳的 models.select 链路）。
+
+        与 _try_failover 同构：只替换 _provider / _model，不重建 QueryLoop ——
+        会话级 token 累计（session_usage）、思考模式覆盖（_thinking_override）
+        与消息上下文全部保留，切换对用户是一次无感续聊。切换是手动行为，
+        故障转移预算（_failover_tried）复位，新模型仍可触发一次厂商回退。
+
+        Args:
+            provider: 目标 provider（由调用方按目标模型构造，
+                见 model_manager._build_switched_provider）。
+            model: 目标模型名。
+
+        Returns:
+            被替换下来的旧 provider（与入参同一实例时返回 None），
+            调用方据此 ``await old.close()`` 释放其 HTTP client。
+        """
+        old = self._provider
+        self._provider = provider
+        self._model = model
+        if old is provider:
+            return None
+        self._failover_tried = False
+        # 语音等场景强制关闭思考时，新 provider 必须继承该覆盖
+        if self._thinking_override is not None:
+            provider.set_thinking_enabled(self._thinking_override)
+        return old
 
     async def compact_now(self, ctx: ToolContext) -> bool:
         """手动触发一次上下文压缩。成功返回 True，跳过/失败返回 False。"""
@@ -671,71 +706,6 @@ class QueryLoop:
                 return False
 
         return True
-
-
-def _evict_old_images(messages: list) -> None:
-    """淘汰旧截图：只保留最新一张的图片数据，其余替换为文字摘要。
-
-    截图每张 ~1500 tokens（base64 JPEG），LLM 看完后数据无再使用价值。
-    此函数从后往前扫描，保留「第一个（最新）」遇到的 ToolResultContent.images，
-    其余全部替换为 "[截图已处理：{content}]" 文本占位（~20 tokens）。
-    """
-    from agent.core.message import ToolResultContent, TextContent
-
-    found_latest = False
-    for msg in reversed(messages):
-        if msg.role != "user":
-            continue
-        for block in list(msg.content):
-            if not isinstance(block, ToolResultContent):
-                continue
-            if block.images:
-                if not found_latest:
-                    found_latest = True  # 最新一张保留
-                    continue
-                # 旧图 → 替换为文字
-                summary = (block.content or "截图").strip()[:80]
-                msg.content = [
-                    ToolResultContent(
-                        tool_use_id=block.tool_use_id,
-                        content=f"[截图已处理: {summary}]",
-                        is_error=block.is_error,
-                    )
-                    if isinstance(b, ToolResultContent) and b is block
-                    else b
-                    for b in msg.content
-                ]
-
-
-def _collapse_old_tool_results(messages: list, *, keep_recent: int = 4) -> None:
-    """工具结果折叠：旧工具输出缩成一行摘要，节省 token。
-
-    只保留最近 keep_recent 个 tool_result 的完整内容，
-    其余替换为 "[工具 {tool_use_id} 已完成]" (~15 tokens)。
-    """
-    from agent.core.message import ToolResultContent
-
-    # 收集所有 tool_result 消息索引（从后往前）
-    tool_msg_indices: list[int] = []
-    for i in range(len(messages) - 1, -1, -1):
-        for block in messages[i].content:
-            if isinstance(block, ToolResultContent):
-                tool_msg_indices.append(i)
-                break
-
-    # 前 keep_recent 个保留，其余折叠
-    for idx in tool_msg_indices[keep_recent:]:
-        msg = messages[idx]
-        msg.content = [
-            ToolResultContent(
-                tool_use_id=block.tool_use_id,
-                content=f"[工具 {block.tool_use_id} 已完成]",
-                is_error=block.is_error,
-            )
-            if isinstance(block, ToolResultContent)
-            else block
-            for block in msg.content
-        ]
 
 
 # ---- 多 Agent 团队邮箱自动同步 (Phase 1+) ----
