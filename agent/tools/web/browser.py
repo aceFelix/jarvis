@@ -16,6 +16,9 @@
 
 依赖: pip install playwright && playwright install chromium
 未安装时工具注册静默跳过，不影响其他工具。
+
+另对外提供 search_via_browser()：供 WebSearch 工具在所有 HTTP 搜索引擎
+失效时，用临时页面（不占用共享 page）做无头浏览器兜底搜索。
 """
 
 from __future__ import annotations
@@ -600,3 +603,92 @@ class BrowserCloseTool(Tool):
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         return "关闭浏览器"
+
+
+# ---------------------------------------------------------------------------
+# WebSearch 兜底通道 —— 临时页面搜索（不污染 Browser* 工具的共享 page）
+# ---------------------------------------------------------------------------
+
+
+async def search_via_browser(
+    manager: _BrowserManager,
+    query: str,
+    max_results: int,
+    *,
+    timeout_ms: int = 20_000,
+) -> list[dict[str, str]]:
+    """用无头浏览器打开 Bing 搜索结果页并提取结果（WebSearch 兜底用）。
+
+    @author aceFelix
+
+    与 Browser* 工具的区别: 只借用同一个浏览器实例（懒启动），但开临时
+    page 搜索、用完即关，不导航、不改变用户/模型正在操作的共享页面。
+    真实渲染能跑过 JS 反爬与重定向，是 HTTP 引擎全部失效时的兜底。
+
+    Args:
+        manager: 浏览器生命周期管理器（通常是模块级单例 _manager）。
+        query: 搜索关键词。
+        max_results: 最多返回条数。
+        timeout_ms: 页面导航超时（毫秒）。
+
+    Returns:
+        [{title, url, snippet}] 列表；解析不到结果时返回空列表。
+
+    Raises:
+        ImportError: playwright 未安装（由 manager.get_page 内部抛出）。
+        Exception: 浏览器启动/导航/取元素失败，由调用方兜获。
+    """
+    from urllib.parse import quote_plus
+
+    was_active = manager.is_active  # 浏览器本就开着时，兜底不应把它关掉
+    browser_opened_here = False
+    page = await manager.get_page(headless=True)
+    if not was_active:
+        browser_opened_here = True
+    tmp = None
+    try:
+        tmp = await page.context.new_page()
+        await tmp.goto(
+            f"https://www.bing.com/search?q={quote_plus(query)}",
+            wait_until="domcontentloaded",
+            timeout=timeout_ms,
+        )
+        # Bing 结果块: li.b_algo > h2 > a（标题链接）+ p（摘要），与
+        # search_engine.parse_bing_html 同一套 DOM 约定，走真实渲染更稳
+        items = await tmp.query_selector_all("li.b_algo")
+        results: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for el in items:
+            if len(results) >= max_results:
+                break
+            try:
+                link = await el.query_selector("h2 a")
+                if not link:
+                    continue
+                title = (await link.inner_text()).strip()
+                url = await link.get_attribute("href") or ""
+                if not url.startswith("http") or url in seen:
+                    continue
+                snippet = ""
+                p = await el.query_selector("p")
+                if p:
+                    snippet = (await p.inner_text()).strip()
+                seen.add(url)
+                results.append(
+                    {"title": title, "url": url, "snippet": snippet}
+                )
+            except Exception:
+                continue  # 单条元素提取失败跳过，不影响其余结果
+        return results
+    finally:
+        if tmp is not None:
+            try:
+                await tmp.close()
+            except Exception:
+                pass
+        if browser_opened_here:
+            # 本次兜底自己启动的浏览器，用完释放，不常驻占内存
+            try:
+                await manager.close()
+            except Exception:
+                pass

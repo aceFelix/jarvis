@@ -135,6 +135,11 @@
 |------|---------|---------|---------|
 | T-060 | 英文搜索 | "搜索 Python 3.13 new features" | 返回搜索结果列表 |
 | T-061 | 中文搜索 | "搜索 北京今日天气" | 正确处理中文 |
+| T-WEB-001 | 多引擎降级 | 断掉 Bing 可达性（或单测 monkeypatch 首引擎抛异常） | 自动降级下一引擎并返回结果，不直接报错 |
+| T-WEB-002 | 浏览器兜底 | 屏蔽全部 HTTP 引擎（单测）且已装 playwright | 启动无头浏览器临时页搜索成功，结果标注「兜底通道」 |
+| T-WEB-003 | 全挂引导 | 引擎与浏览器兜底全部失效（单测） | 失败回执列出各通道原因并引导改用 MCP 搜索工具 |
+
+> 自动化实现：[tests/tools/test_web_search.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/tools/test_web_search.py)（解析/轮询/兜底链全 mock，不触网）。编号用 T-WEB-* 前缀避免与后文 T-06x 硬阻断用例冲突。
 
 ---
 

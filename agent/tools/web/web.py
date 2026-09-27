@@ -2,9 +2,10 @@
 
 设计要点:
 1. WebFetch: 抓取 URL 内容，转 Markdown 给 LLM
-2. WebSearch: 用搜索引擎查询（默认 DuckDuckGo HTML，无需 API key）
+2. WebSearch: 多引擎 fallback 搜索（Bing → DuckDuckGo HTML → DDG lite，
+   全部失效再降级本地浏览器兜底/引导 MCP 搜索工具，免 API key）
 3. SSRF 防护: 禁止访问内网 IP / localhost / 私有网段
-4. 超时: 默认 15 秒
+4. 超时: WebFetch 默认 15 秒，搜索单引擎 10 秒
 5. 内容长度限制: 默认 8000 字符（避免 token 爆炸）
 6. User-Agent: 伪装为浏览器，避免被某些站点拒绝
 7. 依赖: 仅用标准库 urllib + re，避免引入 requests/httpx 等新依赖
@@ -17,11 +18,12 @@ import ipaddress
 import re
 import socket
 from typing import Any
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import urlparse
 
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
+from agent.tools.web.search_engine import _SEARCH_ENGINES
 
 
 # ---- 通用工具 ----
@@ -267,7 +269,8 @@ class WebSearchTool(Tool):
     name = "WebSearch"
     description = (
         "用搜索引擎查询关键词，返回前 N 条结果（标题+URL+摘要）。"
-        "默认使用 DuckDuckGo HTML 接口（无需 API key）。"
+        "多引擎 fallback：Bing → DuckDuckGo HTML → DDG lite，"
+        "全部失效再尝试本地无头浏览器兜底（无需 API key）。"
         "适合查询最新信息、技术文档、新闻等。"
     )
     input_schema: JSONSchema = {
@@ -304,99 +307,102 @@ class WebSearchTool(Tool):
         if ctx.ui:
             ctx.ui.info(f"搜索: {query}")
 
-        try:
-            results = await _search_duckduckgo(query, max_results)
-        except Exception as e:
-            return ToolResult(data=f"搜索失败: {type(e).__name__}: {e}", is_error=True)
+        results, failures = await _run_search_engines(query, max_results, ctx)
 
-        if not results:
-            return ToolResult(data=f"未找到结果: {query}")
+        if results:
+            return ToolResult(data=_format_search_results(query, results))
 
-        # 格式化为 Markdown 列表
-        lines = [f"搜索「{query}」结果（{len(results)} 条）:\n"]
-        for i, r in enumerate(results, 1):
-            lines.append(f"{i}. **{r['title']}**")
-            lines.append(f"   URL: {r['url']}")
-            if r.get("snippet"):
-                lines.append(f"   {r['snippet']}")
-            lines.append("")
-        return ToolResult(data="\n".join(lines))
+        # 所有 HTTP 引擎都失效 → 本地浏览器兜底（Playwright 临时页面，
+        # 不占用 Browser* 工具的共享 page）
+        br_results, br_note = await _browser_search_fallback(query, max_results, ctx)
+        if br_results:
+            return ToolResult(data=_format_search_results(
+                query, br_results, source_note=br_note))
+
+        # 浏览器兜底也不行 → 失败回执里引导模型改用 MCP 搜索工具（若有）
+        fail_lines = "\n".join(f"  - {name}: {err}" for name, err in failures)
+        return ToolResult(
+            data=(
+                f"搜索失败，已尝试全部通道:\n{fail_lines}\n"
+                f"浏览器兜底: {br_note}\n"
+                "建议: 1) 若已注册带搜索能力的 MCP 工具（如 Exa/Tavily/Bocha 等），"
+                "请改调用该工具搜索；2) 否则提示用户检查网络/代理后重试。"
+            ),
+            is_error=True,
+        )
 
 
-async def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
-    """用 DuckDuckGo HTML 接口搜索。
+async def _run_search_engines(
+    query: str, max_results: int, ctx: ToolContext
+) -> tuple[list[dict[str, str]], list[tuple[str, str]]]:
+    """按 _SEARCH_ENGINES 顺序轮询搜索引擎。
 
-    无需 API key，解析 HTML 结果页。
+    Returns:
+        (results, failures): 首个非空引擎结果，以及失败引擎的
+        (名称, 错误摘要) 列表（异常与「0 结果」都记为失效）。
     """
-    import asyncio
-    url = "https://html.duckduckgo.com/html/"
-    encoded_q = quote_plus(query)
-    body = f"q={encoded_q}&b=&kl=".encode("utf-8")
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-
-    def _do_search() -> str:
+    failures: list[tuple[str, str]] = []
+    for name, engine in _SEARCH_ENGINES:
         try:
-            import requests  # type: ignore
-            resp = requests.post(url, data=body, headers=headers, timeout=_DEFAULT_TIMEOUT)
-            return resp.text
-        except ImportError:
-            pass
-        import urllib.request
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as r:
-            return r.read().decode("utf-8", errors="replace")
-
-    loop = asyncio.get_event_loop()
-    html = await loop.run_in_executor(None, _do_search)
-
-    # 解析结果
-    results: list[dict[str, str]] = []
-    # DuckDuckGo HTML 结果块: <a class="result__a" href="...">title</a>
-    # 摘要: <a class="result__snippet">
-    blocks = re.split(r'<div class="result ', html)[1:]
-    for block in blocks:
-        try:
-            # 标题 + URL
-            m = re.search(
-                r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                block,
-                re.DOTALL,
-            )
-            if not m:
-                continue
-            raw_url = m.group(1)
-            # DuckDuckGo 用 redirect 链接: //duckduckgo.com/l/?uddg=<encoded>
-            url_match = re.search(r"uddg=([^&]+)", raw_url)
-            if url_match:
-                from urllib.parse import unquote
-                actual_url = unquote(url_match.group(1))
-            else:
-                actual_url = raw_url
-            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-            # 摘要
-            snippet = ""
-            sm = re.search(
-                r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-                block,
-                re.DOTALL,
-            )
-            if sm:
-                snippet = re.sub(r"<[^>]+>", "", sm.group(1)).strip()
-            if title and actual_url:
-                results.append({
-                    "title": title,
-                    "url": actual_url,
-                    "snippet": snippet,
-                })
-            if len(results) >= max_results:
-                break
-        except Exception:
+            results = await engine(query, max_results)
+        except Exception as e:
+            failures.append((name, f"{type(e).__name__}: {e}"[:200]))
+            if ctx.ui:
+                ctx.ui.info(f"搜索引擎 {name} 失效，降级下一个引擎...")
             continue
-    return results
+        if results:
+            return results, failures
+        failures.append((name, "请求成功但解析到 0 条结果（页面结构可能改版）"))
+    return [], failures
+
+
+async def _browser_search_fallback(
+    query: str, max_results: int, ctx: ToolContext
+) -> tuple[list[dict[str, str]], str]:
+    """本地浏览器兜底搜索（第二道兜底，免 API key）。
+
+    仅当所有 HTTP 引擎失效时调用：复用 browser.py 的 BrowserManager 懒启动
+    无头 Chromium，但开临时 page 搜索、用完即关，不污染 Browser* 工具的
+    共享页面。playwright 未安装时直接返回说明，不抛异常。
+
+    Returns:
+        (results, note): 结果列表与兜底通道状态说明（供失败回执展示）。
+    """
+    try:
+        # 延迟导入：browser.py 模块本身可在无 playwright 时导入，
+        # playwright 只在 get_page 内部 import
+        from agent.tools.web.browser import _manager, search_via_browser
+    except ImportError as e:
+        return [], f"不可用（浏览器模块未安装依赖: {e}）"
+    if ctx.ui:
+        ctx.ui.info("HTTP 搜索引擎全部失效，启动本地无头浏览器兜底搜索...")
+    try:
+        results = await search_via_browser(_manager, query, max_results)
+        return results, f"已执行，解析到 {len(results)} 条结果"
+    except Exception as e:
+        return [], f"失败: {type(e).__name__}: {e}"[:200]
+
+
+def _format_search_results(
+    query: str,
+    results: list[dict[str, str]],
+    *,
+    source_note: str | None = None,
+) -> str:
+    """把搜索结果列表格式化为 Markdown（工具统一输出格式）。
+
+    Args:
+        query: 搜索关键词。
+        results: {title, url, snippet} 字典列表。
+        source_note: 结果来源说明（浏览器兜底时标注，让模型知道走了降级通道）。
+    """
+    lines = [f"搜索「{query}」结果（{len(results)} 条）:\n"]
+    if source_note:
+        lines.insert(0, f"[兜底通道] {source_note}\n")
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. **{r['title']}**")
+        lines.append(f"   URL: {r['url']}")
+        if r.get("snippet"):
+            lines.append(f"   {r['snippet']}")
+        lines.append("")
+    return "\n".join(lines)
