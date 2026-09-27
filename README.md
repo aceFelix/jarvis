@@ -1473,7 +1473,12 @@ agent/
 │       └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
 ├── voice/             # 语音引擎
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
-│   ├── stt.py         # STT 三后端（QwenASR / ParaformerSTT / FunASRFlashSTT）
+│   ├── stt/           # STT 三后端分包（按识别引擎拆分）
+│   │   ├── common.py    # 音频常量 / RMS 计算 / 停止标志（跨后端共享）
+│   │   ├── paraformer.py # ParaformerSTT（Recognition，客户端 VAD）
+│   │   ├── qwen.py      # QwenASR（OmniRealtime，服务端 VAD）
+│   │   ├── funasr.py    # FunASRFlashSTT（HTTP POST 整段 WAV）
+│   │   └── __init__.py  # create_stt() 工厂 + 符号 re-export
 │   ├── stream_tts.py  # StreamTTSPlayer（句子级流式 TTS，逐句播放）
 │   ├── realtime_talk.py # /talk 全双工实时语音（WebSocket + AEC + Function Calling）
 │   ├── voice_loop.py  # /voice 语音对话循环（听→想→说 + 对话⇄待机状态机）
@@ -1514,7 +1519,7 @@ agent/
 └── utils/             # 通用工具
     └── mask.py        # API Key 脱敏
 
-tests/                 # 测试套件（1993 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
+tests/                 # 测试套件（2034 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试
@@ -1545,7 +1550,7 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **1993 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
+项目配备 **2034 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
 
 ```bash
 # 运行全部测试

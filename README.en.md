@@ -1395,7 +1395,12 @@ agent/
 │       └── assets/    # HTML/JS/CSS (transparent Arc Reactor + bubbles)
 ├── voice/             # Voice engine
 │   ├── tts.py         # CosyVoiceTTS (whole-segment synthesis + streaming start/feed/finish + interrupt)
-│   ├── stt.py         # STT three backends (QwenASR / ParaformerSTT / FunASRFlashSTT)
+│   ├── stt/           # STT three-backend package (split by ASR engine)
+│   │   ├── common.py    # audio constants / RMS calc / stop flag (shared)
+│   │   ├── paraformer.py # ParaformerSTT (Recognition, client-side VAD)
+│   │   ├── qwen.py      # QwenASR (OmniRealtime, server-side VAD)
+│   │   ├── funasr.py    # FunASRFlashSTT (HTTP POST whole-segment WAV)
+│   │   └── __init__.py  # create_stt() factory + symbol re-export
 │   ├── stream_tts.py  # StreamTTSPlayer (sentence-level streaming TTS, play sentence by sentence)
 │   ├── realtime_talk.py # /talk full-duplex real-time voice (WebSocket + AEC + Function Calling)
 │   ├── voice_loop.py  # /voice voice conversation loop (listen→think→speak + conversation⇄standby state machine)
@@ -1443,7 +1448,11 @@ tests/                 # Test suite (1599 tests, covers LLM/Config/Tools/Core/Vo
 ├── core/ tools/ daemon/ voice/ # Module unit tests
 ├── test_command_router.py # Command routing integration tests
 ├── test_query_loop.py     # Context compaction/image eviction tests
+├── _query_loop_fakes.py   # Shared QueryLoop test doubles and factories
 ├── test_query_loop_run.py # QueryLoop.run main flow/tool loop/failover tests
+├── test_query_loop_stream.py  # Content accumulation/hooks/helpers/_stream_once tests
+├── test_query_loop_branches.py # Team mailbox injection/hooks tolerance/deferred tools tests
+├── test_query_loop_session.py # Session persistence/model switching tests
 ├── test_orchestrator.py   # Tool orchestrator tests
 ├── test_session_manager.py# Session title generation/save tests
 ├── test_permissions.py    # Five-layer permission system tests
@@ -1463,7 +1472,7 @@ npm/                   # npm distribution package (lets Node.js users install vi
 
 ## Testing & CI
 
-Project has **1599 unit/integration tests**, covering LLM Provider, tool registration, config loading, permission system, context management, session management, memory persistence, security sandbox, background daemon and other core modules. Core runtime (query_loop/orchestrator/memory/permission/LLM Provider) coverage **94%**.
+Project has **2034 unit/integration tests**, covering LLM Provider, tool registration, config loading, permission system, context management (including the tool_use ↔ tool_result pairing invariant), session management, memory persistence, security sandbox, background daemon and other core modules. Core runtime (query_loop/orchestrator/memory/permission/LLM Provider) coverage **94%**.
 
 ```bash
 # Run all tests
