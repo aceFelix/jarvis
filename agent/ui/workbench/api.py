@@ -20,6 +20,7 @@ import queue
 from typing import Any
 
 from agent.config.settings import Settings
+from agent.ui.workbench import model_admin
 from agent.ui.workbench.engine import ChatEngine
 
 
@@ -182,8 +183,8 @@ class WorkbenchAPI:
         """窗口初始状态：当前模型/音色/厂商 + MCP 连接快照（前端首屏与右栏渲染）。"""
         s = self._settings
         return {
-            "provider": s.provider,
-            "model": s.model or "",
+            "provider": self._engine.current_vendor,
+            "model": self._engine.current_model,
             "tts_voice": s.tts_voice,
             "realtime_model": getattr(s, "realtime_model", ""),
             "realtime_voice": getattr(s, "realtime_voice", ""),
@@ -203,78 +204,114 @@ class WorkbenchAPI:
         """
         s = self._settings
         return {
-            "provider": s.provider,
-            "model": s.model or "",
+            "provider": self._engine.current_vendor,
+            "model": self._engine.current_model,
             **self._engine.session_usage,
             "dialogs": self._engine.dialog_count,
             "messages": self._engine.message_count,
         }
 
     def list_models(self) -> list[dict[str, Any]]:
-        """可选模型列表：与 REPL /models 对齐 = 内置模型（[llm.models]）+ 自定义模型（[llm.custom_models]）。
+        """可选模型列表：内置模型（[llm.models]）+ 自定义模型（[llm.custom_models]）。
 
-        当前模型置顶并标 current；厂商经 model_manager._infer_model_vendor 推断，
-        内置名+自定义覆盖合并去重（同 /models 的 builtin/custom 合并规则）。
+        当前模型置顶并标 current；每项另带 source / removable / config 等管理
+        元信息（桌面壳模型面板就地改删的依据，实现见 model_admin.list_models）。
+
+        @author aceFelix
         """
-        s = self._settings
-        try:
-            # 复用 /models 的厂商推断逻辑，避免两处口径不一致（导入失败时降级空厂商）
-            from agent.model_manager import _infer_model_vendor
-        except Exception:
-            def _infer_model_vendor(name: str, cfg: dict | None = None) -> str:
-                return s.provider or ""
-
-        current = s.model or ""
-        items: list[dict[str, Any]] = []
-        seen: set[str] = set()
-
-        # 当前模型置顶（即使它不在两张表里，也保证可见可标）
-        if current:
-            cfg = (s.custom_models or {}).get(current)
-            cfg = cfg if isinstance(cfg, dict) else None
-            desc = (s.models or {}).get(current, "")
-            items.append({
-                "name": current,
-                "vendor": _infer_model_vendor(current, cfg),
-                "current": True,
-                "desc": desc if isinstance(desc, str) else "",
-            })
-            seen.add(current)
-
-        # 内置模型表（项目级 [llm.models]，含用户级覆盖合并后的结果）
-        for name, desc in (s.models or {}).items():
-            if name in seen:
-                continue
-            cfg = (s.custom_models or {}).get(name)
-            cfg = cfg if isinstance(cfg, dict) else None
-            items.append({
-                "name": name,
-                "vendor": _infer_model_vendor(name, cfg),
-                "current": False,
-                "desc": desc if isinstance(desc, str) else "",
-            })
-            seen.add(name)
-
-        # 自定义模型（/models 添加的，非内置的）
-        for name, cfg in (s.custom_models or {}).items():
-            if name in seen or not isinstance(cfg, dict):
-                continue
-            items.append({
-                "name": name,
-                "vendor": _infer_model_vendor(name, cfg),
-                "current": False,
-            })
-            seen.add(name)
-        return items
+        return model_admin.list_models(self._settings, self._engine)
 
     def set_model(self, name: str) -> bool:
-        """切换文本对话模型：持久化到 ~/.jarvis/models.toml（重启引擎生效）。"""
+        """切换文本对话模型：持久化到 ~/.jarvis/models.toml + 立即热切换引擎。
+
+        写盘（last_model，重启后自动恢复）成功后把 ``{"cmd": "switch_model"}``
+        入队，由引擎线程在自己的 asyncio 循环里替换运行中的 provider / QueryLoop：
+        切换立即生效（models.list 的 current 随之移动），无需重启引擎；若此刻
+        正有一轮回复在跑，切换在该轮结束后落地（指令队列串行）。入队即返回，
+        不等引擎落地 —— 落地与失败分别由 model_switched / warn 事件回执。
+
+        @author aceFelix
+        """
         try:
             from agent.config.model_registry import save_last_model
 
-            return save_last_model(name)
+            if not save_last_model(name):
+                return False
         except Exception:
             return False
+        self._post({"cmd": "switch_model", "name": name})
+        return True
+
+    def add_model(
+        self,
+        name: str,
+        *,
+        vendor: str = "deepseek",
+        api_format: str = "openai",
+        base_url: str = "",
+        api_key: str = "",
+        model_type: str = "text",
+    ) -> dict[str, Any]:
+        """添加（或覆盖）自定义模型：写用户级 models.toml 并即时更新内存配置。
+
+        字段与持久化口径与 REPL /models → 添加其他模型 完全一致
+        （实现见 model_admin.add_model）：base_url 留空按厂商推断；api_key
+        非空时同步系统 keyring；写盘失败抛错，由 serve 回 ok=false。
+
+        @author aceFelix
+        """
+        return model_admin.add_model(
+            self._settings,
+            name,
+            vendor=vendor,
+            api_format=api_format,
+            base_url=base_url,
+            api_key=api_key,
+            model_type=model_type,
+        )
+
+    def edit_model(
+        self,
+        name: str,
+        *,
+        new_name: str = "",
+        vendor: str = "",
+        api_format: str = "",
+        base_url: str = "",
+        api_key: str = "",
+        model_type: str = "",
+    ) -> dict[str, Any]:
+        """修改模型配置（桌面壳双击模型项 → 编辑表单 → models.edit）。
+
+        内置模型名锁定、自定义模型可改名；api_key 留空=保持原 Key；改的正是
+        运行中的模型时入队强制热切换（端点/类型立即生效）。实现见
+        model_admin.edit_model。
+
+        @author aceFelix
+        """
+        return model_admin.edit_model(
+            self._settings,
+            self._engine,
+            self._post,
+            name,
+            new_name=new_name,
+            vendor=vendor,
+            api_format=api_format,
+            base_url=base_url,
+            api_key=api_key,
+            model_type=model_type,
+        )
+
+    def remove_model(self, name: str) -> dict[str, Any]:
+        """删除自定义模型（桌面壳右键模型项 → 删除按钮 → models.remove）。
+
+        内置模型不可删（仅回退覆盖配置）；用户级 models.toml 中不存在该段时
+        同样拒绝（项目级配置的模型删了会重启复活）。实现见
+        model_admin.remove_model。
+
+        @author aceFelix
+        """
+        return model_admin.remove_model(self._settings, self._engine, name)
 
     def list_voices(self) -> list[dict[str, Any]]:
         """TTS 音色列表：当前音色 + 自定义音色（/tts-voice 添加的）。"""

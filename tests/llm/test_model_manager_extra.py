@@ -17,6 +17,7 @@ from agent.config.settings import Settings
 from agent.core.query_loop import QueryLoop
 from agent.model_manager import (
     _add_custom_model_flow,
+    _build_switched_provider,
     _delete_custom_model,
     _edit_builtin_model,
     _edit_custom_model,
@@ -429,27 +430,114 @@ class TestRemoveCustomModelFromToml:
         assert 'custom_models."only"' not in content
 
 
+def _custom_model_settings(**extra) -> Settings:
+    """自定义模型 deepseek-chat + 内置 qwen-max 的设置快照（切换类用例共用）。"""
+    defaults: dict = {
+        "api_format": "openai",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "base-key",
+        "max_iterations": 10,
+        "max_tokens": 2000,
+        "temperature": 0.1,
+        "context_compaction": True,
+        "vendor_fallback": "",
+        "models": {"qwen-max": "通义千问", "deepseek-chat": "DeepSeek"},
+    }
+    defaults.update(extra)  # 调用方覆盖默认端点（如 default_* 恢复场景）
+    settings = _make_settings(**defaults)
+    settings.custom_models["deepseek-chat"] = {
+        "provider": "deepseek", "api_format": "openai",
+        "base_url": "", "api_key": "", "model_type": "text",
+    }
+    return settings
+
+
+class TestBuildSwitchedProvider:
+    """热切换共用的 provider 构造（REPL /model 与工作台 models.select 同源）。"""
+
+    def test_custom_reuse_keeps_provider_and_snapshot(self, monkeypatch) -> None:
+        """端点与快照一致 → 复用入参 provider，快照原样返回（下轮比较基准不变）。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        settings = _custom_model_settings()
+        new_provider, desc, used = _build_switched_provider(settings, provider, "deepseek-chat")
+        assert new_provider is provider
+        assert used is settings
+        assert provider.model_type == "text"  # 同厂商不同模型可能 text/multimodal
+        assert desc == "纯文本（DeepSeek）"  # 文本模型带禁用视觉提示
+        build_mock.assert_not_called()
+
+    def test_custom_rebuild_returns_new_snapshot(self, monkeypatch) -> None:
+        """端点与快照不同 → 重建 provider，并回报描述新端点的新快照。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        settings = _custom_model_settings()
+        settings.custom_models["deepseek-chat"]["base_url"] = "https://other.com"
+        settings.custom_models["deepseek-chat"]["api_key"] = "other-key"
+        new_provider, _desc, used = _build_switched_provider(settings, provider, "deepseek-chat")
+        assert new_provider is not provider
+        assert used is not settings
+        assert (used.base_url, used.api_key) == ("https://other.com", "other-key")
+        # replace 克隆，不改入参快照
+        assert settings.base_url == "https://api.deepseek.com"
+        assert settings.api_key == "base-key"
+        build_mock.assert_called_once()
+
+    def test_builtin_restores_default_endpoint(self, monkeypatch) -> None:
+        """内置模型 → 用 default_* 恢复原始端点，不连到自定义模型端点。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="deepseek-chat")
+        settings = _custom_model_settings(
+            default_provider="dashscope",
+            default_api_format="dashscope",
+            default_base_url="",
+            default_api_key="orig-key",
+        )
+        _new_provider, _desc, used = _build_switched_provider(settings, provider, "qwen-max")
+        assert used.provider == "dashscope"
+        assert used.api_format == "dashscope"
+        assert used.api_key == "orig-key"
+        build_mock.assert_called_once()
+
+    def test_roundtrip_uses_snapshot_not_stale_settings(self, monkeypatch) -> None:
+        """回归：比较基准取「当前 provider 端点快照」，自定义→内置→自定义不误判复用。
+
+        旧实现（以及热切换若误传启动 settings）拿全局 settings 比较：settings
+        已被启动时的自定义模型覆盖，切到内置模型后再切回同名自定义模型会被判
+        「配置一致」而复用内置 provider —— provider 指向错误端点。只有用上一步
+        返回的快照比较，才能发现端点其实已变。
+        """
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="qwen-max")
+        # 启动快照：last_model 是自定义模型（端点已被它覆盖）+ default_* 留原始端点
+        settings = _custom_model_settings(
+            base_url="https://other.com",
+            api_key="other-key",
+            default_provider="deepseek",
+            default_api_format="openai",
+            default_base_url="https://api.deepseek.com",
+            default_api_key="base-key",
+        )
+        settings.custom_models["deepseek-chat"]["base_url"] = "https://other.com"
+        settings.custom_models["deepseek-chat"]["api_key"] = "other-key"
+
+        # 第一步：切到内置模型 → 快照换回 default_* 端点
+        _builtin, _desc, snapshot = _build_switched_provider(settings, provider, "qwen-max")
+        assert (snapshot.base_url, snapshot.api_key) == ("https://api.deepseek.com", "base-key")
+
+        # 第二步：切回自定义模型（端点=启动 settings 的 other.com）
+        build_mock.reset_mock()
+        new_provider, _desc2, used = _build_switched_provider(snapshot, provider, "deepseek-chat")
+        build_mock.assert_called_once()  # 端点在快照上已变 → 必须重建
+        assert new_provider is not provider
+        assert (used.base_url, used.api_key) == ("https://other.com", "other-key")
+
+
 class TestSwitchModel:
     """模型切换。"""
 
     def _settings_with_custom(self, **extra) -> Settings:
-        settings = _make_settings(
-            api_format="openai",
-            base_url="https://api.deepseek.com",
-            api_key="base-key",
-            max_iterations=10,
-            max_tokens=2000,
-            temperature=0.1,
-            context_compaction=True,
-            vendor_fallback="",
-            models={"qwen-max": "通义千问", "deepseek-chat": "DeepSeek"},
-            **extra,
-        )
-        settings.custom_models["deepseek-chat"] = {
-            "provider": "deepseek", "api_format": "openai",
-            "base_url": "", "api_key": "", "model_type": "text",
-        }
-        return settings
+        return _custom_model_settings(**extra)
 
     def test_same_model_returns_none(self) -> None:
         """同模型直接返回 None，不重建 provider。"""

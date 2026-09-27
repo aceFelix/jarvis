@@ -1382,3 +1382,69 @@ class TestSessionMemoryPersist:
         assert await loop.compact_now(ctx) is False
         mem_file = tmp_path / ".jarvis" / "SESSION_MEMORY.md"
         assert not mem_file.exists(), "无摘要时不应创建记忆文件"
+
+
+# ---------------------------------------------------------------------------
+# 模型热切换（工作台 models.select → 引擎线程内串行调用）
+# ---------------------------------------------------------------------------
+
+
+class TestSwitchModel:
+    """QueryLoop.switch_model：就地换 provider / 模型，保留会话级状态。"""
+
+    def test_replaces_provider_and_model(self, registry) -> None:
+        """换 provider / 模型并返回旧 provider（调用方负责 close）。"""
+        old = ScriptedProvider([])
+        new = ScriptedProvider([])
+        loop = make_loop(old, FakeOrchestrator(), registry)
+        loop._model = "old-model"
+        usage = loop.session_usage
+
+        returned = loop.switch_model(new, "new-model")
+
+        assert returned is old
+        assert loop._provider is new
+        assert loop._model == "new-model"
+        assert loop.session_usage is usage  # 未重建 QueryLoop：会话 token 累计保留
+
+    def test_same_provider_returns_none(self, registry) -> None:
+        """复用同一 provider：返回 None（调用方不 close），模型名照常更新。"""
+        provider = ScriptedProvider([])
+        loop = make_loop(provider, FakeOrchestrator(), registry)
+
+        assert loop.switch_model(provider, "m2") is None
+        assert loop._provider is provider
+        assert loop._model == "m2"
+
+    def test_resets_failover_budget(self, registry) -> None:
+        """手动切换复位厂商回退预算：新模型仍可触发一次故障转移。"""
+        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
+        loop._failover_tried = True
+
+        loop.switch_model(ScriptedProvider([]), "new-model")
+
+        assert loop._failover_tried is False
+
+    def test_inherits_thinking_override(self, registry, monkeypatch) -> None:
+        """语音模式强制关闭思考时，新 provider 必须继承该覆盖。"""
+        new = ScriptedProvider([])
+        calls: list[bool] = []
+        monkeypatch.setattr(new, "set_thinking_enabled", lambda enabled: calls.append(enabled))
+        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
+        loop._thinking_override = False
+
+        loop.switch_model(new, "new-model")
+
+        assert calls == [False]
+
+    def test_without_override_keeps_provider_default(self, registry, monkeypatch) -> None:
+        """无覆盖（None）→ 不强制写新 provider，用其自身默认思考态。"""
+        new = ScriptedProvider([])
+        calls: list[bool] = []
+        monkeypatch.setattr(new, "set_thinking_enabled", lambda enabled: calls.append(enabled))
+        loop = make_loop(ScriptedProvider([]), FakeOrchestrator(), registry)
+        assert loop._thinking_override is None
+
+        loop.switch_model(new, "new-model")
+
+        assert calls == []

@@ -436,24 +436,34 @@ def _remove_custom_model_from_toml(name: str) -> None:
     remove_custom_model(name)
 
 
-def _switch_model(
-    ui: RichCLI,
+def _build_switched_provider(
     settings: Settings,
     provider: object,
-    registry: object,
-    orchestrator: object,
-    system_prompt: str,
     model_name: str,
-) -> tuple[object, object, str] | None:
-    """切换模型并返回新的 (provider, loop, model_name)。
+) -> tuple[object, str, Settings]:
+    """按目标模型构造 provider（REPL /model 与工作台热切换共用）。
 
-    如果自定义模型指定了不同的 api_format/base_url/api_key，会重建 provider。
-    Returns None 表示无需切换。
+    自定义模型：与「当前 provider 端点」在 api_format / base_url / api_key 上
+    有差异才重建 provider，否则复用原 provider 并同步 model_type（同厂商不同
+    模型可能是 text/multimodal）。
+    内置模型：一律按 default_* 字段恢复原始端点重建，避免从自定义模型切回时
+    误连到自定义端点。
+
+    Args:
+        settings: 当前 provider 的端点配置快照。REPL 传全局 settings；热切换
+            传上次构造 provider 时的快照，保证比较基准与运行中的 provider 一致
+            —— 否则「自定义 → 内置 → 自定义」往返会被误判为无需重建，
+            复用到内置端点的 provider。
+        provider: 当前 provider（复用判定用）。
+        model_name: 目标模型名。
+
+    Returns:
+        ``(provider, model_desc, used_settings)``：新 provider（可能是入参本身）、
+        展示用模型描述、描述该 provider 端点的 settings 快照（调用方留存，
+        作为下一次切换的比较基准）。
+
+    @author aceFelix
     """
-    old_model = getattr(provider, '_model', '')
-    if model_name == old_model:
-        return None
-
     new_provider = provider
     new_is_custom = model_name in settings.custom_models
 
@@ -486,10 +496,13 @@ def _switch_model(
                 api_key=cfg.get("api_key") or settings.api_key,
             )
             new_provider = _build_provider(custom_settings, model_type=mtype)
+            used_settings = custom_settings
         else:
             # 复用同一个 provider，但必须同步 model_type（同厂商不同模型可能是 text/multimodal）
             if hasattr(new_provider, "set_model_type"):
                 new_provider.set_model_type(mtype)
+            # 复用 → 端点配置仍是入参快照描述的那份
+            used_settings = settings
     else:
         # 内置模型 → 用 models.toml 原始 api_format/base_url 重建 provider
         # 若启动时 last_model 是自定义模型，settings 字段已被覆盖，
@@ -505,7 +518,40 @@ def _switch_model(
         else:
             clean_settings = settings
         new_provider = _build_provider(clean_settings, model_type="multimodal")
+        used_settings = clean_settings
 
+    # 文本模型添加视觉禁用提示（desc 取自当前快照的模型表，与 UI 展示口径一致）
+    model_desc = settings.models.get(model_name, "")
+    if model_name in settings.custom_models:
+        cfg = settings.custom_models[model_name]
+        if cfg.get("model_type") == "text":
+            model_desc = f"纯文本（{model_desc or cfg.get('name', model_name)}）"
+        else:
+            model_desc = f"多模态（{model_desc or cfg.get('name', model_name)}）"
+    return new_provider, model_desc, used_settings
+
+
+def _switch_model(
+    ui: RichCLI,
+    settings: Settings,
+    provider: object,
+    registry: object,
+    orchestrator: object,
+    system_prompt: str,
+    model_name: str,
+) -> tuple[object, object, str] | None:
+    """切换模型并返回新的 (provider, loop, model_name)。
+
+    如果自定义模型指定了不同的 api_format/base_url/api_key，会重建 provider
+    （见 _build_switched_provider）。Returns None 表示无需切换。
+    """
+    old_model = getattr(provider, '_model', '')
+    if model_name == old_model:
+        return None
+
+    new_provider, model_desc, _used_settings = _build_switched_provider(
+        settings, provider, model_name
+    )
     # 记录当前模型名，供下次 _switch_model 判断是否需要重置
     new_provider._model = model_name
 
@@ -526,15 +572,6 @@ def _switch_model(
         vendor_fallback=settings.vendor_fallback,
         custom_models=settings.custom_models,
     )
-
-    # 文本模型添加视觉禁用提示
-    model_desc = settings.models.get(model_name, "")
-    if model_name in settings.custom_models:
-        cfg = settings.custom_models[model_name]
-        if cfg.get("model_type") == "text":
-            model_desc = f"纯文本（{model_desc or cfg.get('name', model_name)}）"
-        else:
-            model_desc = f"多模态（{model_desc or cfg.get('name', model_name)}）"
 
     ui.info(f"模型已切换为: {model_name}（{model_desc}）")
     # 持久化当前模型，下次启动自动恢复

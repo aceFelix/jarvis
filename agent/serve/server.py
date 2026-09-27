@@ -38,6 +38,7 @@ from agent.config.settings import Settings
 from agent.serve import protocol
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.metrics import collect_metrics
+from agent.ui.workbench.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
 
 # 附件上限（与桌面壳前端同一口径）：防单条消息超大 payload 打爆 WS/上下文。
 # 超限在入队前快速失败（reply ok=False），不进引擎队列。@author aceFelix
@@ -94,6 +95,10 @@ class DesktopBridgeServer(BridgeServer):
         self._pump_thread: threading.Thread | None = None
         self._pump_stop = threading.Event()
         self._event_queue: queue.Queue | None = None
+        # 已注册的 request/response 型指令名（契约自检用：注册了就必须在
+        # protocol.DESKTOP_COMMANDS 中声明，防「加了指令忘了进集合」）。
+        # @author aceFelix
+        self._rpc_types: set[str] = set()
         self._register_desktop_handlers()
 
     # ---- 指令注册 ----
@@ -110,6 +115,9 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_SESSIONS_DELETE, self._rpc_sessions_delete)
         self._register_rpc(protocol.CMD_MODELS_LIST, lambda data: self._api.list_models())
         self._register_rpc(protocol.CMD_MODELS_SELECT, self._rpc_models_select)
+        self._register_rpc(protocol.CMD_MODELS_ADD, self._rpc_models_add)
+        self._register_rpc(protocol.CMD_MODELS_EDIT, self._rpc_models_edit)
+        self._register_rpc(protocol.CMD_MODELS_REMOVE, self._rpc_models_remove)
         self._register_rpc(protocol.CMD_VOICES_LIST, lambda data: self._api.list_voices())
         self._register_rpc(protocol.CMD_VOICES_SELECT, self._rpc_voices_select)
         self._register_rpc(protocol.CMD_METRICS_GET, lambda data: collect_metrics())
@@ -147,6 +155,7 @@ class DesktopBridgeServer(BridgeServer):
             await self._send_json(ws, msg)
 
         self.register_ws_handler(cmd_type, _handler)
+        self._rpc_types.add(cmd_type)
 
     # ---- 需要参数加工/校验的指令 ----
 
@@ -239,11 +248,93 @@ class DesktopBridgeServer(BridgeServer):
         self._api.delete_session(name)
 
     def _rpc_models_select(self, data: dict) -> bool:
-        """models.select：切换文本模型并持久化（重启引擎后生效，与工作台一致）。"""
+        """models.select：切换文本模型（写盘 + 引擎热切换，与工作台一致）。
+
+        写盘成功即入队 switch_model，引擎线程内串行替换运行中的 provider /
+        QueryLoop，切换立即可用；落地推 model_switched、失败推 warn（事件回执）。
+
+        @author aceFelix
+        """
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("缺少模型名 name")
         return self._api.set_model(name)
+
+    def _rpc_models_add(self, data: dict) -> dict:
+        """models.add：添加/覆盖自定义模型（桌面壳左栏「添加模型」表单提交）。
+
+        入表前完成字段校验：name 必填；api_format / model_type 限枚举值，
+        避免写入引擎无法识别的配置（写盘与内存同步由 api.add_model 承担，
+        与 REPL /models 添加其他模型同口径）。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("缺少模型名 name")
+        api_format = (data.get("api_format") or "openai").strip() or "openai"
+        if api_format not in VALID_API_FORMATS:
+            raise ValueError(f"不支持的接口类型 api_format: {api_format}")
+        model_type = (data.get("model_type") or "text").strip() or "text"
+        if model_type not in VALID_MODEL_TYPES:
+            raise ValueError(f"不支持的模型类型 model_type: {model_type}")
+        return self._api.add_model(
+            name,
+            vendor=(data.get("vendor") or "deepseek").strip() or "deepseek",
+            api_format=api_format,
+            base_url=(data.get("base_url") or "").strip(),
+            api_key=(data.get("api_key") or "").strip(),
+            model_type=model_type,
+        )
+
+    def _rpc_models_edit(self, data: dict) -> dict:
+        """models.edit：修改模型配置（桌面壳左栏双击模型项 → 编辑表单 → 提交）。
+
+        与 models.add 同族：同步写盘 + 同步内存 → reply 回执，前端拿到回执后
+        刷新模型列表（不新增事件）。字段校验口径同 add：name 必填，
+        api_format / model_type 非空时须落枚举；留空表示「沿用现值」由 api 层
+        回填，因此这里不填默认值（否则会把用户没改的字段冲成默认）。
+
+        两处语义需前端配合（见 api.edit_model / model_admin 模块说明）：
+        - api_key 留空 = **保持原 Key 不变**（桌面壳不回显密钥，不能当清空用）；
+        - 若改的是当前运行模型，api 层会入队带 force 的 switch_model，引擎强制
+          按新配置重建 provider，端点/模型类型改动立即生效（回执 hot_switched）。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("缺少模型名 name")
+        api_format = (data.get("api_format") or "").strip()
+        if api_format and api_format not in VALID_API_FORMATS:
+            raise ValueError(f"不支持的接口类型 api_format: {api_format}")
+        model_type = (data.get("model_type") or "").strip()
+        if model_type and model_type not in VALID_MODEL_TYPES:
+            raise ValueError(f"不支持的模型类型 model_type: {model_type}")
+        return self._api.edit_model(
+            name,
+            new_name=(data.get("new_name") or "").strip(),
+            vendor=(data.get("vendor") or "").strip(),
+            api_format=api_format,
+            base_url=(data.get("base_url") or "").strip(),
+            api_key=(data.get("api_key") or "").strip(),
+            model_type=model_type,
+        )
+
+    def _rpc_models_remove(self, data: dict) -> dict:
+        """models.remove：删除自定义模型（桌面壳左栏右键模型项 → 删除按钮）。
+
+        仅自定义模型可删（内置模型来自项目级 [llm.models]，删掉用户级覆盖段
+        仍会留在列表里，api 层直接拒绝）；删成功即同步内存 custom_models，
+        回执 {name, was_current}，was_current=true 时前端提示「当前仍在使用
+        该模型，可另选一个」。删除不动运行中的 provider。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("缺少模型名 name")
+        return self._api.remove_model(name)
 
     def _rpc_voices_select(self, data: dict) -> bool:
         """voices.select：切换 TTS 音色并持久化。"""

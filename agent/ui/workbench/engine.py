@@ -7,6 +7,9 @@ pywebview 要求主线程跑窗口，因此把对话引擎放进守护线程：
   但去掉终端专属环节（启动动画/剪贴板/桥接广播），MCP 保持接入
 - 会话持久化复用 ``session_manager._auto_save``（与 REPL 同一套存盘格式），
   历史会话可被左栏列表读取并恢复
+- 旁路能力按功能拆同包模块（控本文件行数）：voice_adapter（语音事件适配）、
+  mcp_runtime（MCP 接入与启动预热）、model_switch（模型热切换）、
+  render（附件解析与渲染）
 
 @author aceFelix
 """
@@ -31,55 +34,18 @@ from agent.ui.workbench.render import (  # noqa: F401
     _messages_to_render,
     _parse_images,
 )
-from agent.voice.voice_events import VoiceEventsBase
-
-# 半双工语音 WS 事件名（与 agent/serve/protocol.py 的 EVT_VOICE_* 字面量对齐；
-# 此处不 import serve 包，避免 workbench ↔ serve 循环依赖）。
-_EVT_VOICE_STARTED = "voice_started"
-_EVT_VOICE_STOPPED = "voice_stopped"
-_EVT_VOICE_STATE = "voice_state"
-_EVT_VOICE_USER_TRANSCRIPT = "voice_user_transcript"
-_EVT_VOICE_AI_TEXT_DELTA = "voice_ai_text_delta"
-_EVT_VOICE_AI_TEXT = "voice_ai_text"
-
-
-class ServeVoiceAdapter(VoiceEventsBase):
-    """serve / 桌面壳宿主适配器：voice_loop 事件 → WS 事件外抛。
-
-    把解耦 voice_loop 的状态 / 转录 / 流式文本转成 ``voice_*`` 事件经
-    event_queue 推给桌面壳（jarvis-desktop）渲染；提示 / 错误复用现有
-    info / warn / error 通道。音频（STT 录音 / TTS 播放）留在本进程本地
-    pyaudio，不向 GUI 传音频流。
-
-    @author aceFelix
-    """
-
-    def __init__(self, emitter: _EventEmitter) -> None:
-        self._emitter = emitter
-
-    def on_state(self, state: str) -> None:
-        """状态迁移 → voice_state 事件。"""
-        self._emitter.emit(_EVT_VOICE_STATE, state)
-
-    def on_user_transcript(self, text: str) -> None:
-        """用户识别全文 → voice_user_transcript 事件（上屏用户气泡）。"""
-        self._emitter.emit(_EVT_VOICE_USER_TRANSCRIPT, text)
-
-    def on_ai_text_delta(self, text: str) -> None:
-        """AI 流式增量 → voice_ai_text_delta 事件（流式上屏）。"""
-        self._emitter.emit(_EVT_VOICE_AI_TEXT_DELTA, text)
-
-    def on_ai_text(self, text: str) -> None:
-        """AI 回复全文 → voice_ai_text 事件（流式收尾校验）。"""
-        self._emitter.emit(_EVT_VOICE_AI_TEXT, text)
-
-    def on_info(self, msg: str, level: str = "info") -> None:
-        """提示 / 告警 → 复用 info / warn 通道。"""
-        self._emitter.emit(level if level in ("info", "warn") else "info", msg)
-
-    def on_error(self, msg: str) -> None:
-        """错误 → 复用 error 通道。"""
-        self._emitter.emit("error", msg)
+# 语音适配器与语音 WS 事件名拆到 voice_adapter.py（控本文件行数）；此处导入
+# 保持 ``engine.ServeVoiceAdapter`` 的既有引用路径（tests/voice 直接导入）。
+# @author aceFelix
+from agent.ui.workbench.voice_adapter import (  # noqa: F401
+    _EVT_VOICE_STARTED,
+    _EVT_VOICE_STOPPED,
+    ServeVoiceAdapter,
+)
+# 引擎旁路能力（MCP 预热 / 模型热切换）实现在同包模块，见各自模块头注释。
+# 方法名与行为保持不变（测试与调用方直接调 engine._prewarm 等）。
+# @author aceFelix
+from agent.ui.workbench import mcp_runtime, model_switch
 
 
 class ChatEngine:
@@ -137,6 +103,14 @@ class ChatEngine:
         # 自动标题任务句柄：用户改名时取消未落地任务，防自动标题覆盖自定义名。
         # @author aceFelix
         self._title_task: asyncio.Task | None = None
+        # 待生效的模型切换：models.select 可能在会话装配前到达（首条消息前的
+        # 选模型），此时先记账，_ensure_session 装配完成后落地；空串 = 无。
+        # @author aceFelix
+        self._model_override = ""
+        # 当前 provider 的端点配置快照：热切换时作为「要不要重建 provider」的
+        # 比较基准。不能直接用 _settings —— 它始终是进程启动时的快照。
+        # @author aceFelix
+        self._provider_settings = settings
 
     # ---- 只读状态快照（serve 右栏数据源：cost.get / state.get 经 WorkbenchAPI 读取） ----
 
@@ -179,6 +153,30 @@ class ChatEngine:
         列表每次刷新现读现比，前端无需跟踪事件序列。@author aceFelix
         """
         return str(getattr(self, "_session_name", "") or "")
+
+    @property
+    def current_model(self) -> str:
+        """当前生效的模型名（models.list 的 current / cost.get 数据源）。
+
+        会话已装配 → QueryLoop 正在跑的模型（热切换即时更新）；未装配 →
+        待生效的切换目标（models.select 早于首条消息时先记账）；
+        都没有 → 启动配置快照。@author aceFelix
+        """
+        if getattr(self, "_session_ready", False):
+            current = getattr(self, "_model", "")
+        else:
+            current = self._model_override
+        return str(current or self._settings.model or "")
+
+    @property
+    def current_vendor(self) -> str:
+        """当前生效模型的厂商（state.get 的 provider 字段数据源）。
+
+        provider 端点快照随热切换更新（自定义模型可能换厂商），
+        故不能一律读启动 settings。@author aceFelix
+        """
+        vendor = getattr(self._provider_settings, "provider", "")
+        return str(vendor or self._settings.provider or "")
 
     @property
     def mcp_status(self) -> dict[str, Any] | None:
@@ -245,32 +243,13 @@ class ChatEngine:
     # ---- 指令消费主循环 ----
 
     async def _prewarm(self) -> None:
-        """启动后台预装配：registry（+宿主钩子）→ MCP 连接。
+        """启动后台预装配：registry（+宿主钩子）→ MCP 连接（实现见 mcp_runtime）。
 
-        MCP 多 server 并发连接实测约 9s，把它从首条消息的 _ensure_session
-        前移到启动空窗后台：用户开始打字时 MCP 通常已就绪，首条消息秒进
-        LLM；预热窗口内就发消息也只是先少 MCP 工具聊（工具连上自动补挂，
-        与 harness 后台加载同口径）。任何异常置位 _registry_ready 后由
-        _ensure_session 降级同步装配，对话链路始终可用。@author aceFelix
+        MCP 多 server 连接实测约 9s，前移到启动空窗后台后首条消息秒进 LLM；
+        异常时仍置位 _registry_ready，由 _ensure_session 降级同步装配。
+        @author aceFelix
         """
-        try:
-            from agent.core.tool import build_default_registry
-
-            registry = build_default_registry()
-            if self._registry_hook is not None:
-                try:
-                    self._registry_hook(registry)
-                except Exception as e:
-                    self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
-            self._registry = registry
-            if self._settings.enable_mcp:
-                await self._connect_mcp(registry)
-        except Exception as e:
-            self._emitter.emit(
-                "info", f"⚠ 启动预热失败（首条消息同步装配兜底）: {type(e).__name__}: {e}"
-            )
-        finally:
-            self._registry_ready.set()
+        await mcp_runtime.prewarm(self)
 
     async def _command_loop(self) -> None:
         """消费前端指令队列；空闲时让出事件循环。"""
@@ -315,6 +294,11 @@ class ChatEngine:
         elif action == "delete_session":
             await self._ensure_session()
             self._handle_delete(cmd.get("name", ""))
+        elif action == "switch_model":
+            # 模型热切换：刻意不调 _ensure_session（会话未装配时由处理函数
+            # 记账延迟，不因一次切换提前触发重型装配）。force 由 models.edit
+            # 带上（改了当前模型配置 → 同名也必须重建 provider）。@author aceFelix
+            await self._handle_switch_model(cmd.get("name", ""), bool(cmd.get("force")))
         elif action == "start_talk":
             await self._handle_start_talk()
         elif action == "stop_talk":
@@ -405,6 +389,7 @@ class ChatEngine:
             chat_detection=s.tools_chat_detection,
         )
         self._provider = provider
+        self._provider_settings = s
         self._query_loop = loop
         self._model = model
         self._messages: list[Message] = []
@@ -415,67 +400,33 @@ class ChatEngine:
         self._session_ready = True
         self._emitter.emit("status", "就绪")
         self._emitter.emit("session_ready", {"name": self._session_name})
+        # 装配期间到达的模型切换（models.select 早于首条消息）：此时补落地，
+        # 让首个 send 就用上用户刚选的模型。@author aceFelix
+        if self._model_override:
+            override = self._model_override
+            self._model_override = ""
+            await self._handle_switch_model(override)
 
-    def _register_harness(self, registry: Any, workdir: str) -> None:
-        """后台注册 CLI-Anything harness 工具（失败不影响主流程）。"""
-        try:
-            from agent.core.tool import register_dynamic_tools
+    async def _handle_switch_model(self, name: str, force: bool = False) -> None:
+        """热切换运行中的对话模型（models.select / models.edit；实现见 model_switch）。
 
-            count = register_dynamic_tools(registry, workdir=workdir)
-            if count > 0:
-                self._emitter.emit("info", f"✓ harness 工具已加载（{count} 个）")
-        except Exception:
-            pass
-
-    async def _connect_mcp(self, registry: Any) -> None:
-        """连接配置的 MCP server 并把其工具注册进 registry（对齐 main.repl 的 MCP 接入）。
-
-        - connect_all 内部并发连接且每 server 有超时，不会把引擎装配拖成无限等待；
-        - client 引用保留在 self._mcp_client，防 GC 回收导致子进程连接断开；
-        - 任何异常静默降级（仅 info 提示），不阻断文本对话装配。
-
+        切换在引擎指令队列里串行执行：正有一轮回复在跑时，它在回复结束后
+        落地；会话未装配时只记账（_model_override）延迟到 _ensure_session。
+        force=True（models.edit 改了当前模型配置）时同名也重建 provider。
         @author aceFelix
         """
-        try:
-            from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
-            from agent.core.tool import register_dynamic_tools
+        await model_switch.handle_switch_model(self, name, force)
 
-            client = MCPClient()
-            if not client.available:
-                return
-            config = load_mcp_config()
-            if not config:
-                return
-            self._emitter.emit("status", f"正在连接 {len(config)} 个 MCP server...")
-            results = await client.connect_all(config)
-            connected = sum(1 for v in results.values() if v)
-            if not connected:
-                self._mcp_status = {
-                    "connected": [],
-                    "failed": list(config.keys()),
-                    "tools": 0,
-                }
-                self._emitter.emit(
-                    "info", f"⚠ MCP: 所有 server 连接失败（{', '.join(config.keys())}）"
-                )
-                return
-            self._mcp_client = client
-            count = register_dynamic_tools(registry, client)
-            failed = [name for name, ok in results.items() if not ok]
-            # 连接结果快照：供 state.get 右栏运行健康展示（成功/失败名单 + 工具数）
-            self._mcp_status = {
-                "connected": [name for name, ok in results.items() if ok],
-                "failed": failed,
-                "tools": count,
-            }
-            msg = f"MCP: {connected}/{len(config)} server 已连接，注册 {count} 个工具"
-            if failed:
-                msg += f"（{', '.join(failed)} 连接失败，对应工具不可用）"
-            self._emitter.emit("info", msg)
-        except ImportError:
-            pass  # MCP SDK 未安装，跳过接入
-        except Exception as e:
-            self._emitter.emit("info", f"⚠ MCP 接入异常: {type(e).__name__}: {e}")
+    def _register_harness(self, registry: Any, workdir: str) -> None:
+        """后台注册 CLI-Anything harness 工具（实现见 mcp_runtime）。"""
+        mcp_runtime.register_harness(self, registry, workdir)
+
+    async def _connect_mcp(self, registry: Any) -> None:
+        """连接配置的 MCP server 并把工具注册进 registry（实现见 mcp_runtime）。
+
+        任何异常静默降级（仅 info 提示），不阻断文本对话装配。@author aceFelix
+        """
+        await mcp_runtime.connect_mcp(self, registry)
 
     async def _handle_send(
         self,

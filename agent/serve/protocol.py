@@ -36,6 +36,18 @@ sessions.open       name: str                   null（结果走 session_loaded�
 sessions.new        —                           null（结果走 session_new）
 models.list         —                           [{name, vendor, current, ...}]
 models.select       name: str                   bool（是否持久化成功）
+models.add          name: str, vendor: str,     {name, vendor, api_format,
+                      api_format: str,            base_url, model_type}
+                      base_url: str, api_key: str,
+                      model_type: str
+models.edit         name: str                   {name, vendor, api_format,
+                      [, new_name: str,           base_url, model_type,
+                      vendor: str,                hot_switched: bool}
+                      api_format: str,
+                      base_url: str,
+                      api_key: str,
+                      model_type: str]
+models.remove       name: str                   {name, was_current}
 voices.list         —                           [{name, current, ...}]
 voices.select       name: str                   bool
 metrics.get         —                           {cpu, memory, disk}
@@ -90,6 +102,14 @@ CMD_SESSIONS_RENAME = "sessions.rename"
 CMD_SESSIONS_DELETE = "sessions.delete"
 CMD_MODELS_LIST = "models.list"
 CMD_MODELS_SELECT = "models.select"
+# models.add（2026-09）：桌面壳左栏「添加模型」表单提交 —— 写用户级 models.toml
+# 的 [llm.custom_models."<name>"]（与 /models 添加其他模型同口径）。
+CMD_MODELS_ADD = "models.add"
+# models.edit / models.remove（2026-09）：桌面壳左栏模型面板的配置管理 ——
+# 双击模型项进编辑表单（models.edit）、右键显删除按钮（models.remove，
+# 仅自定义模型可删），与 /models 的「修改配置 / 删除模型」同口径。
+CMD_MODELS_EDIT = "models.edit"
+CMD_MODELS_REMOVE = "models.remove"
 CMD_VOICES_LIST = "voices.list"
 CMD_VOICES_SELECT = "voices.select"
 CMD_METRICS_GET = "metrics.get"
@@ -117,6 +137,9 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_SESSIONS_DELETE,
     CMD_MODELS_LIST,
     CMD_MODELS_SELECT,
+    CMD_MODELS_ADD,
+    CMD_MODELS_EDIT,
+    CMD_MODELS_REMOVE,
     CMD_VOICES_LIST,
     CMD_VOICES_SELECT,
     CMD_METRICS_GET,

@@ -3,8 +3,15 @@
 覆盖：
 - message：入引擎队列 + ok 回执；空文本 → 失败回执
 - request/response 型指令：sessions/models/voices/metrics/state 正常路径
+- models.add：添加自定义模型（字段校验 + 写盘隔离 + 内存同步后列表可见）
+- models.edit：改内置模型（名锁定/写用户级覆盖配置）、改自定义模型（可改名且
+  旧段清除、api_key 留空保持原 Key）、字段校验、改当前模型入队强制热切换
+- models.remove：自定义模型删成功且列表消失；内置模型 / 不存在的名字被拒
+- models.select：写盘成功入队 switch_model（引擎立即热切换）、写盘失败不入队；
+  models.list 的 current 取引擎实时模型（不再停在启动快照）
 - schedule.list / cost.get：右栏任务中心与用量卡数据源（hub 缺失降级空列表）
 - 参数校验：sessions.open / models.select / voices.select 缺 name → 失败回执
+- 未注册指令 / 缺 type 字段：回 ok=false 失败回执（不静默忽略）
 - 事件泵：引擎事件 → broadcast 信封映射；stop 幂等
 
 @author aceFelix
@@ -16,6 +23,7 @@ import asyncio
 import json
 import queue
 import time
+from pathlib import Path
 
 from agent.config.settings import Settings
 from agent.core.daemon.deadline import Deadline
@@ -43,6 +51,15 @@ def _make() -> tuple[DesktopBridgeServer, WorkbenchAPI, queue.Queue, queue.Queue
     api = WorkbenchAPI(event_queue, command_queue, engine, settings)
     server = DesktopBridgeServer(api, settings)
     return server, api, event_queue, command_queue
+
+
+def _make_with_settings(settings: Settings) -> tuple[DesktopBridgeServer, WorkbenchAPI, queue.Queue]:
+    """用定制 Settings 起 server（模型内置/自定义表可控的用例用）。"""
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
+    return DesktopBridgeServer(api, settings), api, command_queue
 
 
 def _call(server: DesktopBridgeServer, cmd: str, data: dict) -> dict:
@@ -146,6 +163,309 @@ def test_models_list_and_select():
     bad = _call(server, "models.select", {})
     assert bad["data"]["ok"] is False
     assert "name" in bad["data"]["error"]
+
+
+def test_models_select_enqueues_hot_switch(monkeypatch) -> None:
+    """models.select 写盘成功 → 回执 ok 且入队 switch_model（引擎立即热切换）。
+
+    只写 last_model 时，切换要等进程重启才生效（列表「当前」也不动）；
+    现在写盘成功后追加引擎指令，切换在引擎线程内串行落地。
+    """
+    import agent.config.model_registry as mr
+
+    monkeypatch.setattr(mr, "save_last_model", lambda name: True)  # 不碰真实 ~/.jarvis
+    server, _, _, command_queue = _make()
+
+    reply = _call(server, "models.select", {"name": "qwen3.8-2.4t-a95b"})
+
+    assert reply["data"]["ok"] is True
+    assert reply["data"]["result"] is True
+    assert command_queue.get_nowait() == {"cmd": "switch_model", "name": "qwen3.8-2.4t-a95b"}
+
+
+def test_models_select_write_failure_no_enqueue(monkeypatch) -> None:
+    """写盘失败 → result=false 且不入队（不谎报已切换，引擎保持原模型）。
+
+    回执 ok 只表示指令被处理；业务结果在 result（与 voices.select 同口径，
+    前端把 result!==true 当失败并提示，引擎不收到任何切换指令）。
+    """
+    import agent.config.model_registry as mr
+
+    monkeypatch.setattr(mr, "save_last_model", lambda name: False)
+    server, _, _, command_queue = _make()
+
+    reply = _call(server, "models.select", {"name": "m1"})
+
+    assert reply["data"]["ok"] is True
+    assert reply["data"]["result"] is False
+    assert command_queue.empty()
+
+
+def test_models_list_current_follows_engine() -> None:
+    """models.list 的 current 取引擎实时模型：热切换后「当前」立刻移动。
+
+    回归：current 曾取自启动配置快照（settings.model），于是点选新模型后
+    列表仍标旧模型为「当前」—— 桌面壳表现为「选了 qwen3.8-2.4t-a95b，
+    列表里当前还是 qwen3.8-flash」。
+    """
+    settings = Settings(
+        model="qwen3.8-flash",
+        models={"qwen3.8-flash": "通义千问 3.8 Flash", "qwen3.8-2.4t-a95b": "通义千问 3.8 2.4T"},
+    )
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
+    server = DesktopBridgeServer(api, settings)
+
+    def current_of() -> list[str]:
+        listing = _call(server, "models.list", {})
+        return [m["name"] for m in listing["data"]["result"] if m["current"]]
+
+    assert current_of() == ["qwen3.8-flash"]  # 启动时：配置模型
+    engine._model_override = "qwen3.8-2.4t-a95b"  # 点选后：引擎记账待落地
+    assert current_of() == ["qwen3.8-2.4t-a95b"]
+    engine._model = "qwen3.8-2.4t-a95b"  # 装配后：QueryLoop 正在跑的模型
+    engine._session_ready = True
+    engine._model_override = ""
+    assert current_of() == ["qwen3.8-2.4t-a95b"]
+
+
+def test_models_add_field_validation():
+    """models.add 缺 name / 非法接口类型 / 非法模型类型 → 失败回执，不写盘。"""
+    server, _, _, _ = _make()
+    bad = _call(server, "models.add", {})
+    assert bad["data"]["ok"] is False
+    assert "name" in bad["data"]["error"]
+    bad_fmt = _call(server, "models.add", {"name": "m1", "api_format": "grpc"})
+    assert bad_fmt["data"]["ok"] is False
+    assert "api_format" in bad_fmt["data"]["error"]
+    bad_type = _call(server, "models.add", {"name": "m1", "model_type": "audio"})
+    assert bad_type["data"]["ok"] is False
+    assert "model_type" in bad_type["data"]["error"]
+
+
+def test_models_add_persists_and_visible_in_list(tmp_path):
+    """models.add 成功：写用户级 models.toml（含 base_url 推断）+ 内存同步，
+    models.list 立即列出新模型（桌面壳左栏「添加模型」链路）。
+
+    落盘目标用 Path.home 重定向到 tmp_path、keyring 读写 no-op ——
+    不触碰真实 ~/.jarvis 与系统凭据管理器（与 tests/config/ 口径一致）。
+    """
+    from unittest.mock import patch
+
+    import agent.config.keyring_store as ks
+
+    server, _, _, _ = _make()
+    (tmp_path / ".jarvis").mkdir()
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(
+        ks, "store_api_key", lambda *a, **k: None
+    ):
+        reply = _call(
+            server,
+            "models.add",
+            {
+                "name": "my-model",
+                "vendor": "deepseek",
+                "api_format": "openai",
+                "base_url": "",
+                "api_key": "sk-test",
+                "model_type": "multimodal",
+            },
+        )
+        assert reply["data"]["ok"] is True
+        result = reply["data"]["result"]
+        assert result["name"] == "my-model"
+        # base_url 留空 → 按厂商 + 接口类型推断（与 /models 添加同口径）
+        assert result["base_url"] == "https://api.deepseek.com"
+        # 写盘落到重定向后的用户级 models.toml
+        text = (tmp_path / ".jarvis" / "models.toml").read_text(encoding="utf-8")
+        assert '[llm.custom_models."my-model"]' in text
+
+    # 内存同步：即使已出 patch 上下文，models.list 仍能列出（同进程 settings 快照）
+    listing = _call(server, "models.list", {})
+    names = [m["name"] for m in listing["data"]["result"]]
+    assert "my-model" in names
+
+
+def test_models_edit_validation_and_unknown_model():
+    """models.edit：缺 name / 非法枚举 / 名字不存在 → 失败回执（均不落盘）。"""
+    server, _, _, _ = _make()
+    bad = _call(server, "models.edit", {})
+    assert bad["data"]["ok"] is False
+    assert "name" in bad["data"]["error"]
+    bad_fmt = _call(server, "models.edit", {"name": "m1", "api_format": "grpc"})
+    assert bad_fmt["data"]["ok"] is False
+    assert "api_format" in bad_fmt["data"]["error"]
+    bad_type = _call(server, "models.edit", {"name": "m1", "model_type": "audio"})
+    assert bad_type["data"]["ok"] is False
+    assert "model_type" in bad_type["data"]["error"]
+    unknown = _call(server, "models.edit", {"name": "__no_such_model_probe__"})
+    assert unknown["data"]["ok"] is False
+    assert "不存在" in unknown["data"]["error"]
+
+
+def test_models_edit_builtin_model_writes_override(tmp_path):
+    """models.edit 改内置模型：名字锁定，写用户级覆盖配置；改的又是当前运行
+    模型 → 入队带 force 的 switch_model（引擎按新配置强制重建 provider）。
+
+    对应桌面兏「双击内置模型项 → 改 base_url/接口类型 → 保存」。
+    """
+    from unittest.mock import patch
+
+    import agent.config.keyring_store as ks
+
+    settings = Settings(model="qwen3.8-flash", models={"qwen3.8-flash": "通义千问 3.8 Flash"})
+    server, _, command_queue = _make_with_settings(settings)
+    (tmp_path / ".jarvis").mkdir()
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(
+        ks, "store_api_key", lambda *a, **k: None
+    ):
+        reply = _call(
+            server,
+            "models.edit",
+            {
+                "name": "qwen3.8-flash",
+                "api_format": "openai",
+                "base_url": "https://example.com/v1",
+                "api_key": "sk-new",
+                "model_type": "text",
+            },
+        )
+
+    assert reply["data"]["ok"] is True
+    result = reply["data"]["result"]
+    assert result["name"] == "qwen3.8-flash"  # 内置名字锁定
+    assert result["base_url"] == "https://example.com/v1"
+    assert result["model_type"] == "text"
+    assert result["hot_switched"] is True
+    # 写盘落到重定向后的用户级 models.toml（内置模型写的是覆盖配置）
+    text = (tmp_path / ".jarvis" / "models.toml").read_text(encoding="utf-8")
+    assert '[llm.custom_models."qwen3.8-flash"]' in text
+    assert "https://example.com/v1" in text
+    # 当前运行模型 → force 入队（跳过「同名即当前」短接，按新配置重建）
+    assert command_queue.get_nowait() == {
+        "cmd": "switch_model", "name": "qwen3.8-flash", "force": True,
+    }
+
+
+def test_models_edit_custom_rename_keeps_blank_api_key(tmp_path):
+    """models.edit 改自定义模型：可改名（旧段删除），api_key 留空 → 保持原 Key。
+
+    桌面兏不回显密钥 —— 表单 Key 留空必须是「不变」而非「清空」，否则
+    用户只改个名字就会把密钥抹掉（与 REPL 预填明文的口径刻意不同）。
+    改的不是当前模型 → 不入队、hot_switched=false。
+    """
+    from unittest.mock import patch
+
+    import agent.config.keyring_store as ks
+
+    settings = Settings(
+        custom_models={
+            "edit-probe-old": {
+                "name": "edit-probe-old",
+                "provider": "deepseek",
+                "api_format": "openai",
+                "base_url": "https://api.deepseek.com",
+                "api_key": "sk-keep",
+                "model_type": "text",
+            },
+        },
+    )
+    server, _, command_queue = _make_with_settings(settings)
+    (tmp_path / ".jarvis").mkdir()
+    with patch.object(Path, "home", return_value=tmp_path), patch.object(
+        ks, "store_api_key", lambda *a, **k: None
+    ):
+        reply = _call(server, "models.edit", {"name": "edit-probe-old", "new_name": "edit-probe-new"})
+
+    assert reply["data"]["ok"] is True
+    result = reply["data"]["result"]
+    assert result["name"] == "edit-probe-new"
+    assert result["base_url"] == "https://api.deepseek.com"  # 留空沿用旧值
+    assert result["hot_switched"] is False
+    assert command_queue.empty()
+    # 内存同步：旧名移除、密钥保留
+    assert "edit-probe-old" not in settings.custom_models
+    assert settings.custom_models["edit-probe-new"]["api_key"] == "sk-keep"
+    # 磁盘：旧段不得残留（否则旧名成「幽灵模型」）
+    text = (tmp_path / ".jarvis" / "models.toml").read_text(encoding="utf-8")
+    assert '[llm.custom_models."edit-probe-new"]' in text
+    assert '[llm.custom_models."edit-probe-old"]' not in text
+    names = [m["name"] for m in _call(server, "models.list", {})["data"]["result"]]
+    assert "edit-probe-new" in names
+    assert "edit-probe-old" not in names
+
+
+def test_models_edit_builtin_rename_rejected():
+    """models.edit 给内置模型改名 → 失败回执（内置名固定，不能出「幽灵模型」）。"""
+    settings = Settings(models={"qwen3.8-flash": "通义千问 3.8 Flash"})
+    server, _, command_queue = _make_with_settings(settings)
+    reply = _call(server, "models.edit", {"name": "qwen3.8-flash", "new_name": "my-flash"})
+    assert reply["data"]["ok"] is False
+    assert "内置模型名" in reply["data"]["error"]
+    assert command_queue.empty()
+
+
+def test_models_remove_custom_and_reject_builtin(tmp_path):
+    """models.remove：自定义模型删成功且列表消失；内置模型 / 不存在 → 失败回执。
+
+    内置模型来自项目级 [llm.models]，删掉用户级覆盖段也只是回退默认端点、
+    列表里仍在 —— 直接拒绝（对齐 REPL 的 allow_delete=是否自定义）。
+    """
+    from unittest.mock import patch
+
+    settings = Settings(
+        models={"builtin-probe": "内置探针"},
+        custom_models={"custom-probe": {"name": "custom-probe", "provider": "deepseek"}},
+    )
+    server, _, _ = _make_with_settings(settings)
+    (tmp_path / ".jarvis").mkdir()
+    # 先把自定义模型写进用户级 models.toml（remove 只删磁盘上真实存在的段）
+    with patch.object(Path, "home", return_value=tmp_path):
+        _call(
+            server,
+            "models.add",
+            {"name": "custom-probe", "vendor": "deepseek", "api_format": "openai"},
+        )
+        assert '[llm.custom_models."custom-probe"]' in (
+            tmp_path / ".jarvis" / "models.toml"
+        ).read_text(encoding="utf-8")
+
+        builtin = _call(server, "models.remove", {"name": "builtin-probe"})
+        assert builtin["data"]["ok"] is False
+        assert "内置模型不可删除" in builtin["data"]["error"]
+        missing = _call(server, "models.remove", {"name": "__no_such_model_probe__"})
+        assert missing["data"]["ok"] is False
+
+        reply = _call(server, "models.remove", {"name": "custom-probe"})
+        # 磁盘段已删除（列表不再「重启复活」）
+        assert '[llm.custom_models."custom-probe"]' not in (
+            tmp_path / ".jarvis" / "models.toml"
+        ).read_text(encoding="utf-8")
+
+    assert reply["data"]["ok"] is True
+    assert reply["data"]["result"] == {"name": "custom-probe", "was_current": False}
+    assert "custom-probe" not in settings.custom_models
+    names = [m["name"] for m in _call(server, "models.list", {})["data"]["result"]]
+    assert "custom-probe" not in names
+    assert "builtin-probe" in names  # 内置模型未被误删
+
+
+def test_models_remove_project_level_custom_rejected(tmp_path):
+    """内置表中不存在、但用户级 models.toml 也没写的自定义模型 → 拒绝删除。
+
+    否则删了会在重启后从项目级配置「复活」，属口径分裂；报错不让前端以为删成功。
+    """
+    from unittest.mock import patch
+
+    settings = Settings(custom_models={"ghost-probe": {"name": "ghost-probe"}})
+    server, _, _ = _make_with_settings(settings)
+    with patch.object(Path, "home", return_value=tmp_path):
+        reply = _call(server, "models.remove", {"name": "ghost-probe"})
+    assert reply["data"]["ok"] is False
+    assert "删除失败" in reply["data"]["error"]
+    assert "ghost-probe" in settings.custom_models  # 失败不动内存状态
 
 
 def test_voices_list_and_select():
@@ -283,9 +603,52 @@ def test_answer_user_enqueues():
 
 
 def test_unknown_command_not_registered():
-    """未注册指令不在处理器表中（reader 主循环会静默忽略）。"""
+    """未注册指令不在处理器表中。
+
+    分发层对这种情况回 ok=false 失败回执（见 test_unregistered_command_replies_error），
+    不是静默忽略。
+    """
     server, _, _, _ = _make()
     assert "not.a.command" not in server._ws_handlers
+
+
+class _FakeConn:
+    """按序吐出预设 JSON 帧的假 WS 连接（直驱 _handle_ws 主循环）。"""
+
+    def __init__(self, frames: list[dict]) -> None:
+        self._raw = [json.dumps(f, ensure_ascii=False) for f in frames]
+        self.sent: list[dict] = []
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for raw in self._raw:
+            yield raw
+
+    async def send(self, raw: str) -> None:
+        self.sent.append(json.loads(raw))
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        pass
+
+
+def test_unregistered_command_replies_error():
+    """未注册指令 / 缺 type 字段：回 ok=false 失败回执（不回则客户端干等到超时）。
+
+    旧行为是静默忽略：前端（桌面壳 15s 超时 / 手机端）按回执等待，静默丢弃只会
+    表现为「指令 X 回执超时」且看不到原因——典型触发是前端已热更新、后端进程
+    仍是旧代码（python -m agent.serve 不热重载）。
+    """
+    server, _, _, _ = _make()
+    conn = _FakeConn([{"type": "not.a.command"}, {"type": ""}])
+    asyncio.run(server._handle_ws(conn, f"/?token={server._token}"))
+    replies = [f for f in conn.sent if f.get("event") == "reply"]
+    assert [r["data"]["type"] for r in replies] == ["not.a.command", ""]
+    assert all(r["data"]["ok"] is False for r in replies)
+    assert "不支持指令 not.a.command" in replies[0]["data"]["error"]
+    assert "重启后端" in replies[0]["data"]["error"]
+    assert replies[1]["data"]["error"] == "指令缺少 type 字段"
 
 
 # ---- 每连接首帧 ----

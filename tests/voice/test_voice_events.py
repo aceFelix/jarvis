@@ -290,15 +290,19 @@ class TestServeProtocolVoice:
         assert protocol.EVT_VOICE_AI_TEXT == "voice_ai_text"
 
     def test_engine_literals_match_protocol(self) -> None:
-        """engine 的字面量事件名应与 protocol 常量一致（防漂移）。"""
+        """语音事件字面量应与 protocol 常量一致（防漂移）。
+
+        字面量定义在 agent/ui/workbench/voice_adapter.py（自 engine 拆出），
+        此处直接盯定义点。@author aceFelix
+        """
         from agent.serve import protocol
-        from agent.ui.workbench import engine
-        assert engine._EVT_VOICE_STARTED == protocol.EVT_VOICE_STARTED
-        assert engine._EVT_VOICE_STOPPED == protocol.EVT_VOICE_STOPPED
-        assert engine._EVT_VOICE_STATE == protocol.EVT_VOICE_STATE
-        assert engine._EVT_VOICE_USER_TRANSCRIPT == protocol.EVT_VOICE_USER_TRANSCRIPT
-        assert engine._EVT_VOICE_AI_TEXT_DELTA == protocol.EVT_VOICE_AI_TEXT_DELTA
-        assert engine._EVT_VOICE_AI_TEXT == protocol.EVT_VOICE_AI_TEXT
+        from agent.ui.workbench import voice_adapter
+        assert voice_adapter._EVT_VOICE_STARTED == protocol.EVT_VOICE_STARTED
+        assert voice_adapter._EVT_VOICE_STOPPED == protocol.EVT_VOICE_STOPPED
+        assert voice_adapter._EVT_VOICE_STATE == protocol.EVT_VOICE_STATE
+        assert voice_adapter._EVT_VOICE_USER_TRANSCRIPT == protocol.EVT_VOICE_USER_TRANSCRIPT
+        assert voice_adapter._EVT_VOICE_AI_TEXT_DELTA == protocol.EVT_VOICE_AI_TEXT_DELTA
+        assert voice_adapter._EVT_VOICE_AI_TEXT == protocol.EVT_VOICE_AI_TEXT
 
     def test_api_exposes_voice_methods(self) -> None:
         """WorkbenchAPI 应暴露 start_voice/stop_voice/interrupt_voice。"""

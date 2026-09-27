@@ -3,8 +3,9 @@
 覆盖：
 - build_handshake 握手 JSON 结构（Electron 主进程解析契约）
 - build_reply 回执信封（ok / 失败两路）
-- DESKTOP_COMMANDS 与 DesktopBridgeServer 处理器表一一对应（防漏注册）
+- DESKTOP_COMMANDS 与 DesktopBridgeServer 处理器表双向对应（防漏注册 / 防漏声明）
 - proactive.ack RPC：hub 缺失/参数缺失报错、正常路径透传
+- models.edit / models.remove RPC：缺 name / 非法枚举 / 名字不存在 → 不入库
 - settings.get/set RPC：白名单全键取值、校验、先落盘后生效、调度键热更新、
   落盘失败不动运行时
 
@@ -101,8 +102,62 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 23 个 rpc = 24（增减须同步双仓文档）。"""
-    assert len(protocol.DESKTOP_COMMANDS) == 24
+    """指令总数契约：message + 26 个 rpc = 27（增减须同步双仓文档）。"""
+    assert len(protocol.DESKTOP_COMMANDS) == 27
+
+
+def test_all_registered_rpcs_declared():
+    """反向防漏：WS 处理器表里注册的 RPC 都必须在 protocol 中声明。
+
+    `test_all_desktop_commands_registered` 是单向校验（集合 → 处理器表）；
+    反方向同样要防：只写了 `_register_rpc` 却忘记加入 `DESKTOP_COMMANDS`
+    时，集合依然「合法」（条数断言也照旧通过），契约却少了一条指令 ——
+    `models.add` 就长期漏在集合外，直到补 `models.edit` / `models.remove`
+    时才被发现。
+
+    @author aceFelix
+    """
+    server = _make_server()
+    # message 走事件泵（_cmd_message 覆写内置路由），不在 RPC 记账内
+    expected = set(protocol.DESKTOP_COMMANDS) - {protocol.CMD_MESSAGE}
+    assert server._rpc_types == expected, f"声明与注册不一致: {server._rpc_types ^ expected}"
+
+
+# ---- models.edit / models.remove RPC ----
+
+def test_models_edit_field_validation():
+    """models.edit：缺 name / 非法枚举 → ValueError（回执 ok=false，不写盘）。
+
+    与 models.add 同口径，但 api_format / model_type 允许留空（留空 = 沿用
+    现值），所以只有非空值才落枚举校验。
+    """
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_models_edit({})
+    with pytest.raises(ValueError):
+        server._rpc_models_edit({"name": "   "})
+    with pytest.raises(ValueError):
+        server._rpc_models_edit({"name": "m1", "api_format": "grpc"})
+    with pytest.raises(ValueError):
+        server._rpc_models_edit({"name": "m1", "model_type": "audio"})
+
+
+def test_models_edit_unknown_model_raises():
+    """models.edit：名字既不在内置表也不在自定义表 → ValueError（不凭空造模型）。"""
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_models_edit({"name": "__no_such_model_probe__"})
+
+
+def test_models_remove_field_validation():
+    """models.remove：缺 name → ValueError；内置/不存在的模型 → ValueError。"""
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_models_remove({})
+    with pytest.raises(ValueError):
+        server._rpc_models_remove({"name": "   "})
+    with pytest.raises(ValueError):
+        server._rpc_models_remove({"name": "__no_such_model_probe__"})
 
 
 # ---- proactive.ack RPC ----

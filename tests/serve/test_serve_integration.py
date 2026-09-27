@@ -4,6 +4,7 @@
 - 随机端口回填与 127.0.0.1 绑定收敛（不对局域网暴露）
 - token 认证：错误/缺失 token 被拒（close 4401）
 - 正确 token 连接后指令 → reply 回执全链路
+- 未注册指令 → ok=false 失败回执（不静默忽略）
 - 事件泵 broadcast → WS 客户端实际收到事件信封
 
 websockets 为可选依赖，缺失时整组跳过（与 bridge 同口径）。
@@ -82,6 +83,14 @@ async def _e2e() -> None:
             bad = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
             assert bad["data"]["ok"] is False
             assert "name" in bad["data"]["error"]
+
+            # 未注册指令（如旧后端收到新指令）：立即回 ok=false，不让客户端干等到超时
+            await ws.send(json.dumps({"type": "models.unknown"}))
+            unknown = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            assert unknown["event"] == "reply"
+            assert unknown["data"]["type"] == "models.unknown"
+            assert unknown["data"]["ok"] is False
+            assert "不支持指令 models.unknown" in unknown["data"]["error"]
 
             # 4. 事件泵：引擎事件 → broadcast → 客户端收到事件信封
             server.start_event_pump(event_queue)
