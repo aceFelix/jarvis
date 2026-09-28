@@ -9,6 +9,8 @@
 - models.remove：自定义模型删成功且列表消失；内置模型 / 不存在的名字被拒
 - models.select：写盘成功入队 switch_model（引擎立即热切换）、写盘失败不入队；
   models.list 的 current 取引擎实时模型（不再停在启动快照）
+- voices.*（2026-09-28 音色-模型适配）：list 全量目录+当前置顶、select dict
+  回执含联动字段、add 同名 upsert/内置名拒绝、delete 仅自定义可删
 - schedule.list / cost.get：右栏任务中心与用量卡数据源（hub 缺失降级空列表）
 - 参数校验：sessions.open / models.select / voices.select 缺 name → 失败回执
 - 未注册指令 / 缺 type 字段：回 ok=false 失败回执（不静默忽略）
@@ -469,13 +471,87 @@ def test_models_remove_project_level_custom_rejected(tmp_path):
 
 
 def test_voices_list_and_select():
-    """voices.list 返回列表；voices.select 缺 name 被拒。"""
+    """voices.list 返回全量目录（当前置顶）；voices.select 缺 name 被拒。"""
     server, _, _, _ = _make()
     listing = _call(server, "voices.list", {})
     assert listing["data"]["ok"] is True
-    assert isinstance(listing["data"]["result"], list)
+    result = listing["data"]["result"]
+    assert isinstance(result, list) and result
+    assert {"name", "voice_id", "description", "vendor", "model",
+            "linked", "current", "custom"} <= set(result[0].keys())
+    assert result[0]["current"] is True  # 当前音色置顶（旧版首项口径兼容）
     bad = _call(server, "voices.select", {})
     assert bad["data"]["ok"] is False
+
+
+def test_voices_select_dict_reply_with_linkage(tmp_path):
+    """voices.select 回执为 dict：联动时 linked_model 非空并落盘；未知音色 ok=false。"""
+    from unittest.mock import patch
+
+    settings = Settings(tts_voice="longanlang_v3", tts_model="cosyvoice-v2")
+    server, _, _ = _make_with_settings(settings)
+    (tmp_path / ".jarvis").mkdir()
+    (tmp_path / ".jarvis" / "settings.toml").write_text(
+        '[tts]\nmodel = "cosyvoice-v2"\nvoice = "longanlang_v3"\n', encoding="utf-8",
+    )
+    with patch.object(Path, "home", return_value=tmp_path):
+        reply = _call(server, "voices.select", {"name": "longxiaochun_v3"})
+        assert reply["data"]["ok"] is True
+        result = reply["data"]["result"]
+        assert result == {
+            "ok": True, "name": "longxiaochun_v3", "voice_id": "longxiaochun_v3",
+            "linked_model": "cosyvoice-v3-flash", "old_model": "cosyvoice-v2",
+        }
+        assert settings.tts_voice == "longxiaochun_v3"
+        assert settings.tts_model == "cosyvoice-v3-flash"
+        text = (tmp_path / ".jarvis" / "settings.toml").read_text(encoding="utf-8")
+        assert 'voice = "longxiaochun_v3"' in text
+        assert 'model = "cosyvoice-v3-flash"' in text
+        # 目录外音色：指令本身被处理（data.ok=True），业务结果在 result.ok=False
+        missing = _call(server, "voices.select", {"name": "不存在的音色"})
+    assert missing["data"]["result"]["ok"] is False
+    assert "未找到" in missing["data"]["result"]["error"]
+
+
+def test_voices_add_and_delete_flow(tmp_path):
+    """voices.add 写入自定义音色（upsert/校验/内置名拒绝）；voices.delete 仅自定义可删。"""
+    from unittest.mock import patch
+
+    settings = Settings(tts_voice="longanlang_v3", tts_model="cosyvoice-v3-flash")
+    server, _, _ = _make_with_settings(settings)
+    (tmp_path / ".jarvis").mkdir()
+    (tmp_path / ".jarvis" / "settings.toml").write_text(
+        '[tts]\nmodel = "cosyvoice-v3-flash"\nvoice = "longanlang_v3"\n', encoding="utf-8",
+    )
+    toml_path = tmp_path / ".jarvis" / "settings.toml"
+    with patch.object(Path, "home", return_value=tmp_path):
+        added = _call(server, "voices.add", {
+            "name": "我的声音", "voice_id": "my-clone",
+            "model": "cosyvoice-v3-plus", "description": "复刻",
+        })
+        assert added["data"]["result"] == {"ok": True, "name": "我的声音"}
+        assert settings.custom_voices["我的声音"]["voice_id"] == "my-clone"
+        assert '[tts.custom_voices."我的声音"]' in toml_path.read_text(encoding="utf-8")
+        # 同名 upsert（编辑即重提）：覆盖不重复
+        _call(server, "voices.add", {"name": "我的声音", "voice_id": "my-clone-2"})
+        assert settings.custom_voices["我的声音"]["voice_id"] == "my-clone-2"
+        # 缺 voice_id / 内置音色名遮蔽 → 失败回执（ValueError 由框架转 ok=false）
+        bad = _call(server, "voices.add", {"name": "x"})
+        assert bad["data"]["ok"] is False
+        shadow = _call(server, "voices.add", {"name": "longcheng_v3", "voice_id": "y"})
+        assert shadow["data"]["ok"] is False
+        assert "内置音色名" in shadow["data"]["error"]
+        # 删除：内置被拒；自定义删成功且磁盘段消失
+        rm_builtin = _call(server, "voices.delete", {"name": "longcheng_v3"})
+        assert rm_builtin["data"]["ok"] is False
+        deleted = _call(server, "voices.delete", {"name": "我的声音"})
+        assert deleted["data"]["result"] == {"ok": True, "name": "我的声音"}
+        assert "我的声音" not in settings.custom_voices
+        assert "我的声音" not in toml_path.read_text(encoding="utf-8")
+    # 删后列表回到纯内置目录：内置项 custom=False（前端据此不显删除按钮）
+    names = {v["name"]: v for v in _call(server, "voices.list", {})["data"]["result"]}
+    assert "longcheng_v3" in names and names["longcheng_v3"]["custom"] is False
+    assert "我的声音" not in names
 
 
 def test_metrics_get_reply_shape():

@@ -7,7 +7,8 @@ JS 通过 ``pywebview.api.*`` 调用，全部为轻量只读/入队操作，
 - 文本对话：send_message / new_session / list_sessions / load_session
 - 实时语音：start_talk / stop_talk
 - 半双工语音：start_voice / stop_voice / interrupt_voice
-- 左栏数据：list_models / set_model / list_voices / set_voice / get_state
+- 左栏数据：list_models / set_model / list_voices / set_voice / add_voice /
+  delete_voice / get_state（音色目录含适配模型与联动预告，与 REPL /tts-voice 同源）
 - 窗口控制：window_minimize / window_close（无边框自绘标题栏；不提供全屏，
   启动即铺满工作区且真全屏会盖住任务栏）
 
@@ -333,29 +334,100 @@ class WorkbenchAPI:
         return model_admin.remove_model(self._settings, self._engine, name)
 
     def list_voices(self) -> list[dict[str, Any]]:
-        """TTS 音色列表：当前音色 + 自定义音色（/tts-voice 添加的）。"""
+        """TTS 音色全量目录：内置 + 自定义（/tts-voice 同源，REPL/桌面壳共用）。
+
+        每项 {name, voice_id, description, vendor, model, current, custom,
+        linked}：model = 适配模型（空 = 不限）；linked = 点选后将联动切换的
+        TTS 模型（兼容/不限时 None，前端据此预告）；当前音色置顶（保留
+        旧版「首项即当前」口径），自定义项 custom=True 供前端显删除/编辑。
+
+        @author aceFelix
+        """
+        from agent.voice.tts_voices import aligned_tts_model, all_tts_voices
         s = self._settings
+        voices = all_tts_voices(s)
+        custom_names = set((s.custom_voices or {}).keys())
         items: list[dict[str, Any]] = []
-        if s.tts_voice:
-            items.append({"name": s.tts_voice, "current": True})
-        for name, cfg in (s.custom_voices or {}).items():
-            if name == s.tts_voice:
-                continue
+        for name, cfg in voices.items():
+            is_cur = name == s.tts_voice or cfg["voice_id"] == s.tts_voice
             items.append({
                 "name": name,
-                "description": cfg.get("description", ""),
-                "current": False,
+                "voice_id": cfg["voice_id"],
+                "description": cfg["description"],
+                "vendor": cfg["vendor"],
+                "model": cfg.get("model", ""),
+                "linked": aligned_tts_model(cfg.get("model", ""), s.tts_model),
+                "current": is_cur,
+                "custom": name in custom_names,
             })
+        # 当前置顶（稳定排序，其余保持目录序）
+        items.sort(key=lambda it: not it["current"])
         return items
 
-    def set_voice(self, name: str) -> bool:
-        """切换 TTS 音色：持久化到 settings.toml。"""
-        try:
-            from agent.config.model_registry import save_tts_voice
+    def set_voice(self, name: str) -> dict[str, Any]:
+        """切换 TTS 音色：含音色-模型硬约束联动与持久化（voices.select）。
 
-            return save_tts_voice(name)
-        except Exception:
-            return False
+        返回 {ok, name?, voice_id?, linked_model?, old_model?, error?}；
+        音色不在目录内时 ok=False 带 error（不盲写未知 voice_id）。
+
+        @author aceFelix
+        """
+        from agent.voice.tts_voices import apply_voice_switch
+        res = apply_voice_switch(self._settings, name)
+        if res is None:
+            return {"ok": False, "error": f"音色未找到：{name}"}
+        return {"ok": True, **res}
+
+    def add_voice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """添加/更新自定义 TTS 音色（桌面壳音色表单 → voices.add）。
+
+        字段口径同 REPL /tts-voice 添加表单：name/voice_id 必填，
+        model = 适配模型（可空 = 不限），description 可选；同名覆盖（编辑
+        即重提）。持久化到 [tts.custom_voices]，非法入参抛 ValueError（由
+        serve 回 ok=false 错误回执）。
+
+        @author aceFelix
+        """
+        name = str(payload.get("name") or "").strip()
+        voice_id = str(payload.get("voice_id") or "").strip()
+        if not name:
+            raise ValueError("缺少音色名 name")
+        if not voice_id:
+            raise ValueError("缺少音色 ID voice_id")
+        s = self._settings
+        # 内置音色名不可被自定义项遮蔽（保存会改内置项展示，重启复活冲突）
+        from agent.voice.tts_voices import VOICE_CATALOG
+        if name in VOICE_CATALOG and name not in (s.custom_voices or {}):
+            raise ValueError(f"「{name}」是内置音色名，换一个名字")
+        config = {
+            "name": name,
+            "voice_id": voice_id,
+            "description": str(payload.get("description") or "").strip() or name,
+            "vendor": "dashscope",
+            "model": str(payload.get("model") or "").strip(),
+        }
+        from agent.config.model_registry import save_custom_voice
+        if not save_custom_voice(name, config):
+            raise ValueError("保存失败：找不到 ~/.jarvis/settings.toml")
+        s.custom_voices[name] = config
+        return {"ok": True, "name": name}
+
+    def delete_voice(self, name: str) -> dict[str, Any]:
+        """删除自定义 TTS 音色（桌面壳右键删除 → voices.delete）。
+
+        仅自定义音色可删（内置音色后端拒绝）；删的是当前在用音色时仍允许
+        （[tts] voice 值不变，下次合成仍用该 ID，与模型面板删当前模型同口径）。
+
+        @author aceFelix
+        """
+        name = (name or "").strip()
+        s = self._settings
+        if name not in (s.custom_voices or {}):
+            raise ValueError(f"仅自定义音色可删除，「{name}」不是自定义音色")
+        s.custom_voices.pop(name, None)
+        from agent.config.model_registry import remove_custom_voice
+        remove_custom_voice(name)  # 段不存在返回 False，内存已清不阻断
+        return {"ok": True, "name": name}
 
     # ---- 内部 ----
 

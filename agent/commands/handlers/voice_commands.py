@@ -221,26 +221,38 @@ _ADD_VOICE_MARKER = "__jarvis_add_tts_voice__"
 
 
 def _switch_tts_voice(ui, settings, voice_id: str, label: str) -> bool:
-    """切换当前 TTS 音色（settings.tts_voice）并持久化到 [tts] voice。
+    """切换当前 TTS 音色（含模型联动与持久化，终端只做文案展示）。
+
+    硬约束逻辑收敛在 tts_voices.apply_voice_switch（与 serve/工作台共用）；
+    目录未命中的历史遗留直传 voice_id 退回仅持久化，不阻断切换。
 
     @author aceFelix
     """
     if not voice_id:
         return False
-    settings.tts_voice = voice_id
-    try:
-        from agent.config.settings import save_tts_voice
-        save_tts_voice(voice_id)
-    except Exception:
-        pass
-    ui.info(f"🎙️ TTS 音色已切换: {label}（{voice_id}）")
+    from agent.voice.tts_voices import apply_voice_switch
+    res = apply_voice_switch(settings, voice_id)
+    if res is None:
+        settings.tts_voice = voice_id
+        try:
+            from agent.config.settings import save_tts_voice
+            save_tts_voice(voice_id)
+        except Exception:
+            pass
+        ui.info(f"🎙️ TTS 音色已切换: {label}（{voice_id}）")
+        return True
+    ui.info(f"🎙️ TTS 音色已切换: {res['name']}（{res['voice_id']}）")
+    if res["linked_model"]:
+        ui.info(f"🔗 TTS 模型已联动音色: {res['old_model']} → {res['linked_model']}")
     return True
 
 
 def _add_tts_voice_flow(ui, settings) -> bool:
     """单屏表单添加自定义 TTS 音色（当前仅支持阿里云 DashScope 厂商）。
 
-    音色名 + DashScope 音色 ID（voice 参数，含声音复刻 voice_id）→ 保存。
+    音色名 + DashScope 音色 ID（voice 参数，含声音复刻 voice_id）+ 适配模型
+    → 保存。适配模型必填语义：系统音色选家族（cosyvoice-v3），声音复刻选
+    创建时指定的 target_model；选“不限”则切换时不联动改模型。
 
     @author aceFelix
     """
@@ -258,6 +270,18 @@ def _add_tts_voice_flow(ui, settings) -> bool:
             "type": "text",
             "placeholder": "例如: longxiaochun_v3（声音复刻的 voice_id 也可）",
             "default": "",
+        },
+        {
+            "name": "适配模型",
+            "type": "select",
+            "options": [
+                ("cosyvoice-v3", "CosyVoice v3 全系（系统 _v3 音色）"),
+                ("cosyvoice-v3-flash", "cosyvoice-v3-flash（复刻 target_model）"),
+                ("cosyvoice-v3-plus", "cosyvoice-v3-plus（复刻 target_model）"),
+                ("cosyvoice-v3.5-plus", "cosyvoice-v3.5-plus（复刻 target_model）"),
+                ("", "不限（自行保证音色与模型匹配）"),
+            ],
+            "default": "cosyvoice-v3",
         },
         {
             "name": "描述",
@@ -281,18 +305,21 @@ def _add_tts_voice_flow(ui, settings) -> bool:
         ui.warn("DashScope 音色 ID 不能为空")
         return False
     description = (result.get("描述") or "").strip() or name
+    voice_model = (result.get("适配模型") or "").strip()
 
     config = {
         "name": name,
         "voice_id": voice_id,
         "description": description,
         "vendor": "dashscope",
+        "model": voice_model,
     }
     try:
         from agent.config.settings import save_custom_voice
         if save_custom_voice(name, config):
             settings.custom_voices[name] = config
-            ui.info(f"音色「{name}」已添加并保存（{voice_id}）")
+            model_note = f"，适配 {voice_model}" if voice_model else ""
+            ui.info(f"音色「{name}」已添加并保存（{voice_id}{model_note}）")
             return True
         ui.warn("保存失败：找不到 ~/.jarvis/settings.toml")
         return False
@@ -315,21 +342,8 @@ def _delete_custom_voice(ui, settings, name: str) -> None:
 
     settings.custom_voices.pop(name, None)
     try:
-        import re as _re
-        from pathlib import Path
-        toml_path = Path.home() / ".jarvis" / "settings.toml"
-        if toml_path.exists():
-            content = toml_path.read_text(encoding="utf-8")
-            marker = f'[tts.custom_voices."{name}"]'
-            if marker in content:
-                start = content.index(marker)
-                rest = content[start + len(marker):]
-                m = _re.search(r'\n\[', rest)
-                end = start + len(marker) + m.start() if m else len(content)
-                while end < len(content) and content[end] == '\n':
-                    end += 1
-                content = content[:start].rstrip() + "\n" + content[end:]
-                toml_path.write_text(content, encoding="utf-8")
+        from agent.config.settings import remove_custom_voice
+        remove_custom_voice(name)  # 段不存在返回 False，不阻断（内存已清）
         ui.info(f"音色「{name}」已删除")
     except Exception as e:
         ui.error(f"删除音色失败: {e}")
@@ -396,7 +410,13 @@ async def handle_tts_voice(ctx: "CommandContext", stripped: str) -> bool:
     for name, cfg in voices.items():
         label = name if name == cfg["voice_id"] else f"{name} ({cfg['voice_id']})"
         tag = " ✎ 自定义" if name in custom_names else ""
-        items.append((cfg["voice_id"], label, f"{cfg['description']}{tag}"))
+        # 适配模型透出：与当前 tts_model 不兼容的音色标注联动去向，切换前一目了然
+        model_hint = ""
+        if cfg.get("model"):
+            from agent.voice.tts_voices import aligned_tts_model
+            link = aligned_tts_model(cfg["model"], settings.tts_model)
+            model_hint = f"（联动 {link}）" if link else f"（适配 {cfg['model']}）"
+        items.append((cfg["voice_id"], label, f"{cfg['description']}{model_hint}{tag}"))
     items.append((_ADD_VOICE_MARKER, "+ 添加音色", "新增自定义 TTS 音色（DashScope）"))
 
     space_tags = {

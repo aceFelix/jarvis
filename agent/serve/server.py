@@ -120,6 +120,10 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_MODELS_REMOVE, self._rpc_models_remove)
         self._register_rpc(protocol.CMD_VOICES_LIST, lambda data: self._api.list_voices())
         self._register_rpc(protocol.CMD_VOICES_SELECT, self._rpc_voices_select)
+        # voices.add / voices.delete（2026-09-28）：桌面壳音色面板的自定义音色
+        # 管理，校验与落盘由 api.add_voice/delete_voice 承担（与 /tts-voice 同口径）
+        self._register_rpc(protocol.CMD_VOICES_ADD, self._rpc_voices_add)
+        self._register_rpc(protocol.CMD_VOICES_DELETE, self._rpc_voices_delete)
         self._register_rpc(protocol.CMD_METRICS_GET, lambda data: collect_metrics())
         self._register_rpc(protocol.CMD_STATE_GET, lambda data: self._api.get_state())
         self._register_rpc(protocol.CMD_SCHEDULE_LIST, self._rpc_schedule_list)
@@ -354,12 +358,52 @@ class DesktopBridgeServer(BridgeServer):
             raise ValueError("缺少模型名 name")
         return self._api.remove_model(name)
 
-    def _rpc_voices_select(self, data: dict) -> bool:
-        """voices.select：切换 TTS 音色并持久化。"""
+    def _rpc_voices_select(self, data: dict) -> dict:
+        """voices.select：切换 TTS 音色并持久化（含模型联动）。
+
+        回执为 {ok, name, voice_id, linked_model, old_model}：联动发生
+        时 linked_model 非空，前端据此提示「已同步切换 TTS 模型」。
+
+        @author aceFelix
+        """
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("缺少音色名 name")
         return self._api.set_voice(name)
+
+    def _rpc_voices_add(self, data: dict) -> dict:
+        """voices.add：添加/覆盖自定义音色（桌面壳音色面板表单提交）。
+
+        入表前校验 name / voice_id 必填；model 为空时由 api 层按家族
+        默认模型兜底。落盘与内存同步由 api.add_voice 承担（同名 upsert
+        即编辑复用，与 /tts-voice 新增音色表单同口径）。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        voice_id = (data.get("voice_id") or "").strip()
+        if not name or not voice_id:
+            raise ValueError("音色名 name 与 voice_id 均必填")
+        return self._api.add_voice({
+            "name": name,
+            "voice_id": voice_id,
+            "model": (data.get("model") or "").strip(),
+            "description": (data.get("description") or "").strip(),
+            "vendor": (data.get("vendor") or "").strip(),
+        })
+
+    def _rpc_voices_delete(self, data: dict) -> dict:
+        """voices.delete：删除自定义音色（桌面壳音色面板右键删除按钮）。
+
+        仅自定义音色可删（内置音色来自 VOICE_CATALOG，api 层直接拒绝）；
+        删成功即同步内存 custom_voices 并外科式移除 TOML 段。
+
+        @author aceFelix
+        """
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("缺少音色名 name")
+        return self._api.delete_voice(name)
 
     def _rpc_answer_user(self, data: dict) -> None:
         """answer_user：回填引擎 ask_user 弹窗（权限确认等）。"""

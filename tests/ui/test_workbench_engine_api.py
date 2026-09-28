@@ -224,6 +224,9 @@ def test_api_get_state_and_lists():
 
     voices = api.list_voices()
     assert voices and voices[0]["current"] is True
+    # 全量目录字段（2026-09-28 音色-模型适配）：前端据此渲染适配/联动预告
+    assert {"name", "voice_id", "description", "vendor", "model",
+            "linked", "custom"} <= set(voices[0].keys())
 
     models = api.list_models()
     if models:

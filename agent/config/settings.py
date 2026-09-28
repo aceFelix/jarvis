@@ -66,8 +66,9 @@ class Settings:
     # 用户自定义模型配置 {model_name: {provider, base_url, api_key, api_format, model_type}}
     # 通过 /models → 添加其他模型 创建，持久化到 ~/.jarvis/models.toml [llm.custom_models]
     custom_models: dict[str, dict] = field(default_factory=dict)
-    # 用户自定义 TTS 音色 {voice_name: {voice_id, description, vendor}}
+    # 用户自定义 TTS 音色 {voice_name: {voice_id, description, vendor, model}}
     # 通过 /tts-voice → 添加音色 创建，持久化到 ~/.jarvis/settings.toml [tts.custom_voices]
+    # model = 适配模型（家族前缀或具体模型，空 = 不限），切换音色时联动校正 tts_model
     custom_voices: dict[str, dict] = field(default_factory=dict)
     # 深度思考（思维链）—— enable_thinking 通过 extra_body 传给 DashScope
     enable_thinking: bool = True
@@ -811,7 +812,8 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
 
 # ── 以下函数已拆分到独立模块，此处保留重导出以兼容现有导入 ──
 from agent.config.model_registry import save_custom_model, save_last_model  # noqa: E402, F401
-from agent.config.model_registry import save_custom_voice, save_tts_voice  # noqa: E402, F401
+from agent.config.model_registry import save_custom_voice, save_tts_voice, save_tts_model  # noqa: E402, F401
+from agent.config.model_registry import remove_custom_voice  # noqa: E402, F401
 from agent.config.models_config import (  # noqa: E402, F401
     auto_split_user_config as auto_split_user_config,
     models_path_for as models_path_for,

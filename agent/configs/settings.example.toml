@@ -38,6 +38,15 @@ voice = "longanlang_v3"
 volume = 50          # 0-100
 speech_rate = 1.0    # 0.5-2.0，1.0 正常语速
 pitch_rate = 1.0     # 0.5-2.0，1.0 正常音调
+# 自定义音色（/tts-voice 添加，也可手写）：model = 适配模型（家族前缀 cosyvoice-v3
+# 或具体模型；声音复刻填创建时的 target_model；空串 = 不限）。切换音色时若 model
+# 与上方 model 不兼容会自动联动改模型并落盘。
+# [tts.custom_voices."我的声音"]
+# name = "我的声音"
+# voice_id = "my-clone-xxxx"
+# model = "cosyvoice-v3-flash"
+# description = "声音复刻 - 我的声音"
+# vendor = "dashscope"
 
 [stt]
 # 单一后端 QwenASR（OmniRealtimeConversation，服务端 VAD，中英混合强）。

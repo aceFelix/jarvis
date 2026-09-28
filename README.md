@@ -324,7 +324,7 @@ max_iterations = 50              # 单轮最大工具调用次数
 # ---- 语音 ----
 [tts]
 model = "cosyvoice-v3-flash"     # TTS 模型（v3-flash/v3-plus/v3.5-plus）
-voice = "longanlang_v3"          # 音色（/tts-voice 可切换）
+voice = "longanlang_v3"          # 音色（/tts-voice 可切换，自定义音色带适配模型、切换自动联动）
 volume = 50                      # 音量 0-100
 speech_rate = 1.0                # 语速 0.5-2.0
 pitch_rate = 1.0                 # 音高 0.5-2.0
@@ -507,7 +507,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 |---|---|
 | `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
 | `/talk` | 进入实时双工语音对话（终端半双工轮替；桌面壳为说话即打断的真全双工） |
-| `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope） |
+| `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope；音色带适配模型，不兼容自动联动 tts_model） |
 | `/say <文本>` | TTS 朗读指定文字 |
 | `/listen` `/mic` | 录音并识别为文字 |
 
@@ -694,7 +694,7 @@ Jarvis 提供两套独立的语音系统：
 - **语音输出**：两种 TTS 模式
   - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
   - **StreamTTSPlayer**：WebSocket 流式合成，LLM 逐句输出 → 即时合成播放，首句延迟 ~500ms
-  - 默认音色 `longanlang_v3`；内置 7 个音色，`/tts-voice` 可切换或添加自定义音色
+  - 默认音色 `longanlang_v3`；内置 7 个音色，`/tts-voice` 可切换或添加自定义音色（音色带「适配模型」字段：系统音色按模型系列隔离、声音复刻绑定 target_model，切换时不兼容自动联动切 `tts_model`）
 - **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
 - **思考隔离**：思考过程只显示在终端面板，不进入 TTS
 - **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
@@ -1087,11 +1087,12 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表。
 - **添加模型（桌面壳，2026-09）**：左栏模型面板列表末项「＋ 添加模型」（虚线框）→ 点击后独立组件 `ModelForm` 整体替换列表（同右栏设置面板模式），六个字段（模型厂商/模型名/API Key/接口类型/Base URL/模型类型）与 REPL `/models` → 添加其他模型完全同口径；提交走 `models.add` 指令：serve 二次校验（模型名必填、接口类型/模型类型白名单）→ 复用 `save_custom_model` 写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（API Key 同步系统 keyring）+ `_infer_base_url` 推断空 Base URL → 成功后壳刷 `models.list` 并提示「模型「X」已添加」，失败保持表单打开可修正。
 - **修改与删除模型配置（桌面壳，2026-09）**：左栏模型项交互对齐会话列表 —— **双击**模型项进 `ModelForm` 编辑该模型（预填 `models.list` 每项 `config` 现值），**右键**模型项则项内出现删除按钮、再点才真删（二次确认）。编辑走 `models.edit` 指令（`name` 必填，`new_name`/`vendor`/`api_format`/`base_url`/`api_key`/`model_type` 留空表示不改）：内置模型（命中项目级 `[llm.models]`）**名字锁定不可改**（改名只会产生「幽灵模型」），自定义模型可改名（写新段删旧段，`api_key` 留空则**保持原 Key** —— 桌面壳不回显密钥，与 REPL「留空即清空」刻意不同）；改的是当前运行模型时 serve 侧入队 `{"cmd": "switch_model", "force": true}` **强制重建 provider**，端点/接口类型改动立即生效（回执带 `hot_switched`，壳提示「当前会话已按新配置重连」）。删除走 `models.remove`：仅自定义模型可删（内置模型与「用户级 models.toml 无该段」均回 ok=false，后者防「删不掉但重启复活」），删的是当前模型时回执 `was_current` 且**不动运行中的 provider**（提示用户另选）。
+- **音色管理（桌面壳，2026-09-28）**：左栏「音色」面板与模型面板同范式 —— `voices.list` 返回**全量音色目录**（内置 + 自定义，每项 `{name, voice_id, description, vendor, model, linked, current, custom}`，当前音色置顶；副行透出「适配 X」/「联动 X」预告）；点选音色走 `voices.select`（回执从 bool 升级为 `{ok, name, voice_id, linked_model, old_model}`：与终端 `/tts-voice` 同口径立即写盘并在不兼容时**自动联动 tts_model**，`linked_model` 带回壳提示「联动 TTS 模型 X，下次语音生效」）；末项「＋ 添加音色」表单提交 `voices.add`（name/voice_id 必填、内置名遮蔽拒绝，upsert 即编辑——双击自定义项进表单预填）；右键自定义项显删除按钮、再点发 `voices.delete`（仅 custom 可删，后端经 `remove_custom_voice` 外科式删 `models.toml` 段）。
 - **设置面板（桌面壳，2026-09；同年 09 第一批扩键）**：设置独立成面板（标题栏齿轮进入，整体替换右栏信息面板）：外观（主题/语言，纯前端 localStorage 偏好）+ 后端联动三组（经 `settings.get`/`settings.set` 与 serve 联动：校验→先外科式落盘 settings.toml 对应节→再改运行时，失败回滚）：语音播报（待机 TTS 开关 + 音量/语速）、每日简报（开关 + 时间）、截止日期追踪（开关 + 检查时间）；简报/截止日期改动额外触发 `ProactiveHub` 调度热重注册（无需重启）。白名单单一真源在 `agent/config/desktop_settings.py`（密钥/自由路径永不入协议）。
 - **未知指令失败回执（2026-09 加固）**：WS 分发对**未注册**的指令 type 立即回 `{"event":"reply","data":{"type","ok":false,"error"}}`（旧行为是静默忽略，既不回 ok 也不回 error），错误文案为「后端不支持指令 X（后端进程可能未加载最新代码，请重启后端后重试）」；缺 `type` 字段同样回失败回执。原因是前端（Vite 热更新）可能先支持新指令、而后端进程仍是旧代码（`python -m agent.serve` 不热重载），静默丢弃只会让桌面壳干等到 15s 超时、用户看不到任何原因（典型症状「指令 models.add 回执超时」）；手机 PWA 不消费 `reply` 事件，行为不受影响。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：28 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：30 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*`（含 `add` 添加自定义音色 / `delete` 删除音色，`select` 回执带 tts_model 联动） / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 
@@ -1508,7 +1509,7 @@ agent/
 │   ├── voice_config.py # 语音配置（关键词/唤醒词/待机参数/语音 system prompt）
 │   ├── tts_text.py    # TTS 文本清洗（markdown/<think>/工具标签剥离）
 │   ├── barge_in.py    # 打断监听器（ESC 键盘 / 麦克风能量 / 打断词）
-│   ├── tts_voices.py  # TTS 音色目录（/tts-voice 数据源）
+│   ├── tts_voices.py  # TTS 音色目录（/tts-voice 数据源，含音色-模型适配联动）
 │   ├── audio.py       # PyAudio 全局单例（防 segfault）
 │   ├── aec.py         # AEC 回声消除（WebRTC AEC3，外放防自言自语）
 │   └── client_vad.py  # 客户端 VAD（静音检测/语音活动判断）

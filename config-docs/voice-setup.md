@@ -230,6 +230,11 @@ voice = "longxiaochun_v3"
 > [CosyVoice 音色列表](https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list)
 > （不同 `tts_model` 支持的音色集合不同）。也支持**声音复刻**，把复刻的 `voice_id` 填入 `tts_voice`。
 
+> ⚠ **音色与模型是硬约束**：DashScope 系统音色按模型系列隔离（表中 `_v3`
+> 音色只能配 `cosyvoice-v3-*` 系列，配 `cosyvoice-v2` 会报 `voice is not exists`）；
+> 声音复刻的 `voice_id` 更绑定创建时指定的 `target_model`，同一声音跨模型使用
+> 需对每个目标模型各复刻一次。`/tts-voice` 已据此做切换联动（见下）。
+
 ### /tts-voice 命令
 
 在 REPL 中可用 `/tts-voice` 交互式选择 / 添加音色，无需手改配置（目前仅支持阿里云 DashScope）：
@@ -240,8 +245,52 @@ voice = "longxiaochun_v3"
 /tts-voice <Tab>         # Tab 自动补全已存在的音色
 ```
 
-列表含内置音色 + 自定义音色；选择「+ 添加音色」可录入自定义音色（音色名 + DashScope 音色 ID，
-声音复刻的 `voice_id` 也可），持久化到 `~/.jarvis/settings.toml` 的 `[tts.custom_voices]`。
+列表含内置音色 + 自定义音色（描述行透出适配模型，不兼容时标注联动去向）；
+选择「+ 添加音色」进入四字段表单，持久化到 `~/.jarvis/settings.toml` 的
+`[tts.custom_voices]`：
+
+| 字段 | TOML 键 | 说明 |
+|---|---|---|
+| 音色名 | section 键 + `name` | 列表展示名 |
+| DashScope 音色 ID | `voice_id` | 请求参数（系统音色 / 声音复刻 ID 均可） |
+| 适配模型 | `model` | 下拉选：`cosyvoice-v3`（家族前缀，v3-flash/plus/v3.5-plus 均可）/
+|  |  | 具体模型（复刻音色选创建时的 target_model）/ 空串 = 不限 |
+| 供应商 | `vendor` | 目前仅 `dashscope` |
+| 描述 | `description` | 可选 |
+
+```toml
+# 自动生成的自定义音色示例（也可手写）
+[tts.custom_voices."我的声音"]
+name = "我的声音"
+voice_id = "my-clone-xxxx"
+model = "cosyvoice-v3-flash"   # 复刻时指定的 target_model
+description = "声音复刻 - 我的声音"
+vendor = "dashscope"
+```
+
+**切换联动**：音色带 `model` 且与当前 `tts_model` 不兼容时，自动联动切换
+`tts_model` 并落盘（重启保持），保证切换后立即可合成；家族前缀（如
+`cosyvoice-v3`）匹配家族内任意模型（v3-flash / v3.5-plus 互切不联动），
+联动目标取家族默认具体模型（`cosyvoice-v3-flash`）。
+
+### 桌面壳音色管理（jarvis-desktop）
+
+桌面壳左栏「音色」面板与终端 `/tts-voice` 同口径共用切换公共层（2026-09-28 接入），
+无需打开终端也能管理音色：
+
+- **全量目录**：面板列出内置 + 自定义音色（当前音色置顶），副行透出适配模型
+  （「适配 X」）与不兼容预告（「联动 X」= 现在点选会自动联动成的 tts_model）；
+- **点选即切**：发 `voices.select`，立即写盘并在不兼容时自动联动 `tts_model`，
+  聊天流提示「音色已切换为 X（联动 TTS 模型 Y，下次语音生效）」；运行中的语音
+  会话不热切换，仍为下次语音生效；
+- **添加 / 编辑**：末项「＋ 添加音色」进表单（音色名 / DashScope 音色 ID / 适配模型
+  下拉 / 描述，与终端四字段同口径）；双击自定义项进表单预填编辑（音色名锁定，
+  同名 upsert 覆盖）；
+- **删除**：右键自定义项显删除按钮、再点才真删（二次确认；内置音色不可删，
+  后端也会拒绝）。
+
+自定义音色同样落 `~/.jarvis/settings.toml` 的 `[tts.custom_voices]`，终端与桌面壳
+看到同一份目录、行为完全一致。
 
 ---
 

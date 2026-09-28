@@ -308,7 +308,7 @@ max_iterations = 50              # Max tool calls per turn
 # ---- Voice ----
 [tts]
 model = "cosyvoice-v3-flash"     # TTS model (v3-flash/v3-plus/v3.5-plus)
-voice = "longanlang_v3"          # Voice (/tts-voice to switch)
+voice = "longanlang_v3"          # Voice (/tts-voice to switch; custom voices carry an adapted model with auto link)
 volume = 50                      # Volume 0-100
 speech_rate = 1.0                # Speech rate 0.5-2.0
 pitch_rate = 1.0                 # Pitch 0.5-2.0
@@ -484,7 +484,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 |---|---|
 | `/voice` | Enter voice conversation mode (continuous STT→LLM→TTS loop) |
 | `/talk` | Enter real-time duplex voice chat (terminal half-duplex turns; the desktop shell offers true full duplex with speak-to-interrupt) |
-| `/tts-voice [prefix]` | Switch/add TTS voice (DashScope only) |
+| `/tts-voice [prefix]` | Switch/add TTS voice (DashScope only; voices carry an adapted model, tts_model auto-linked when incompatible) |
 | `/say <text>` | TTS read specified text |
 | `/listen` `/mic` | Record and recognize to text |
 
@@ -669,11 +669,11 @@ After entering voice conversation mode, forms a **Listen → Think → Speak** l
 - **Voice output**: Two TTS modes
   - **CosyVoiceTTS**: Whole-segment synthesis playback (`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`)
   - **StreamTTSPlayer**: WebSocket streaming synthesis, LLM outputs sentence-by-sentence → instant synthesis playback, first sentence latency ~500ms
-  - Default voice `longanlang_v3`; 7 built-in voices, `/tts-voice` to switch or add custom voices
+  - Default voice `longanlang_v3`; 7 built-in voices, `/tts-voice` to switch or add custom voices (each carries an "adapted model" field: system voices are isolated by model series, cloned voices bind to their target_model, and switching auto-links `tts_model` when incompatible)
 - **Interrupt mechanism**: ESC key interrupts current AI playback, or say "stand down" to exit voice mode
 - **Thinking isolation**: Thinking process only shown in terminal panel, not sent to TTS
 - **Content cleaning**: Auto-filters code blocks, tables, links and other content unsuitable for speech
-- **Desktop shell**: The jarvis-desktop left-column "🎤 Voice" mode is this same half-duplex loop (since 2026-09) — `/voice` was decoupled from RichCLI (`VoiceSessionEvents` protocol + dual adapters) and bridged through `--serve` like `/talk` (commands `voice.{start,stop,interrupt}`, events `voice_*`, mutually exclusive with `/talk`). Audio I/O (STT recording / TTS playback) stays in the serve subprocess's local pyaudio (same machine as the shell); the shell acts only as a remote control showing state/text (interrupt via button + microphone barge-in dual channel).
+- **Desktop shell**: The jarvis-desktop left-column "🎤 Voice" mode is this same half-duplex loop (since 2026-09) — `/voice` was decoupled from RichCLI (`VoiceSessionEvents` protocol + dual adapters) and bridged through `--serve` like `/talk` (commands `voice.{start,stop,interrupt}`, events `voice_*`, mutually exclusive with `/talk`). Audio I/O (STT recording / TTS playback) stays in the serve subprocess's local pyaudio (same machine as the shell); the shell acts only as a remote control showing state/text (interrupt via button + microphone barge-in dual channel). Since 2026-09-28 the left-column "Voice" panel also manages voices end-to-end via `voices.*` commands (full catalog with adapted-model / linkage previews, click-to-switch with automatic `tts_model` linkage, add/edit form, custom-voice delete) — same behavior and the same persisted `[tts.custom_voices]` as the terminal `/tts-voice`.
 
 ### Real-time Duplex `/talk`
 
@@ -1433,7 +1433,7 @@ agent/
 │   ├── voice_config.py # Voice config (keywords/wake words/standby params/voice system prompt)
 │   ├── tts_text.py    # TTS text cleaning (markdown/<think>/tool tag stripping)
 │   ├── barge_in.py    # Interrupt listener (ESC keyboard / mic energy / interrupt words)
-│   ├── tts_voices.py  # TTS voice catalog (/tts-voice data source)
+│   ├── tts_voices.py  # TTS voice catalog (/tts-voice data source, voice-model adaptation link)
 │   ├── audio.py       # PyAudio global singleton (prevents segfault)
 │   ├── aec.py         # AEC echo cancellation (WebRTC AEC3, external playback anti-self-talk)
 │   └── client_vad.py  # Client-side VAD (silence detection/voice activity detection)

@@ -102,11 +102,12 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 26 个 rpc + talk.audio（无回执帧通道）= 28。
+    """指令总数契约：message + 28 个 rpc + talk.audio（无回执帧通道）= 30。
 
+    2026-09-28 音色-模型适配接入桌面壳：+voices.add / voices.delete（28→30）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 28
+    assert len(protocol.DESKTOP_COMMANDS) == 30
 
 
 def test_all_registered_rpcs_declared():

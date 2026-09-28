@@ -86,7 +86,8 @@ enable_thinking = true
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `tts_model` | `"cosyvoice-v3-flash"` | TTS 模型 |
-| `tts_voice` | `"longanlang_v3"` | 音色 |
+| `tts_voice` | `"longanlang_v3"` | 音色（自定义音色见 `custom_voices`；切换时若音色适配模型与 `tts_model` 不兼容会自动联动切模型并落盘） |
+| `custom_voices` | `{}` | 自定义音色 `{音色名: {voice_id, model, vendor, description}}`（`/tts-voice` 添加，`[tts.custom_voices]` 节；`model` = 适配模型，空 = 不限） |
 | `tts_volume` | `50` | 音量（0-100）；桌面壳设置面板可运行时调（`settings.set` 滑杆，先落盘再改运行时） |
 | `tts_speech_rate` | `1.0` | 语速倍率（0.5-2.0）；桌面壳设置面板可运行时调 |
 | `tts_pitch_rate` | `1.0` | 音调倍率 |

@@ -5,7 +5,9 @@
 并继续管理其余运行时持久化：
 - save_custom_model / save_last_model: 委托 models_config 写 models.toml
 - save_custom_voice: 保存自定义 TTS 音色（settings.toml [tts.custom_voices]）
+- remove_custom_voice: 删除自定义 TTS 音色段（/tts-voice 与桌面壳共用）
 - save_tts_voice: 持久化当前 TTS 音色选择（settings.toml [tts]）
+- save_tts_model: 持久化当前 TTS 模型（settings.toml [tts]，/tts-voice 联动切换用）
 - save_proactive_tts_enabled: 持久化主动播报 TTS 开关（[daemon] 节）
 
 从 settings.py 拆分出来，独立维护模型与语音持久化逻辑。
@@ -49,7 +51,7 @@ def save_last_model(model_name: str) -> bool:
 def save_custom_voice(name: str, config: dict[str, str]) -> bool:
     """保存自定义 TTS 音色到 ~/.jarvis/settings.toml 的 [tts.custom_voices] 节。
 
-    如果音色已存在则更新，否则追加。支持 name/voice_id/description/vendor。
+    如果音色已存在则更新，否则追加。支持 name/voice_id/description/vendor/model。
     返回 True 表示保存成功。
 
     @author aceFelix
@@ -69,6 +71,8 @@ def save_custom_voice(name: str, config: dict[str, str]) -> bool:
         entry_lines.append(f'description = "{description}"')
     vendor = config.get("vendor", "dashscope")
     entry_lines.append(f'vendor = "{vendor}"')
+    # 适配模型（/tts-voice 音色-模型硬约束）：空串表示不限，仍显式写入便于重编
+    entry_lines.append(f'model = "{config.get("model", "")}"')
     entry = "\n".join(entry_lines)
 
     marker = f'[tts.custom_voices."{name}"]'
@@ -104,6 +108,35 @@ def save_custom_voice(name: str, config: dict[str, str]) -> bool:
     return True
 
 
+def remove_custom_voice(name: str) -> bool:
+    """从 ~/.jarvis/settings.toml 删除 [tts.custom_voices."name"] 段。
+
+    终端 /tts-voice（Space 删除）与桌面壳 voices.delete 共用；段不存在时
+    返回 False（调用方先清内存再调或自行决定顺序）。删除方式为外科式段
+    移除：从段头到下一个段头（或文件尾）整段剪掉，其余内容不动。
+
+    @author aceFelix
+    """
+    toml_path = Path.home() / ".jarvis" / "settings.toml"
+    if not toml_path.exists():
+        return False
+
+    content = toml_path.read_text(encoding="utf-8")
+    marker = f'[tts.custom_voices."{name}"]'
+    if marker not in content:
+        return False
+
+    start = content.index(marker)
+    rest = content[start + len(marker):]
+    m = re.search(r'\n\[', rest)
+    end = start + len(marker) + m.start() if m else len(content)
+    while end < len(content) and content[end] == '\n':
+        end += 1
+    content = content[:start].rstrip() + "\n" + content[end:]
+    toml_path.write_text(content, encoding="utf-8")
+    return True
+
+
 def save_tts_voice(voice_id: str) -> bool:
     """持久化当前 TTS 音色到 ~/.jarvis/settings.toml 的 [tts] 节 voice 字段。
 
@@ -111,11 +144,33 @@ def save_tts_voice(voice_id: str) -> bool:
 
     @author aceFelix
     """
+    return _save_tts_field("voice", voice_id)
+
+
+def save_tts_model(model: str) -> bool:
+    """持久化当前 TTS 模型到 ~/.jarvis/settings.toml 的 [tts] 节 model 字段。
+
+    /tts-voice 切换音色时若音色适配模型与当前 tts_model 不兼容，联动改模型
+    后经本函数落盘，重启后保持。返回 True 表示保存成功。
+
+    @author aceFelix
+    """
+    return _save_tts_field("model", model)
+
+
+def _save_tts_field(key: str, value: str) -> bool:
+    """外科式写入 settings.toml 的 [tts] 节单字段（voice/model 共用）。
+
+    只替换/追加目标键行，保留节内其他字段与注释、以及 [tts.custom_voices]
+    子表不受影响（子表在独立段，按段头 [tts] 行精确匹配段界）。
+
+    @author aceFelix
+    """
     toml_path = Path.home() / ".jarvis" / "settings.toml"
     toml_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not toml_path.exists():
-        toml_path.write_text(f'[tts]\nvoice = "{voice_id}"\n', encoding="utf-8")
+        toml_path.write_text(f'[tts]\n{key} = "{value}"\n', encoding="utf-8")
         return True
 
     content = toml_path.read_text(encoding="utf-8")
@@ -128,19 +183,19 @@ def save_tts_voice(voice_id: str) -> bool:
         section_end = section_start + 1 + (next_section.start() if next_section else len(content[section_start + 1:]))
         section = content[section_start + 1:section_start + 1 + section_end - (section_start + 1)]
 
-        if re.search(r'^voice\s*=', section, re.MULTILINE):
+        if re.search(rf'^{key}\s*=', section, re.MULTILINE):
             new_section = re.sub(
-                r'^voice\s*=.*$',
-                f'voice = "{voice_id}"',
+                rf'^{key}\s*=.*$',
+                f'{key} = "{value}"',
                 section,
                 flags=re.MULTILINE,
             )
         else:
-            new_section = section.rstrip() + f'\nvoice = "{voice_id}"\n'
+            new_section = section.rstrip() + f'\n{key} = "{value}"\n'
 
         content = content[:section_start + 1] + new_section + content[section_start + 1 + section_end - (section_start + 1):]
     else:
-        content = content.rstrip() + f'\n\n[tts]\nvoice = "{voice_id}"\n'
+        content = content.rstrip() + f'\n\n[tts]\n{key} = "{value}"\n'
 
     toml_path.write_text(content, encoding="utf-8")
     return True

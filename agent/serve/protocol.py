@@ -48,8 +48,19 @@ models.edit         name: str                   {name, vendor, api_format,
                       api_key: str,
                       model_type: str]
 models.remove       name: str                   {name, was_current}
-voices.list         —                           [{name, current, ...}]
-voices.select       name: str                   bool
+voices.list         —                           [{name, voice_id, description,
+                                                 vendor, model, linked,
+                                                 current, custom}]（全量目录，
+                                                 当前音色置顶）
+voices.select       name: str                   {ok, name, voice_id,
+                                                 linked_model, old_model}
+voices.add          name: str                   {ok, name}（写入自定义音色
+                      voice_id: str             [tts.custom_voices]，同名
+                      [, model: str,            upsert=编辑；内置名拒绝）
+                      description: str,
+                      vendor: str]
+voices.delete       name: str                   {ok, name}（仅自定义音色
+                                                 可删）
 metrics.get         —                           {cpu, memory, disk}
 state.get           —                           {provider, model, mcp, ...}
 schedule.list       —                           {reminders: [...],
@@ -116,6 +127,11 @@ CMD_MODELS_EDIT = "models.edit"
 CMD_MODELS_REMOVE = "models.remove"
 CMD_VOICES_LIST = "voices.list"
 CMD_VOICES_SELECT = "voices.select"
+# voices.add / voices.delete（2026-09-28 音色-模型适配桌面接入）：桌面壳左栏
+# 音色面板的自定义音色管理 —— 添加/编辑表单提交（voices.add，同名 upsert）、
+# 删除自定义音色（voices.delete，仅 custom 可删），与 /tts-voice 表单同口径。
+CMD_VOICES_ADD = "voices.add"
+CMD_VOICES_DELETE = "voices.delete"
 CMD_METRICS_GET = "metrics.get"
 CMD_STATE_GET = "state.get"
 CMD_SCHEDULE_LIST = "schedule.list"
@@ -150,6 +166,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MODELS_REMOVE,
     CMD_VOICES_LIST,
     CMD_VOICES_SELECT,
+    CMD_VOICES_ADD,
+    CMD_VOICES_DELETE,
     CMD_METRICS_GET,
     CMD_STATE_GET,
     CMD_SCHEDULE_LIST,
