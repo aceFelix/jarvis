@@ -60,7 +60,7 @@ vision = [
     "paddleocr>=2.7.0",
 ]
 voice = [
-    # 阿里 CosyVoice TTS / Paraformer STT SDK（跨平台）
+    # 阿里 DashScope SDK：CosyVoice TTS + Qwen3-ASR 实时识别（跨平台）
     "dashscope>=1.20.0",
     # 音频播放/录音（跨平台，Linux 需 portaudio19-dev，macOS 需 brew install portaudio）
     "pyaudio>=0.2.14",

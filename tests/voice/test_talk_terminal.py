@@ -64,6 +64,71 @@ async def test_talk_runs_in_terminal(monkeypatch):
     assert _FakeRealtimeTalk.run_calls == [ui]
     assert _FakeRealtimeTalk.last_config is not None
     assert _FakeRealtimeTalk.last_config["api_key"] == "sk-test"
+    # 事件时间线日志开关随配置透传（默认关，见 [realtime_talk] event_log）
+    assert _FakeRealtimeTalk.last_config["event_log"] is False
+
+
+async def test_talk_passes_event_log_switch(monkeypatch):
+    """[realtime_talk] event_log 开启时透传给引擎（第 1 层可观测性开关）。"""
+    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    ui = _FakeUI()
+    settings = SimpleNamespace(
+        dashscope_api_key="sk-test", api_key="", realtime_event_log=True,
+    )
+
+    await _realtime_talk(ui, settings)
+
+    assert _FakeRealtimeTalk.last_config["event_log"] is True
+
+
+async def test_talk_passes_echo_suppress_default(monkeypatch):
+    """回声压低默认透传为 True——AEC 生效时也不能丢，否则回声会取消每一轮回复。"""
+    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    ui = _FakeUI()
+    settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
+
+    await _realtime_talk(ui, settings)
+
+    assert _FakeRealtimeTalk.last_config["echo_suppress_with_aec"] is True
+
+
+async def test_talk_passes_echo_suppress_off(monkeypatch):
+    """[realtime_talk] echo_suppress_with_aec = false 时透传关闭（耳机场景）。"""
+    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    ui = _FakeUI()
+    settings = SimpleNamespace(
+        dashscope_api_key="sk-test", api_key="",
+        realtime_echo_suppress_with_aec=False,
+    )
+
+    await _realtime_talk(ui, settings)
+
+    assert _FakeRealtimeTalk.last_config["echo_suppress_with_aec"] is False
+
+
+async def test_talk_passes_half_duplex_default(monkeypatch):
+    """半双工默认透传为 True——免提外放唯一可靠的多轮方案。"""
+    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    ui = _FakeUI()
+    settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
+
+    await _realtime_talk(ui, settings)
+
+    assert _FakeRealtimeTalk.last_config["half_duplex"] is True
+
+
+async def test_talk_passes_half_duplex_off(monkeypatch):
+    """[realtime_talk] half_duplex = false 时透传关闭（耳机全双工）。"""
+    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    ui = _FakeUI()
+    settings = SimpleNamespace(
+        dashscope_api_key="sk-test", api_key="",
+        realtime_half_duplex=False,
+    )
+
+    await _realtime_talk(ui, settings)
+
+    assert _FakeRealtimeTalk.last_config["half_duplex"] is False
 
 
 async def test_talk_missing_key_errors(monkeypatch):

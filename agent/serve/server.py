@@ -127,8 +127,11 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_ANSWER_USER, self._rpc_answer_user)
         # reply.abort：停止当前回复（线程安全取消引擎 send 任务，不入队列）
         self._register_rpc(protocol.CMD_REPLY_ABORT, lambda data: self._api.abort_reply())
-        self._register_rpc(protocol.CMD_TALK_START, lambda data: self._api.start_talk())
+        self._register_rpc(protocol.CMD_TALK_START, self._rpc_talk_start)
         self._register_rpc(protocol.CMD_TALK_STOP, lambda data: self._api.stop_talk())
+        # talk.audio：桌面全双工麦克风帧（fire-and-forget，无回执——50Hz 级
+        # 小帧等回执会白白占满指令队列；帧校验与消费在 api/engine 侧完成）
+        self.register_ws_handler(protocol.CMD_TALK_AUDIO, self._cmd_talk_audio)
         self._register_rpc(protocol.CMD_VOICE_START, lambda data: self._api.start_voice())
         self._register_rpc(protocol.CMD_VOICE_STOP, lambda data: self._api.stop_voice())
         self._register_rpc(protocol.CMD_VOICE_INTERRUPT, lambda data: self._api.interrupt_voice())
@@ -158,6 +161,21 @@ class DesktopBridgeServer(BridgeServer):
         self._rpc_types.add(cmd_type)
 
     # ---- 需要参数加工/校验的指令 ----
+
+    def _rpc_talk_start(self, data: dict) -> Any:
+        """talk.start：透传 duplex 标记（桌面端全双工桥接，见 _cmd_talk_audio）。"""
+        return self._api.start_talk(duplex=bool(data.get("duplex")))
+
+    async def _cmd_talk_audio(self, ws: Any, data: dict) -> None:
+        """talk.audio 指令：桌面全双工会话的麦克风帧（fire-and-forget，无回执）。
+
+        base64 帧上限 64KB（100ms @16kHz PCM16 ≈ 3.2KB，余量充足）；非 duplex
+        会话或帧非法时静默丢弃，不干扰半双工 PyAudio 路径。
+        """
+        payload = data.get("data")
+        if not isinstance(payload, str) or not payload or len(payload) > 65536:
+            return
+        self._api.feed_talk_audio(payload)
 
     async def _cmd_message(self, ws: Any, data: dict) -> None:
         """message 指令：文本（可带 images/files 附件）入引擎队列，回执确认（流式结果走事件泵）。

@@ -79,7 +79,6 @@ def _listen(ui, settings, loop, ctx) -> None:
     result = stt.listen(
         max_seconds=settings.stt_max_seconds,
         silence_seconds=settings.stt_silence_seconds,
-        silence_threshold=settings.stt_silence_threshold,
         on_partial=_on_partial,
         on_open=_on_open,
     )
@@ -175,6 +174,22 @@ async def _realtime_talk(ui, settings) -> None:
         "voice": getattr(settings, "realtime_voice", "longanqian"),
         "ws_url": getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
         "workdir": getattr(settings, "workdir", "") or os.getcwd(),
+        # 事件时间线日志开关（[realtime_talk] event_log，默认关）
+        "event_log": bool(getattr(settings, "realtime_event_log", False)),
+        # AI 说话期间的麦克风二次压低（[realtime_talk] echo_suppress_with_aec，
+        # 默认开：关掉后残余回声会打断并取消 AI 每一轮回复）
+        "echo_suppress_with_aec": bool(
+            getattr(settings, "realtime_echo_suppress_with_aec", True)
+        ),
+        # 半双工（默认开）：AI 说话期间不上传麦克风，规避外放回声卡住下一轮
+        "half_duplex": bool(getattr(settings, "realtime_half_duplex", True)),
+        # 响应救援（默认开）：turn_detected 取消/无响应时补发 response.create
+        "rescue": bool(getattr(settings, "realtime_rescue", True)),
+        # 轮次检测（默认 server_vad 官方免提推荐；smart_turn 仅安静环境/耳机）
+        "turn_detection": getattr(settings, "realtime_turn_detection", "server_vad"),
+        "silence_duration_ms": int(getattr(settings, "realtime_silence_ms", 500)),
+        # 工具模式（默认 builtin 仅内置两工具；all 为注册表+MCP 全量）
+        "tools_mode": getattr(settings, "realtime_tools_mode", "builtin"),
     }
 
     # 纯终端全双工对话（原「优先拉起 pywebview 独立窗口」路径已于 2026-09 下线）

@@ -26,7 +26,6 @@ from agent.voice.stt.common import (
     _PCM_RATE,
     _PCM_WIDTH,
     _SILENCE_SECONDS,
-    _SILENCE_THRESHOLD,
     _import_pyaudio,
     _is_stopped,
 )
@@ -150,7 +149,7 @@ class _QwenASRCallback:
 class QwenASR:
     """Qwen3-ASR 语音识别器。基于 OmniRealtimeConversation，服务端 VAD。
 
-    与 ParaformerSTT 的关键差异:
+    实现要点（与已下线的 Paraformer 后端不同）:
     - 用 /realtime 端点 + OmniRealtimeConversation（非 /inference + Recognition）
     - 音频需 base64 编码后 append_audio（非 send_audio_frame raw bytes）
     - **服务端 VAD**: 服务端自动检测说话开始/结束，客户端不用手写 RMS 静音检测，
@@ -180,7 +179,6 @@ class QwenASR:
         *,
         max_seconds: float = _MAX_SECONDS,
         silence_seconds: float = _SILENCE_SECONDS,  # QwenASR 用服务端 VAD，此参数仅用于 end_session 时机参考
-        silence_threshold: int = _SILENCE_THRESHOLD,  # 未使用（服务端 VAD），保留接口兼容
         on_partial: Any = None,
         on_open: Any = None,
     ) -> dict[str, Any]:

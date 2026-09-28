@@ -95,17 +95,17 @@ class Settings:
     tts_volume: int = 50
     tts_speech_rate: float = 1.0
     tts_pitch_rate: float = 1.0
-    # STT（阶段三第二刀）
-    stt_model: str = "paraformer-realtime-v2"
+    # STT（阶段三第二刀）—— 单一后端 QwenASR，断句由服务端 VAD 完成
+    stt_model: str = "qwen3-asr-flash-realtime"
     stt_max_seconds: float = 15.0
     stt_silence_seconds: float = 1.5
-    stt_silence_threshold: int = 500
     # 语音模式最长录音时间（/voice 模式），超时自动提交。默认 5 分钟
     voice_max_seconds: float = 300.0
     # 语音模式选项（阶段三第四刀）
-    # 语音打断：TTS 播报期间短录检测"闭嘴""等一下"等中断词
-    # 可能偶尔因 PyAudio 冲突静默失败（不影响对话），ESC 仍可用
-    voice_barge_in: bool = True
+    # 语音打断（麦克风通道）：TTS 播报期间由 _BargeInWatcher 监听用户开口自动打断。
+    # 默认关闭：watcher 会开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows
+    # 上可能 segfault（见 configs/settings.example.toml 同名说明），环境稳定后再开。
+    voice_barge_in: bool = False
     # barge_in_key（键盘打断）默认启用：TTS 播报期间用 keyboard 库全局钩子监听 ESC，
     # 按下立即停止播报并切回聆听。不占 PyAudio，无 segfault 风险，daemon 无窗口也能捕获。
     voice_barge_in_key: bool = True
@@ -115,6 +115,37 @@ class Settings:
     realtime_ws_url: str = ""
     realtime_model: str = "qwen-audio-3.0-realtime-flash"
     realtime_voice: str = "longanqian"
+    # 事件时间线日志：开启后把 /talk 收到的每条服务端事件按序写入
+    # ~/.jarvis/logs/diag.log（component=realtime），用于复盘"谁在何时打断谁"。
+    # 默认关闭。环境音转写显示（🔇 前缀）与退出诊断摘要不受此开关控制，始终生效。
+    realtime_event_log: bool = False
+    # AI 说话期间是否对麦克风二次压低增益（默认 true）。
+    # WebRTC AEC3 只能消除部分回声，残留会被服务端重新识别为用户语音，
+    # 触发打断并取消本轮回复——关掉后表现为“AI 永远不开口”。
+    # 仅在佩戴耳机（无扬声器回声）时才建议关闭。
+    realtime_echo_suppress_with_aec: bool = True
+    # 半双工开关（默认 True）：AI 说话期间不上传麦克风，说完后留一段回声尾迹
+    # 静默期再恢复拾取。免提外放 + 软件 AEC 下可靠多轮的唯一方案（否则回声会
+    # 让 smart_turn 误判“用户仍在说话”→ AI 永远不开下一轮）；戴耳机想随口
+    # 打断时设为 False 切回全双工。
+    realtime_half_duplex: bool = True
+    # 响应救援（默认 True）：用户轮次已提交但服务端迟迟不创建响应、或响应被
+    # turn_detected 取消后不再补答时，客户端在 1.2~1.8s 后补发一次
+    # response.create（官方允许"等待用户下一轮输入时"手动触发）。兜底防
+    # "贾维斯永远不回复"；若实测与预期行为冲突可关闭排查。
+    realtime_rescue: bool = True
+    # 轮次检测模式（默认 "server_vad"，官方免提推荐）：声学 VAD + 静音时长判停，
+    # 尾音会延长当前轮而非触发新轮次，对免提外放最稳。"smart_turn" 为语义判停，
+    # 可过滤"嗯/啊"等附和声，但语义判停偏早，用户尾音易被重新检出为新轮次
+    # （turn_detected 取消响应），仅建议安静环境/耳机使用。
+    realtime_turn_detection: str = "server_vad"
+    # server_vad 判停静音时长（毫秒，范围 200~6000，默认 500）：越短响应越快，
+    # 但短暂停顿会误触发；对话场景推荐 400~800。
+    realtime_silence_ms: int = 500
+    # 语音会话工具模式（默认 "builtin"）：只注册 get_current_time /
+    # end_conversation，低延迟优先。"all" 装配 ToolRegistry + MCP 全量工具
+    # （约 300 个 schema，会话启动慢，且实测大工具表可能拖慢服务端响应触发）。
+    realtime_tools_mode: str = "builtin"
 
     # P3-1 跨设备协同（手机通过 PWA 连接）
     bridge_http_port: int = 8765
@@ -454,9 +485,13 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "permissions_file", "system_prompt_append",
         "debug", "verbose",
         "tts_model", "tts_voice", "tts_volume", "tts_speech_rate", "tts_pitch_rate",
-        "stt_model", "stt_max_seconds", "stt_silence_seconds", "stt_silence_threshold",
+        "stt_model", "stt_max_seconds", "stt_silence_seconds",
         "voice_max_seconds",
-        "realtime_ws_url", "realtime_model", "realtime_voice",
+        "realtime_ws_url", "realtime_model", "realtime_voice", "realtime_event_log",
+        "realtime_echo_suppress_with_aec",
+        "realtime_half_duplex",
+        "realtime_rescue",
+        "realtime_turn_detection", "realtime_silence_ms", "realtime_tools_mode",
         "bridge_http_port", "bridge_ws_port", "bridge_token",
         "boot_animation",
         "context_compaction",
@@ -503,7 +538,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("model", "stt_model"),
             ("max_seconds", "stt_max_seconds"),
             ("silence_seconds", "stt_silence_seconds"),
-            ("silence_threshold", "stt_silence_threshold"),
         ):
             if sub_key in stt_table:
                 updates[field] = stt_table[sub_key]
@@ -524,6 +558,13 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             ("ws_url", "realtime_ws_url"),
             ("model", "realtime_model"),
             ("voice", "realtime_voice"),
+            ("event_log", "realtime_event_log"),
+            ("echo_suppress_with_aec", "realtime_echo_suppress_with_aec"),
+            ("half_duplex", "realtime_half_duplex"),
+            ("rescue", "realtime_rescue"),
+            ("turn_detection", "realtime_turn_detection"),
+            ("silence_ms", "realtime_silence_ms"),
+            ("tools_mode", "realtime_tools_mode"),
         ):
             if sub_key in rt_table:
                 updates[field] = rt_table[sub_key]

@@ -151,14 +151,15 @@ class TestApplyToml:
         assert result.tts_volume == 80
 
     def test_stt_subtable_mapping(self) -> None:
+        """[stt] 表字段映射到 stt_* 顶层（model 只透传，加载器不校验后端）。"""
         s = Settings()
         result = _apply_toml(s, {
             "stt": {
-                "model": "paraformer-realtime-v2",
+                "model": "qwen3-asr-flash-realtime",
                 "silence_seconds": 2.0,
             }
         })
-        assert result.stt_model == "paraformer-realtime-v2"
+        assert result.stt_model == "qwen3-asr-flash-realtime"
         assert result.stt_silence_seconds == 2.0
 
     def test_email_subtable_mapping(self) -> None:

@@ -155,13 +155,32 @@ class WorkbenchAPI:
 
     # ---- 实时语音 ----
 
-    def start_talk(self) -> None:
-        """启动 /talk 实时双工语音。"""
-        self._post({"cmd": "start_talk"})
+    def start_talk(self, duplex: bool = False) -> Any:
+        """启动 /talk 实时双工语音。
+
+        Args:
+            duplex: True 时走桌面全双工桥接（浏览器 getUserMedia 采集 → WS
+                talk.audio 帧 → RealtimeEngine half_duplex=False），音频不经
+                PyAudio，由渲染进程播放 talk_audio 事件。False 保持 PyAudio
+                半双工路径（兼容旧客户端）。
+        """
+        self._post({"cmd": "start_talk", "duplex": duplex})
+        return None
 
     def stop_talk(self) -> None:
         """结束实时语音会话（窗口保持）。"""
         self._post({"cmd": "stop_talk"})
+
+    def feed_talk_audio(self, b64_frame: str) -> None:
+        """桌面全双工会话的麦克风音频帧直喂（serve 的 talk.audio 指令入口）。
+
+        走引擎直连（不在 command_queue 排队——50Hz 小帧排队会拖慢引擎指令
+        循环）；无活动 duplex 会话时静默丢弃。
+        """
+        try:
+            self._engine.feed_talk_audio(b64_frame)
+        except Exception:
+            pass
 
     # ---- 半双工语音（/voice） ----
 

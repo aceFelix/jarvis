@@ -168,7 +168,6 @@ async def _voice_loop_round(
             stt.listen,
             max_seconds=settings.voice_max_seconds,
             silence_seconds=settings.stt_silence_seconds,
-            silence_threshold=settings.stt_silence_threshold,
             on_partial=events.on_user_partial,
             on_open=lambda: None,
         )
@@ -370,7 +369,6 @@ async def _standby_round(settings: Settings, stt: Any) -> str:
             stt.listen,
             max_seconds=_STANDBY_MAX_SECONDS,
             silence_seconds=_STANDBY_SILENCE_SECONDS,
-            silence_threshold=settings.stt_silence_threshold,
             on_partial=lambda t: None,
             on_open=lambda: None,
         )

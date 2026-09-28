@@ -57,8 +57,11 @@ schedule.list       —                           {reminders: [...],
 cost.get            —                           {model, input_tokens,
                                                  output_tokens, ...}
 answer_user         text: str                   null（回填 ask_user 弹窗）
-talk.start          —                           null（结果走 talk_started）
+talk.start          duplex?: bool（全双工           null（结果走 talk_started）
+                    桥接，桌面端传 true）
 talk.stop           —                           null（结果走 talk_stopped）
+talk.audio          data: base64 PCM16 16k          无回执（fire-and-forget，
+                    麦克风帧（全双工会话）          仅 duplex 会话消费）
 voice.start         —                           null（结果走 voice_started）
 voice.stop          —                           null（结果走 voice_stopped）
 voice.interrupt     —                           bool（打断当前播报/推理）
@@ -75,7 +78,8 @@ proactive.ack       task_id: str                bool（提醒确认，停止升�
 - 指标：``metrics``（每 2 秒推送，与 metrics.get 同构）
 - 实时语音：``talk_started`` / ``talk_stopped`` / ``volume`` /
   ``user_speaking`` / ``ai_speaking`` / ``user_transcript`` /
-  ``ai_transcript`` / ``ai_transcript_delta``
+  ``ai_transcript`` / ``ai_transcript_delta``；全双工桥接会话另有
+  ``talk_audio``（AI 语音帧，base64 PCM16 24kHz）
 - 半双工语音（/voice）：``voice_started`` / ``voice_stopped`` /
   ``voice_state``（payload = listening/thinking/speaking/standby/dialog/
   exited） / ``voice_user_transcript`` / ``voice_ai_text_delta`` /
@@ -120,6 +124,10 @@ CMD_ANSWER_USER = "answer_user"
 CMD_REPLY_ABORT = "reply.abort"
 CMD_TALK_START = "talk.start"
 CMD_TALK_STOP = "talk.stop"
+# talk.audio（2026-09-28 桌面全双工）：渲染进程 → 服务端的麦克风音频帧
+#（base64 PCM16 16kHz 单声道，100ms/帧），仅 talk.start 带 duplex=true 的
+# 会话消费；无回执（fire-and-forget，客户端用 send 而非 sendCommand）。
+CMD_TALK_AUDIO = "talk.audio"
 CMD_VOICE_START = "voice.start"
 CMD_VOICE_STOP = "voice.stop"
 CMD_VOICE_INTERRUPT = "voice.interrupt"
@@ -150,6 +158,7 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_REPLY_ABORT,
     CMD_TALK_START,
     CMD_TALK_STOP,
+    CMD_TALK_AUDIO,
     CMD_VOICE_START,
     CMD_VOICE_STOP,
     CMD_VOICE_INTERRUPT,
@@ -165,6 +174,10 @@ EVT_METRICS = "metrics"
 EVT_PROACTIVE_NOTIFY = "proactive_notify"
 EVT_VOICE_STARTED = "voice_started"
 EVT_VOICE_STOPPED = "voice_stopped"
+# talk_audio（2026-09-28 桌面全双工）：服务端 → 渲染进程的 AI 语音帧
+#（base64 PCM16 24kHz 单声道，随 response.audio.delta 逐帧广播）；打断时
+# 远端应清空播放队列（引擎本地 spk.stop_stream 与该事件语义对齐）。
+EVT_TALK_AUDIO = "talk_audio"
 EVT_VOICE_STATE = "voice_state"
 EVT_VOICE_USER_TRANSCRIPT = "voice_user_transcript"
 EVT_VOICE_AI_TEXT_DELTA = "voice_ai_text_delta"

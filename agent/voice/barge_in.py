@@ -183,7 +183,6 @@ class _VoiceBargeInDetector:
                 result = self._stt.listen(
                     max_seconds=1.5,
                     silence_seconds=0.5,
-                    silence_threshold=500,
                     on_partial=lambda t: None,
                     on_open=lambda: None,
                 )

@@ -31,7 +31,7 @@ verbose = false
 # ---- 语音 ----
 # 基于 DashScope。复用 DASHSCOPE_API_KEY。
 # TTS: CosyVoice，音色 longanlang_v3；可用模型 cosyvoice-v3-flash(快)/v3-plus(好)/v3.5-plus(字级时间戳)
-# STT: 实时识别推荐 paraformer-realtime-v2 / fun-asr-realtime；非实时 fun-asr-flash-* 不推荐用于 /voice
+# STT: 单一后端 QwenASR（qwen3-asr-flash-realtime，服务端 VAD）
 [tts]
 model = "cosyvoice-v3-flash"
 voice = "longanlang_v3"
@@ -40,16 +40,11 @@ speech_rate = 1.0    # 0.5-2.0，1.0 正常语速
 pitch_rate = 1.0     # 0.5-2.0，1.0 正常音调
 
 [stt]
-# model 适配规则（create_stt 工厂自动选择后端）：
-#   - "qwen*"              → QwenASR（OmniRealtimeConversation，服务端 VAD，质量高，中英混合强）
-#   - "paraformer*"        → ParaformerSTT（Recognition WebSocket，客户端 VAD，轻量快）
-#   - "fun-asr-realtime"   → ParaformerSTT（同为 Recognition 实时识别后端）
-#   - "fun-asr-flash-*"    → FunASRFlashSTT（HTTP POST 文件上传，非实时，/voice 体验差）
-# 切换后端只需改这一行
+# 单一后端 QwenASR（OmniRealtimeConversation，服务端 VAD，中英混合强）。
+# model 原样透传给 DashScope，需填 qwen 实时识别模型名；填 paraformer / fun-asr 之类会在建连阶段报错。
 model = "qwen3-asr-flash-realtime"
-max_seconds = 15         # 单次录音最长秒数（防卡死）
-silence_seconds = 1.5    # 连续静音多少秒视为说完（Paraformer 客户端 VAD / Qwen 服务端 VAD 均用此值）
-silence_threshold = 500  # RMS 静音阈值（仅 Paraformer 客户端 VAD 用；Qwen 用服务端 VAD 忽略此值）
+max_seconds = 15         # 单次录音最长秒数（防卡死，客户端兜底超时）
+silence_seconds = 1.5    # 服务端 VAD 连续静音多少秒视为说完
 
 [voice]
 # barge_in: 语音打断——播报中开口说话自动打断。
@@ -58,6 +53,37 @@ barge_in = false
 # barge_in_key: 键盘打断——播报中按 ESC 立即停止播报，切回聆听。
 # 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。想换键改 voice_loop.py _KeyBargeInWatcher 默认 key。
 barge_in_key = true
+
+[realtime_talk]
+# /talk 实时双工语音（DashScope qwen-audio-3.0-realtime-flash）。
+# model / voice / ws_url 也可写在此表内，优先级高于同名顶层 realtime_* 字段。
+# event_log: 事件时间线日志——把本次会话收到的每条服务端事件按序写入
+# ~/.jarvis/logs/diag.log（component=realtime），用于复盘交互时序（谁在何时打断谁）。
+# 默认关闭。被服务端判为非有效轮次的语音（🔇 前缀）与退出诊断摘要始终显示，不受此开关控制。
+event_log = false
+# echo_suppress_with_aec: AI 说话期间是否压低麦克风增益（×0.1）抑制残余回声。
+# 默认 true，AEC 已启用时同样生效：WebRTC AEC3 在免提外放下只能消除部分回声，
+# 残留会被服务端重新识别为用户语音→触发打断→取消本轮回复，表现为“AI 永远不开口”。
+# 仅在佩戴耳机（无扬声器回声）时才建议关闭，让插话语音保持正常增益。
+echo_suppress_with_aec = true
+# half_duplex: 半双工（默认 true）——AI 说话期间不上传麦克风，说完后留 0.6s 回声尾迹
+# 静默期再恢复拾取，是免提外放能连续多轮的关键（否则回声会让 AI 永远不开下一轮）。
+# 戴耳机想随口打断时设为 false（全双工）。
+half_duplex = true
+# rescue: 响应救援（默认 true）——用户轮次已提交但服务端迟迟不创建响应、或响应被
+# turn_detected 取消后不再补答时，客户端在 1.2~1.8s 后补发一次 response.create
+# （官方允许"等待用户下一轮输入时"手动触发），兜底防"贾维斯永远不回复"。
+rescue = true
+# turn_detection: 轮次检测（默认 "server_vad"，官方免提推荐）——声学 VAD + 静音时长
+# 判停，尾音延长当前轮而非触发新轮次。"smart_turn" 语义判停偏早，尾音易被重检为
+# 新轮次取消响应，仅建议安静环境/耳机。
+turn_detection = "server_vad"
+# silence_ms: server_vad 判停静音时长（毫秒，200~6000，默认 500；对话场景推荐 400~800）。
+silence_ms = 500
+# tools_mode: 语音会话工具模式（默认 "builtin"）——只注册 get_current_time /
+# end_conversation，低延迟优先。"all" 装配 ToolRegistry + MCP 全量（约 300 个 schema，
+# 会话启动慢，且实测大工具表可能拖慢服务端响应触发）。
+tools_mode = "builtin"
 
 [ui]
 # 启动动画：JARVIS 蓝色方舟反应炉粒子动效（致敬 钢铁侠）。

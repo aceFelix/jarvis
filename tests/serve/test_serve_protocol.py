@@ -102,8 +102,11 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 26 个 rpc = 27（增减须同步双仓文档）。"""
-    assert len(protocol.DESKTOP_COMMANDS) == 27
+    """指令总数契约：message + 26 个 rpc + talk.audio（无回执帧通道）= 28。
+
+    增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
+    """
+    assert len(protocol.DESKTOP_COMMANDS) == 28
 
 
 def test_all_registered_rpcs_declared():
@@ -118,9 +121,21 @@ def test_all_registered_rpcs_declared():
     @author aceFelix
     """
     server = _make_server()
-    # message 走事件泵（_cmd_message 覆写内置路由），不在 RPC 记账内
-    expected = set(protocol.DESKTOP_COMMANDS) - {protocol.CMD_MESSAGE}
+    # message 走事件泵（_cmd_message 覆写内置路由）；talk.audio 是无回执的
+    # 帧通道（register_ws_handler 直挂，50Hz 小帧不进 RPC 记账）—— 二者
+    # 都不在 _rpc_types 内，从期望集合中扣除
+    expected = set(protocol.DESKTOP_COMMANDS) - {
+        protocol.CMD_MESSAGE,
+        protocol.CMD_TALK_AUDIO,
+    }
     assert server._rpc_types == expected, f"声明与注册不一致: {server._rpc_types ^ expected}"
+
+
+def test_talk_audio_handler_registered():
+    """talk.audio：已注册帧处理器且声明在指令集合（双仓契约，防单侧漏改）。"""
+    server = _make_server()
+    assert protocol.CMD_TALK_AUDIO in server._ws_handlers
+    assert protocol.CMD_TALK_AUDIO in protocol.DESKTOP_COMMANDS
 
 
 # ---- models.edit / models.remove RPC ----

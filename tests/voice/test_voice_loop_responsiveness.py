@@ -35,7 +35,6 @@ def _settings() -> SimpleNamespace:
         verbose=False,
         voice_max_seconds=5,
         stt_silence_seconds=1.0,
-        stt_silence_threshold=100,
         stt_model="fake-stt",
         tts_model="fake-tts",
         tts_voice="fake-voice",
