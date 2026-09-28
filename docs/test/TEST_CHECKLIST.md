@@ -275,8 +275,8 @@
 ### 13.1 STT 引擎
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
-| T-118 | QwenASR 识别 | model=qwen3-asr-*，说中文 | 服务端 VAD，识别准确 |
-| T-119 | ParaformerSTT 识别 | model=paraformer-*，说中文 | 客户端 VAD，轻量快速 |
+| T-118 | QwenASR 识别 | model=qwen3-asr-flash-realtime（默认），说中文 | 服务端 VAD 断句，识别准确 |
+| T-119 | 非 qwen 模型名被拒 | 把 model 改成 paraformer-realtime-v2 后启动 /voice | 建连阶段报错并提示，不静默降级 |
 | T-120 | 静音检测 | 说完后停顿 | 自动检测静音停止录音 |
 | T-121 | 中英混合 | 说"帮我搜索 Python 教程" | 中英混合正确识别 |
 | T-122 | 实时部分结果 | 说话过程中 | 终端显示实时识别文字 |

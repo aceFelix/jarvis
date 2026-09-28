@@ -93,11 +93,13 @@ enable_thinking = true
 
 ### STT（语音 → 文字）
 
+单一后端 QwenASR（DashScope OmniRealtime 流式识别，断句由服务端 VAD 完成）。
+
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `stt_model` | `"paraformer-realtime-v2"` | STT 模型 |
-| `stt_max_seconds` | `15.0` | 最长录音秒数 |
-| `stt_silence_seconds` | `1.5` | 静音多少秒后自动结束 |
+| `stt_model` | `"qwen3-asr-flash-realtime"` | STT 模型名（原样透传，非 qwen 实时模型会在建连阶段被拒绝） |
+| `stt_max_seconds` | `15.0` | 最长录音秒数（客户端兜底超时） |
+| `stt_silence_seconds` | `1.5` | 服务端 VAD 静音多少秒后断句 |
 
 ### 实时双工（/talk）
 
@@ -105,8 +107,16 @@ enable_thinking = true
 |---|---|---|
 | `realtime_model` | `"qwen-audio-3.0-realtime-flash"` | Realtime 模型 |
 | `realtime_voice` | `"longanqian"` | 实时语音音色 |
-| `voice_barge_in` | `true` | 语音打断（说"闭嘴"等中断词） |
+| `realtime_half_duplex`（`[realtime_talk].half_duplex`） | `true` | 半双工：AI 说话期静音麦克风，外放稳定多轮；戴耳机设 false |
+| `realtime_rescue`（`[realtime_talk].rescue`） | `true` | 响应救援：服务端吞轮时补发一次 `response.create`（三闸门防重复回答） |
+| `realtime_turn_detection`（`[realtime_talk].turn_detection`） | `"server_vad"` | 轮次检测：`server_vad`（默认，尾音延长当前轮）/ `smart_turn`（语义判停，尾音易被重检） |
+| `realtime_silence_ms`（`[realtime_talk].silence_ms`） | `500` | server_vad 判停静音时长（毫秒，200~6000） |
+| `realtime_tools_mode`（`[realtime_talk].tools_mode`） | `"builtin"` | 语音会话工具面：`builtin` 2 内置工具低延迟 / `all` Registry+MCP 全量 |
+| `voice_barge_in` | `false` | 麦克风语音打断（默认关：watcher 会开第二个 PyAudio 实例，与 TTS 并发有崩溃风险） |
 | `voice_barge_in_key` | `true` | 键盘打断（ESC 键） |
+
+> 桌面壳 jarvis-desktop 的语音模式为真全双工（浏览器 AEC + `talk.audio`/`talk_audio`
+> 音频桥接），路径内固定 `half_duplex=False`，不受上述配置影响。
 
 ---
 

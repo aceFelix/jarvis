@@ -85,7 +85,7 @@ An AI Agent smart butler built for personal computers — a tribute to JARVIS fr
 | MCP integration / session memory / context compaction | ✅ | ✅ | ✅ |
 | Rich terminal UI + boot animation | ✅ | ✅ | ✅ |
 | Voice conversation `/voice` (STT + TTS) | ✅ | ✅ | ✅ |
-| Real-time duplex voice `/talk` (full duplex, in-terminal) | ✅ | ✅ | ✅ |
+| Real-time duplex voice `/talk` (terminal half-duplex turns; desktop shell true full duplex) | ✅ | ✅ | ✅ |
 | Three-column GUI workbench (`--gui`/`--talk`, transparent + Arc Reactor) | ✅ | ✅ | ✅ |
 | Mouse / keyboard / screenshot (pyautogui) | ✅ | ✅¹ | ✅² |
 | Camera / vision monitoring | ✅ | ✅ | ✅ |
@@ -314,11 +314,8 @@ speech_rate = 1.0                # Speech rate 0.5-2.0
 pitch_rate = 1.0                 # Pitch 0.5-2.0
 
 [stt]
-# Three-backend auto-adaptation (based on model name):
-#   qwen3-asr-*        → QwenASR (OmniRealtimeConversation, server-side VAD, highest quality)
-#   paraformer-*       → ParaformerSTT (Recognition WebSocket, client-side VAD, lightweight & fast)
-#   fun-asr-realtime   → ParaformerSTT (same Recognition real-time backend)
-#   fun-asr-flash-*    → FunASRFlashSTT (HTTP POST file upload, non-real-time, poor /voice experience)
+# Single backend: QwenASR (OmniRealtimeConversation, server-side VAD, strong Chinese-English mix)
+# `model` is passed through to DashScope as-is; use a Qwen real-time ASR model name
 model = "qwen3-asr-flash-realtime"
 max_seconds = 15                  # Max recording seconds
 silence_seconds = 1.5             # Silence detection seconds
@@ -331,6 +328,13 @@ barge_in_key = true               # Keyboard barge-in: press ESC to stop during 
 [realtime_talk]
 model = "qwen-audio-3.0-realtime-flash"  # DashScope real-time voice model
 voice = "longanqian"                      # Voice
+event_log = false                  # Event timeline log (writes ~/.jarvis/logs/diag.log), off by default
+echo_suppress_with_aec = true      # Attenuate mic while AI speaks to suppress echo (turn off only with headphones)
+half_duplex = true                 # Half-duplex: mute mic while AI speaks (reliable speakerphone multi-turn); set false with headphones for barge-in
+rescue = true                      # Response rescue: client re-issues response.create when the server swallows a turn
+turn_detection = "server_vad"      # Turn detection: server_vad (default, hands-free recommended) / smart_turn
+silence_ms = 500                   # server_vad end-of-turn silence (ms)
+tools_mode = "builtin"             # Tool surface: builtin (2 tools, low latency) / all (Registry+MCP)
 
 # ---- Context compaction ----
 [context]
@@ -479,7 +483,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 | Command | Description |
 |---|---|
 | `/voice` | Enter voice conversation mode (continuous STT→LLM→TTS loop) |
-| `/talk` | Enter real-time duplex voice chat (in-terminal full duplex, speak to interrupt) |
+| `/talk` | Enter real-time duplex voice chat (terminal half-duplex turns; the desktop shell offers true full duplex with speak-to-interrupt) |
 | `/tts-voice [prefix]` | Switch/add TTS voice (DashScope only) |
 | `/say <text>` | TTS read specified text |
 | `/listen` `/mic` | Record and recognize to text |
@@ -646,7 +650,7 @@ Jarvis provides two independent voice systems:
 | Mode | Tech Path | Features |
 |---|---|---|
 | **`/voice` Voice Chat** | STT → LLM → TTS pipeline | Recognize→think→playback, turn-by-turn chat |
-| **`/talk` Real-time Chat** | Full-duplex WebSocket direct | Speak and listen simultaneously, interrupt AI while talking |
+| **`/talk` Real-time Chat** | Full-duplex WebSocket direct | Terminal half-duplex turns; desktop shell true full duplex (speak to interrupt) |
 
 > The two systems run independently but share microphone hardware. Running both may cause PyAudio device conflicts.
 
@@ -658,14 +662,9 @@ After entering voice conversation mode, forms a **Listen → Think → Speak** l
 🎤 Listen → STT recognize → LLM think & answer → TTS playback → 🎤 Listen → ...
 ```
 
-- **Voice input**: Three STT backends available, switch by modifying `[stt].model` in `settings.toml`:
-
-  | Config model | Backend class | Protocol | Features |
-  |---|---|---|---|
-  | `qwen3-asr-*` | **QwenASR** | WebSocket (OmniRealtimeConversation) | Server-side VAD, highest quality, strong Chinese-English mix |
-  | `paraformer-*` | **ParaformerSTT** | WebSocket (Recognition) | Client-side VAD, lightweight & fast |
-  | `fun-asr-realtime` | **ParaformerSTT** | WebSocket (Recognition) | Real-time recognition, same backend as paraformer |
-  | `fun-asr-flash-*` | **FunASRFlashSTT** | HTTP POST (file upload) | Non-real-time, poor /voice loop experience, not recommended |
+- **Voice input**: single STT backend **QwenASR** (`[stt].model` in `settings.toml`, default `qwen3-asr-flash-realtime`)
+  - WebSocket (OmniRealtimeConversation) streaming recognition, server-side VAD segmentation, strong Chinese-English mix
+  - The conversation loop and standby wake-word share one instance; recognition language comes from the `language` parameter (default `zh`)
 
 - **Voice output**: Two TTS modes
   - **CosyVoiceTTS**: Whole-segment synthesis playback (`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`)
@@ -678,17 +677,33 @@ After entering voice conversation mode, forms a **Listen → Think → Speak** l
 
 ### Real-time Duplex `/talk`
 
-Based on DashScope real-time voice WebSocket service (`qwen-audio-3.0-realtime-flash`):
+Based on DashScope real-time voice WebSocket service (`qwen-audio-3.0-realtime-flash`),
+refactored on 2026-09-28 into a **transport-agnostic engine (`RealtimeEngine`) plus
+terminal/desktop adapters**:
 
-- **Full-duplex communication**: Microphone audio stream sent to model in real-time, simultaneously receives AI voice output
-- **smart_turn turn detection**: Fuses acoustic perception with semantic understanding to detect speech boundaries, meaningless echo sounds won't interrupt conversation
-- **AEC echo cancellation**: Based on WebRTC AEC3, eliminates speaker echo, works without headphones, preserves speak-to-interrupt capability
-- **Function Calling**: Model can autonomously call tools for real-time info. Built-in time query tool, auto-integrates all ToolRegistry tools (file read/write, Bash, Glob, Grep, WebSearch, SendEmail etc.). Model judges high-risk operations per instructions, asks user for voice confirmation before executing
-- **Terminal-only UI**: Runs full-duplex conversation directly in the terminal with live transcription stream, interruption fully supported (the pywebview standalone window was retired in 2026-09)
-- **Graphical real-time chat**: Handled by the three-column workbench (`--gui` middle-column real-time mode, Arc Reactor animation) and the jarvis-desktop app
+- **server_vad turn detection (default)**: acoustic VAD + silence-duration segmentation —
+  trailing sounds extend the current turn instead of falsely triggering a new one;
+  `turn_detection = "smart_turn"` switches to semantic segmentation (ambient transcription /
+  voiceprint features available only there)
+- **Half-duplex turns (terminal default)**: mic muted (silence frames keep the stream alive)
+  while AI speaks — reliable multi-turn on speakerphone; set `half_duplex = false` with
+  headphones to restore barge-in
+- **True full duplex on desktop (jarvis-desktop)**: browser `getUserMedia` system-level AEC
+  cancels speaker echo before audio hits the wire; frames bridged via serve protocol
+  (`talk.audio` up / `talk_audio` down) — speak to interrupt, zero config
+- **Response rescue**: when the server swallows a turn (cancelled without follow-up /
+  response never created), the client re-issues `response.create` once as a safety net
+- **AEC echo cancellation (terminal, optional)**: WebRTC AEC3 (`aec-audio-processing`);
+  without it, half-duplex muting prevents echo at the source
+- **Function Calling**: default `tools_mode = "builtin"` (time query + end conversation —
+  large tool tables measurably slow down server response creation); `"all"` assembles all
+  ToolRegistry tools + MCP (loaded once before the first `session.update`). High-risk
+  operations ask for voice confirmation first
+- **Terminal-only UI**: live transcription stream directly in the terminal (the pywebview standalone window was retired in 2026-09)
+- **Graphical real-time chat**: three-column workbench (`--gui` middle column) and the jarvis-desktop app (true full duplex)
 - Exit: ESC key or say "stand down"
 
-> **AEC dependency**: Real-time chat echo cancellation depends on `aec-audio-processing` (WebRTC AEC3 Python binding) and `numpy`, included in `[voice]` optional dependency group. Auto-degrades to smart_turn-only semantic anti-echo mode when not installed.
+> **AEC dependency**: terminal echo cancellation depends on `aec-audio-processing` (WebRTC AEC3 Python binding) and `numpy`, included in `[voice]` optional dependency group; without it, half-duplex muting covers speakerphone scenarios. See [docs/architecture/06-语音系统.md](docs/architecture/06-语音系统.md) for the mute/rescue strategy.
 
 ### TTS Playback `/say`
 
@@ -825,6 +840,13 @@ Configure in `~/.jarvis/settings.toml`:
 api_key = "sk-xxx"              # DashScope API Key (required for real-time voice)
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
+event_log = false               # Event timeline log (writes ~/.jarvis/logs/diag.log), off by default
+echo_suppress_with_aec = true   # Attenuate mic while AI speaks to suppress echo (turn off only with headphones)
+half_duplex = true      # Half-duplex: mute mic while AI speaks; set false with headphones for barge-in (desktop duplex path ignores it)
+rescue = true           # Response rescue (on by default)
+turn_detection = "server_vad"   # server_vad (default) / smart_turn
+silence_ms = 500        # server_vad end-of-turn silence (ms, 200~6000)
+tools_mode = "builtin"  # builtin (default) / all (Registry+MCP)
 ```
 
 > `api_key` authenticates `/talk` real-time duplex voice (mapped to `dashscope_api_key`). Falls back to the `DASHSCOPE_API_KEY` env var if not configured; the main `api_key` is also reused when the current LLM provider is dashscope. **Keys from other vendors (deepseek/openai) are never borrowed** — since 2026-09 it fails fast with clear setup guidance instead of attempting a connection doomed to a 1007 Access denied rejection.
@@ -1395,14 +1417,18 @@ agent/
 │       └── assets/    # HTML/JS/CSS (transparent Arc Reactor + bubbles)
 ├── voice/             # Voice engine
 │   ├── tts.py         # CosyVoiceTTS (whole-segment synthesis + streaming start/feed/finish + interrupt)
-│   ├── stt/           # STT three-backend package (split by ASR engine)
+│   ├── stt/           # STT package (single backend QwenASR)
 │   │   ├── common.py    # audio constants / RMS calc / stop flag (shared)
-│   │   ├── paraformer.py # ParaformerSTT (Recognition, client-side VAD)
 │   │   ├── qwen.py      # QwenASR (OmniRealtime, server-side VAD)
-│   │   ├── funasr.py    # FunASRFlashSTT (HTTP POST whole-segment WAV)
 │   │   └── __init__.py  # create_stt() factory + symbol re-export
 │   ├── stream_tts.py  # StreamTTSPlayer (sentence-level streaming TTS, play sentence by sentence)
-│   ├── realtime_talk.py # /talk full-duplex real-time voice (WebSocket + AEC + Function Calling)
+│   ├── realtime_engine.py # /talk protocol engine (WS state machine / mute policy / response rescue, transport-agnostic)
+│   ├── realtime_talk.py # /talk terminal adapter (PyAudio capture + ESC + tool assembly)
+│   ├── realtime_bridge_audio.py # desktop bridge adapter (BridgeMic/BridgeSpk, serve frames ⇄ engine)
+│   ├── realtime_audio.py # /talk audio pure functions (RMS / attenuation / mute decision)
+│   ├── realtime_tools.py # /talk tool layer (builtin tools + MCP registry aggregation + Function Calling)
+│   ├── realtime_mcp.py # /talk MCP tool assembly (loaded once before first session.update)
+│   ├── realtime_events.py # /talk observability layer (ambient transcription + event timeline + turn counters)
 │   ├── voice_loop.py  # /voice voice conversation loop (listen→think→speak + conversation⇄standby state machine)
 │   ├── voice_config.py # Voice config (keywords/wake words/standby params/voice system prompt)
 │   ├── tts_text.py    # TTS text cleaning (markdown/<think>/tool tag stripping)

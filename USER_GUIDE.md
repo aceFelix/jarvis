@@ -197,7 +197,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 更自然的对话体验——像打电话一样：
 
 - **全双工**：你说话的同时我能听到，不用等我说完
-- **随时打断**：开口说话就自动打断我的回复
+- **随时打断**：说"闭嘴"等中断词（需把 `[voice].barge_in` 设为 `true`，默认关）或按 `ESC`
 - **纯终端运行**：直接在终端内对话并实时显示转录文字流（2026-09 起不再弹独立窗口；图形化实时聊天用工作台 `--gui` 或 jarvis-desktop）
 - **退出**：说"退下"或按 `ESC`
 
@@ -206,8 +206,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 ```toml
 # ~/.jarvis/settings.toml
 [stt]
-model = "qwen3-asr-flash-realtime"   # 推荐：质量最高，中英混合强
-# 也可换 paraformer-realtime-v2（轻量快）/ fun-asr-flash-*（非实时，不推荐）
+model = "qwen3-asr-flash-realtime"   # 单一后端 QwenASR：服务端 VAD，中英混合强
 
 [tts]
 model = "cosyvoice-v3-flash"         # 快速合成

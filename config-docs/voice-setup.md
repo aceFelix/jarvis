@@ -45,10 +45,17 @@ api_key = ""                                        # → dashscope_api_key（�
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
 ws_url = ""
+event_log = false                                   # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
+echo_suppress_with_aec = true                       # AI 说话时压低麦克风抑制残余回声（仅戴耳机时才建议关）
+half_duplex = true                                  # 半双工：AI 说话期静音麦克风（外放稳定多轮）；耳机全双工设 false
+rescue = true                                       # 响应救援：吞轮时补发 response.create（默认开）
+turn_detection = "server_vad"                       # 轮次检测：server_vad（默认）/ smart_turn
+silence_ms = 500                                    # server_vad 判停静音时长 ms（200~6000）
+tools_mode = "builtin"                              # 工具面：builtin（默认 2 工具低延迟）/ all（Registry+MCP）
 
 # ── 语音打断（注意：barge_in / barge_in_key 必须在 [voice] 表内，写顶层无效）──
 [voice]
-barge_in = true          # 语音打断：说"闭嘴""等一下"等中断词
+barge_in = false         # 麦克风打断：播报中检测到用户开口自动打断（默认关）
 barge_in_key = true      # 键盘打断：按 ESC
 
 # /voice 单轮聆听上限（顶层字段，默认 300 秒）
@@ -64,10 +71,9 @@ pitch_rate = 1.0
 
 # ── STT 配置（/voice 模式的语音识别）──
 [stt]
-model = "qwen3-asr-flash-realtime"
-max_seconds = 15.0       # 单次录音最长秒数
-silence_seconds = 1.5    # 连续静音多少秒视为说完
-silence_threshold = 500  # RMS 静音阈值（QwenASR 后端走服务端 VAD，此值不生效）
+model = "qwen3-asr-flash-realtime"   # 唯一后端，原样透传给 DashScope
+max_seconds = 15.0       # 单次录音最长秒数（客户端兜底超时）
+silence_seconds = 1.5    # 服务端 VAD 连续静音多少秒视为说完
 ```
 
 ---
@@ -87,13 +93,93 @@ pip install aec-audio-processing
 安装后 `/talk` 启动时会自动显示：
 
 ```
-AEC 回声消除已启用 · smart_turn · 说话打断 · ESC 退出
+轮次检测: server_vad · 半双工轮替·AI 说完你再说 · ESC 退出
 ```
 
 ### 无需 AEC 的场景
 
 - 使用耳机（物理隔离，无回声）
 - 使用内置麦克风 + 笔记本扬声器（距离近，回声小）
+
+### 装了 AEC 为什么还要压低麦克风
+
+WebRTC AEC3 在免提外放 + 非理想延迟对齐下**只能消除部分回声**，残留会被
+服务端重新识别为用户语音，触发打断并取消 AI 本轮回复——表现为“AI 永远不开口”。
+因此 `/talk` 在 AI 说话期间会把麦克风音频乘 `ECHO_SUPPRESS_FACTOR`（0.1）作为兜底，
+**AEC 已启用时同样生效**；并配合“回声保护窗口”：AI 说话期间若衰减后麦克风电平仍
+很低，`speech_started` 会被判为回声误触发而忽略，不取消回复。
+
+该压低只在 AI 真正说话期间生效，不会永久压小您的语音。佩戴耳机时可关掉它以恢复
+正常增益：
+
+```toml
+[realtime_talk]
+echo_suppress_with_aec = false   # 默认 true；仅耳机场景建议关闭
+```
+
+> 若 `/talk` 出现“一直在说、AI 完全不回复”，退出时的诊断摘要会提示“回复被取消”
+> 及其回声成因；打开 `event_log = true` 可在 `~/.jarvis/logs/diag.log` 看到完整事件时间线。
+> 完整复盘见
+> [realtime-talk-echo-self-cancel-fix.md](../docs/fixlogs/realtime-talk-echo-self-cancel-fix.md)。
+
+### 外放时 AI 说完就不接话？半双工轮替（默认开启）
+
+即使有 AEC + 压低 + 回声保护，**免提外放**下仍可能出问题：只要 AI 说话期间麦克风
+持续上传，服务端就可能把回声/混响当成“您还在说话”，于是 AI 说完后迟迟等不到
+安静信号、**永远不开启下一轮**（典型表现：第一轮能答，之后您说话它一直不接）。
+
+`/talk` 默认用**半双工**从源头解决：AI 说话期间完全不上传麦克风，说完后再留 0.6 秒
+回声尾迹静默期才恢复拾取。您只需“等它说完再接话”，多轮就稳定了。代价是失去随口打断
+——但外放场景本就打断不了，等于无损。
+
+戴耳机想恢复“随时打断”的全双工时：
+
+```toml
+[realtime_talk]
+half_duplex = false   # 默认 true（半双工）；设为 false 需配合耳机使用
+```
+
+复盘见 [realtime-talk-half-duplex.md](../docs/fixlogs/realtime-talk-half-duplex.md)。
+
+### 轮次检测：为什么默认 server_vad（2026-09-28 根因翻案）
+
+旧版默认 `smart_turn`（语义判停）实测存在“尾音重检”灾难：语义判停偏早，判停后
+客户端仍在直播真实麦克风，尾音/换气被服务端 VAD 重新检出为“新轮次”，刚创建的响应
+被 `response.done[cancelled, reason=turn_detected]` 掐死——表现为“每轮必取消”。
+现默认改为官方免提推荐的 **server_vad**（声学 VAD + 静音时长判停，尾音只会延长当前轮）。
+
+```toml
+[realtime_talk]
+turn_detection = "server_vad"   # 默认；需要环境音转写/声纹能力时才设 "smart_turn"
+silence_ms = 500                # 判停静音时长：说话节奏慢/多人环境可调大到 800~1500
+```
+
+设 `smart_turn` 时引擎会自动叠加“轮末静音窗”（判停后 3s 发静音帧堵尾音，您真在
+继续说话则立即恢复，不吞话）作为缓解手段，但仍建议安静环境使用。
+
+### 响应救援（rescue）：防“说了话永远不回复”
+
+服务端存在两类吞轮异常：响应被 turn_detected 取消后不再补答；轮次提交后迟迟不
+自动建响应。`rescue = true`（默认）时，客户端在 1.2~1.8s 后补发一次
+`response.create` 兜底，并有防“重复回答”三闸门（任何 response.done 撤销待发救援、
+单字/回声轮不武装、两次救援最小间隔 2s）。遇到“它确实没答”时屏幕会提示
+`🛟 响应救援`。排查阶段可用 `rescue = false` 关闭验证。
+
+### 工具面瘦身（tools_mode）
+
+实测 299 个工具 schema 的全量会话会让服务端“轮次提交后迟迟不创建响应”。默认
+`builtin` 只给语音会话 2 个内置工具（时间查询/结束对话）；需要文件/命令/MCP 等
+全量能力时设 `tools_mode = "all"`（会话启动稍慢，需自行验证稳定性）。MCP 工具
+会在首个 `session.update` 之前一次性加载完毕——中途补发会毒化会话（历史故障根因）。
+
+### 桌面端真全双工（jarvis-desktop）
+
+桌面壳的语音模式是**说话即打断**的真全双工：浏览器 `getUserMedia` 的系统级回声
+消除（AEC）在声音进网络前就消除 AI 外放回声，服务端只听到您的真实语音；音频经
+serve 协议（`talk.audio` 上行 / `talk_audio` 下行）桥接给同一个 `RealtimeEngine`。
+桌面路径自动关闭半双工/软件压低/AEC 三重消除，**无需任何配置**；终端 `/talk`
+仍是半双工轮替（软件 AEC 不彻底下的稳定解）。架构见
+[docs/architecture/06-语音系统.md](../docs/architecture/06-语音系统.md) “桌面全双工桥接”一节。
 
 ---
 
@@ -216,16 +302,19 @@ python -c "import pyaudio; p = pyaudio.PyAudio(); print(p.get_default_input_devi
 ## 架构简述
 
 ```
-[麦克风] → PyAudio 采集 (16kHz/mono) → WebSocket 发送
-                                          ↓
-                                    DashScope Realtime API
-                                          ↓
-[扬声器] ← PyAudio 播放 (24kHz/mono) ← WebSocket 接收
+【终端】                          【桌面 jarvis-desktop】
+麦克风(PyAudio 16k)                getUserMedia+浏览器AEC → AudioWorklet 重采样 16k
+   ↓ attach_audio                  ↓ serve 指令 talk.audio(base64 帧)
+RealtimeEngine（协议状态机/静音策略/响应救援/Function Calling，传输无关）
+   ↑ attach_audio                  ↑ BridgeMic / BridgeSpk
+扬声器(PyAudio 24k)                Web Audio 顺序排播 24k ← serve 事件 talk_audio
+   ↕ WebSocket
+DashScope Realtime API（server_vad 判停 / 理解 / 生成 / TTS）
 
-并发协程：
-  _send_audio()     → 持续发送麦克风数据
-  _recv_events()    → 接收识别结果 + AI 回复音频
-  _esc_watcher()    → 监听 ESC 键打断
-  _load_mcp_tools() → 后台加载 MCP 工具（不阻塞启动）
-  _watchdog()       → 心跳检测，断连自动重连
+引擎并发协程：
+  _send_audio()       → 持续发送麦克风数据（含静音门控）
+  _recv_events()      → 接收识别结果 + AI 回复音频
+  _response_rescue()  → 响应救援：吞轮时补发 response.create
+  _watchdog()         → 停止时主动关闭 WS，解除 recv 阻塞
+终端附加：_esc_watcher() → 监听 ESC 键退出
 ```

@@ -330,11 +330,8 @@ speech_rate = 1.0                # 语速 0.5-2.0
 pitch_rate = 1.0                 # 音高 0.5-2.0
 
 [stt]
-# 三后端自动适配（根据 model 名）：
-#   qwen3-asr-*        → QwenASR（OmniRealtimeConversation，服务端 VAD，质量最高）
-#   paraformer-*       → ParaformerSTT（Recognition WebSocket，客户端 VAD，轻量快）
-#   fun-asr-realtime   → ParaformerSTT（同为 Recognition 实时识别后端）
-#   fun-asr-flash-*    → FunASRFlashSTT（HTTP POST 文件上传，非实时，/voice 体验差）
+# 单一后端：QwenASR（OmniRealtimeConversation，服务端 VAD，中英混合强）
+# model 原样透传给 DashScope，需填 qwen 实时识别模型名
 model = "qwen3-asr-flash-realtime"
 max_seconds = 15                  # 单次录音最长秒数
 silence_seconds = 1.5             # 静音检测秒数
@@ -347,6 +344,13 @@ barge_in_key = true               # 键盘打断：播报中按 ESC 立即停止
 [realtime_talk]
 model = "qwen-audio-3.0-realtime-flash"  # DashScope 实时语音模型
 voice = "longanqian"                      # 音色
+event_log = false                  # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
+echo_suppress_with_aec = true      # AI 说话时压低麦克风抑制回声（仅戴耳机时才建议关）
+half_duplex = true                 # 半双工：AI 说话时静音麦克风（外放稳定多轮）；戴耳机想随口打断设为 false
+rescue = true                      # 响应救援：服务端吞轮时补发 response.create（默认开）
+turn_detection = "server_vad"      # 轮次检测：server_vad（默认，免提推荐）/ smart_turn
+silence_ms = 500                   # server_vad 判停静音时长（毫秒）
+tools_mode = "builtin"             # 工具面：builtin（默认 2 工具低延迟）/ all（Registry+MCP）
 
 # ---- 上下文压缩 ----
 [context]
@@ -502,7 +506,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | 命令 | 说明 |
 |---|---|
 | `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
-| `/talk` | 进入实时双工语音对话（终端内全双工，说话即可打断） |
+| `/talk` | 进入实时双工语音对话（终端半双工轮替；桌面壳为说话即打断的真全双工） |
 | `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope） |
 | `/say <文本>` | TTS 朗读指定文字 |
 | `/listen` `/mic` | 录音并识别为文字 |
@@ -671,7 +675,7 @@ Jarvis 提供两套独立的语音系统：
 | 模式 | 技术路线 | 特点 |
 |---|---|---|
 | **`/voice` 语音对话** | STT → LLM → TTS 管线 | 识别→思考→朗读，逐轮对话 |
-| **`/talk` 实时聊天** | 全双工 WebSocket 直连 | 边说边听，AI 说话时可打断 |
+| **`/talk` 实时聊天** | 全双工 WebSocket 直连 | 终端半双工轮替；桌面壳全双工（说话打断） |
 
 > 两套系统独立运行，但共用麦克风硬件。同时开启可能导致 PyAudio 设备冲突。
 
@@ -683,14 +687,9 @@ Jarvis 提供两套独立的语音系统：
 🎤 聆听 → STT 识别 → LLM 思考回答 → TTS 朗读 → 🎤 聆听 → ...
 ```
 
-- **语音输入**：三种 STT 后端可选，修改 `settings.toml` 中 `[stt].model` 切换：
-
-  | 配置 model | 后端类 | 协议 | 特点 |
-  |---|---|---|---|
-  | `qwen3-asr-*` | **QwenASR** | WebSocket（OmniRealtimeConversation） | 服务端 VAD，质量最高，中英混合强 |
-  | `paraformer-*` | **ParaformerSTT** | WebSocket（Recognition） | 客户端 VAD，轻量快速 |
-  | `fun-asr-realtime` | **ParaformerSTT** | WebSocket（Recognition） | 实时识别，与 paraformer 同后端 |
-  | `fun-asr-flash-*` | **FunASRFlashSTT** | HTTP POST（文件上传） | 非实时，/voice 循环体验差，不推荐 |
+- **语音输入**：单一 STT 后端 **QwenASR**（`settings.toml` 的 `[stt].model`，默认 `qwen3-asr-flash-realtime`）
+  - WebSocket（OmniRealtimeConversation）流式识别，服务端 VAD 断句，中英混合强
+  - 对话聆听与待机唤醒共用同一实例；识别语言由 `language` 参数控制（默认 `zh`）
 
 - **语音输出**：两种 TTS 模式
   - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
@@ -702,17 +701,29 @@ Jarvis 提供两套独立的语音系统：
 
 ### 实时双工 `/talk`
 
-基于 DashScope 实时语音 WebSocket 服务（`qwen-audio-3.0-realtime-flash`）：
+基于 DashScope 实时语音 WebSocket 服务（`qwen-audio-3.0-realtime-flash`），2026-09-28 重构为
+**传输无关引擎（`RealtimeEngine`）+ 终端/桌面双适配器**：
 
-- **全双工通信**：麦克风音频流实时送入模型，同时接收 AI 语音输出
-- **smart_turn 轮次检测**：融合声学感知与语义理解判断说话边界，无意义附和声不会打断对话
-- **AEC 回声消除**：基于 WebRTC AEC3，消除扬声器回声，外放不戴耳机也不会自言自语，同时保留开口打断能力
-- **Function Calling**：模型可自主调用工具获取实时信息。内置时间查询工具，并自动接入 ToolRegistry 全部工具（文件读写、Bash、Glob、Grep、WebSearch、SendEmail 等）。模型根据 instructions 自主判断高风险操作，先用语音询问用户确认后再执行
-- **纯终端 UI**：直接在终端内运行全双工对话，转录文字流实时显示，支持随时打断（2026-09 起不再弹出 pywebview 独立窗口）
-- **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式，方舟反应炉动画）与 jarvis-desktop 桌面应用承担
+- **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
+  轮次；`turn_detection = "smart_turn"` 可切语义判停（支持环境音转写/声纹增强）
+- **半双工轮替（终端默认）**：AI 说话期间静音麦克风（发静音帧维持送流），外放稳定多轮；
+  戴耳机设 `half_duplex = false` 恢复随口打断
+- **桌面端真全双工（jarvis-desktop）**：浏览器 `getUserMedia` 系统级 AEC 消除回声，音频经
+  serve 协议（`talk.audio` 上行 / `talk_audio` 下行）桥接，说话即打断，无需配置
+- **响应救援（rescue）**：服务端吞轮（取消后不补答/建响应超时）时客户端补发
+  `response.create` 兜底，防“说了话永远不回复”
+- **AEC 回声消除（终端可选）**：基于 WebRTC AEC3（`aec-audio-processing`），未安装时靠
+  半双工静音从源头防回声
+- **Function Calling**：默认 `tools_mode = "builtin"`（时间查询/结束对话 2 工具，低延迟；
+  实测大工具表会拖慢服务端建响应）；`"all"` 装配 ToolRegistry 全部工具 + MCP（文件读写、
+  Bash、WebSearch 等），MCP 在首个 `session.update` 前一次性加载。高风险操作先语音确认再执行
+- **纯终端 UI**：转录文字流实时显示（2026-09 起不再弹出 pywebview 独立窗口）
+- **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式）与 jarvis-desktop 桌面应用（真全双工）承担
 - 退出方式：ESC 键或说"退下"
 
-> **AEC 依赖**：实时聊天回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，已包含在 `[voice]` 可选依赖组中。未安装时自动降级为仅 smart_turn 语义防回声模式。
+> **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，
+已包含在 `[voice]` 可选依赖组中；未安装时半双工静音兜底。架构与静音/救援策略详见
+[docs/architecture/06-语音系统.md](docs/architecture/06-语音系统.md)。
 
 ### TTS 朗读 `/say`
 
@@ -850,6 +861,13 @@ python -m agent.daemon.autostart status             # 查看状态
 api_key = "sk-xxx"              # DashScope API Key（实时语音必需）
 model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
+event_log = false               # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
+echo_suppress_with_aec = true   # AI 说话时压低麦克风抑制回声（仅戴耳机时才建议关）
+half_duplex = true      # 半双工：AI 说话时静音麦克风；戴耳机想随口打断设为 false（桌面全双工路径不受影响）
+rescue = true           # 响应救援：吞轮时补发 response.create（默认开）
+turn_detection = "server_vad"   # 轮次检测：server_vad（默认）/ smart_turn
+silence_ms = 500        # server_vad 判停静音时长（毫秒，200~6000）
+tools_mode = "builtin"  # 工具面：builtin（默认）/ all（Registry+MCP 全量）
 ```
 
 > `api_key` 用于 `/talk` 实时双工语音鉴权（映射到 `dashscope_api_key`）。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量；当前 LLM 厂商就是 dashscope 时也可直接复用主 `api_key`。**不会借用 deepseek/openai 等其它厂商的 key**（2026-09 起防呆 fail-fast：缺配置时直接给出中文配置指引，不发起注定被 1007 Access denied 拒绝的连接）。
@@ -1063,6 +1081,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **依赖**：`websockets` 已为核心依赖（随 `pip install` 自动安装，2026-09 起）；仍保留缺失降级：import 失败时以退出码 `3` 报错退出。
 - **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知），二期起并行待机 TTS 朗读（`proactive_tts_enabled`，忙时跳过）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
 - **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
+- **全双工实时语音音频桥（2026-09-28 已接线）**：`talk.start` 带 `duplex: true` 时，音频不再走 serve 本机 pyaudio，而是双向桥接：渲染进程 `getUserMedia`（浏览器 AEC）采集 16kHz PCM16 经指令 `talk.audio`（base64 帧，fire-and-forget）上行喂 `BridgeMic` → `RealtimeEngine`；AI 24kHz 语音帧经事件 `talk_audio` 下行，由 Web Audio 顺序排播；打断时下行空 payload 表示 flush。浏览器系统级回声消除使桌面壳成为**说话即打断的真全双工**（引擎路径内自动关半双工/软件压低/软件 AEC）。采集/播放实现见 jarvis-desktop `src/renderer/src/audio/`。
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
 - **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 轮数/消息数）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表。
@@ -1072,7 +1091,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **未知指令失败回执（2026-09 加固）**：WS 分发对**未注册**的指令 type 立即回 `{"event":"reply","data":{"type","ok":false,"error"}}`（旧行为是静默忽略，既不回 ok 也不回 error），错误文案为「后端不支持指令 X（后端进程可能未加载最新代码，请重启后端后重试）」；缺 `type` 字段同样回失败回执。原因是前端（Vite 热更新）可能先支持新指令、而后端进程仍是旧代码（`python -m agent.serve` 不热重载），静默丢弃只会让桌面壳干等到 15s 超时、用户看不到任何原因（典型症状「指令 models.add 回执超时」）；手机 PWA 不消费 `reply` 事件，行为不受影响。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：27 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*` / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音 / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：28 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*` / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}`）+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`）/ 主动播报（`proactive_notify`）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 
@@ -1473,14 +1492,18 @@ agent/
 │       └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
 ├── voice/             # 语音引擎
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
-│   ├── stt/           # STT 三后端分包（按识别引擎拆分）
-│   │   ├── common.py    # 音频常量 / RMS 计算 / 停止标志（跨后端共享）
-│   │   ├── paraformer.py # ParaformerSTT（Recognition，客户端 VAD）
+│   ├── stt/           # STT 识别包（单一后端 QwenASR）
+│   │   ├── common.py    # 音频常量 / RMS 计算 / 停止标志（跨模块共享）
 │   │   ├── qwen.py      # QwenASR（OmniRealtime，服务端 VAD）
-│   │   ├── funasr.py    # FunASRFlashSTT（HTTP POST 整段 WAV）
 │   │   └── __init__.py  # create_stt() 工厂 + 符号 re-export
 │   ├── stream_tts.py  # StreamTTSPlayer（句子级流式 TTS，逐句播放）
-│   ├── realtime_talk.py # /talk 全双工实时语音（WebSocket + AEC + Function Calling）
+│   ├── realtime_engine.py # /talk 协议引擎核心（WebSocket 状态机/静音策略/响应救援，传输无关）
+│   ├── realtime_talk.py # /talk 终端适配器（PyAudio 采集 + ESC + 工具装配）
+│   ├── realtime_bridge_audio.py # 桌面桥接适配器（BridgeMic/BridgeSpk，serve 音频帧 ⇄ 引擎）
+│   ├── realtime_audio.py # /talk 音频纯函数（RMS/衰减/静音判定）
+│   ├── realtime_tools.py # /talk 工具层（内置工具 + MCP 注册表聚合 + Function Calling 执行）
+│   ├── realtime_mcp.py # /talk MCP 工具装配（首个 session.update 前一次性加载）
+│   ├── realtime_events.py # /talk 可观测层（环境音转写 + 事件时间线 + 轮次统计）
 │   ├── voice_loop.py  # /voice 语音对话循环（听→想→说 + 对话⇄待机状态机）
 │   ├── voice_config.py # 语音配置（关键词/唤醒词/待机参数/语音 system prompt）
 │   ├── tts_text.py    # TTS 文本清洗（markdown/<think>/工具标签剥离）
