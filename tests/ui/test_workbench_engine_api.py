@@ -298,6 +298,28 @@ def test_api_list_sessions_marks_current(monkeypatch) -> None:
     assert all(s["current"] is False for s in api.list_sessions())
 
 
+def test_api_list_sessions_carries_workdir(monkeypatch) -> None:
+    """sessions.list 每项带 workdir：桌面据此按当前项目过滤/分组历史会话。
+
+    取 SessionMeta.workdir（存盘时已落）原样透出。@author aceFelix
+    """
+    from agent.core.memory import store as store_mod
+    from agent.core.memory.store import SessionMeta
+
+    monkeypatch.setattr(
+        store_mod,
+        "list_sessions",
+        lambda: [
+            SessionMeta(name="a", workdir="D:/proj/x", message_count=1, updated_at=200),
+            SessionMeta(name="b", workdir="", message_count=1, updated_at=100),
+        ],
+    )
+    api, _, _ = _make_api()
+    by_name = {s["name"]: s for s in api.list_sessions()}
+    assert by_name["a"]["workdir"] == "D:/proj/x"
+    assert by_name["b"]["workdir"] == ""
+
+
 # ---- 命令行参数 ----
 
 def test_parse_args_gui_and_talk():

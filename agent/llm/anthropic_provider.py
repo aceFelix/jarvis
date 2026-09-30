@@ -29,6 +29,10 @@ from agent.llm.base import (
     Usage,
 )
 from agent.llm.cache_policy import CACHE_POLICIES
+# 文本态工具调用兜底：DeepSeek 等 Anthropic 兼容端点偶发把工具调用以 DSML 文本吐进
+# text block（服务端没拦成 tool_use block），没有兜底时裸码会原样回显且工具不触发。
+# @author aceFelix
+from agent.llm.text_tool_calls import TextualToolCallGuard
 
 
 def _block_to_anthropic(block: Any) -> dict[str, Any]:
@@ -257,6 +261,9 @@ class AnthropicProvider(LLMProvider):
                 # 可能不正确实现 final message 聚合。
                 content_blocks: dict[int, dict[str, Any]] = {}
                 text_buf = ""
+                # 文本态工具调用兜底守卫：过滤泄漏进 text block 的 DSML/XML，
+                # 流末把泄漏文本转成真实 ToolCall（见 llm/text_tool_calls.py）
+                guard = TextualToolCallGuard(t.name for t in tools)
 
                 async for event in stream:
                     if event.type == "message_start":
@@ -265,8 +272,11 @@ class AnthropicProvider(LLMProvider):
                     if event.type == "content_block_delta":
                         delta = event.delta
                         if delta.type == "text_delta":
-                            text_buf += delta.text
-                            yield TextDelta(text=delta.text)
+                            # 走泄漏过滤器：正常文本即时回显，命中 DSML 标记后转缓存不回显
+                            _safe = guard.feed(delta.text)
+                            if _safe:
+                                text_buf += _safe
+                                yield TextDelta(text=_safe)
                         elif delta.type == "thinking_delta":
                             # 思考模式下的思维链内容（DeepSeek/Anthropic extended thinking）
                             # thinking_delta 带 .thinking 属性，不是 .text
@@ -293,6 +303,11 @@ class AnthropicProvider(LLMProvider):
                         # thinking block 的内容通过 thinking_delta 事件流式接收，
                         # 这里不需要额外处理 content_block_start
 
+                # 释放过滤器尾缓冲里剩余的确定安全文本
+                _tail = guard.flush()
+                if _tail:
+                    yield TextDelta(text=_tail)
+
                 # 流结束后，解析累积的工具调用
                 for idx in sorted(content_blocks.keys()):
                     entry = content_blocks[idx]
@@ -318,6 +333,18 @@ class AnthropicProvider(LLMProvider):
                         input=parsed_input,
                     )
                     yield ToolCallEnd(id=entry["id"])
+
+                # 兜底：整轮没有结构化 tool_use，但正文泄漏了文本态调用 → 解析成真实调用
+                # （DeepSeek 等 Anthropic 兼容端点的 DSML 泄漏，见 llm/text_tool_calls.py）
+                if not content_blocks:
+                    for pc in guard.drain():
+                        yield ToolCall(id=pc.id, name=pc.name, input=pc.input)
+                        yield ToolCallEnd(id=pc.id)
+                    # 兜底未产出任何调用（如本轮未发工具 schema）时，把吞掉的原文
+                    # 补回显，避免「半句话静默结束」——宁可看到裸码也不能丢信息
+                    _rescued = guard.rescue_text
+                    if _rescued:
+                        yield TextDelta(text=_rescued)
 
                 # 获取 usage（不依赖 final message 的 content）
                 try:

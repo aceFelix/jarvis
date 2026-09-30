@@ -133,6 +133,9 @@ class WorkbenchAPI:
                     "updated_at": s.updated_at,
                     "message_count": s.message_count,
                     "model": s.model,
+                    # 会话归属的项目目录（桌面按当前项目过滤/分组历史会话）。
+                    # @author aceFelix
+                    "workdir": s.workdir,
                     "current": s.name == current,
                 }
                 for s in list_sessions()
@@ -428,6 +431,61 @@ class WorkbenchAPI:
         from agent.config.model_registry import remove_custom_voice
         remove_custom_voice(name)  # 段不存在返回 False，内存已清不阻断
         return {"ok": True, "name": name}
+
+    # ---- 左栏：项目工作区 ----
+
+    def set_project(self, path: str) -> None:
+        """切换当前项目（工作目录）：入队 set_workdir，结果走 project_switched 事件。
+
+        与 set_model 同口径：路径校验在 serve/server.py 入队前完成（绝对 +
+        存目录），引擎侧重建（换 workdir → 重生提示词/重挂 harness/开新会话）
+        在指令队列串行落地。入队即返回，不等引擎落地。
+
+        @author aceFelix
+        """
+        self._post({"cmd": "set_workdir", "path": path})
+
+    def get_project(self) -> dict[str, Any]:
+        """当前项目：{workdir, name, persisted}（persisted = 已在 projects.toml 登记）。
+
+        @author aceFelix
+        """
+        from pathlib import Path
+
+        from agent.config import projects_registry
+
+        workdir = str(self._settings.workdir or "")
+        recent = {p["path"] for p in projects_registry.list_projects()}
+        return {
+            "workdir": workdir,
+            "name": Path(workdir).name if workdir else "",
+            "persisted": workdir in recent,
+        }
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """最近项目列表（左栏项目区数据源，按 last_opened 倒序）。
+
+        每项附 exists 标记（目录是否仍在），供前端对失效项置灰/提示移除。
+
+        @author aceFelix
+        """
+        from pathlib import Path
+
+        from agent.config import projects_registry
+
+        items = projects_registry.list_projects()
+        for it in items:
+            it["exists"] = bool(it.get("path")) and Path(it["path"]).is_dir()
+        return items
+
+    def forget_project(self, path: str) -> bool:
+        """从最近列表移除项目（不删磁盘目录）；返回是否确有该记录被移除。
+
+        @author aceFelix
+        """
+        from agent.config import projects_registry
+
+        return projects_registry.forget(path)
 
     # ---- 内部 ----
 

@@ -102,12 +102,14 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 28 个 rpc + talk.audio（无回执帧通道）= 30。
+    """指令总数契约：message + 32 个 rpc + talk.audio（无回执帧通道）= 34。
 
     2026-09-28 音色-模型适配接入桌面壳：+voices.add / voices.delete（28→30）。
+    2026 桌面项目工作区：+project.set / project.get / projects.list /
+    projects.forget（30→34）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 30
+    assert len(protocol.DESKTOP_COMMANDS) == 34
 
 
 def test_all_registered_rpcs_declared():
@@ -314,3 +316,49 @@ def test_settings_set_persist_failure_keeps_runtime(monkeypatch):
     with pytest.raises(RuntimeError):
         server._rpc_settings_set({"briefing_time": "07:00"})
     assert server._settings.briefing_time == "08:30"
+
+
+# ---- 桌面项目工作区 project.* RPC ----
+
+def test_project_rpc_handlers_registered():
+    """project.set/get + projects.list/forget 均已注册且声明在指令集合。"""
+    server = _make_server()
+    for cmd in (
+        protocol.CMD_PROJECT_SET,
+        protocol.CMD_PROJECT_GET,
+        protocol.CMD_PROJECTS_LIST,
+        protocol.CMD_PROJECTS_FORGET,
+    ):
+        assert cmd in server._ws_handlers
+        assert cmd in protocol.DESKTOP_COMMANDS
+
+
+def test_project_set_valid_path_enqueues(tmp_path):
+    """合法绝对目录：入队 set_workdir 并回执受理 {ok, workdir, name}。"""
+    server = _make_server()
+    proj = tmp_path / "demo"
+    proj.mkdir()
+    result = server._rpc_project_set({"path": str(proj)})
+    assert result == {"ok": True, "workdir": str(proj), "name": "demo"}
+    # 入队而非同步生效：命令队列尾部应为 set_workdir
+    cmd = server._api._command_queue.get_nowait()
+    assert cmd == {"cmd": "set_workdir", "path": str(proj)}
+
+
+def test_project_set_rejects_invalid_paths(tmp_path):
+    """缺 path / 空 / 相对路径 / 不存在目录 → ValueError（回执 ok=false，不入队）。"""
+    server = _make_server()
+    missing = tmp_path / "nope"
+    for bad in ({}, {"path": "   "}, {"path": "relative/dir"}, {"path": str(missing)}):
+        with pytest.raises(ValueError):
+            server._rpc_project_set(bad)
+    assert server._api._command_queue.empty()
+
+
+def test_projects_forget_missing_path_raises():
+    """projects.forget：缺 path / 空 path → ValueError。"""
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_projects_forget({})
+    with pytest.raises(ValueError):
+        server._rpc_projects_forget({"path": "   "})

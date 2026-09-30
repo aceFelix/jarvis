@@ -142,6 +142,13 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_PROACTIVE_ACK, self._rpc_proactive_ack)
         self._register_rpc(protocol.CMD_SETTINGS_GET, self._rpc_settings_get)
         self._register_rpc(protocol.CMD_SETTINGS_SET, self._rpc_settings_set)
+        # project.*（桌面项目工作区）：project.set 校验后入队引擎重建（结果走
+        # project_switched 事件）；get/list/forget 直读/写 projects.toml。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_PROJECT_SET, self._rpc_project_set)
+        self._register_rpc(protocol.CMD_PROJECT_GET, lambda data: self._api.get_project())
+        self._register_rpc(protocol.CMD_PROJECTS_LIST, lambda data: self._api.list_projects())
+        self._register_rpc(protocol.CMD_PROJECTS_FORGET, self._rpc_projects_forget)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -492,6 +499,43 @@ class DesktopBridgeServer(BridgeServer):
         if key in SCHEDULE_KEYS and self._hub is not None:
             self._hub.hot_update_schedule()
         return {key: value}
+
+    # ---- 桌面项目工作区 project.* ----
+
+    def _rpc_project_set(self, data: dict) -> dict:
+        """project.set：校验目标目录后入队引擎切换（结果走 project_switched 事件）。
+
+        后端只接收并校验绝对目录路径（非空、绝对、存在），绝不弹框、不自动
+        创建目录。校验通过即入队 set_workdir 并回执受理 {ok, workdir, name}；
+        引擎侧重建完成后另推 project_switched 作为最终落地确认。
+
+        @author aceFelix
+        """
+        from pathlib import Path
+
+        raw = (data.get("path") or "").strip()
+        if not raw:
+            raise ValueError("缺少项目路径 path")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            raise ValueError(f"项目路径须为绝对路径: {raw}")
+        if not candidate.is_dir():
+            raise ValueError(f"项目目录不存在: {raw}")
+        path = str(candidate)
+        self._api.set_project(path)
+        return {"ok": True, "workdir": path, "name": candidate.name}
+
+    def _rpc_projects_forget(self, data: dict) -> bool:
+        """projects.forget：校验 path 后从最近列表移除（不删磁盘目录）。
+
+        @author aceFelix
+        """
+        from pathlib import Path
+
+        raw = (data.get("path") or "").strip()
+        if not raw:
+            raise ValueError("缺少项目路径 path")
+        return self._api.forget_project(str(Path(raw).expanduser()))
 
     # ---- 每连接首帧 ----
 

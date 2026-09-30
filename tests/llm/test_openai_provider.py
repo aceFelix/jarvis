@@ -396,7 +396,7 @@ class TestTextualToolCallFallback:
 
     @pytest.mark.asyncio
     async def test_dsml_leak_becomes_real_toolcall(self, provider: OpenAIProvider) -> None:
-        P = chr(0xFF5D)
+        P = chr(0xFF5C)  # 全角竖线：与真实泄漏样本码点一致
         DO = "<" + P * 2 + "DSML" + P * 2 + " "
         DC = "</" + P * 2 + "DSML" + P * 2 + " "
         leak = (

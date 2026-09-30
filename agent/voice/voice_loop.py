@@ -232,7 +232,9 @@ async def _voice_loop_round(
         """组合 feeder：喂 TTS 合成 + 外抛流式 delta 给宿主上屏。"""
         if stream_ok:
             stream_player.feed(text)
-        events.on_ai_text_delta(text)
+        # 上屏 delta 剥除 <standby/> 退下控制标记（属交互信令，用户不该在气泡里
+        # 看到；TTS 侧另有清洗，此处只管显示流）。跨 chunk 切割由收尾全量兜底。
+        events.on_ai_text_delta(_STANDBY_TAG.sub("", text))
 
     ctx.on_assistant_text = _feed
 
@@ -306,7 +308,10 @@ async def _voice_loop_round(
             reply_thinking = msg.get_thinking()
             if reply_text.strip() or reply_thinking.strip():
                 break
-    events.on_ai_text(reply_text)
+    # 全量上屏前剥除 <standby/> 退下标记：桌面壳 voice_ai_text 为全量替换流式
+    # 气泡，此处即最终显示态的唯一权威来源，剥标后用户气泡不再残留该标记。
+    # 退下检测仍走 _detect_standby(ctx.messages)（读原始消息），不受此处剥标影响。
+    events.on_ai_text(_STANDBY_TAG.sub("", reply_text))
 
     _voice_log(
         "LLM reply: text=%r  thinking=%r  stopped_reason=%s  iterations=%d  tools=%d",

@@ -69,8 +69,18 @@ async def test_connect_mcp_registers_tools_and_keeps_client(monkeypatch) -> None
     assert captured["registry"] is registry
     assert captured["client"] is client
     assert engine._mcp_client is client  # 引用保留，防 GC 断连
-    infos = [e["payload"] for e in _drain(event_queue) if e["type"] == "info"]
+    events = _drain(event_queue)
+    infos = [e["payload"] for e in events if e["type"] == "info"]
     assert any("注册 3 个工具" in t for t in infos)
+    # MCP 连接落定 → 推 mcp_ready 事件，payload 为 state.get 同构快照，
+    # 桌面壳据此刷新右栏运行健康（init 时快照常为 None）。@author aceFelix
+    ready = [e for e in events if e["type"] == "mcp_ready"]
+    assert ready == [
+        {
+            "type": "mcp_ready",
+            "payload": {"connected": ["amap-maps"], "failed": [], "tools": 3},
+        }
+    ]
 
 
 async def test_connect_mcp_all_failed_skips_registration(monkeypatch) -> None:
@@ -88,8 +98,17 @@ async def test_connect_mcp_all_failed_skips_registration(monkeypatch) -> None:
     await engine._connect_mcp(ToolRegistry())
 
     assert engine._mcp_client is None
-    infos = [e["payload"] for e in _drain(event_queue) if e["type"] == "info"]
+    events = _drain(event_queue)
+    infos = [e["payload"] for e in events if e["type"] == "info"]
     assert any("所有 server 连接失败" in t for t in infos)
+    # 全部失败也推 mcp_ready（真实失败态覆盖 init 的 None），tools=0。
+    # @author aceFelix
+    ready = [e for e in events if e["type"] == "mcp_ready"]
+    assert ready and ready[0]["payload"] == {
+        "connected": [],
+        "failed": ["amap-maps", "tyc-mcp"],
+        "tools": 0,
+    }
 
 
 async def test_connect_mcp_unavailable_or_no_config_silent(monkeypatch) -> None:
@@ -209,3 +228,56 @@ async def test_ensure_session_reuses_prewarmed_registry(monkeypatch) -> None:
 
     assert captured["registry"] is sentinel
     assert engine._session_ready is True
+
+
+def _patch_ensure_session_heavy(monkeypatch, registry: ToolRegistry) -> None:
+    """将 _ensure_session 的重型依赖（provider/orchestrator/query_loop/prompt）打桩，
+    只保留 registry 装配与 ToolSearch 注册逻辑供断言。@author aceFelix"""
+    import agent.bootstrap as boot_mod
+    import agent.core.orchestrator as orch_mod
+    import agent.core.query_loop as ql_mod
+    import agent.prompts.system as sp_mod
+
+    monkeypatch.setattr(boot_mod, "_build_provider", lambda s, model_type: object())
+    monkeypatch.setattr(boot_mod, "_model_type_for", lambda s: "text")
+    monkeypatch.setattr(boot_mod, "_build_checker", lambda s: None)
+    monkeypatch.setattr(boot_mod, "_build_recovery_executor", lambda s: None)
+    monkeypatch.setattr(boot_mod, "_build_context", lambda s, ui, msgs: None)
+    monkeypatch.setattr(orch_mod, "ToolOrchestrator", lambda **kw: None)
+    monkeypatch.setattr(ql_mod, "QueryLoop", lambda **kw: object())
+    monkeypatch.setattr(sp_mod, "build_system_prompt", lambda *a, **k: "sys")
+    monkeypatch.setattr(tool_mod, "build_default_registry", lambda: registry)
+    monkeypatch.setattr(ChatEngine, "_register_harness", lambda self_, r, w: None)
+
+
+async def test_ensure_session_registers_tool_search_when_deferred(monkeypatch) -> None:
+    """延迟加载开启：_ensure_session 必须补注册 ToolSearch（桌面漏注册导致
+    模型无法加载 MCP 工具、退回 Bash+curl 的根因回归）。@author aceFelix"""
+    engine, _ = _make_engine()
+    engine._settings.model = "m"
+    engine._settings.enable_mcp = False
+    engine._settings.tools_deferred_loading = True
+    registry = ToolRegistry()
+    engine._registry = registry
+    engine._registry_ready.set()
+    _patch_ensure_session_heavy(monkeypatch, registry)
+
+    await engine._ensure_session()
+
+    assert "ToolSearch" in registry
+
+
+async def test_ensure_session_skips_tool_search_when_not_deferred(monkeypatch) -> None:
+    """延迟加载关闭（全量发送）：不注册 ToolSearch，与终端 main.py 同口径。@author aceFelix"""
+    engine, _ = _make_engine()
+    engine._settings.model = "m"
+    engine._settings.enable_mcp = False
+    engine._settings.tools_deferred_loading = False
+    registry = ToolRegistry()
+    engine._registry = registry
+    engine._registry_ready.set()
+    _patch_ensure_session_heavy(monkeypatch, registry)
+
+    await engine._ensure_session()
+
+    assert "ToolSearch" not in registry

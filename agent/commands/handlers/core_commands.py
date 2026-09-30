@@ -269,21 +269,10 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
         rows.append(["累计输出 token（API 实计）", f"{session.output_tokens:,}"])
         rows.append(["缓存命中 token", f"{session.cache_read_tokens:,}"])
         rows.append(["缓存创建 token", f"{session.cache_creation_tokens:,}"])
-        # 命中率分母按协议口径区分（而非厂商名）：
-        # - OpenAI/DashScope 兼容协议：input_tokens 已含缓存命中 → 分母=input_tokens
-        # - Anthropic 协议（含 DeepSeek Anthropic 兼容端点）：input_tokens 不含缓存
-        #   → 真实总输入 = input_tokens + cache_read_tokens
-        # 判断依据：Anthropic 协议下 cache_read 是 input_tokens 之外的独立值，
-        # 命中数可能远大于未命中的 input_tokens（如 system prompt 全命中）。
-        # 用 cache_read > input_tokens 作为"input_tokens 不含缓存"的信号。
-        if session.cache_read_tokens > session.input_tokens:
-            # input_tokens 不含缓存（Anthropic 协议），分母需加上缓存命中
-            denom = session.input_tokens + session.cache_read_tokens
-        else:
-            # input_tokens 已含缓存（OpenAI/DashScope 协议）
-            denom = session.input_tokens
-        hit_ratio = session.cache_read_tokens / denom * 100 if denom else 0
-        rows.append(["缓存命中率", f"{hit_ratio:.1f}%"])
+        # 命中率分母按协议口径区分（OpenAI 兼容协议 input 已含缓存 / Anthropic
+        # 协议不含），口径实现见 Usage.cache_hit_rate —— 与桌面壳 cost.get 共用
+        # 同一份计算，避免两处各写一套分母规则导致指标对不上。@author aceFelix
+        rows.append(["缓存命中率", f"{session.cache_hit_rate:.1f}%"])
 
     ui.info("本会话成本统计（部分基于估算）")
     render_table(rows, headers=["指标", "值"])

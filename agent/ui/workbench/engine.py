@@ -45,7 +45,7 @@ from agent.ui.workbench.voice_adapter import (  # noqa: F401
 # 引擎旁路能力（MCP 预热 / 模型热切换）实现在同包模块，见各自模块头注释。
 # 方法名与行为保持不变（测试与调用方直接调 engine._prewarm 等）。
 # @author aceFelix
-from agent.ui.workbench import mcp_runtime, model_switch
+from agent.ui.workbench import mcp_runtime, model_switch, project_switch
 
 
 class ChatEngine:
@@ -107,6 +107,11 @@ class ChatEngine:
         # 选模型），此时先记账，_ensure_session 装配完成后落地；空串 = 无。
         # @author aceFelix
         self._model_override = ""
+        # 待生效的工作目录切换：project.set 可能在会话装配前到达（首条消息前
+        # 就选了项目），此时写 settings.workdir + 记账，_ensure_session 用新
+        # workdir 生成提示词/挂 harness；空串 = 无（镜像 _model_override）。
+        # @author aceFelix
+        self._workdir_override = ""
         # 当前 provider 的端点配置快照：热切换时作为「要不要重建 provider」的
         # 比较基准。不能直接用 _settings —— 它始终是进程启动时的快照。
         # @author aceFelix
@@ -115,10 +120,12 @@ class ChatEngine:
     # ---- 只读状态快照（serve 右栏数据源：cost.get / state.get 经 WorkbenchAPI 读取） ----
 
     @property
-    def session_usage(self) -> dict[str, int]:
+    def session_usage(self) -> dict[str, Any]:
         """会话级累计 token 用量（cost.get 数据源；引擎未装配/假 loop 时全 0）。
 
-        @author aceFelix
+        除四类 token 外附 ``cache_hit_rate``（百分数，保留一位小数），口径
+        统一由 Usage.cache_hit_rate 计算，与 REPL /cost 同一份实现；桌面壳
+        用量卡直接展示该值，不再自己重算分母。@author aceFelix
         """
         usage = getattr(getattr(self, "_query_loop", None), "session_usage", None)
         if usage is None:
@@ -127,12 +134,14 @@ class ChatEngine:
                 "output_tokens": 0,
                 "cache_read_tokens": 0,
                 "cache_creation_tokens": 0,
+                "cache_hit_rate": 0.0,
             }
         return {
             "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
             "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
             "cache_read_tokens": int(getattr(usage, "cache_read_tokens", 0) or 0),
             "cache_creation_tokens": int(getattr(usage, "cache_creation_tokens", 0) or 0),
+            "cache_hit_rate": round(float(getattr(usage, "cache_hit_rate", 0.0) or 0.0), 1),
         }
 
     @property
@@ -299,6 +308,12 @@ class ChatEngine:
             # 记账延迟，不因一次切换提前触发重型装配）。force 由 models.edit
             # 带上（改了当前模型配置 → 同名也必须重建 provider）。@author aceFelix
             await self._handle_switch_model(cmd.get("name", ""), bool(cmd.get("force")))
+        elif action == "set_workdir":
+            # 项目（workdir）运行时切换：与会话未装配时只记账延迟（见 project_switch），
+            # 装配后则引擎线程内串行重建提示词/重挂 harness/开新会话。刻意不调
+            # _ensure_session，交由处理函数判定是否需延迟，不为一次切换提前触发重型装配。
+            # @author aceFelix
+            await self._handle_set_workdir(cmd.get("path", ""))
         elif action == "start_talk":
             await self._handle_start_talk(cmd)
         elif action == "stop_talk":
@@ -353,6 +368,18 @@ class ChatEngine:
                     self._emitter.emit("info", f"⚠ 工具注册钩子失败: {type(e).__name__}: {e}")
             if s.enable_mcp:
                 await self._connect_mcp(registry)
+        # ToolSearch 注册（延迟加载机制的钥匙工具，对齐终端 main.py）：
+        # deferred_loading=True 时 MCP/harness/GUI 等工具被标为延迟态，初始不发给
+        # 模型，只在其需要时由 ToolSearch 搜关键词加载。桌面引擎此前漏注册它，
+        # 导致模型被告知「用 ToolSearch 加载 MCP 工具」却在工具列表里找不到该工具，
+        # 只能退回 Bash+curl 抓网页（桌面表现比终端"笨"、不用高德天气 MCP 的根因）。
+        # 必须在 build_system_prompt 之前注册，才能进核心工具清单发给模型。
+        # @author aceFelix
+        if s.tools_deferred_loading:
+            from agent.tools.tool_search import ToolSearchTool
+
+            if "ToolSearch" not in registry:
+                registry.register(ToolSearchTool(registry))
         # harness 动态工具后台加载，避免阻塞首轮对话
         threading.Thread(
             target=lambda: self._register_harness(registry, s.workdir), daemon=True
@@ -416,6 +443,16 @@ class ChatEngine:
         @author aceFelix
         """
         await model_switch.handle_switch_model(self, name, force)
+
+    async def _handle_set_workdir(self, path: str) -> None:
+        """运行时切换工作目录（桌面壳 project.set；实现见 project_switch）。
+
+        与 _handle_switch_model 同构：切换在引擎指令队列里串行执行，正有一轮
+        回复在跑时在回复结束后落地；会话未装配时只记账（_workdir_override +
+        直接写 settings.workdir）延迟到 _ensure_session。切项目 = 开新会话。
+        @author aceFelix
+        """
+        await project_switch.handle_set_workdir(self, path)
 
     def _register_harness(self, registry: Any, workdir: str) -> None:
         """后台注册 CLI-Anything harness 工具（实现见 mcp_runtime）。"""

@@ -1,7 +1,8 @@
 """文本态工具调用兜底解析器测试（text_tool_calls.py）。
 
 覆盖 DeepSeek DSML 泄漏与纯 XML 泄漏两种形态的解析，以及流式过滤器的
-抑制/回退缓冲行为。DSML 样本用 chr(0xFF5D) 构造，避免源码里出现裸全角竖线。
+抑制/回退缓冲行为。DSML 样本用 chr(0xFF5C) 构造，避免源码里出现裸全角竖线；
+另有 TestRealLeakSample 以 Unicode 转义写死真实存档原文，作为码点锚点。
 
 @author aceFelix
 """
@@ -12,13 +13,14 @@ import pytest
 
 from agent.llm.text_tool_calls import (
     StreamingLeakFilter,
+    TextualToolCallGuard,
     has_leaked_toolcall,
     normalize_leaked_markup,
     parse_textual_tool_calls,
 )
 
-# DSML 特殊 token 分隔符（全角竖线 U+FF5D）
-P = chr(0xFF5D)
+# DSML 特殊 token 分隔符：真实泄漏样本为全角竖线 U+FF5C（2026-09-30 按码点核对）
+P = chr(0xFF5C)
 # `<｜｜DSML｜｜ ` 与 `</｜｜DSML｜｜ ` 前缀（含尾随空格）
 DO = "<" + P * 2 + "DSML" + P * 2 + " "
 DC = "</" + P * 2 + "DSML" + P * 2 + " "
@@ -76,6 +78,59 @@ class TestParseDsml:
     def test_preamble_not_mistaken(self):
         """纯正文（无标记）不解析出任何调用。"""
         assert parse_textual_tool_calls("今天天气不错", {"Bash"}) == []
+
+
+class TestRealLeakSample:
+    """真实泄漏样本回归锚点（分隔符码点 U+FF5C）。
+
+    2026-09-30 教训：实现里曾把分隔符误写成 U+FF5D，而测试样本又用同一个错误
+    常量构造，结果「实现 + 测试一起绿、线上仍然漏码」。本类把真实存档原文以
+    Unicode 转义写死（与 ~/.jarvis/sessions 里的字符逐码点一致），独立于 P 常量，
+    防止同类自证错误重演。
+
+    @author aceFelix
+    """
+
+    REAL = (
+        "我看看这个项目的结构。\n\n"
+        "<\uff5c\uff5cDSML\uff5c\uff5c calls>\n"
+        "<\uff5c\uff5cDSML\uff5c\uff5c invoke name=\"Bash\">\n"
+        "<\uff5c\uff5cDSML\uff5c\uff5c parameter name=\"command\" string=\"true\">ls -la"
+        "</\uff5c\uff5cDSML\uff5c\uff5c parameter>\n"
+        "</\uff5c\uff5cDSML\uff5c\uff5c invoke>\n"
+        "<\uff5c\uff5cDSML\uff5c\uff5c invoke name=\"Glob\">\n"
+        "<\uff5c\uff5cDSML\uff5c\uff5c parameter name=\"pattern\" string=\"true\">*.md"
+        "</\uff5c\uff5cDSML\uff5c\uff5c parameter>\n"
+        "</\uff5c\uff5cDSML\uff5c\uff5c invoke>\n"
+        "</\uff5c\uff5cDSML\uff5c\uff5c calls>"
+    )
+
+    def test_detected(self):
+        assert has_leaked_toolcall(self.REAL) is True
+
+    def test_parsed_two_calls(self):
+        calls = parse_textual_tool_calls(self.REAL, {"Bash", "Glob"})
+        assert [c.name for c in calls] == ["Bash", "Glob"]
+        assert calls[0].input == {"command": "ls -la"}
+        assert calls[1].input == {"pattern": "*.md"}
+
+    def test_streaming_filter_suppresses(self):
+        """流式路径：前言放行、DSML 起转入缓存并可解析出调用。"""
+        head = "我看看这个项目的结构。\n\n"
+        f = StreamingLeakFilter()
+        emitted = f.feed(head) + f.feed(self.REAL[len(head):]) + f.flush()
+        assert emitted == head
+        assert f.suppressed is True
+        assert parse_textual_tool_calls(f.call_text, {"Bash", "Glob"}) != []
+
+    def test_legacy_ff5d_still_matched(self):
+        """兼容 U+FF5D 写法（历史假设/其他端点），不回归。"""
+        legacy = (
+            "<\uff5d\uff5dDSML\uff5d\uff5d " + 'invoke name="Bash">'
+            + "</\uff5d\uff5dDSML\uff5d\uff5d invoke>"
+        )
+        assert has_leaked_toolcall(legacy) is True
+        assert parse_textual_tool_calls(legacy, {"Bash"})[0].name == "Bash"
 
 
 class TestParseXml:
@@ -150,3 +205,64 @@ class TestStreamingLeakFilter:
         f.feed(DO + 'invoke name="Bash">')
         after = f.feed("更多内容")
         assert after == ""  # 抑制后不再回显任何正文
+
+
+class TestTextualToolCallGuard:
+    """组合守卫：过滤 + 解析一条龙（各 Provider 共用的接入点）。
+
+    2026-09-30 补：anthropic 协议路径（deepseek-flash 走 /anthropic 端点）同样会把
+    DSML 漏进正文，于是把流程抽成守卫供 OpenAI / Anthropic 两条路径复用。
+
+    @author aceFelix
+    """
+
+    def test_normal_text_no_call(self):
+        g = TextualToolCallGuard(["Bash"])
+        out = g.feed("今天天气") + g.feed("不错") + g.flush()
+        assert out == "今天天气不错"
+        assert g.suppressed is False
+        assert g.drain() == []
+
+    def test_leak_filtered_and_drained(self):
+        """前言照常回显、DSML 不回显、结尾解析出真实调用（标记跨多次 feed）。"""
+        g = TextualToolCallGuard(["Bash"])
+        emitted = g.feed("我来看看。" + DO + "calls>")
+        emitted += g.feed(DO + 'invoke name="Bash">')
+        emitted += g.feed(
+            DO + 'parameter name="command" string="true">ls -l' + DC + "parameter>"
+        )
+        emitted += g.feed(DC + "invoke>" + DC + "calls>")
+        assert emitted == "我来看看。"
+        assert g.suppressed is True
+        assert g.flush() == ""  # 抑制态下尾缓冲不再回显，避免裸码续写
+        calls = g.drain()
+        assert [c.name for c in calls] == ["Bash"]
+        assert calls[0].input == {"command": "ls -l"}
+
+    def test_unregistered_tool_dropped(self):
+        """工具名不在本轮注册集合内 → 不当作调用（防正文尖括号误判）。"""
+        g = TextualToolCallGuard(["Location"])
+        g.feed(DO + 'invoke name="Bash">' + DC + "invoke>")
+        assert g.drain() == []
+        # 但不能吞掉信息：解析不出调用时原文要通过 rescue_text 交回调用方
+        assert "DSML" in g.rescue_text
+
+    def test_empty_toolset_drops_everything(self):
+        """本轮没带任何工具时，泄漏文本不应解析出调用。"""
+        g = TextualToolCallGuard()
+        g.feed(DO + 'invoke name="Bash">' + DC + "invoke>")
+        assert g.drain() == []
+        assert "DSML" in g.rescue_text
+
+    def test_rescue_text_empty_when_calls_parsed(self):
+        """兜底成功转出调用时无需补救（不重复回显裸码）。"""
+        g = TextualToolCallGuard(["Bash"])
+        g.feed(DO + 'invoke name="Bash">' + DC + "invoke>")
+        assert len(g.drain()) == 1
+        assert g.rescue_text == ""
+
+    def test_rescue_text_empty_when_not_suppressed(self):
+        """未发生泄漏时无补救文本。"""
+        g = TextualToolCallGuard(["Bash"])
+        g.feed("正常正文")
+        assert g.rescue_text == ""

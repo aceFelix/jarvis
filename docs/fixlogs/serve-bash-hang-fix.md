@@ -136,3 +136,50 @@
   入被当前轮次串行占用的指令队列（自死锁），必须走线程安全 task.cancel。
 - **孤儿进程要显式回收**：取消路径（CancelledError）里先 kill 子进程再
   re-raise，否则每次停止回复都会泄漏一个 bash。
+
+## 后续修复（2026-09-30）：停止/报错后工具卡残留「执行中」
+
+### 现象
+
+用户实机再次反馈：桌面壳里让 jarvis 删文件，工具卡长时间停在「… 执行中」、
+右下角按钮却是「发送」（不是「■ 停止」），既像命令卡死又没法停。核对代码：
+本文的 Bash `stdin=DEVNULL`、`reply.abort` 停止按钮均已合入且用户当前构建
+（`out/renderer` 已含 `reply.abort`、serve 从源码重启）都带上了——问题不在这里。
+
+### 根因
+
+`chatStore.finishAssistant`（`assistant_done` 事件驱动）只把 `busy` 置 false 并
+定稿流式 AI 气泡，**不碰仍未收到 `tool_result` 的工具卡**（`done:false`）。而：
+
+- 点「■ 停止」→ 引擎取消 send 任务 → `bash.py` 捕获 `CancelledError` kill 子进程后
+  re-raise，**该工具不再发 `tool_result`**；
+- 或一轮中途因网络/LLM 报错结束（`_handle_send` 的 except → finally 仍发 `assistant_done`）。
+
+两种情况 `assistant_done` 一到，`busy` 变 false（按钮回「发送」），但那张在飞的工具卡
+永远 `done:false` → 渲染成「… 执行中」永不收尾。用户据此误判「命令卡死、停止无效」。
+
+### 修复
+
+`jarvis-desktop/src/renderer/src/stores/chatStore.ts::finishAssistant`：收尾时把
+`messages` 里所有 `kind==='tool' && !done` 的卡片一并定稿为 `done:true` +
+`isError:true`，空输出填「（本轮已结束：未收到该工具结果，可能已被停止或中途出错）」。
+停止/报错后卡片转为红色 ✗ 中断态、工具组正常折叠收起，不再残留「执行中」。
+
+### 验证
+
+- `test/renderer/chatStore.test.ts` 新增 2 用例：未回填卡在 `finishAssistant` 后
+  定稿为 `done/isError`、已回填卡结果不被改写；
+- `test/renderer/dispatcher.test.ts` 新增 1 用例：`tool_use` 后直接 `assistant_done`
+  （无 `tool_result`）→ 卡片收尾；
+- `npx vitest run` → **289 passed**（16 文件，较基线 +3）；`npm run typecheck`、
+  `npm run build` 通过。
+
+### 经验
+
+- **取消/报错的轮次收尾必须覆盖所有"进行中"UI 态**：`assistant_done` 是唯一的收尾
+  信号，凡是靠"后续事件翻转"的中间态（工具卡 `done`、状态栏 busy 等）都必须在这里
+  兜底复位，否则任何一条路径没走到后续事件就会永久卡在中间态。
+- **前后端各自独立更新会造成"代码已修但现象复现"错觉**：桌面壳渲染层打进 exe、
+  后端从源码 spawn，两者构建时间不同步时，用户看到的"缺功能"可能只是其中一层没重建。
+  排查先看运行日志的启动时间与构建产物内容，别急着改代码。
+

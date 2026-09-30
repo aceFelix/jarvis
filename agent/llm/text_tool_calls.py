@@ -5,14 +5,16 @@
     `delta.tool_calls`。但部分模型 / 第三方兼容网关偶发地把工具调用以「文本」形式吐进
     `delta.content`——DeepSeek 用的是其内部序列化格式 DSML（形如
     `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="X"><｜｜DSML｜｜ parameter ...>`，
-    `｜` 为全角竖线 U+FF5D）。这类 token 一旦漏进正文字段，provider 不识别，就会被原样
+    `｜` 为全角竖线 U+FF5C）。这类 token 一旦漏进正文字段，provider 不识别，就会被原样
     显示成乱码，且工具不会触发（表现为「模型抽风，重新说一句才好使」）。
 
-    本模块提供两道防线：
+    本模块提供两道防线与一个组合封装：
     1. StreamingLeakFilter —— 流式过滤器，检测到泄漏标记后停止把后续文本当正文回显，
        改为缓存待解析（避免用户看到裸 DSML）。
     2. parse_textual_tool_calls —— 把缓存的泄漏文本（DSML 或纯 XML 两种形态）解析成
        结构化工具调用，交回 provider 转成 ToolCall 事件，让工具照常执行。
+    3. TextualToolCallGuard —— 上面两者的组合封装，Provider 侧三行接入即可复用，
+       避免每条协议路径各抄一遍「feed/flush/parse」流程。
 
 设计约束:
     - 归一化用正则把 DSML 命名空间前缀去掉，统一成 `<invoke>` / `<parameter>` 的 XML
@@ -24,18 +26,24 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-# 全角竖线 U+FF5D（DeepSeek 特殊 token 分隔符）。用变量拼接构造标签，避免源码里出现
-# 完整的尖括号标签字面量（与外层工具的参数分隔符冲突）。
-_PIPE = chr(0xFF5D)
+# DeepSeek 特殊 token 的分隔竖线。⚠ 真实泄漏样本用的是全角竖线 U+FF5C
+# （2026-09-30 从 ~/.jarvis/sessions 存档原文按码点核对确认）；此前实现误用
+# U+FF5D（全角右括号），标记匹配不上，兜底对真实样本从未生效。为兼容不同
+# 端点的写法，这里把三种竖线全部纳入匹配：U+FF5C / U+FF5D / 半角 U+007C。
+# 用变量拼接构造标签，避免源码里出现完整的尖括号标签字面量（与外层工具的参数分隔符冲突）。
+_PIPE_CHARS = chr(0xFF5C) + chr(0xFF5D) + "|"
 _INVOKE = "inv" + "oke"
 _PARAM = "para" + "meter"
-# 泄漏标记：DSML 正文里必然出现的 `<｜｜`（正文散文不会出现全角竖线）
-_LEAK_MARKER = "<" + _PIPE * 2
+# 泄漏标记：DSML 正文里必然出现的「`<` + 两个竖线」（正文散文不会出现全角竖线）
+_LEAK_RE = re.compile("<[" + _PIPE_CHARS + "]{2}")
 # DSML 命名空间前缀，如 `<｜｜DSML｜｜ ` → 归一化为 `<`
-_DSML_PREFIX_RE = re.compile("[" + _PIPE + "|]{2}DSML[" + _PIPE + "|]{2}\\s*")
+_DSML_PREFIX_RE = re.compile(
+    "[" + _PIPE_CHARS + "]{2}DSML[" + _PIPE_CHARS + "]{2}\\s*"
+)
 
 
 @dataclass
@@ -62,7 +70,7 @@ def has_leaked_toolcall(text: str) -> bool:
     """粗判一段文本里是否含泄漏的工具调用标记（DSML 或 XML invoke/parameter）。"""
     if not text:
         return False
-    if _LEAK_MARKER in text:
+    if _LEAK_RE.search(text):
         return True
     open_invoke = "<" + _INVOKE + " "
     open_param = "<" + _PARAM + " "
@@ -147,11 +155,12 @@ def parse_textual_tool_calls(
 def _partial_marker_len(buf: str) -> int:
     """返回 buf 结尾处「可能是泄漏标记前缀」的长度，用于流式回退缓冲。
 
-    标记 `<｜｜` 长 3，故只需回看最多 2 个尾字符（`<`、`<｜`）。
+    标记为 `<` + 两个竖线（长 3），故最多回看 2 个尾字符：`<`、`<`+单个竖线。
     """
-    for k in range(len(_LEAK_MARKER) - 1, 0, -1):
-        if buf.endswith(_LEAK_MARKER[:k]):
-            return k
+    if len(buf) >= 2 and buf[-2] == "<" and buf[-1] in _PIPE_CHARS:
+        return 2
+    if buf.endswith("<"):
+        return 1
     return 0
 
 
@@ -185,10 +194,10 @@ class StreamingLeakFilter:
             self._call_text += chunk
             return ""
         self._pending += chunk
-        idx = self._pending.find(_LEAK_MARKER)
-        if idx >= 0:
-            emit = self._pending[:idx]
-            self._call_text = self._pending[idx:]
+        m = _LEAK_RE.search(self._pending)
+        if m:
+            emit = self._pending[: m.start()]
+            self._call_text = self._pending[m.start():]
             self._pending = ""
             self._suppressed = True
             return emit
@@ -205,3 +214,78 @@ class StreamingLeakFilter:
         out = self._pending
         self._pending = ""
         return out
+
+
+class TextualToolCallGuard:
+    """文本态工具调用兜底守卫 ——「流式过滤 + 泄漏解析」的组合封装。
+
+    Provider 侧只需三个动作：逐块 `feed()` 拿可回显正文、流末 `flush()` 释放尾缓冲、
+    `drain()` 取解析出的真实调用。四步流程（feed / flush / suppressed / parse）收进
+    这里，各协议路径接入时不再各自复制同一套代码。
+
+    典型接法（流式循环内）：
+        guard = TextualToolCallGuard(t.name for t in tools)
+        ...
+        safe = guard.feed(delta_text)   # 正常正文即时回显
+        ...
+        tail = guard.flush()            # 流末释放尾缓冲
+        for pc in guard.drain():        # 无结构化调用时转真调用
+            yield ToolCall(id=pc.id, name=pc.name, input=pc.input)
+        # 一个调用也没解析出来时，必须把吞掉的原文补回显（guard.rescue_text），
+        # 否则会出现「半句话静默结束」，比裸码更难排查。
+
+    @author aceFelix
+    """
+
+    def __init__(self, tool_names: Iterable[str] = ()) -> None:
+        """初始化守卫。
+
+        Args:
+            tool_names: 本轮已注册的工具名集合；解析只保留落在集合内的调用，
+                防止把正文里恰好出现的尖括号误判成工具调用（空集合 = 全部丢弃）。
+        """
+        self._filter = StreamingLeakFilter()
+        self._valid_names = set(tool_names)
+        # 解析结果缓存：drain() 与 rescue_text 都要知道「到底解析出了几个」，
+        # 缓存避免同一份泄漏文本重复解析两次
+        self._calls: list[ParsedToolCall] | None = None
+
+    def feed(self, chunk: str) -> str:
+        """喂入一段正文增量，返回此刻可安全回显的文本。"""
+        return self._filter.feed(chunk)
+
+    def flush(self) -> str:
+        """流结束时释放尾缓冲里剩余的确定安全文本。"""
+        return self._filter.flush()
+
+    @property
+    def suppressed(self) -> bool:
+        """是否已进入抑制态（正文里出现过泄漏标记）。"""
+        return self._filter.suppressed
+
+    def drain(self) -> list[ParsedToolCall]:
+        """取出泄漏文本解析出的工具调用；未发生抑制时返回空列表。
+
+        结果会缓存，多次调用返回同一列表（rescue_text 依赖它判断兜底是否成功）。
+        """
+        if self._calls is None:
+            if not self._filter.suppressed:
+                self._calls = []
+            else:
+                self._calls = parse_textual_tool_calls(
+                    self._filter.call_text, self._valid_names
+                )
+        return self._calls
+
+    @property
+    def rescue_text(self) -> str:
+        """兜底失败时的补救文本：发生过抑制、却一个调用也没解析出来。
+
+        典型场景：本轮根本没发工具 schema（如 chat_detection 判定为纯聊天，
+        `valid_names` 为空集），所有解析出的调用被校验过滤掉。此时若不把吞掉的
+        原文补回显，用户只会看到半句话就结束，既无工具也无报错——比原来的裸码
+        更难排查。返回空串表示无需补救。
+        """
+        if not self._filter.suppressed or self.drain():
+            return ""
+        return self._filter.call_text

@@ -412,3 +412,132 @@ class TestStream:
         )]
         kwargs = provider._client.messages.stream.call_args.kwargs
         assert "tools" not in kwargs
+
+
+# ─────────────────────────────────────────────────────────────
+# 文本态工具调用兜底（DSML 泄漏进 text block）
+# ─────────────────────────────────────────────────────────────
+
+
+class TestTextualToolCallFallback:
+    """DSML 泄漏进 Anthropic text block 时的端到端兜底（stream() 层）。
+
+    复现 deepseek-flash（provider_type="anthropic"，端点 api.deepseek.com/anthropic）
+    偶发把工具调用以 DSML 文本吐进 text block、没有结构化 tool_use 的场景：
+    provider 应过滤掉裸码回显，并把泄漏文本解析成真实 ToolCall 让工具照常执行。
+
+    @author aceFelix
+    """
+
+    async def test_dsml_leak_becomes_real_toolcall(self, provider: AnthropicProvider) -> None:
+        P = chr(0xFF5C)  # 全角竖线：与真实泄漏样本码点一致
+        DO = "<" + P * 2 + "DSML" + P * 2 + " "
+        DC = "</" + P * 2 + "DSML" + P * 2 + " "
+        # 真实泄漏样本（取自 ~/.jarvis/sessions）：前言 + calls/invoke/parameter 三层
+        chunks = [
+            "我看看这个项目的结构。\n\n",
+            DO + "calls>",
+            DO + 'invoke name="Bash">',
+            DO + 'parameter name="command" string="true">ls -la' + DC + "parameter>",
+            DC + "invoke>",
+            DC + "calls>",
+        ]
+        events = [_Ev(type="content_block_start", index=0, content_block=_Ev(type="text"))]
+        events += [
+            _Ev(type="content_block_delta", index=0, delta=_Ev(type="text_delta", text=c))
+            for c in chunks
+        ]
+        provider._client.messages.stream.return_value = _FakeStream(events, _final_message())
+        tools = [ToolDef(name="Bash", description="run", input_schema={"type": "object"})]
+
+        out = [e async for e in provider.stream(
+            model="deepseek-flash", system="sys",
+            messages=[Message.user_text("这是一个什么项目jarvis")],
+            tools=tools, max_tokens=100,
+        )]
+
+        calls = [e for e in out if isinstance(e, ToolCall)]
+        assert len(calls) == 1
+        assert calls[0].name == "Bash"
+        assert calls[0].input == {"command": "ls -la"}
+        # 前言正常回显，裸 DSML 不得出现在任何 TextDelta
+        texts = "".join(e.text for e in out if isinstance(e, TextDelta))
+        assert "我看看这个项目的结构。" in texts
+        assert "DSML" not in texts and P not in texts
+        assert isinstance(out[-1], Stop)
+
+    async def test_leak_without_tool_schema_is_not_swallowed(
+        self, provider: AnthropicProvider
+    ) -> None:
+        """本轮没发工具 schema（如 chat_detection 判为纯聊天）时，兜底解析不出调用，
+        也必须把吞掉的泄漏原文补回显——不能既不执行也不显示地静默结束。
+
+        @author aceFelix
+        """
+        P = chr(0xFF5C)
+        DO = "<" + P * 2 + "DSML" + P * 2 + " "
+        DC = "</" + P * 2 + "DSML" + P * 2 + " "
+        chunks = [
+            "我来看看当前目录的情况。\n\n",
+            DO + 'invoke name="Bash">',
+            DO + 'parameter name="command" string="true">ls' + DC + "parameter>",
+            DC + "invoke>",
+        ]
+        events = [_Ev(type="content_block_start", index=0, content_block=_Ev(type="text"))]
+        events += [
+            _Ev(type="content_block_delta", index=0, delta=_Ev(type="text_delta", text=c))
+            for c in chunks
+        ]
+        provider._client.messages.stream.return_value = _FakeStream(events, _final_message())
+
+        out = [e async for e in provider.stream(
+            model="deepseek-flash", system="sys",
+            messages=[Message.user_text("当前目录是一个什么项目")],
+            tools=[], max_tokens=100,
+        )]
+
+        assert [e for e in out if isinstance(e, ToolCall)] == []
+        texts = "".join(e.text for e in out if isinstance(e, TextDelta))
+        assert "我来看看当前目录的情况。" in texts
+        # 兜底失败时原文必须可见（信息不丢），而不是半句话就停
+        assert "DSML" in texts
+
+    async def test_structured_tool_use_not_duplicated(self, provider: AnthropicProvider) -> None:
+        """结构化 tool_use 在场时不再走文本兜底（避免重复调用）。"""
+        events = [
+            _Ev(type="content_block_delta", index=0,
+                delta=_Ev(type="text_delta", text="好的，执行。")),
+            _Ev(type="content_block_start", index=0,
+                content_block=_Ev(type="tool_use", id="toolu_9", name="Bash")),
+            _Ev(type="content_block_delta", index=0,
+                delta=_Ev(type="input_json_delta", partial_json='{"command": "ls"}')),
+        ]
+        provider._client.messages.stream.return_value = _FakeStream(events, _final_message())
+        tools = [ToolDef(name="Bash", description="run", input_schema={"type": "object"})]
+
+        out = [e async for e in provider.stream(
+            model="deepseek-flash", system="sys",
+            messages=[Message.user_text("列目录")], tools=tools, max_tokens=100,
+        )]
+
+        calls = [e for e in out if isinstance(e, ToolCall)]
+        assert len(calls) == 1
+        assert calls[0].id == "toolu_9"
+        assert calls[0].input == {"command": "ls"}
+        texts = "".join(e.text for e in out if isinstance(e, TextDelta))
+        assert texts == "好的，执行。"
+
+    async def test_normal_text_not_suppressed(self, provider: AnthropicProvider) -> None:
+        """正文里正常的 `<` / HTML 不误触发抑制，也不产出多余调用。"""
+        body = "比较 a<b 与 <code>x</code>"
+        events = [_Ev(type="content_block_delta", index=0, delta=_Ev(type="text_delta", text=body))]
+        provider._client.messages.stream.return_value = _FakeStream(events, _final_message())
+
+        out = [e async for e in provider.stream(
+            model="deepseek-flash", system="sys",
+            messages=[Message.user_text("hi")], tools=[], max_tokens=10,
+        )]
+
+        assert [e for e in out if isinstance(e, ToolCall)] == []
+        texts = "".join(e.text for e in out if isinstance(e, TextDelta))
+        assert texts == body

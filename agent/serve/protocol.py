@@ -66,7 +66,9 @@ state.get           —                           {provider, model, mcp, ...}
 schedule.list       —                           {reminders: [...],
                                                  deadlines: [...]}
 cost.get            —                           {model, input_tokens,
-                                                 output_tokens, ...}
+                                                 output_tokens, ...,
+                                                 cache_hit_rate（百分比，
+                                                 口径同 REPL /cost）}
 answer_user         text: str                   null（回填 ask_user 弹窗）
 talk.start          duplex?: bool（全双工           null（结果走 talk_started）
                     桥接，桌面端传 true）
@@ -77,6 +79,11 @@ voice.start         —                           null（结果走 voice_started
 voice.stop          —                           null（结果走 voice_stopped）
 voice.interrupt     —                           bool（打断当前播报/推理）
 proactive.ack       task_id: str                bool（提醒确认，停止升级重发）
+project.set         path: str（绝对目录）       null（结果走 project_switched；
+                                                非法/相对/不存在路径 ok=false）
+project.get         —                           {workdir, name, persisted}
+projects.list       —                           [{path, name, last_opened}]
+projects.forget     path: str                   bool（是否确有移除，不删磁盘）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -85,6 +92,8 @@ proactive.ack       task_id: str                bool（提醒确认，停止升�
   ``assistant_thinking`` / ``tool_use`` / ``tool_result`` / ``assistant_done``
 - 会话：``session_ready`` / ``session_renamed``（标题改名，前端只刷列表
   不清屏） / ``session_loaded`` / ``session_new``
+- 项目工作区：``project_switched``（payload ``{workdir, name}``，project.set
+  引擎侧重建完成后推一次，与 model_switched 同为「入队即返回、落地走事件」）
 - 提示：``info`` / ``warn`` / ``error`` / ``status`` / ``ask_user``
 - 指标：``metrics``（每 2 秒推送，与 metrics.get 同构）
 - 实时语音：``talk_started`` / ``talk_stopped`` / ``volume`` /
@@ -99,6 +108,9 @@ proactive.ack       task_id: str                bool（提醒确认，停止升�
   kind = ``briefing`` 每日简报 / ``reminder`` 用户提醒 / ``deadline``
   截止日期；源自 ProactiveHub，见 ``agent/serve/hub.py``）
 - 初始化：``init``（连接建立后首推，payload 同 state.get）
+- 运行健康：``mcp_ready``（MCP 后台连接落定时推一次，payload 即 state.get 的
+  mcp 快照 ``{connected, failed, tools}``；桌面 init 时快照常为 None——MCP 约 9s
+  后台预热才连上，故需本事件驱动右栏补刷）
 
 @author aceFelix
 """
@@ -150,6 +162,14 @@ CMD_VOICE_INTERRUPT = "voice.interrupt"
 CMD_PROACTIVE_ACK = "proactive.ack"
 CMD_SETTINGS_GET = "settings.get"
 CMD_SETTINGS_SET = "settings.set"
+# project.*（桌面项目工作区，2026）：桌面壳"选择文件夹作为项目 → 在其中
+# 聊天开发"。project.set 切当前 workdir（结果走 project_switched 事件）；
+# project.get / projects.list / projects.forget 读写当前项目与最近项目列表
+#（~/.jarvis/projects.toml）。后端只接收并校验绝对目录路径，绝不弹框。
+CMD_PROJECT_SET = "project.set"
+CMD_PROJECT_GET = "project.get"
+CMD_PROJECTS_LIST = "projects.list"
+CMD_PROJECTS_FORGET = "projects.forget"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -183,12 +203,23 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_PROACTIVE_ACK,
     CMD_SETTINGS_GET,
     CMD_SETTINGS_SET,
+    CMD_PROJECT_SET,
+    CMD_PROJECT_GET,
+    CMD_PROJECTS_LIST,
+    CMD_PROJECTS_FORGET,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----
 EVT_REPLY = "reply"
 EVT_INIT = "init"
 EVT_METRICS = "metrics"
+# MCP 连接结果落定事件：payload = state.get 的 mcp 快照（{connected,failed,tools}），
+# 引擎后台预热连完 MCP 后推一次，桌面壳据此刷新右栏运行健康。@author aceFelix
+EVT_MCP_READY = "mcp_ready"
+# 项目切换落地事件：payload = {workdir, name}。project.set 入队后由引擎线程
+# 串行重建（换 workdir → 重生提示词/重挂 harness/开新会话）完成后推一次；
+# 与 model_switched 同构（入队即返回，落地走事件）。@author aceFelix
+EVT_PROJECT_SWITCHED = "project_switched"
 EVT_PROACTIVE_NOTIFY = "proactive_notify"
 EVT_VOICE_STARTED = "voice_started"
 EVT_VOICE_STOPPED = "voice_stopped"

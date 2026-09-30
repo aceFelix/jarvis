@@ -85,6 +85,9 @@ async def connect_mcp(engine: ChatEngine, registry: Any) -> None:
                 "failed": list(config.keys()),
                 "tools": 0,
             }
+            # 全部失败也是「已落定」：推就绪事件，让右栏把 init 时的 None（显示
+            # 为 MCP 未启用）刷新成真实失败态。桌面壳启动早于本后台预热完成。
+            engine._emitter.emit("mcp_ready", engine._mcp_status)
             engine._emitter.emit(
                 "info", f"⚠ MCP: 所有 server 连接失败（{', '.join(config.keys())}）"
             )
@@ -102,6 +105,9 @@ async def connect_mcp(engine: ChatEngine, registry: Any) -> None:
         if failed:
             msg += f"（{', '.join(failed)} 连接失败，对应工具不可用）"
         engine._emitter.emit("info", msg)
+        # MCP 连接结果落定：推就绪事件，桌面壳据此刷新右栏运行健康（init 拉到的
+        # 快照可能仍是 None——MCP 多 server 并发连接约 9s 才完成）。@author aceFelix
+        engine._emitter.emit("mcp_ready", engine._mcp_status)
     except ImportError:
         pass  # MCP SDK 未安装，跳过接入
     except Exception as e:

@@ -203,6 +203,20 @@ class QueryLoop:
             provider.set_thinking_enabled(self._thinking_override)
         return old
 
+    def update_system_prompt(self, text: str) -> None:
+        """就地替换系统提示词（桌面切项目 project_switch 链路）。
+
+        与 switch_model 同构：不重建 QueryLoop —— 会话消息上下文、session_usage
+        累计、思考模式覆盖全部保留，只换 ``_system``。切 workdir 后环境段
+        （含 workdir）与项目级技能/记忆随之变化，用新提示词就地刷新即可。
+
+        Args:
+            text: 新的系统提示词全文。
+
+        @author aceFelix
+        """
+        self._system = text
+
     async def compact_now(self, ctx: ToolContext) -> bool:
         """手动触发一次上下文压缩。成功返回 True，跳过/失败返回 False。"""
         if not self._enable_compaction:
@@ -705,6 +719,9 @@ class QueryLoop:
         - 用户消息 <= 20 字
         - 不含动作关键词
         - 对话历史中无工具调用记录
+
+        注意：判定为纯聊天会直接不发送任何工具 schema，若误判则模型无法调工具，
+        所以关键词表宁全勿缺（尤其工作区/环境指代类问句）。@author aceFelix
         """
         # 取最后一条 user 消息
         last_user_text = ""
@@ -744,6 +761,16 @@ class QueryLoop:
             "星期", "今天", "明天", "昨天", "今年", "版本", "日历",
             "how", "what", "when", "who", "where", "which", "why",
             "time", "date", "today", "weather", "version", "calendar",
+            # 工作区/代码库词 —— 「当前目录是一个什么项目」这类问句必须能调工具。
+            # 2026-09-30 桌面端复盘：这类句子被误判为纯聊天→本轮 0 工具→模型仍凭习惯
+            # 吐文本态 DSML 调用→被兜底按 valid_names 全量过滤→表现为「思考完就停止」。
+            # 注意：关键词统一小写，比较走 text_lower。
+            "目录", "项目", "仓库", "工程", "代码", "结构", "路径", "分支",
+            "提交", "依赖", "日志", "报错", "文件夹", "数据库", "接口",
+            "git", "repo", "project", "directory", "folder", "codebase",
+            "commit", "branch", "readme", "build", "deploy",
+            # 环境指代词 —— 短问句指向当前环境，往往需要读现实数据而非背书
+            "当前", "现在", "这个", "这里", "这是", "本地", "机器", "我的",
         )
         text_lower = text.lower()
         for kw in action_keywords:

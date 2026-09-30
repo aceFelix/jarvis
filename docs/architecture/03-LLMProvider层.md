@@ -169,18 +169,40 @@ if self.is_thinking_enabled() and hasattr(delta, "reasoning_content"):
 **文本态工具调用兜底**（deepseek DSML 泄漏修复）：
 
 DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke name="X">…`，`｜` 为全角
-竖线 U+FF5D）偶发不被后端拦截转结构化，而是当正文漏进 `delta.content`，jarvis 只认
-结构化 `delta.tool_calls`，就会把裸码原样显示、工具不触发（表现为“抽风，重新说一句才好使”）。
-`openai_provider.stream()` 逐块把 `content` 喂给 `StreamingLeakFilter`：
+竖线 U+FF5C）偶发不被后端拦截转结构化，而是当正文漏进文本字段，jarvis 只认结构化
+工具块，就会把裸码原样显示、工具不触发（表现为“抽风，重新说一句才好使”）。两条协议
+路径都接同一套兜底（[text_tool_calls.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/text_tool_calls.py)
+的 `TextualToolCallGuard`）：
 
-- 命中标记 `<｜｜` 前的正文照常 `TextDelta` 输出，标记起的后续文本转入缓存不返回显；
-- 流结束时若无结构化 `tool_calls` 且发生过抑制，则用 `parse_textual_tool_calls()`
+- 命中标记（`<` + 两个竖线）前的正文照常 `TextDelta` 输出，标记起的后续文本转入缓存不再回显；
+- 流结束时若无结构化工具调用且发生过抑制，则用 `parse_textual_tool_calls()`
   （先归一化 DSML→XML，再抽 invoke/parameter）解析成 `ToolCall`，并用已注册工具名校验；
-- 正文里正常的 `<`/HTML 不会误触发（仅全角竖线组合 `<｜｜` 作为信号）。
+- 正文里正常的 `<`/HTML 不会误触发（仅全角竖线组合 `<｜｜` 作为信号）；
+- 竖线码点兼容三种写法：全角 U+FF5C（DeepSeek 实际输出）、U+FF5D、半角 U+007C。
+- **不丢信息契约**：若发生过抑制却一个调用也没解析出来（典型如 `chat_detection` 判定纯聊天
+  导致本轮 `tools=[]`、`valid_names` 为空集），`guard.rescue_text` 会把吞掉的原文补发回显，
+  避免「半句话静默结束」这种比裸码更难排查的失效形态。
 
-此兜底只接在 `OpenAIProvider` 一处，即覆盖 deepseek / dashscope 兼容 / moonshot / 智谱
-兼容 / openai 等所有走该 Provider 的厂商。Anthropic / Zai 原生 Provider 自带结构化工具块，
-暂不接入。详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)。
+| 协议路径 | 接入点 | 覆盖厂商 |
+|---|---|---|
+| OpenAI 兼容 | `openai_provider.stream()` 的 `delta.content` | deepseek(v1) / dashscope 兼容 / moonshot / 智谱兼容 / openai / siliconflow / google 等 |
+| Anthropic | `anthropic_provider.stream()` 的 `text_delta` | deepseek `/anthropic` 端点（deepseek-flash）/ minimax `/anthropic` 等 Anthropic 兼容端点 |
+
+⚠ 2026-09-30 三次补漏：
+
+1. **只接了 OpenAI 路径**：原先假设「Anthropic 原生 Provider 自带结构化工具块」，实机发现
+   DeepSeek 的 `/anthropic` 兼容端点在「前言 + 调用」同轮时同样会把 DSML 当 `text` block
+   吐出来（终端与桌面壳同时复现裸码），故补齐 Anthropic 路径。
+2. **分隔符码点写错**：实现里把竖线误写成 U+FF5D，而测试样本又用同一个错误常量构造，
+   导致「实现 + 测试一起绿、线上仍然漏码」。现按真实存档码点 U+FF5C 修正，并新增独立于
+   错误常量的真实样本锚点测试（`TestRealLeakSample`）。
+3. **兜底静默吞信息**：码点修好后桌面端变为「思考完就停止」——`_is_chat_only` 把「当前目录
+   是一个什么项目」误判为纯聊天→本轮 0 工具→模型仍吐 DSML→被空 `valid_names` 全部过滤。
+   已补全关键词表并加入 `rescue_text` 回退（见 [query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py)
+   的 `_is_chat_only`）。
+
+Zai / DashScope 原生 SDK 走各自的工具块协议，暂未接入，若复现按同一 guard 三行接入即可。
+详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)。
 
 ### 2. Anthropic Provider
 
@@ -190,6 +212,11 @@ DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke n
 - **SDK**：`anthropic` Python SDK
 - **消息格式转换**：内部 Message → Anthropic messages 格式
 - **工具调用**：Anthropic tool_use block → ToolCall 事件
+- **文本态工具调用兜底**：text block 里泄漏的 DSML/XML 文本由
+  [text_tool_calls.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/text_tool_calls.py)
+  的 `TextualToolCallGuard` 过滤裸码回显并转真实 `ToolCall`。2026-09-30 补：DeepSeek
+  `/anthropic` 兼容端点（deepseek-flash）同轮「前言 + 调用」时同样会泄漏，见上方
+  「文本态工具调用兜底」
 - **ThinkingContent 过滤**：Anthropic 兼容后端无法处理 ThinkingContent，发送前过滤
 - **Provider 名推断**：从 base_url 动态推断 provider 名
 - **多模态图片**：image content → Anthropic image block

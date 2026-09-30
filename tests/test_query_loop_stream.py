@@ -232,6 +232,14 @@ class TestHelperMethods:
         ctx.messages.append(Message(role="assistant", content=[ToolUseContent(id="t1", name="fake_tool", input={})]))
         assert loop._is_chat_only(ctx) is False  # 历史有工具调用
 
+        # 2026-09-30 桌面端复现句：工作区/环境指代类问句曾被误判为纯聊天，
+        # 导致本轮 0 工具发给模型，模型仍凭习惯吐文本态 DSML 调用，被兜底按
+        # 空 valid_names 全量过滤，表现为「思考完就停止」且不执行任何工具
+        ask = "jarvis当前目录是一个什么项目"
+        ctx, _ = make_ctx()
+        ctx.messages.append(Message(role="user", content=[TextContent(text=ask)]))
+        assert loop._is_chat_only(ctx) is False  # 含工作区词「目录/项目/当前」
+
     async def test_chat_detection_suppresses_tools(self, registry):
         """chat_detection=True 且输入为纯聊天 → 发给 LLM 的工具列表为空。"""
         provider = ScriptedProvider([[TextDelta("嗨"), Stop(reason="stop")]])

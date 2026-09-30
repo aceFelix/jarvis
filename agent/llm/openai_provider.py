@@ -11,10 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
-from agent.llm.text_tool_calls import (
-    StreamingLeakFilter,
-    parse_textual_tool_calls,
-)
+from agent.llm.text_tool_calls import TextualToolCallGuard
 
 from agent.core.message import (
     ImageContent,
@@ -316,8 +313,7 @@ class OpenAIProvider(LLMProvider):
         tool_acc: dict[int, dict[str, Any]] = {}
         # 文本态工具调用兜底：过滤泄漏进 content 的 DSML/XML，避免裸码回显
         # @author aceFelix
-        leak_filt = StreamingLeakFilter()
-        valid_names = {t.name for t in tools}
+        guard = TextualToolCallGuard(t.name for t in tools)
 
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
@@ -347,7 +343,7 @@ class OpenAIProvider(LLMProvider):
                     yield ThinkingDelta(text=reasoning)
                 if delta.content:
                     # 走泄漏过滤器：正常文本即时放行，命中 DSML 标记后转入缓存不回显
-                    _safe = leak_filt.feed(delta.content)
+                    _safe = guard.feed(delta.content)
                     if _safe:
                         yield TextDelta(text=_safe)
                 if delta.tool_calls:
@@ -370,7 +366,7 @@ class OpenAIProvider(LLMProvider):
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
             # 释放过滤器里尾缓冲的剩余安全文本
-            _tail = leak_filt.flush()
+            _tail = guard.flush()
             if _tail:
                 yield TextDelta(text=_tail)
             # 发出累积的工具调用
@@ -389,10 +385,15 @@ class OpenAIProvider(LLMProvider):
                 yield ToolCallEnd(id=entry["id"] or f"call_{name or 'unknown'}")
             # 兜底：无结构化 tool_calls 但正文泄漏了工具调用标记 → 解析成真实调用
             # （DeepSeek DSML / 部分兼容网关把调用吐进 content 文本，见 text_tool_calls.py）
-            if not tool_acc and leak_filt.suppressed:
-                for pc in parse_textual_tool_calls(leak_filt.call_text, valid_names):
+            if not tool_acc:
+                for pc in guard.drain():
                     yield ToolCall(id=pc.id, name=pc.name, input=pc.input)
                     yield ToolCallEnd(id=pc.id)
+                # 兜底未产出任何调用（如本轮未发工具 schema）时，把吞掉的原文
+                # 补回显，避免「半句话静默结束」——宁可看到裸码也不能丢信息
+                _rescued = guard.rescue_text
+                if _rescued:
+                    yield TextDelta(text=_rescued)
             yield Stop(reason=finish_reason or "stop", usage=final_usage)
         except Exception as e:
             from agent.llm.errors import classify

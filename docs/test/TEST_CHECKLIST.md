@@ -731,6 +731,13 @@
 | T-333 | models 指令 | `models.list` / `models.select`(name) / `models.add`(name,vendor,api_format,base_url,api_key,model_type) / `models.edit`(name［,new_name,vendor,api_format,base_url,api_key,model_type］) / `models.remove`(name) | list 返回模型数组（含 current，current 取引擎实时模型；每项另带 source(builtin/custom) / editable / removable / config **不回传明文 api_key**，只给 `has_key`）；select 返回 bool 且持久化**并触发引擎热切换**（写盘成功后列表 current 立刻跟随、无需重启；写盘失败 result=false 且不入队切换）；add 返回 `{name, vendor, api_format, base_url, model_type}` 且写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（base_url 留空按厂商推断、api_key 入系统 keyring）、随后 `models.list` 可见；edit 返回 `{name, vendor, api_format, base_url, model_type, hot_switched}`（name 必填、非空枚举落白名单；内置模型传 new_name、目标名已占用、名字不存在回 ok=false 且不动磁盘/内存；api_key 留空 = **保持原 Key**；改的是当前运行模型时强制重建 provider 并置 hot_switched=true）；remove 返回 `{name, was_current}`（仅用户级自定义段真的存在时才删：内置模型、磁盘无该段均回 ok=false；删当前模型**不动运行中的 provider** 仅提示另选）；缺 name / 非法 api_format / 非法 model_type 回 ok=false |
 | T-334 | voices/metrics/state | `voices.list`/`voices.select`/`voices.add`/`voices.delete`/`metrics.get`/`state.get` | voices.list 返回全量目录（内置+自定义，当前置顶，每项 `{name, voice_id, description, vendor, model, linked, current, custom}`）；select 回执 dict `{ok, name, voice_id, linked_model, old_model}`（立即写盘、不兼容自动联动 tts_model；目录未命中 ok=true 但 result.ok=false）；add 回 `{ok, name}`（name/voice_id 必填、内置名遮蔽拒绝、upsert 即编辑）；delete 仅 custom 可删（内置回 ok=false）；metrics/state 各自返回对应结构（metrics 含 cpu/memory/disk） |
 | T-335 | answer_user / talk | `answer_user`(text) 回填 ask_user；`talk.start`/`talk.stop` | ask_user 弹窗被回填；talk 触发 `talk_started`/`talk_stopped` |
+| T-342 | project.set 合法切换 | 发 `{"type":"project.set","path":"<已存在的绝对目录>"}` | 回执 ok=true + `{workdir,name}`；随后推 `project_switched` 事件（payload `{workdir,name}`）；引擎自动 `_handle_new_session()`（切项目=开新会话）、项目级 `.jarvis/MEMORY.md`、`.jarvis/skills/` 重新挂接；`~/.jarvis/projects.toml` 自动置顶 last_active |
+| T-343 | project.set 非法路径 | `path` 为空串/相对路径/不存在目录 | raise → 回执 ok=false，**不**推 `project_switched`、**不**写 projects.toml（`_workdir_override`/`s.workdir` 保持不变）；单测 `tests/serve/test_serve_protocol.py::test_project_set_rejects_invalid_paths` |
+| T-344 | project.set 同路径收敛 | 当前 workdir 已为 X 时再发 `project.set(X)` | 仅推一次 `project_switched` 事件供前端收敛（不重建 prompt/不新开 session）；单测 `tests/ui/test_project_switch.py` |
+| T-345 | project.get / projects.list | 拉当前项目信息与最近项目列表 | project.get 返 `{workdir,name,persisted}`（persisted=false 代表 serve 启动默认值尚未写入 projects.toml）；projects.list 返 `[{path,name,last_opened,exists}]` 按 last_opened 倒序（exists=false 项前端置灰） |
+| T-346 | projects.forget | 删一个存在的最近项 + 一个不存在的 | 存在 → ok=true + result=true，`projects.toml` 无该记录、若为 last_active 则清空；不存在 → ok=true + result=false（幂等）；**不删磁盘目录** |
+| T-347 | list_sessions workdir 字段 | `sessions.list` | 每项多一字段 `workdir`（取自 SessionMeta.workdir），供前端按项目分组/过滤；旧无该字段的会话归为空串不丢弃 |
+| T-348 | serve 启动 last_active 恢复 | 写入 `projects.toml` 后重启 serve | `agent/serve/__main__.py` 与 `jarvis --serve` 都优先取 `get_last_active_existing()`（存在且目录仍在）作为默认 workdir；目录已不存在则回退到命令行 cwd；实现「重开回到上次项目」 |
 
 ### 35.4 事件泵与兼容性
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -738,6 +745,9 @@
 | T-336 | 事件泵广播 | 引擎产生事件后观察 WS | 每 50ms 轮询，`{"type","payload"}` 原样广播为 `{"event","data"}` |
 | T-337 | 指标推送 | 连接后静置 | 每 ~2 秒收到 `metrics` 事件 |
 | T-338 | 手机 PWA 旧协议回归 | 用 BridgeServer 原 `query`/`abort` 协议连接 | 行为不变、向后兼容 |
+| T-339 | MCP 就绪补刷事件 | 启动 `--serve` 连上桌面壳，静候后台 MCP 预热（约 9s） | MCP 连接落定后推一次 `mcp_ready` 事件（payload=`state.get` 的 mcp 快照 `{connected,failed,tools}`）；右栏「运行健康」从 `init` 时的「MCP 未启用」自动刷新为真实连接态（单测 `test_workbench_engine_mcp.py`） |
+| T-340 | 语音 `<standby/>` 不泄漏上屏 | 语音模式说「退下吧」，观察桌面/终端气泡 | 告别语气泡**不出现字面 `<standby/>`**（全量 `on_ai_text` 与流式 `on_ai_text_delta` 均剥标）；仍正常进入待机（退下检测读原始消息不受影响）；单测 `test_voice_standby_display.py` |
+| T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_workbench_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/serve-toolsearch-registration-fix.md) |
 
 ---
 
@@ -764,7 +774,7 @@
 
 ---
 
-> **总计：338 项测试，覆盖 35 个功能模块**
+> **总计：348 项测试，覆盖 35 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348）
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >

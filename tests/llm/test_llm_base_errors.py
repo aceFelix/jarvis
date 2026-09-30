@@ -54,6 +54,25 @@ class TestUsage:
         assert u.cache_read_tokens == 0
         assert u.cache_creation_tokens == 0
 
+    def test_cache_hit_rate_openai_style(self) -> None:
+        """OpenAI / DashScope 兼容协议：input 已含缓存 → 分母 = input。"""
+        assert Usage(input_tokens=1000, cache_read_tokens=400).cache_hit_rate == 40.0
+        # 命中与未命中持平：仍按 input 口径，命中率为 100%
+        assert Usage(input_tokens=100, cache_read_tokens=100).cache_hit_rate == 100.0
+
+    def test_cache_hit_rate_anthropic_style(self) -> None:
+        """Anthropic 协议：input 不含缓存（命中数大于 input）→ 分母加上命中。
+
+        若按 input 当分母会算出 900% 的荒谬命中率，归一化后应为 90%。
+        """
+        u = Usage(input_tokens=100, cache_read_tokens=900)
+        assert u.cache_hit_rate == 90.0
+
+    def test_cache_hit_rate_without_input_is_zero(self) -> None:
+        """尚未发生 API 调用（input=0）→ 0%，调用方据此隐藏指标。"""
+        assert Usage().cache_hit_rate == 0.0
+        assert Usage(output_tokens=50, cache_read_tokens=10).cache_hit_rate == 0.0
+
 
 class TestEventTypes:
     """LLMEvent 各事件类型可构造。"""

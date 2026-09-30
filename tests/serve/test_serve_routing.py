@@ -648,7 +648,11 @@ def test_schedule_list_with_hub_maps_fields():
 
 
 def test_cost_get_shape_defaults_zero():
-    """cost.get 返回用量统计（引擎未装配时 token/轮数/消息数全 0）。"""
+    """cost.get 返回用量统计（引擎未装配时 token/轮数/消息数全 0）。
+
+    cache_hit_rate 为后端统一口径算好的百分数（Usage.cache_hit_rate），
+    桌面壳用量卡直接展示，不在前端重算。@author aceFelix
+    """
     server, _, _, _ = _make()
     reply = _call(server, "cost.get", {})
     assert reply["data"]["ok"] is True
@@ -660,10 +664,12 @@ def test_cost_get_shape_defaults_zero():
         "output_tokens",
         "cache_read_tokens",
         "cache_creation_tokens",
+        "cache_hit_rate",
         "dialogs",
         "messages",
     } <= set(result.keys())
     assert result["input_tokens"] == 0
+    assert result["cache_hit_rate"] == 0.0
     assert result["dialogs"] == 0
     assert result["messages"] == 0
 

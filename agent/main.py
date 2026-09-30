@@ -613,6 +613,17 @@ def main(argv: list[str] | None = None) -> int:
         overrides["quick_start"] = True
     settings = settings.with_overrides(**overrides)
 
+    # serve 模式（桌面壳）未显式指定 --workdir 时，回到上次活跃项目：
+    # 桌面「选文件夹作为项目」把当前项目写入 projects.toml 的 last_active，
+    # 重启 serve 即据此恢复 workdir（实现"重开续用最近项目"）。仅在记录的
+    # 目录仍存在时启用，目录被删/移动则回退到默认 workdir（进程 cwd）。
+    # @author aceFelix
+    if args.serve and not args.workdir:
+        from agent.config.projects_registry import get_last_active_existing
+        _last = get_last_active_existing()
+        if _last:
+            settings = settings.with_overrides(workdir=_last)
+
     # 切到工作目录（不存在则自动创建）
     try:
         os.makedirs(settings.workdir, exist_ok=True)

@@ -238,3 +238,20 @@ class TestSwitchModel:
         loop.switch_model(new, "new-model")
 
         assert calls == []
+
+
+class TestUpdateSystemPrompt:
+    """QueryLoop.update_system_prompt：就地换提示词，不重建 loop（桌面切项目链路）。"""
+
+    def test_replaces_system_and_keeps_state(self, registry) -> None:
+        """只改 _system：会话 token 累计与 provider 不变（与 switch_model 同构）。"""
+        provider = ScriptedProvider([])
+        loop = make_loop(provider, FakeOrchestrator(), registry, system="旧提示")
+        assert loop._system == "旧提示"
+        usage = loop.session_usage
+
+        loop.update_system_prompt("新工作区提示")
+
+        assert loop._system == "新工作区提示"
+        assert loop._provider is provider  # 未重建 loop
+        assert loop.session_usage is usage
