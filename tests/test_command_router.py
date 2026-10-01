@@ -151,3 +151,71 @@ async def test_normal_input_returns_false(cmd_ctx):
     result = await dispatch_command(cmd_ctx, "hello jarvis")
 
     assert result is False
+
+
+# ---- /think 参数模糊前缀匹配（免打全 low|medium|high） @author aceFelix ----
+
+
+@pytest.mark.asyncio
+async def test_think_fuzzy_prefix_single_hit(cmd_ctx):
+    """/think l → low；/think med → medium；均经 loop 统一入口落地。"""
+    with patch("agent.commands.handlers.core_commands.build_system_prompt", return_value="sys"):
+        assert await dispatch_command(cmd_ctx, "/think l") is True
+        cmd_ctx.loop.set_thinking_effort.assert_called_with("low")
+        assert cmd_ctx.settings.thinking_effort == "low"
+        assert cmd_ctx.settings.enable_thinking is True
+
+        assert await dispatch_command(cmd_ctx, "/think med") is True
+        cmd_ctx.loop.set_thinking_effort.assert_called_with("medium")
+
+
+@pytest.mark.asyncio
+async def test_think_numeric_shorthand(cmd_ctx):
+    """/think 1/2/3 速记 low/medium/high；/think 0 仍为 off。"""
+    with patch("agent.commands.handlers.core_commands.build_system_prompt", return_value="sys"):
+        for arg, expect in (("1", "low"), ("2", "medium"), ("3", "high")):
+            await dispatch_command(cmd_ctx, f"/think {arg}")
+            cmd_ctx.loop.set_thinking_effort.assert_called_with(expect)
+
+        await dispatch_command(cmd_ctx, "/think 0")
+        cmd_ctx.loop.set_thinking_effort.assert_called_with("off")
+        assert cmd_ctx.settings.enable_thinking is False
+
+
+@pytest.mark.asyncio
+async def test_think_ambiguous_prefix_warns(cmd_ctx):
+    """/think o 同时命中 on/off → 弹用法提示，不下发设置。"""
+    await dispatch_command(cmd_ctx, "/think o")
+
+    cmd_ctx.loop.set_thinking_effort.assert_not_called()
+    assert any("用法" in str(c) for c in cmd_ctx.ui.warn.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_think_invalid_arg_warns(cmd_ctx):
+    """/think xyz 无任何命中 → 弹用法提示，不下发设置。"""
+    await dispatch_command(cmd_ctx, "/think xyz")
+
+    cmd_ctx.loop.set_thinking_effort.assert_not_called()
+    cmd_ctx.ui.warn.assert_called_once()
+
+
+def test_think_tab_completion():
+    """_SlashCompleter 对 /think 前缀弹出档位补全（/think l 只命中 low）。"""
+    pytest.importorskip("prompt_toolkit")
+    from prompt_toolkit.document import Document
+
+    from agent.ui.cli import _HAS_PT, _SlashCompleter
+
+    if not _HAS_PT:
+        pytest.skip("prompt_toolkit 未安装时哑元 Completer 不可用")
+    comp = _SlashCompleter()
+
+    doc = Document("/think ", cursor_position=7)
+    names = [c.text for c in comp.get_completions(doc, MagicMock())]
+    assert names == ["on", "off", "low", "medium", "high"]
+
+    doc = Document("/think l", cursor_position=8)
+    names = [c.text for c in comp.get_completions(doc, MagicMock())]
+    assert names == ["low"]
+

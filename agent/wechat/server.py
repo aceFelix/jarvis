@@ -56,6 +56,9 @@ class WeChatBridge:
         ui: Any,
         *,
         workdir: str = "",
+        query_lock: "threading.Lock | None" = None,
+        on_turn_end: "Callable[[], None] | None" = None,
+        on_query_begin: "Callable[[], None] | None" = None,
     ) -> None:
         """
         Args:
@@ -63,17 +66,29 @@ class WeChatBridge:
             ctx: ToolContext 实例（共享 REPL 的 messages）。
             ui: 终端 UI（RichCLI），用于显示状态和二维码。
             workdir: 工作目录。
+            query_lock: 跨通道共享串行锁。桌面 serve 模式由引擎下发其唯一 query
+                锁，使微信 query 与桌面文本/手机互斥；为 None 时自建（终端）。
+            on_turn_end: 每轮 query 结束后的回调（桌面 serve 注入引擎 _after_turn，
+                使微信对话即时落盘到电脑会话历史）；None 时不落盘（终端另有存盘）。
         """
         self._query_loop = query_loop
         self._ctx = ctx
         self._ui = ui
         self._workdir = workdir or ctx.workdir
+        # 每轮结束回调：桌面注入 engine._after_turn 完成增量存盘 + 标题生成。
+        # @author aceFelix
+        self._on_turn_end = on_turn_end
+        # 每轮即将开跑（拿到锁后）回调：桌面注入 engine._remote_query_begin 登记
+        # 当前任务，使 reply.abort 能取消微信在跑的轮次；终端 None 行为不变。
+        # @author aceFelix
+        self._on_query_begin = on_query_begin
 
         self._client = ILinkClient()
         self._running = False
         self._login_time: float = 0
-        # 跨线程串行化锁：保护共享 messages
-        self._query_lock = threading.Lock()
+        # 跨线程串行化锁：保护共享 messages。桌面注入引擎唯一 query 锁，
+        # 终端默认自建。@author aceFelix
+        self._query_lock = query_lock if query_lock is not None else threading.Lock()
         # 主线程 asyncio loop（REPL loop），query 在此执行
         self._main_loop: asyncio.AbstractEventLoop | None = None
         # typing_ticket 缓存（per user）
@@ -266,13 +281,38 @@ class WeChatBridge:
         return ui.get_reply()
 
     async def _exec_query(self, text: str, ctx: ToolContext) -> None:
-        """加锁执行 query_loop.run。"""
+        """加锁执行 query_loop.run，结束后通知桌面收尾本轮 AI 气泡。"""
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._query_lock.acquire)
         try:
+            # 拿到锁、即将开跑：登记当前任务供桌面 reply.abort 取消（任意来源）。
+            # @author aceFelix
+            if self._on_query_begin is not None:
+                try:
+                    self._on_query_begin()
+                except Exception:
+                    pass
             await self._query_loop.run(text, ctx)
         finally:
             self._query_lock.release()
+            # 本轮结束：让桌面把累积的 assistant_text 定稿成一条气泡（否则下一条
+            # 微信消息的回复会续写同一气泡）。WeChatUI.end_turn 内部对终端宿主判空。
+            # @author aceFelix
+            end = getattr(ctx.ui, "end_turn", None)
+            if end is not None:
+                try:
+                    end()
+                except Exception:
+                    pass
+            # 本轮结束落盘：桌面注入的 engine._after_turn 把共享 messages 增量存到
+            # 电脑会话历史（与桌面本地输入同规则），使纯微信对话也持久化。此协程
+            # 跑在引擎 loop（_run_query 经 run_coroutine_threadsafe 调度），_after_turn
+            # 内的 create_task 因此落在正确的 loop 上。@author aceFelix
+            if self._on_turn_end is not None:
+                try:
+                    self._on_turn_end()
+                except Exception:
+                    pass
 
     async def _send_reply(self, to_id: str, context_token: str, text: str) -> None:
         """发送回复，超过 MAX_MSG_LENGTH 则分段。"""
@@ -343,6 +383,9 @@ def start_wechat_in_thread(
     *,
     workdir: str = "",
     main_loop: asyncio.AbstractEventLoop | None = None,
+    query_lock: "threading.Lock | None" = None,
+    on_turn_end: "Callable[[], None] | None" = None,
+    on_query_begin: "Callable[[], None] | None" = None,
 ) -> WeChatBridge:
     """在独立线程启动 WeChatBridge，返回单例。
 
@@ -350,6 +393,8 @@ def start_wechat_in_thread(
 
     Args:
         main_loop: 主线程 asyncio loop（REPL loop），query 在此执行。
+        query_lock: 跨通道共享串行锁（桌面 serve 模式传引擎唯一锁）；None 自建。
+        on_turn_end: 每轮 query 结束回调（桌面注入引擎 _after_turn 落盘）。
     """
     global _global_wechat, _global_wechat_thread, _global_wechat_loop
 
@@ -360,6 +405,12 @@ def start_wechat_in_thread(
     ):
         if main_loop is not None:
             _global_wechat._main_loop = main_loop
+        # 复用已运行实例时同步刷新落盘回调（桌面重连可能换引擎实例）。
+        # @author aceFelix
+        if on_turn_end is not None:
+            _global_wechat._on_turn_end = on_turn_end
+        if on_query_begin is not None:
+            _global_wechat._on_query_begin = on_query_begin
         return _global_wechat
 
     if main_loop is None:
@@ -368,7 +419,15 @@ def start_wechat_in_thread(
         except RuntimeError:
             pass
 
-    bridge = WeChatBridge(query_loop=query_loop, ctx=ctx, ui=ui, workdir=workdir)
+    bridge = WeChatBridge(
+        query_loop=query_loop,
+        ctx=ctx,
+        ui=ui,
+        workdir=workdir,
+        query_lock=query_lock,
+        on_turn_end=on_turn_end,
+        on_query_begin=on_query_begin,
+    )
     bridge._main_loop = main_loop
     _global_wechat = bridge
 

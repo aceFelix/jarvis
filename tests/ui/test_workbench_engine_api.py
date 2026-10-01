@@ -320,6 +320,107 @@ def test_api_list_sessions_carries_workdir(monkeypatch) -> None:
     assert by_name["b"]["workdir"] == ""
 
 
+# ---- 工作模式 / 思考强度运行时切换（2026-09 桌面输入区两选择器）----
+
+def test_engine_set_mode_writes_settings_when_not_ready() -> None:
+    """会话未装配时 _handle_set_mode 只写 settings（装配时 _build_checker 自然读到）。"""
+    from agent.permissions.modes import parse_mode
+
+    settings = Settings()
+    engine = ChatEngine(settings, queue.Queue(), queue.Queue())
+    engine._session_ready = False
+    asyncio.run(engine._handle_set_mode("plan"))
+    assert settings.permission_mode == parse_mode("plan")
+    assert engine.current_permission_mode == "plan"
+
+
+def test_engine_set_mode_swaps_orchestrator_when_ready(monkeypatch) -> None:
+    """已装配时热重建 orchestrator 并 set_orchestrator 换进 loop（保留会话）。"""
+    import agent.bootstrap as bs
+    import agent.core.orchestrator as orch_mod
+
+    settings = Settings()
+    engine = ChatEngine(settings, queue.Queue(), queue.Queue())
+    swapped: dict = {}
+
+    class _FakeLoop:
+        def set_orchestrator(self, o):  # noqa: D401
+            swapped["orchestrator"] = o
+
+    engine._query_loop = _FakeLoop()
+    engine._active_registry = object()
+    engine._session_ready = True
+    monkeypatch.setattr(bs, "_build_checker", lambda s: object())
+    monkeypatch.setattr(bs, "_build_recovery_executor", lambda s: object())
+    # 避开真实 ToolOrchestrator 构造（registry 为假对象）：直接回传 kwargs
+    monkeypatch.setattr(orch_mod, "ToolOrchestrator", lambda **kw: kw)
+
+    asyncio.run(engine._handle_set_mode("yolo"))
+    assert "orchestrator" in swapped
+    assert engine.current_permission_mode == "yolo"
+
+
+def test_engine_set_thinking_syncs_loop_and_settings_when_ready() -> None:
+    """已装配时 _handle_set_thinking 写 settings + 转发档位给 loop；开关变化不报错。"""
+    settings = Settings()
+    engine = ChatEngine(settings, queue.Queue(), queue.Queue())
+    calls: list = []
+
+    class _FakeLoop:
+        def set_thinking_effort(self, e):  # noqa: D401
+            calls.append(e)
+
+        def is_thinking_effort(self):
+            return calls[-1] if calls else None
+
+    engine._query_loop = _FakeLoop()
+    engine._active_registry = None  # _rebuild_system_prompt 早退（无需真 registry）
+    engine._session_ready = True
+
+    asyncio.run(engine._handle_set_thinking("off"))
+    assert settings.enable_thinking is False
+    assert settings.thinking_effort == "off"
+    assert calls == ["off"]
+    assert engine.current_thinking_effort == "off"
+
+    asyncio.run(engine._handle_set_thinking("low"))
+    assert settings.enable_thinking is True
+    assert settings.thinking_effort == "low"
+    assert calls == ["off", "low"]
+    assert engine.current_thinking_effort == "low"
+
+
+def test_engine_set_thinking_writes_settings_when_not_ready() -> None:
+    """未装配时只写 settings（不碰 loop），current_thinking_effort 回退 settings。"""
+    settings = Settings()
+    engine = ChatEngine(settings, queue.Queue(), queue.Queue())
+    engine._session_ready = False
+    asyncio.run(engine._handle_set_thinking("off"))
+    assert settings.enable_thinking is False
+    assert engine.current_thinking_effort == "off"
+
+
+def test_api_set_mode_and_thinking_enqueue() -> None:
+    """api.set_mode/set_thinking：合法入队 + 回业务 dict；非法不入队。"""
+    api, _, command_queue = _make_api()
+    assert api.set_mode("plan") == {"ok": True, "mode": "plan"}
+    assert command_queue.get_nowait() == {"cmd": "set_mode", "mode": "plan"}
+    assert api.set_mode("bogus")["ok"] is False
+    assert command_queue.empty()
+    assert api.set_thinking("high") == {"ok": True, "effort": "high"}
+    assert command_queue.get_nowait() == {"cmd": "set_thinking", "effort": "high"}
+    assert api.set_thinking("extreme")["ok"] is False
+    assert command_queue.empty()
+
+
+def test_api_get_state_includes_runtime_fields() -> None:
+    """get_state 补 permission_mode/thinking_effort/thinking_supported（桌面选择器初值）。"""
+    api, _, _ = _make_api()
+    state = api.get_state()
+    assert {"permission_mode", "thinking_effort", "thinking_supported"} <= set(state.keys())
+    assert isinstance(state["thinking_supported"], list)
+
+
 # ---- 命令行参数 ----
 
 def test_parse_args_gui_and_talk():

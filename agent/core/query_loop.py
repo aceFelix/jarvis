@@ -149,6 +149,10 @@ class QueryLoop:
         # 避免故障转移后思考模式被意外恢复（语音模式下必须保持关闭）。
         # None 表示不强制，使用 provider 默认状态。
         self._thinking_override: bool | None = None
+        # 思考强度档位覆盖（off/low/medium/high/on）：桌面壳「思考」选择器与终端
+        # /think 设置后，switch_model / _try_failover 重建 provider 时同步到新 provider，
+        # 避免切换/回退后档位丢失。None 表示未覆盖（用 provider 默认）。
+        self._thinking_effort_override: str | None = None
         # 工具延迟加载开关（参考 Claude Code deferred tool loading）
         self._deferred_loading = deferred_loading
         # 纯聊天零工具检测开关
@@ -174,6 +178,34 @@ class QueryLoop:
         if self._thinking_override is not None:
             return self._thinking_override
         return self._provider.is_thinking_enabled()
+
+    def set_thinking_effort(self, level: str | None) -> None:
+        """统一设置思考强度档位，同步到当前 provider 并记录覆盖。
+
+        level: off/low/medium/high/on；off 等价关闭思考。档位与开/关共用一套
+        覆盖机制：记录到 _thinking_effort_override，并把 on/off 同步到
+        _thinking_override，保证 switch_model / _try_failover 重建 provider 后不丢状态。
+        @author aceFelix
+        """
+        self._thinking_effort_override = level
+        if level is not None:
+            self._thinking_override = level != "off"
+        self._provider.set_thinking_effort(level)
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前生效的思考强度档位（未覆盖时取 provider 实际状态）。"""
+        if self._thinking_effort_override is not None:
+            return self._thinking_effort_override
+        return self._provider.is_thinking_effort()
+
+    def set_orchestrator(self, orchestrator: "ToolOrchestrator") -> None:
+        """就地替换工具编排器（权限模式热切换 /mode、mode.set 链路）。
+
+        只换 _orchestrator（内含新的 permission_checker / recovery_executor），
+        不重建 QueryLoop —— 会话消息、session_usage、思考模式覆盖全部保留，
+        下一轮 run() 即用新权限策略。@author aceFelix
+        """
+        self._orchestrator = orchestrator
 
     def switch_model(self, provider: LLMProvider, model: str) -> LLMProvider | None:
         """就地热切换 provider / 模型（工作台与桌面壳的 models.select 链路）。
@@ -201,6 +233,9 @@ class QueryLoop:
         # 语音等场景强制关闭思考时，新 provider 必须继承该覆盖
         if self._thinking_override is not None:
             provider.set_thinking_enabled(self._thinking_override)
+        # 思考强度档位覆盖优先（set_thinking_effort 内部会一并管开/关）
+        if self._thinking_effort_override is not None:
+            provider.set_thinking_effort(self._thinking_effort_override)
         return old
 
     def update_system_prompt(self, text: str) -> None:
@@ -659,6 +694,9 @@ class QueryLoop:
                     # 故障转移后同步思考模式状态：语音模式下必须保持关闭
                     if self._thinking_override is not None:
                         self._provider.set_thinking_enabled(self._thinking_override)
+                    # 思考强度档位覆盖优先（重建 provider 后不丢档位）
+                    if self._thinking_effort_override is not None:
+                        self._provider.set_thinking_effort(self._thinking_effort_override)
                     return True
                 except Exception:
                     continue

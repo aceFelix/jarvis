@@ -84,12 +84,18 @@ project.set         path: str（绝对目录）       null（结果走 project_s
 project.get         —                           {workdir, name, persisted}
 projects.list       —                           [{path, name, last_opened}]
 projects.forget     path: str                   bool（是否确有移除，不删磁盘）
+mode.set            mode: str                   {ok, mode}（default/plan/
+                                                accept_edits/yolo；非法 ok=false）
+think.set           effort: str                 {ok, effort}（off/on/low/
+                                                medium/high；非法 ok=false）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
 
 - 对话流：``user_message`` / ``assistant_text``（流式增量）/
   ``assistant_thinking`` / ``tool_use`` / ``tool_result`` / ``assistant_done``
+- 跨设备协同：``qrcode``（连接二维码卡片） / ``remote_state``（连接态） /
+  ``remote_user_message``（手机/微信入站消息，桌面渲染为带来源标记的用户气泡）
 - 会话：``session_ready`` / ``session_renamed``（标题改名，前端只刷列表
   不清屏） / ``session_loaded`` / ``session_new``
 - 项目工作区：``project_switched``（payload ``{workdir, name}``，project.set
@@ -170,6 +176,24 @@ CMD_PROJECT_SET = "project.set"
 CMD_PROJECT_GET = "project.get"
 CMD_PROJECTS_LIST = "projects.list"
 CMD_PROJECTS_FORGET = "projects.forget"
+# mode.set / think.set（工作模式 / 思考强度，2026-09）：桌面输入区两个选择器。
+# mode.set 切权限模式（default/plan/accept_edits/yolo，与终端 /mode 同口径）；
+# think.set 切思考强度（off/on/low/medium/high，后端按厂商翻译成各参数）。
+# 均为 request/response 型，校验在 api 侧，落地入引擎队列串行执行。
+CMD_MODE_SET = "mode.set"
+CMD_THINK_SET = "think.set"
+# phone.* / wechat.*（跨设备协同桌面接入，2026-10）：把终端 /connect-phone、
+# /connect-wechat 的能力接入桌面壳。手机/微信与桌面共享同一会话，靠引擎侧唯一
+# 共享 query 锁串行（两端都能发、绝不同时发）。connect 为「入队即返回、二维码走
+# qrcode 事件」的异步型；status 供重开桌面回填连接态；wechat.pairing 回填手机端
+# 显示的数字配对码（终端是 input()，桌面改内联输入）。@author aceFelix
+CMD_PHONE_CONNECT = "phone.connect"
+CMD_PHONE_DISCONNECT = "phone.disconnect"
+CMD_PHONE_STATUS = "phone.status"
+CMD_WECHAT_CONNECT = "wechat.connect"
+CMD_WECHAT_DISCONNECT = "wechat.disconnect"
+CMD_WECHAT_STATUS = "wechat.status"
+CMD_WECHAT_PAIRING = "wechat.pairing"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -207,6 +231,15 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_PROJECT_GET,
     CMD_PROJECTS_LIST,
     CMD_PROJECTS_FORGET,
+    CMD_MODE_SET,
+    CMD_THINK_SET,
+    CMD_PHONE_CONNECT,
+    CMD_PHONE_DISCONNECT,
+    CMD_PHONE_STATUS,
+    CMD_WECHAT_CONNECT,
+    CMD_WECHAT_DISCONNECT,
+    CMD_WECHAT_STATUS,
+    CMD_WECHAT_PAIRING,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----
@@ -231,6 +264,20 @@ EVT_VOICE_STATE = "voice_state"
 EVT_VOICE_USER_TRANSCRIPT = "voice_user_transcript"
 EVT_VOICE_AI_TEXT_DELTA = "voice_ai_text_delta"
 EVT_VOICE_AI_TEXT = "voice_ai_text"
+# qrcode（跨设备协同，2026-10）：手机/微信连接二维码就绪事件，payload =
+# {"channel": "phone"|"wechat", "url": <扫码地址字符串>, "fresh": bool}。桌面壳在
+# 中间聊天区内联渲染成二维码卡片（前端 qrcode 库画 canvas）；fresh=True 表示一次
+# 新连接（前端在底部新建卡片、清理旧未连接卡片），fresh=False/缺省表示同一连接内
+# 二维码过期重生成（就地刷新最后一张未连接卡片，不堆叠）；微信配对码走既有
+# ask_user 内联条（answer_user 通道），不新增交互组件。@author aceFelix
+EVT_QRCODE = "qrcode"
+# 跨设备协同连接状态事件：payload = {"channel", "connected": bool}，
+# 连接成功/断开时各推一次，桌面下拉按钮据此切换文案与置灰。
+EVT_REMOTE_STATE = "remote_state"
+# 跨设备协同远端用户消息：payload = {"channel": "phone"|"wechat", "text": str}。
+# 手机/微信入站消息经此事件上桌面，前端按普通用户气泡渲染并标注来源（区别于
+# 本地 user_message 被跳过、也区别于早先的居中 info 系统提示）。
+EVT_REMOTE_USER_MESSAGE = "remote_user_message"
 
 
 def build_reply(cmd_type: str, *, ok: bool, result: object = None, error: str = "") -> dict:

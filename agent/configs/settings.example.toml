@@ -203,9 +203,12 @@ briefing_time = "08:30"         # 简报时间（HH:MM）
 
 [bridge]
 # P3-1 跨设备协同：手机通过 PWA 网页与电脑端 JARVIS 对话。
-# 在 JARVIS 终端输入 /connect-phone 启动，终端会显示二维码和访问地址。
+# 启动方式：终端输入 /connect-phone；桌面端（jarvis-desktop）点输入栏
+# 「跨设备协同」下拉按钮选「手机」（二维码内联显示在中间聊天区）。终端会显示二维码和访问地址。
 # 手机和电脑需在同一局域网，或通过内网穿透从外网访问。
 # 权限隔离：手机端默认 PLAN 模式（只读），写操作需手机端确认。
+# 共享会话：桌面/手机/微信（/connect-wechat）共用同一对话，抢引擎唯一 query 锁串行，
+# 都能发消息但绝不同时发。
 http_port = 8765               # HTTP 端口（PWA 页面 + 图片上传）
 ws_port = 8766                 # WebSocket 端口（实时通信）
 token = ""                     # 认证 token，留空则自动生成（每次 /connect-phone 变化）

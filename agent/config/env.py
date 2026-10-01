@@ -88,6 +88,15 @@ def apply_env_overrides(s: "Settings") -> "Settings":
     if compaction:
         updates["context_compaction"] = compaction.lower() in ("1", "true", "yes")
 
+    # 思考强度档位（off/low/medium/high/on）；JARVIS_ENABLE_THINKING=0 等价 off。
+    effort = _env("JARVIS_THINKING_EFFORT", "MY_AGENT_THINKING_EFFORT")
+    if effort:
+        updates["thinking_effort"] = effort.strip().lower()
+    enable_thinking = _env("JARVIS_ENABLE_THINKING", "MY_AGENT_ENABLE_THINKING")
+    if enable_thinking and enable_thinking.lower() in ("0", "false", "no"):
+        updates["enable_thinking"] = False
+        updates.setdefault("thinking_effort", "off")
+
     return s.with_overrides(**updates) if updates else s
 
 

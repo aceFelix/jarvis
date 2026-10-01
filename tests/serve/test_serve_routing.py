@@ -769,3 +769,53 @@ def test_event_pump_broadcasts_and_stops():
     server.stop_event_pump()
     server.stop_event_pump()  # 幂等：二次调用不抛异常
     assert server._pump_thread is None
+
+
+# ---- mode.set / think.set（工作模式 + 思考强度，2026-09 桌面输入区两选择器）----
+
+def test_mode_set_enqueues_on_valid_mode():
+    """mode.set 合法模式 → 业务结果 result.ok=True 且入队 set_mode（引擎热重建 orchestrator）。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "mode.set", {"mode": "plan"})
+    assert reply["data"]["ok"] is True  # 传输层：指令被处理
+    assert reply["data"]["result"] == {"ok": True, "mode": "plan"}  # 业务结果
+    assert command_queue.get_nowait() == {"cmd": "set_mode", "mode": "plan"}
+
+
+def test_mode_set_invalid_rejected_no_enqueue():
+    """未知模式名 → result.ok=False，不入队（不谎报已切换）。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "mode.set", {"mode": "nope"})
+    assert reply["data"]["result"]["ok"] is False
+    assert command_queue.empty()
+
+
+def test_mode_set_missing_mode_rejected():
+    """缺 mode 字段（归一为空串）→ result.ok=False，不入队。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "mode.set", {})
+    assert reply["data"]["result"]["ok"] is False
+    assert command_queue.empty()
+
+
+def test_think_set_enqueues_on_valid_effort():
+    """think.set 合法档位（off/on/low/medium/high）→ 入队 set_thinking。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "think.set", {"effort": "low"})
+    assert reply["data"]["result"] == {"ok": True, "effort": "low"}
+    assert command_queue.get_nowait() == {"cmd": "set_thinking", "effort": "low"}
+
+
+def test_think_set_invalid_rejected_no_enqueue():
+    """非法思考档位 → result.ok=False，不入队。"""
+    server, _, _, command_queue = _make()
+    reply = _call(server, "think.set", {"effort": "extreme"})
+    assert reply["data"]["result"]["ok"] is False
+    assert command_queue.empty()
+
+
+def test_mode_think_registered_in_handlers():
+    """mode.set / think.set 已注册到 _ws_handlers（协议与服务器接线到位）。"""
+    server, _, _, _ = _make()
+    assert "mode.set" in server._ws_handlers
+    assert "think.set" in server._ws_handlers

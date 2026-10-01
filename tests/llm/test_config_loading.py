@@ -228,6 +228,36 @@ class TestApplyToml:
         assert cm["my-model"]["api_format"] == "openai"  # 从 provider_type 规范化
         assert cm["my-model"]["provider"] == "openai"    # 自动补充
 
+    def test_llm_custom_models_provider_prefers_vendor(self) -> None:
+        """缺 provider 时厂商应优先取 vendor，而非被 api_format（传输协议）顶替。
+
+        复现 deepseek-flash（走 api.deepseek.com/anthropic 兼容端点）旧配置：
+        provider_type=anthropic + vendor=deepseek 无 provider 键，若按 api_format
+        兜底会把厂商误判成 anthropic，导致桌面思考选择器置灰。@author aceFelix
+        """
+        from agent.llm.provider_registry import lookup_thinking_key
+        from agent.llm.thinking import supported_efforts
+
+        s = Settings()
+        result = _apply_toml(s, {
+            "llm": {
+                "custom_models": {
+                    "deepseek-flash": {
+                        "base_url": "https://api.deepseek.com/anthropic",
+                        "api_key": "sk-xxx",
+                        "provider_type": "anthropic",  # 传输协议
+                        "vendor": "deepseek",          # 真实厂商
+                    }
+                }
+            }
+        })
+        cm = result.custom_models["deepseek-flash"]
+        assert cm["api_format"] == "anthropic"   # 传输协议不变
+        assert cm["provider"] == "deepseek"      # 厂商认 vendor，不被 anthropic 顶替
+        # 按厂商解析思考档位：deepseek 有配置 → 非空（选择器不置灰）
+        key = lookup_thinking_key(cm["provider"]) or cm["provider"]
+        assert supported_efforts(key) == ["off", "low", "medium", "high"]
+
     def test_empty_data_returns_same_instance(self) -> None:
         """空数据应返回原 Settings（无副作用）。"""
         s = Settings()

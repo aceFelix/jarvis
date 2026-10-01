@@ -312,27 +312,36 @@ class ThinkingConfig:
     off_value: Any          # 关闭时的值（False 或 {"type": "disabled"}）
     reasoning_effort: str | None = None   # 额外注入的推理强度（如 "high"）
     budget_field: str | None = None       # thinking_budget 字段名
+    effort_map: dict[str, str] | None = None  # 统一档位 low/medium/high → 厂商 reasoning_effort
+    budget_map: dict[str, int] | None = None  # 统一档位 low/medium/high → 厂商 thinking_budget
+    # has_levels 属性：effort_map 或 budget_map 任一非空 = 支持强度档位（否则仅开/关）
 
 THINKING_CONFIGS = {
-    "dashscope":    ThinkingConfig(placement="extra_body", field="enable_thinking", budget_field="thinking_budget"),
-    "deepseek":     ThinkingConfig(placement="extra_body", field="thinking", on_value={"type": "enabled"}, reasoning_effort="high"),
-    "zhipu":        ThinkingConfig(placement="extra_body", field="thinking", on_value={"type": "enabled"}, reasoning_effort="high"),
-    "dashscope_sdk":ThinkingConfig(placement="top_level", field="enable_thinking", budget_field="thinking_budget"),
-    "zai_sdk":      ThinkingConfig(placement="top_level", field="thinking", on_value={"type": "enabled"}, reasoning_effort="high"),
+    "dashscope":    ThinkingConfig(placement="extra_body", field="enable_thinking", budget_field="thinking_budget", budget_map={"low":512,"medium":2000,"high":8000}),
+    "deepseek":     ThinkingConfig(placement="extra_body", field="thinking", on_value={"type":"enabled"}, reasoning_effort="high", effort_map={"low":"low","medium":"high","high":"max"}),
+    "zhipu":        ThinkingConfig(placement="extra_body", field="thinking", on_value={"type":"enabled"}, reasoning_effort="high", effort_map={"low":"low","medium":"medium","high":"high"}),
+    "dashscope_sdk":ThinkingConfig(placement="top_level", field="enable_thinking", budget_field="thinking_budget", budget_map={"low":512,"medium":2000,"high":8000}),
+    "zai_sdk":      ThinkingConfig(placement="top_level", field="thinking", on_value={"type":"enabled"}, reasoning_effort="high", effort_map={"low":"low","medium":"medium","high":"high"}),
+    "xiaomimimo":   ThinkingConfig(placement="extra_body", field="thinking", on_value={"type":"enabled"}, off_value={"type":"disabled"}),  # 仅开/关
+    "moonshot":     ThinkingConfig(placement="extra_body", field="thinking", on_value={"type":"enabled"}, effort_map={"low":"low","medium":"high","high":"max"}),
 }
 ```
 
-统一入口 `apply_thinking(request_kwargs, config, thinking_on, thinking_budget)`：
-- 按 `placement` 决定参数去向（extra_body / 顶层 kwargs）
-- 开启时注入 `reasoning_effort` 与 `thinking_budget`
+统一入口 `apply_thinking(request_kwargs, config, thinking_on, thinking_budget=0, effort=None)`：
+- 按 `placement` 决定开关字段去向（extra_body / 顶层 kwargs）
+- `thinking_on=False` 写 off_value 后短路返回（不注入强度）
+- 开启时：**优先按 `effort` 档位**查 `budget_map`→`thinking_budget`、`effort_map`→`reasoning_effort`（恒写顶层）；档位缺失时回退旧 `thinking_budget` 入参与 `config.reasoning_effort` 默认（向后兼容）
 - 不支持的厂商（field 为空）直接跳过
 
-### QueryLoop 统一开关
+纯函数 `supported_efforts(vendor_key) -> list[str]`：不支持→`[]`；仅开关→`["off","on"]`；支持强度→`["off","low","medium","high"]`。供 `state.get` 告知桌面该模型可选哪些档。
 
-[QueryLoop.set_thinking_enabled()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L161-L170) 统一开关：
-- 同步到当前 provider
-- 记录到 `_thinking_override`，故障转移后能同步到新 provider
-  （语音模式强制关闭思考，避免故障转移后意外恢复）
+### QueryLoop 统一开关与档位
+
+[QueryLoop.set_thinking_enabled()](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py#L161-L170) 统一开关；
+`set_thinking_effort(level)` / `is_thinking_effort()` 在此之上叠加强度档位：
+- 同步到当前 provider（各 provider 的 `set_thinking_effort` 记录 `_thinking_effort`，`stream()` 调 `apply_thinking` 时传入）
+- 记录到 `_thinking_effort_override`（并把 on/off 同步进 `_thinking_override`），`switch_model` / `_try_failover` 重建 provider 后一并注入，档位不丢
+- `set_orchestrator(new)` 就地替换工具编排器（权限模式热切换保留会话，不重建 QueryLoop）
 
 **过滤逻辑**：`/think off` 时，Provider 层即使后端返回 `reasoning_content` 也不 emit `ThinkingDelta`，净化输出。
 

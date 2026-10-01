@@ -529,8 +529,10 @@ class TestLoadSettingsLayering:
         assert s.base_url == "https://api.deepseek.com/anthropic"
         assert s.api_format == "anthropic"
         # 历史写入的自定义模型段只有 provider_type/vendor、没有 provider 键，
-        # settings._apply_toml 用 api_format 兜底（既有行为，本次拆分不改语义）。
-        assert s.provider == "anthropic"
+        # 厂商（provider）应优先认 vendor 字段，而非被传输协议 api_format 顶替。
+        # 只按 api_format 兜底会把 deepseek-via-anthropic 误判成 anthropic，
+        # 导致桌面思考选择器置灰（2026-10 修复）。@author aceFelix
+        assert s.provider == "deepseek"
         # 原始值留存，供 _switch_model 切回内置模型
         assert s.default_provider == "dashscope"
 

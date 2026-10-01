@@ -85,6 +85,18 @@ def test_workbench_ui_maps_protocol_to_events():
     ]
 
 
+def test_workbench_ui_remote_user_message():
+    """远端用户消息：remote_user_message 事件携 {channel,text}，供桌面画带来源标记气泡。"""
+    q: queue.Queue = queue.Queue()
+    ui = WorkbenchUI(_EventEmitter(q))
+    ui.remote_user_message("wechat", "后天天气如何")
+
+    events = _drain(q)
+    assert events == [
+        {"type": "remote_user_message", "payload": {"channel": "wechat", "text": "后天天气如何"}}
+    ]
+
+
 def test_workbench_ui_tool_input_fallback_to_str():
     """tool_input 含不可序列化对象时降级为字符串，不抛异常。"""
     q: queue.Queue = queue.Queue()

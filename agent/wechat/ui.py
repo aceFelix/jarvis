@@ -42,12 +42,36 @@ class WeChatUI:
     # ---- UIProtocol 实现 ----
 
     def user_message(self, text: str) -> None:
-        """微信用户发送的消息：在电脑终端显示。"""
+        """微信用户发送的消息：桌面按带来源标记的用户气泡显示。
+
+        桌面宿主（WorkbenchUI）有 remote_user_message → 推专事件让前端画右对齐
+        用户气泡 + “微信”标记；终端 RichCLI 无此方法 → 回退 info 前缀。
+        @author aceFelix
+        """
         if self._desktop_ui is not None:
             try:
-                self._desktop_ui.info(f"[微信] {text}")
+                fn = getattr(self._desktop_ui, "remote_user_message", None)
+                if fn is not None:
+                    fn("wechat", text)
+                else:
+                    self._desktop_ui.info(f"[微信] {text}")
             except Exception:
                 pass
+
+    def end_turn(self) -> None:
+        """本轮 query 结束：通知桌面收尾 AI 气泡。
+
+        微信回复的 assistant_text 经 desktop_ui 流式上屏，但引擎只为本地输入发
+        assistant_done；若不在此显式收尾，下一条微信消息的回复会续写进同一气泡。
+        终端 RichCLI 无 assistant_done，getattr 判空后自然 no-op。@author aceFelix
+        """
+        if self._desktop_ui is not None:
+            done = getattr(self._desktop_ui, "assistant_done", None)
+            if done is not None:
+                try:
+                    done()
+                except Exception:
+                    pass
 
     def assistant_text(self, text: str) -> None:
         """助手回复文本增量（流式）：拼接收集 + 终端同步。"""

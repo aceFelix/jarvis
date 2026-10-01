@@ -146,6 +146,9 @@ class AnthropicProvider(LLMProvider):
         # voice_loop 通过 set_thinking_enabled(False) 统一关闭。
         # stream() 会根据此标志注入 thinking={"type": "enabled"} 参数。
         self._thinking_enabled = True
+        # 运行时思考强度档位（low/medium/high）：Anthropic 原生映射 budget_tokens；
+        # DeepSeek 等兼容端点仅支持开/关，档位不改变参数。
+        self._thinking_effort: str | None = None
 
     @property
     def name(self) -> str:  # type: ignore[override]
@@ -179,6 +182,21 @@ class AnthropicProvider(LLMProvider):
     def is_thinking_enabled(self) -> bool:
         """返回当前思考模式是否开启。"""
         return self._thinking_enabled
+
+    def set_thinking_effort(self, level: str | None) -> None:
+        """设置思考强度档位（off 关闭；low/medium/high 开启并映射 budget_tokens）。"""
+        if level in (None, "off"):
+            self.set_thinking_enabled(False)
+            self._thinking_effort = None
+            return
+        self.set_thinking_enabled(True)
+        self._thinking_effort = None if level == "on" else level
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前思考强度档位（关闭时为 off）。"""
+        if not self._thinking_enabled:
+            return "off"
+        return self._thinking_effort or "on"
 
     async def stream(
         self,
@@ -239,10 +257,13 @@ class AnthropicProvider(LLMProvider):
         # 思考模式不支持 temperature（DeepSeek 文档：设置不会报错但不生效）
         if self._thinking_enabled:
             if self.name == "anthropic":
-                # Anthropic 原生 extended thinking 需要预算 token
+                # Anthropic 原生 extended thinking 需要预算 token（最小 1024）；
+                # 按统一强度档位取预算，无档位时回退默认 10000。@author aceFelix
+                _budget_map = {"low": 1024, "medium": 4096, "high": 10000}
+                _budget = _budget_map.get(self._thinking_effort or "", 10000)
                 request_kwargs["thinking"] = {
                     "type": "enabled",
-                    "budget_tokens": 10000,
+                    "budget_tokens": _budget,
                 }
             else:
                 # DeepSeek 等兼容端点只需 type，不需要 budget_tokens

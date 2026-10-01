@@ -101,11 +101,17 @@ class BridgeUI:
     # ---- UIProtocol 实现 ----
 
     def user_message(self, text: str) -> None:
-        """手机端用户发送的消息：推送到手机 UI 并同步显示在电脑终端。"""
-        # 电脑终端显示用户消息（带前缀区分来源）
+        """手机端用户发送的消息：推送到手机 UI 并同步显示在电脑端。"""
+        # 电脑端显示用户消息：桌面宿主（WorkbenchUI）有 remote_user_message →
+        # 推专事件画带“手机”标记的用户气泡；终端 RichCLI 无此方法 → 回退 info 前缀。
+        # @author aceFelix
         if self._desktop_ui is not None:
             try:
-                self._desktop_ui.info(f"[手机] {text}")
+                fn = getattr(self._desktop_ui, "remote_user_message", None)
+                if fn is not None:
+                    fn("phone", text)
+                else:
+                    self._desktop_ui.info(f"[手机] {text}")
             except Exception:
                 pass
         # 手机端也显示自己发的消息（from=phone 用于前端去重）
@@ -176,8 +182,21 @@ class BridgeUI:
         """查询完成后投递结束哨兵，通知 stream() 任务退出。
 
         在 BridgeServer._run_query 的 finally 中调用，确保所有 UI 事件已被消费。
+        同时通知桌面宿主收尾本轮（与微信 WeChatUI.end_turn 对称）：桌面靠
+        assistant_done 撤销 busy（发送按钮从“停止”恢复“发送”）并定稿 AI 气泡；
+        手机轮次的 assistant_text 已转发到桌面，若不在此补发 done，busy 会永久卡住。
+        终端 RichCLI 无 assistant_done，getattr 判空后自然 no-op。
+
+        @author aceFelix
         """
         self._queue.put(None)  # 线程安全
+        if self._desktop_ui is not None:
+            try:
+                done = getattr(self._desktop_ui, "assistant_done", None)
+                if done is not None:
+                    done()
+            except Exception:
+                pass
 
 
 class BroadcastUI:

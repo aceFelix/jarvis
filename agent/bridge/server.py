@@ -32,7 +32,7 @@ import os
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse, parse_qs
 
 from agent.bridge.ui import BridgeUI
@@ -101,6 +101,7 @@ class BridgeServer:
         token: str = "",
         workdir: str = "",
         host: str = "0.0.0.0",
+        query_lock: "threading.Lock | None" = None,
     ) -> None:
         """
         Args:
@@ -111,6 +112,9 @@ class BridgeServer:
             token: 认证 token，空则自动生成 16 位 hex。
             workdir: 工作目录，空则沿用 ctx.workdir。
             host: 绑定地址；手机协同默认 0.0.0.0，桌面 serve 模式应传 127.0.0.1。
+            query_lock: 跨通道共享的串行锁。桌面 serve 模式下由引擎下发其唯一
+                query 锁，使手机 query 与桌面文本 query 互斥；为 None 时自建
+                （终端单宿主场景，锁只在本桥接内串行）。
         """
         self._query_loop = query_loop
         self._ctx = ctx
@@ -137,14 +141,28 @@ class BridgeServer:
         self._loop: asyncio.AbstractEventLoop | None = None
         # 主线程 asyncio loop（REPL loop），所有 query 在此执行，避免跨线程 UI 问题
         self._main_loop: asyncio.AbstractEventLoop | None = None
-        # 跨线程串行化锁：保护共享 messages 不被并发修改
-        self._query_lock = threading.Lock()
+        # 跨线程串行化锁：保护共享 messages 不被并发修改。桌面 serve 模式注入引擎
+        # 的唯一 query 锁与桌面文本互斥；终端默认自建（仅本桥接内串行）。
+        # @author aceFelix
+        self._query_lock = query_lock if query_lock is not None else threading.Lock()
         # 当前已连接的 WebSocket 客户端集合
         self._clients: set[Any] = set()
         # WS 指令处理器表：{type: async handler(ws, data)}。
         # 内置 message（手机 PWA 对话）；abort 在 reader 中直接处理不入表；
         # 桌面 serve 模式经 register_ws_handler 追加指令。
         self._ws_handlers: dict[str, Any] = {"message": self._handle_message_command}
+        # 客户端接入 / 全部离开回调（桌面宿主据此推 remote_state 连接态）：
+        # on_client_connected 在首个 WS 客户端通过认证接入时调，on_client_disconnected
+        # 在最后一个客户端离开时调。终端默认 None（不触发），行为零变化。@author aceFelix
+        self.on_client_connected: Any = None
+        self.on_client_disconnected: Any = None
+        # 每轮 query 结束回调（桌面 serve 注入 engine._after_turn 落盘，使纯手机
+        # 对话也持久化到电脑会话历史）；终端默认 None（另有存盘）。@author aceFelix
+        self.on_turn_end: Any = None
+        # 每轮 query 即将开跑（拿到锁后）回调：桌面注入 engine._remote_query_begin
+        # 登记当前任务，使 reply.abort 能取消手机在跑的轮次；终端 None 行为不变。
+        # @author aceFelix
+        self.on_query_begin: Any = None
 
     async def _on_client_connected(self, ws: Any) -> None:
         """新 WS 连接通过认证后的钩子（默认空实现）。
@@ -153,8 +171,29 @@ class BridgeServer:
         启动期一次性 broadcast 在无在线客户端时会被 broadcast 静默丢弃，
         首帧只能按连接推送才能保证送达（并覆盖断线重连场景）。
 
+        额外：若宿主设了 on_client_connected（桌面 serve 模式），在首个客户端接入时
+        回调一次，用于推 remote_state connected=True（桥接就绪 ≠ 手机已连）。
+
         @author aceFelix
         """
+        if self.on_client_connected is not None:
+            try:
+                self.on_client_connected()
+            except Exception:
+                pass
+
+    def _remove_client(self, ws: Any) -> None:
+        """移出客户端集合；最后一个客户端离开时触发 on_client_disconnected。
+
+        集中处理断开检测，供正常断开 finally 与 broadcast 发送失败两处调用，
+        保证 connected=False 只在真正无在线客户端时推一次。@author aceFelix
+        """
+        self._clients.discard(ws)
+        if not self._clients and self.on_client_disconnected is not None:
+            try:
+                self.on_client_disconnected()
+            except Exception:
+                pass
 
     def register_ws_handler(self, msg_type: str, handler: Any) -> None:
         """注册一个 WS 指令处理器（扩展点，供 agent.serve 等子类使用）。
@@ -265,8 +304,8 @@ class BridgeServer:
                 try:
                     await ws.send(payload)
                 except Exception:
-                    # 发送失败（如连接已断开）时移出集合
-                    self._clients.discard(ws)
+                    # 发送失败（如连接已断开）时移出集合（走 _remove_client 以触发断开回调）
+                    self._remove_client(ws)
 
         try:
             asyncio.run_coroutine_threadsafe(_send(), self._loop)
@@ -501,7 +540,7 @@ class BridgeServer:
                     continue
                 await handler(ws, data)
         finally:
-            self._clients.discard(ws)
+            self._remove_client(ws)
             reader_task.cancel()
             try:
                 await reader_task
@@ -550,9 +589,24 @@ class BridgeServer:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._query_lock.acquire)
         try:
+            # 拿到锁、即将开跑：登记当前任务供桌面 reply.abort 取消（任意来源）。
+            # @author aceFelix
+            if self.on_query_begin is not None:
+                try:
+                    self.on_query_begin()
+                except Exception:
+                    pass
             return await self._query_loop.run(text, ctx, images=images)
         finally:
             self._query_lock.release()
+            # 本轮结束落盘：桌面注入的 engine._after_turn 把共享 messages 增量存到
+            # 电脑会话历史。此 finally 跑在引擎 loop（上方已调度到 main_loop），
+            # _after_turn 内的 create_task 因此落在正确的 loop 上。@author aceFelix
+            if self.on_turn_end is not None:
+                try:
+                    self.on_turn_end()
+                except Exception:
+                    pass
 
     async def _run_query(self, ws, text: str) -> None:
         """跑一轮手机端对话查询，把结果流式推送到 ws。
@@ -617,6 +671,9 @@ def start_bridge_in_thread(
     token: str = "",
     workdir: str = "",
     main_loop: asyncio.AbstractEventLoop | None = None,
+    query_lock: "threading.Lock | None" = None,
+    on_turn_end: "Callable[[], None] | None" = None,
+    on_query_begin: "Callable[[], None] | None" = None,
 ) -> BridgeServer:
     """在独立线程启动 BridgeServer，返回单例。
 
@@ -625,6 +682,7 @@ def start_bridge_in_thread(
     Args:
         main_loop: 主线程 asyncio loop（REPL loop），所有 query 在此执行。
                    为 None 时尝试获取当前运行中的 loop。
+        on_turn_end: 每轮 query 结束回调（桌面注入引擎 _after_turn 落盘）。
 
     @author aceFelix
     """
@@ -634,6 +692,12 @@ def start_bridge_in_thread(
         # 已有实例：更新 main_loop 引用（可能跨 REPL 重启）
         if main_loop is not None:
             _global_bridge._main_loop = main_loop
+        # 复用已运行实例时同步刷新落盘回调（桌面重连可能换引擎实例）。
+        # @author aceFelix
+        if on_turn_end is not None:
+            _global_bridge.on_turn_end = on_turn_end
+        if on_query_begin is not None:
+            _global_bridge.on_query_begin = on_query_begin
         return _global_bridge
 
     # 获取主线程 loop：所有 query 在此执行，避免跨线程 UI 问题
@@ -650,8 +714,11 @@ def start_bridge_in_thread(
         ws_port=ws_port,
         token=token,
         workdir=workdir,
+        query_lock=query_lock,
     )
     server._main_loop = main_loop
+    server.on_turn_end = on_turn_end
+    server.on_query_begin = on_query_begin
     _global_bridge = server
 
     def _run() -> None:

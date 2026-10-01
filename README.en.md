@@ -453,7 +453,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 |---|---|
 | `/model <prefix>` | Prefix-match switch model (supports fuzzy input, picker on multiple matches) |
 | `/models` | Interactive model management (↑↓ select, Enter switch, space edit config, grouped by vendor) |
-| `/think` | Toggle deep thinking mode (`/think on` / `/think off`) |
+| `/think` | Toggle/adjust deep thinking (`/think on\|off\|low\|medium\|high`; desktop composer also offers a four-level selector) |
 
 ### Permission Control
 
@@ -594,17 +594,21 @@ model_type = "text"              # GLM-4.7-flash is text-only model
 When enabled, model outputs `reasoning_content` (thinking process) before each reply, forming complete **Think → Act → Observe** ReAct loop.
 
 - **Visual effect**: Thinking content displayed as dark panel "💭 Thinking Process" in terminal
-- **Runtime toggle**: `/think on` / `/think off` (no restart needed)
+- **Runtime toggle & effort**: `/think on` / `/think off` / `/think low|medium|high` (no restart needed); desktop composer offers **off / low / medium / high** unified levels
 - **Config items**:
   ```toml
   enable_thinking = true
-  thinking_budget = 800  # Thinking process token limit
+  thinking_budget = 800    # Thinking token limit (fallback when no effort level)
+  thinking_effort = "high" # Unified level: off/on/low/medium/high (translated per vendor)
   ```
-- **Vendor adaptation**: Uses `ThinkingConfig` config-table-driven, each vendor's thinking params auto-injected:
-  - Qwen / DashScope: `enable_thinking=True` + `thinking_budget` (extra_body)
-  - DeepSeek: `thinking={"type": "enabled"}` + `reasoning_effort=high` (extra_body)
-  - Zhipu GLM: `thinking={"type": "enabled"}` + `reasoning_effort=high` (extra_body)
-  - OpenAI / Moonshot and other vendors without thinking support auto-skip
+  Env var `JARVIS_THINKING_EFFORT` overrides the level.
+- **Vendor adaptation**: `ThinkingConfig` config-table translates unified levels to native params:
+  - Qwen / DashScope: `enable_thinking` + `thinking_budget` (extra_body/top_level), levels mapped via `budget_map` low=512 / medium=2000 / high=8000
+  - DeepSeek / Kimi(Moonshot): `thinking.type` + `reasoning_effort`, levels mapped low=`low` / medium=`high` / high=`max` (docs have no medium, nearest level)
+  - Zhipu GLM: `thinking.type` + `reasoning_effort`, native low/medium/high
+  - Xiaomi MiMo: `thinking.type` switch only (no levels)
+  - OpenAI / MiniMax / Google / SiliconFlow and vendors without clean thinking control auto-skip (desktop selector greyed out)
+- **Desktop integration**: composer "work mode" / "thinking" selectors send `mode.set` / `think.set`, applied serially by the engine queue, **effective next message** (same semantics as terminal `/mode` & `/think`)
 - **Voice mode**: Auto-disables thinking (reduces first-token latency)
 
 ---
@@ -1597,22 +1601,6 @@ Every piece of your feedback is my motivation to improve, thanks for your suppor
 
 ---
 
-## Development References
-
-J.A.R.V.I.S. design and implementation references the following excellent projects and resources:
-
-| Project / Resource | Description |
-|---|---|
-| [ClaudeCode (BasicProtein)](https://github.com/BasicProtein/ClaudeCode) | Core architecture reference, Agent loop and tool call design |
-| [claude-code (Anthropic)](https://github.com/anthropics/claude-code) | Official Claude Code implementation, interaction paradigm and permission model reference |
-| [OpenClaw](https://github.com/openclaw/openclaw) | Multi-channel AI Agent framework, plugin system and Channel abstraction reference |
-| [weixin-ClawBot-API](https://github.com/SiverKing/weixin-ClawBot-API) | WeChat ClawBot iLink Bot API protocol implementation reference |
-| [CLI-Anything](https://github.com/HKUDS/CLI-Anything) | CLI tool integration framework, skill extension mechanism reference |
-| [DeepSeek API Docs](https://api-docs.deepseek.com) | LLM inference API docs |
-| [Zhipu BigModel Docs](https://docs.bigmodel.cn/cn/guide/start/introduction) | Zhipu GLM LLM inference API docs |
-| [Alibaba Cloud Bailian Platform](https://bailian.console.aliyun.com) | Real-time voice chat API (Qwen) server-side |
-
----
 ---
 
 ## Thank You for Your Support

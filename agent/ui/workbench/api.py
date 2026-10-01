@@ -203,7 +203,7 @@ class WorkbenchAPI:
     # ---- 左栏：模型与音色 ----
 
     def get_state(self) -> dict[str, Any]:
-        """窗口初始状态：当前模型/音色/厂商 + MCP 连接快照（前端首屏与右栏渲染）。"""
+        """窗口初始状态：当前模型/音色/厂商 + 权限模式/思考档位 + MCP 快照（前端首屏与右栏渲染）。"""
         s = self._settings
         return {
             "provider": self._engine.current_vendor,
@@ -212,10 +212,24 @@ class WorkbenchAPI:
             "realtime_model": getattr(s, "realtime_model", ""),
             "realtime_voice": getattr(s, "realtime_voice", ""),
             "workdir": s.workdir,
+            # 工作模式（权限模式）与思考强度：桌面输入区两个选择器的初值。
+            # thinking_supported = 当前厂商可选档位（空=不支持思考，选择器置灰）。@author aceFelix
+            "permission_mode": self._engine.current_permission_mode,
+            "thinking_effort": self._engine.current_thinking_effort,
+            "thinking_supported": self._thinking_levels(),
             # MCP 连接快照：{"connected": [...], "failed": [...], "tools": int}
             # 或 None（MCP 未启用/未装配）——右栏运行健康区块据此渲染
             "mcp": self._engine.mcp_status,
         }
+
+    def _thinking_levels(self) -> list[str]:
+        """当前厂商支持的思考档位列表（供桌面选择器渲染，空=不支持）。"""
+        from agent.llm.provider_registry import lookup_thinking_key
+        from agent.llm.thinking import supported_efforts
+
+        vendor = self._engine.current_vendor
+        key = lookup_thinking_key(vendor) or vendor
+        return supported_efforts(key)
 
     def get_cost(self) -> dict[str, Any]:
         """会话用量统计（serve cost.get 指令数据源，桌面壳右栏用量卡）。
@@ -264,6 +278,98 @@ class WorkbenchAPI:
             return False
         self._post({"cmd": "switch_model", "name": name})
         return True
+
+    # 权限模式枚举（与终端 /mode、agent.permissions.modes 对齐）
+    _VALID_MODES = frozenset({"default", "plan", "accept_edits", "yolo"})
+    # 思考强度档位（off/on 为开关，low/medium/high 为强度）
+    _VALID_EFFORTS = frozenset({"off", "on", "low", "medium", "high"})
+
+    def set_mode(self, mode: str) -> dict[str, Any]:
+        """切换工作（权限）模式：校验后入队引擎，由线程内热重建 orchestrator。
+
+        入队即返回（与 set_model 同口径），结果由 status 事件回执；非法模式名 ok=false。
+        @author aceFelix
+        """
+        mode = (mode or "").strip().lower()
+        if mode not in self._VALID_MODES:
+            return {"ok": False, "error": f"未知模式: {mode}"}
+        self._post({"cmd": "set_mode", "mode": mode})
+        return {"ok": True, "mode": mode}
+
+    def set_thinking(self, effort: str) -> dict[str, Any]:
+        """切换思考强度：校验后入队引擎，同步 loop/provider 与 settings。
+
+        effort ∈ off/on/low/medium/high；非法值 ok=false。入队即返回。
+        @author aceFelix
+        """
+        effort = (effort or "").strip().lower()
+        if effort not in self._VALID_EFFORTS:
+            return {"ok": False, "error": f"未知思考档位: {effort}"}
+        self._post({"cmd": "set_thinking", "effort": effort})
+        return {"ok": True, "effort": effort}
+
+    # ---- 跨设备协同（手机 PWA / 微信 ClawBot，2026-10） ----
+
+    def connect_phone(self) -> dict[str, Any]:
+        """启动手机协同：入队 connect_phone，二维码 URL 走 qrcode 事件异步回推。
+
+        与 set_model 同口径「入队即返回」：真正的 ensure_session + 起桥接在引擎
+        线程串行落地（可能耗时），完成后推 qrcode / remote_state 事件。重开桌面
+        后可用 phone_status 回填当前连接态与 URL。
+
+        @author aceFelix
+        """
+        self._post({"cmd": "connect_phone"})
+        return {"ok": True, "pending": True}
+
+    def disconnect_phone(self) -> dict[str, Any]:
+        """断开手机协同（入队 disconnect_phone）。"""
+        self._post({"cmd": "disconnect_phone"})
+        return {"ok": True}
+
+    def phone_status(self) -> dict[str, Any]:
+        """手机桥接状态：{active, url}（active=是否已有运行中的手机桥接）。"""
+        try:
+            from agent.bridge import get_bridge_server
+
+            server = get_bridge_server()
+            if server is None:
+                return {"active": False, "url": ""}
+            return {"active": True, "url": server.url}
+        except Exception:
+            return {"active": False, "url": ""}
+
+    def connect_wechat(self) -> dict[str, Any]:
+        """启动微信扫码登录：入队 connect_wechat，二维码走 qrcode 事件、
+        配对码走 ask_user/answer_user 内联输入（见 wechat_pairing）。"""
+        self._post({"cmd": "connect_wechat"})
+        return {"ok": True, "pending": True}
+
+    def disconnect_wechat(self) -> dict[str, Any]:
+        """断开微信 ClawBot 连接（入队 disconnect_wechat）。"""
+        self._post({"cmd": "disconnect_wechat"})
+        return {"ok": True}
+
+    def wechat_status(self) -> dict[str, Any]:
+        """微信桥接状态：{connected}（connected=是否已登录拿到 bot_token）。"""
+        try:
+            from agent.wechat import get_wechat_bridge
+
+            bridge = get_wechat_bridge()
+            return {"connected": bool(bridge and bridge.connected)}
+        except Exception:
+            return {"connected": False}
+
+    def wechat_pairing(self, code: str) -> dict[str, Any]:
+        """回喂微信手机端显示的数字配对码（入队 wechat_pairing）。
+
+        终端是阻塞 input() 读取，桌面改为内联输入条提交；引擎把 code 放进 login
+        线程阻塞等待的 pairing 队列，解锁 verify_callback 继续登录流程。
+
+        @author aceFelix
+        """
+        self._post({"cmd": "wechat_pairing", "code": (code or "").strip()})
+        return {"ok": True}
 
     def add_model(
         self,

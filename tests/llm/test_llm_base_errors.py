@@ -228,7 +228,16 @@ class TestThinkingConfig:
     """ThinkingConfig 配置表。"""
 
     def test_config_table_keys(self) -> None:
-        assert set(THINKING_CONFIGS) == {"dashscope", "deepseek", "zhipu", "dashscope_sdk", "zai_sdk"}
+        # xiaomimimo / moonshot 为 2026-09 桌面思考强度接入新增（OpenAI 兼容、控制干净）。
+        assert set(THINKING_CONFIGS) == {
+            "dashscope",
+            "deepseek",
+            "zhipu",
+            "dashscope_sdk",
+            "zai_sdk",
+            "xiaomimimo",
+            "moonshot",
+        }
 
     def test_supported_property(self) -> None:
         assert THINKING_CONFIGS["dashscope"].supported is True

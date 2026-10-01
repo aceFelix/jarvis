@@ -149,6 +149,21 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_PROJECT_GET, lambda data: self._api.get_project())
         self._register_rpc(protocol.CMD_PROJECTS_LIST, lambda data: self._api.list_projects())
         self._register_rpc(protocol.CMD_PROJECTS_FORGET, self._rpc_projects_forget)
+        # mode.set / think.set（工作模式 / 思考强度）：校验在 api 侧，落地在引擎
+        # 队列串行执行（正回复时于该轮结束后生效），业务结果在回执 result.ok。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_MODE_SET, self._rpc_mode_set)
+        self._register_rpc(protocol.CMD_THINK_SET, self._rpc_think_set)
+        # phone.* / wechat.*（跨设备协同）：connect/disconnect 入队即回执（二维码
+        # 走 qrcode 事件异步回推）；status 直读桥接单例回填连接态；wechat.pairing
+        # 把配对码入队喂给 login 线程。@author aceFelix
+        self._register_rpc(protocol.CMD_PHONE_CONNECT, lambda data: self._api.connect_phone())
+        self._register_rpc(protocol.CMD_PHONE_DISCONNECT, lambda data: self._api.disconnect_phone())
+        self._register_rpc(protocol.CMD_PHONE_STATUS, lambda data: self._api.phone_status())
+        self._register_rpc(protocol.CMD_WECHAT_CONNECT, lambda data: self._api.connect_wechat())
+        self._register_rpc(protocol.CMD_WECHAT_DISCONNECT, lambda data: self._api.disconnect_wechat())
+        self._register_rpc(protocol.CMD_WECHAT_STATUS, lambda data: self._api.wechat_status())
+        self._register_rpc(protocol.CMD_WECHAT_PAIRING, self._rpc_wechat_pairing)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -176,6 +191,10 @@ class DesktopBridgeServer(BridgeServer):
     def _rpc_talk_start(self, data: dict) -> Any:
         """talk.start：透传 duplex 标记（桌面端全双工桥接，见 _cmd_talk_audio）。"""
         return self._api.start_talk(duplex=bool(data.get("duplex")))
+
+    def _rpc_wechat_pairing(self, data: dict) -> Any:
+        """wechat.pairing：透传手机端显示的数字配对码。"""
+        return self._api.wechat_pairing(str(data.get("code", "")))
 
     async def _cmd_talk_audio(self, ws: Any, data: dict) -> None:
         """talk.audio 指令：桌面全双工会话的麦克风帧（fire-and-forget，无回执）。
@@ -288,6 +307,21 @@ class DesktopBridgeServer(BridgeServer):
         if not name:
             raise ValueError("缺少模型名 name")
         return self._api.set_model(name)
+
+    def _rpc_mode_set(self, data: dict) -> dict:
+        """mode.set：切换工作（权限）模式，校验与入队由 api.set_mode 承担。
+
+        非法模式名回 result.ok=false（传输层仍 ok=true），与 voices.select 同口径。
+        @author aceFelix
+        """
+        return self._api.set_mode(data.get("mode", ""))
+
+    def _rpc_think_set(self, data: dict) -> dict:
+        """think.set：切换思考强度（off/on/low/medium/high），校验与入队由 api.set_thinking 承担。
+
+        @author aceFelix
+        """
+        return self._api.set_thinking(data.get("effort", ""))
 
     def _rpc_models_add(self, data: dict) -> dict:
         """models.add：添加/覆盖自定义模型（桌面壳左栏「添加模型」表单提交）。

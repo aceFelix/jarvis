@@ -569,34 +569,52 @@ def _toggle_thinking(
     registry: Any,
     raw: str,
 ) -> None:
-    """/think [on|off] —— 开关深度思考模式。"""
+    """/think [on|off|low|medium|high] —— 开关或调节深度思考强度。"""
     current = getattr(provider, '_enable_thinking', True)
 
     parts = raw.split(maxsplit=1)
     if len(parts) == 1:
         new_state = not current
+        effort = "on" if new_state else "off"
     else:
         arg = parts[1].strip().lower()
-        if arg in ("on", "1", "true", "enable"):
-            new_state = True
+        # 模糊前缀匹配：l/m/h/on/off 均可辨认；数字速记 1/2/3 = low/medium/high。
+        # "o" 同时命中 on/off、其余无唯一命中 → 提示歧义/无效并列出全部档位。
+        # @author aceFelix
+        if arg in ("on", "true", "enable"):
+            new_state, effort = True, "on"
         elif arg in ("off", "0", "false", "disable"):
-            new_state = False
+            new_state, effort = False, "off"
+        elif arg in ("low", "medium", "high"):
+            # 强度档位：开启思考并记录档位，后端按厂商 THINKING_CONFIGS 翻译
+            new_state, effort = True, arg
+        elif arg in ("1", "2", "3"):
+            new_state, effort = True, {"1": "low", "2": "medium", "3": "high"}[arg]
         else:
-            ui.warn(f"用法: /think on|off（当前: {'开' if current else '关'}）")
-            return
+            hits = [e for e in ("on", "off", "low", "medium", "high") if e.startswith(arg)]
+            if len(hits) == 1:
+                new_state, effort = True, hits[0]
+            else:
+                ui.warn(
+                    f"用法: /think on|off|low|medium|high（支持模糊前缀，如 /think l；"
+                    f"1/2/3 = low/medium/high；当前: {'开' if current else '关'}）"
+                )
+                return
 
-    provider.set_thinking_enabled(new_state)
+    # 经 loop 统一入口设置（同步 provider 并记录覆盖，故障转移/切模型后不丢）
+    loop.set_thinking_effort(effort)
     settings.enable_thinking = new_state
+    settings.thinking_effort = effort
 
     new_system = build_system_prompt(settings.workdir, registry, enable_thinking=new_state, settings=settings)
     if settings.system_prompt_append:
         new_system = new_system + "\n\n" + settings.system_prompt_append
     loop._system = new_system
 
-    ui.info(f"深度思考: {'✅ 开' if new_state else '❌ 关'}")
+    ui.info(f"深度思考: {'✅ ' + effort if new_state else '❌ 关'}")
 
 
 def handle_think(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /think [on|off]。"""
+    """处理 /think [on|off|low|medium|high]（参数支持模糊前缀）。"""
     _toggle_thinking(ctx.ui, ctx.settings, ctx.provider, ctx.loop, ctx.registry, stripped)
     return True

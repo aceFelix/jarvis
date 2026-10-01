@@ -160,7 +160,7 @@ SLASH_COMMANDS = [
     ("/agents",     "查看多 Agent 团队状态与成员"),
     ("/tasks",      "查看共享任务列表进度"),
     ("/plan",       "切换规划模式（进入/退出只读规划）"),
-    ("/think",      "开关深度思考模式（/think on|off）"),
+    ("/think",      "开关或调节深度思考强度（/think on|off|low|medium|high）"),
     ("/mcp",        "查看 MCP server 连接状态与工具"),
     ("/tools",      "列出可用工具列表"),
     ("/image <path>", "添加本地图片到待发送列表（下条消息附带）"),
@@ -227,6 +227,7 @@ class _SlashCompleter(Completer):
 
     子命令补全:
     - /mode <prefix> → 匹配权限模式 (default/plan/accept_edits/yolo)
+    - /think <prefix> → 匹配思考强度档位 (on/off/low/medium/high)
     - /model <prefix> → 匹配模型名（内置 + 自定义）
     - /load <prefix> → 匹配已保存会话名
     - /save <prefix> → 匹配已保存会话名
@@ -250,6 +251,10 @@ class _SlashCompleter(Completer):
         # ---- /mode <prefix> 子命令补全 ----
         if text_lower.startswith("/mode ") or text_before_cursor.startswith("/mode "):
             return self._complete_modes(text_before_cursor)
+
+        # ---- /think <prefix> 参数补全（思考强度档位）----
+        if text_lower.startswith("/think ") or text_before_cursor.startswith("/think "):
+            return self._complete_thinking(text_before_cursor)
 
         # ---- /model <prefix> 子命令补全 ----
         if text_lower.startswith("/model ") or text_before_cursor.startswith("/model "):
@@ -321,6 +326,36 @@ class _SlashCompleter(Completer):
 
         prefix = text[len("/mode "):].lower()
         matches = [(n, d) for n, d in all_modes if n.lower().startswith(prefix)]
+
+        results: list[Completion] = []
+        for name, desc in matches:
+            start_pos = -len(prefix) if prefix else 0
+            results.append(
+                Completion(
+                    text=name,
+                    start_position=start_pos,
+                    display=FormattedText([
+                        ("#5bc8ff", f"{name:<16}"),
+                        ("#888888", f"  {desc}"),
+                    ]),
+                )
+            )
+        return results
+
+    @staticmethod
+    def _complete_thinking(text: str) -> list[Completion]:
+        """补全 /think <prefix> 的思考强度档位（与终端模糊前缀匹配同口径）。"""
+        # 5 档取值及描述（off/on + 三档强度，后端按厂商 THINKING_CONFIGS 翻译）
+        all_efforts: list[tuple[str, str]] = [
+            ("on",     "开启：用厂商默认强度"),
+            ("off",    "关闭深度思考"),
+            ("low",    "低强度（1/2/3 速记三档）"),
+            ("medium", "中强度"),
+            ("high",   "高强度"),
+        ]
+
+        prefix = text[len("/think "):].strip().lower()
+        matches = [(n, d) for n, d in all_efforts if n.startswith(prefix)]
 
         results: list[Completion] = []
         for name, desc in matches:

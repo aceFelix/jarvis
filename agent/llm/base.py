@@ -172,6 +172,19 @@ class LLMProvider(abc.ABC):
         """返回当前思考模式是否开启。默认 False（不支持思考的 provider）。"""
         return False
 
+    def set_thinking_effort(self, level: str | None) -> None:
+        """统一设置思考强度档位（off/low/medium/high/on）。
+
+        默认空实现：不支持思考的 provider 无需处理。子类 override 时把档位
+        落到各自的 reasoning_effort / thinking_budget 参数（off 等价关闭思考）。
+        桌面壳「思考」选择器与终端 /think 均经此入口。
+        """
+        return None
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前思考强度档位。默认 None（未设置/不支持思考的 provider）。"""
+        return None
+
     async def close(self) -> None:
         """释放资源（HTTP client 等）。默认空实现。"""
         return None

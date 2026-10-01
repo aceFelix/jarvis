@@ -82,6 +82,8 @@ class ZaiProvider(LLMProvider):
         # _force_no_thinking: 强制关闭思考的兜底标志（即使 _enable_thinking=True 也不发 thinking）
         # voice_loop 语音模式用 set_thinking_enabled(False) 统一控制。
         self._force_no_thinking = False
+        # 运行时思考强度档位（low/medium/high）：智谱映射为 reasoning_effort。
+        self._thinking_effort: str | None = None
 
         kwargs: dict[str, Any] = {"timeout": 180.0}
         if api_key:
@@ -108,6 +110,21 @@ class ZaiProvider(LLMProvider):
         @author aceFelix
         """
         return self._enable_thinking and not self._force_no_thinking
+
+    def set_thinking_effort(self, level: str | None) -> None:
+        """设置思考强度档位（off 关闭；low/medium/high 开启并映射 reasoning_effort）。"""
+        if level in (None, "off"):
+            self.set_thinking_enabled(False)
+            self._thinking_effort = None
+            return
+        self.set_thinking_enabled(True)
+        self._thinking_effort = None if level == "on" else level
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前思考强度档位（关闭时为 off）。"""
+        if not self.is_thinking_enabled():
+            return "off"
+        return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
         """动态切换模型类型（multimodal / text）。
@@ -168,7 +185,10 @@ class ZaiProvider(LLMProvider):
         thinking_on = self._enable_thinking and not self._force_no_thinking
         cfg = THINKING_CONFIGS.get("zai_sdk")
         if cfg:
-            apply_thinking(request_kwargs, cfg, thinking_on)
+            apply_thinking(
+                request_kwargs, cfg, thinking_on, self._thinking_budget,
+                getattr(self, '_thinking_effort', None),
+            )
 
         # 异步队列 + 后台线程桥接同步 SDK
         queue: asyncio.Queue[Any] = asyncio.Queue()

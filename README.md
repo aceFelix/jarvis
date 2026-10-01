@@ -476,7 +476,7 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 |---|---|
 | `/model <前缀>` | 前缀匹配切换模型（支持模糊输入，多匹配时弹选择器） |
 | `/models` | 交互式模型管理（↑↓选择、Enter切换、空格编辑配置，按厂商分组） |
-| `/think` | 开关深度思考模式（`/think on` / `/think off`） |
+| `/think` | 开关/调节深度思考（`/think on\|off\|low\|medium\|high`，支持模糊前缀与 1/2/3 速记；桌面输入区同提供四档选择器） |
 
 ### 权限控制
 
@@ -619,17 +619,23 @@ model_type = "text"              # GLM-4.7-flash 为纯文本模型
 启用后，模型在每次回复前先输出 `reasoning_content`（思考过程），形成完整的 **Think → Act → Observe** ReAct 循环。
 
 - **视觉效果**：思考内容在终端显示为暗色面板「💭 思考过程」
-- **运行中开关**：`/think on` / `/think off`（无需重启）
+- **运行中开关与强度**：`/think on` / `/think off` / `/think low|medium|high`（无需重启），参数支持
+  模糊前缀（`/think l` = low、`/think h` = high）与数字速记（`1/2/3` = low/medium/high），
+  输入 `/think ` 后 Tab 可补全档位；桌面输入区「思考」选择器提供 **关闭 / 低 / 中 / 高** 四档统一强度
 - **配置项**：
   ```toml
   enable_thinking = true
-  thinking_budget = 800  # 思考过程 Token 上限
+  thinking_budget = 800    # 思考过程 Token 上限（无强度档位时的回退值）
+  thinking_effort = "high" # 统一强度档位：off/on/low/medium/high（后端按厂商翻译）
   ```
-- **厂商适配**：采用 `ThinkingConfig` 配置表驱动，各厂商思考参数自动注入：
-  - Qwen / DashScope：`enable_thinking=True` + `thinking_budget`（extra_body）
-  - DeepSeek：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
-  - 智谱 GLM：`thinking={"type": "enabled"}` + `reasoning_effort=high`（extra_body）
-  - OpenAI / Moonshot 等不支持思考的厂商自动跳过
+  环境变量 `JARVIS_THINKING_EFFORT` 可覆盖档位。
+- **厂商适配**：采用 `ThinkingConfig` 配置表驱动，把统一档位翻译成各厂商原生参数：
+  - Qwen / DashScope：`enable_thinking` + `thinking_budget`（extra_body/top_level），档位经 `budget_map` 映射 低=512 / 中=2000 / 高=8000
+  - DeepSeek / Kimi(Moonshot)：`thinking.type` + `reasoning_effort`，档位映射 低=`low` / 中=`high` / 高=`max`（文档无 medium，就近取档）
+  - 智谱 GLM：`thinking.type` + `reasoning_effort`，档位映射原生 低/中/高
+  - 小米 MiMo：`thinking.type` 仅开/关（无强度档位）
+  - OpenAI / MiniMax / Google / SiliconFlow 等无干净思考控制的厂商自动跳过（桌面选择器对其置灰）
+- **桌面壳联动**：输入区「工作模式」「思考」两个选择器经 `mode.set` / `think.set` 指令走引擎队列串行落地，**下一条消息生效**（与终端 `/mode`、`/think` 同口径）
 - **语音模式**：自动关闭思考（降低首字延迟）
 
 ---
@@ -1001,6 +1007,12 @@ token = ""                     # 认证 token，留空自动生成
 
 > 外网访问需配合内网穿透（如 frp、Cloudflare Tunnel）。
 
+> **桌面端**：jarvis-desktop 输入栏的「跨设备协同」下拉按钮（`[LNK]`）可直接发起手机连接，
+> 二维码内联显示在中间聊天区（重连时总在底部刷新，无需往上翻找）；手机发来的消息以带「手机」
+> 标记的用户气泡上屏、每轮对话即时存到电脑会话历史；桌面文本 / 手机 /
+> 微信三端共享同一会话并抢引擎唯一 query 锁串行发送（详见 jarvis-desktop README 与
+> `docs/architecture/14-跨设备与微信接入.md` 第六节）。
+
 ### 微信 ClawBot 接入
 
 在终端输入 `/connect-wechat`，扫码连接微信 ClawBot，之后在微信中发消息即可与 JARVIS 对话（含完整工具调用能力）。
@@ -1021,6 +1033,10 @@ token = ""                     # 认证 token，留空自动生成
 **依赖**：`pip install "jarvis-agent[wechat]"`（aiohttp + qrcode）
 
 > 需微信版本 ≥ 8.0.70，设置 → 插件中可看到 ClawBot。
+
+> **桌面端**：jarvis-desktop 输入栏的「跨设备协同」下拉按钮可直接发起微信连接，二维码内联聊天区（重连
+> 时总在底部刷新），**扫上即连**（微信配对码为服务端偶发兜底，桌面不再内联输入）；微信发来的消息以带「微信」标记的
+> 用户气泡上屏、每条回复各自成独立气泡、每轮对话即时存到电脑会话历史；与手机、桌面文本共享同一会话并串行发送。
 
 ### 安全沙箱执行（P3-8）
 
@@ -1082,7 +1098,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知），二期起并行待机 TTS 朗读（`proactive_tts_enabled`，忙时跳过）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
 - **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
 - **全双工实时语音音频桥（2026-09-28 已接线）**：`talk.start` 带 `duplex: true` 时，音频不再走 serve 本机 pyaudio，而是双向桥接：渲染进程 `getUserMedia`（浏览器 AEC）采集 16kHz PCM16 经指令 `talk.audio`（base64 帧，fire-and-forget）上行喂 `BridgeMic` → `RealtimeEngine`；AI 24kHz 语音帧经事件 `talk_audio` 下行，由 Web Audio 顺序排播；打断时下行空 payload 表示 flush。浏览器系统级回声消除使桌面壳成为**说话即打断的真全双工**（引擎路径内自动关半双工/软件压低/软件 AEC）。采集/播放实现见 jarvis-desktop `src/renderer/src/audio/`。
-- **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。
+- **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。**任意来源都能停**（2026-10）：手机 / 微信 / 主动任务发起的轮次经桥接 `on_query_begin`（引擎 `_remote_query_begin`）把当前任务登记为 `_send_task`，故 `reply.abort` 对非桌面本地输入的在跑轮次同样生效；桌面侧 `busy` 改由引擎活动事件（`assistant_text`/`assistant_thinking`/`tool_use`）驱动、`assistant_done` 统一撤销，不再只靠本地发送置位。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
 - **项目工作区（桌面壳，2026-08）**：左栏**底部**常驻「项目」区（面板区之后、状态栏之前，配色随主题皮肤）：`＋ 打开文件夹` 由主进程目录选择器取绝对路径后发指令 `project.set`，后端二次校验（存在 + 绝对，不自动建目录）→ 入队引擎线程内串行重建系统提示词 / 重挂 harness / 开新会话，落地推 `project_switched`；最近项目走 `projects.list`（点击即切、右键「从列表移除」= `projects.forget`，只清 `~/.jarvis/projects.toml` 记录、不删磁盘）；serve 启动默认 workdir 取该文件 `last_active`，实现「重开回到上次项目」。另有：`init`（每连接首帧）把左栏状态栏从启动期的「等待后端启动...」切到「就绪」；后端进程未重启（无 `project.*` 注册）时点选会秒级上屏「后端不支持指令 project.set（…请重启后端后重试）」而非干等超时。
 - **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 缓存命中率 + 轮数/消息数，命中率统一由 `Usage.cache_hit_rate` 按协议口径算好、前端不重算）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表、`mcp_ready` 刷运行健康（MCP 为后台预热约 9s，init 时快照常为 null，“未启用”，连接落定后推 `mcp_ready` 事件驱动右栏补刷）。
@@ -1675,22 +1691,6 @@ J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳
 
 ---
 
-## 开发参考
-
-J.A.R.V.I.S. 的设计与实现参考了以下优秀项目和资源：
-
-| 项目 / 资源 | 说明 |
-|---|---|
-| [ClaudeCode (BasicProtein)](https://github.com/BasicProtein/ClaudeCode) | 核心架构参考，Agent 循环与工具调用设计 |
-| [claude-code (Anthropic)](https://github.com/anthropics/claude-code) | 官方 Claude Code 实现，交互范式与权限模型参考 |
-| [OpenClaw](https://github.com/openclaw/openclaw) | 多渠道 AI Agent 框架，插件体系与 Channel 抽象参考 |
-| [weixin-ClawBot-API](https://github.com/SiverKing/weixin-ClawBot-API) | 微信 ClawBot iLink Bot API 协议实现参考 |
-| [CLI-Anything](https://github.com/HKUDS/CLI-Anything) | CLI 工具集成框架，技能扩展机制参考 |
-| [DeepSeek API 文档](https://api-docs.deepseek.com) | 大模型推理接口文档 |
-| [智谱 BigModel 文档](https://docs.bigmodel.cn/cn/guide/start/introduction) | 智谱 GLM 大模型推理接口文档 |
-| [阿里云百炼平台](https://bailian.console.aliyun.com) | 实时语音对话 API（通义千问）服务端 |
-
----
 ---
 
 ## 感谢支持

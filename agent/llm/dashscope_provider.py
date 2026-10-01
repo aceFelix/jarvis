@@ -207,6 +207,8 @@ class DashScopeProvider(LLMProvider):
         self._enable_thinking = enable_thinking
         self._thinking_budget = thinking_budget
         self._force_no_thinking = False
+        # 运行时思考强度档位（low/medium/high）：dashscope 映射为 thinking_budget。
+        self._thinking_effort: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -218,6 +220,21 @@ class DashScopeProvider(LLMProvider):
 
     def is_thinking_enabled(self) -> bool:
         return self._enable_thinking and not self._force_no_thinking
+
+    def set_thinking_effort(self, level: str | None) -> None:
+        """设置思考强度档位（off 关闭；low/medium/high 开启并映射 thinking_budget）。"""
+        if level in (None, "off"):
+            self.set_thinking_enabled(False)
+            self._thinking_effort = None
+            return
+        self.set_thinking_enabled(True)
+        self._thinking_effort = None if level == "on" else level
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前思考强度档位（关闭时为 off）。"""
+        if not self.is_thinking_enabled():
+            return "off"
+        return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
         """动态切换模型类型（multimodal / text）。"""
@@ -276,7 +293,10 @@ class DashScopeProvider(LLMProvider):
 
         cfg = THINKING_CONFIGS.get("dashscope_sdk")
         if cfg:
-            apply_thinking(call_kwargs, cfg, thinking_on, self._thinking_budget)
+            apply_thinking(
+                call_kwargs, cfg, thinking_on, self._thinking_budget,
+                getattr(self, '_thinking_effort', None),
+            )
 
         # dashscope SDK 是同步的，用线程+Queue 桥接到 async
         queue: asyncio.Queue[Any] = asyncio.Queue()

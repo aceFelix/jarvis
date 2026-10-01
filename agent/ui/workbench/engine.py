@@ -45,7 +45,7 @@ from agent.ui.workbench.voice_adapter import (  # noqa: F401
 # 引擎旁路能力（MCP 预热 / 模型热切换）实现在同包模块，见各自模块头注释。
 # 方法名与行为保持不变（测试与调用方直接调 engine._prewarm 等）。
 # @author aceFelix
-from agent.ui.workbench import mcp_runtime, model_switch, project_switch
+from agent.ui.workbench import mcp_runtime, model_switch, project_switch, remote_bridge
 
 
 class ChatEngine:
@@ -116,6 +116,17 @@ class ChatEngine:
         # 比较基准。不能直接用 _settings —— 它始终是进程启动时的快照。
         # @author aceFelix
         self._provider_settings = settings
+        # 跨设备协同（手机 / 微信）与桌面文本共用的唯一串行锁：三通道都调度到
+        # 本引擎 loop（self._loop）执行 query_loop.run，抢同一把 threading.Lock
+        # 保证「同一时刻只有一个 query 在跑」，防共享 _messages 被并发写坏。
+        # 语义与终端 BridgeServer/WeChatBridge 各自的 _query_lock 一致，只是这里
+        # 提升为跨通道共享的唯一锁，由本引擎持有并下发给桥接。
+        # @author aceFelix
+        self._query_lock = threading.Lock()
+        # 微信登录配对码回喂队列：connect_wechat 时创建，login 线程的
+        # verify_callback 阻塞在此 get()，桌面 wechat.pairing 指令 put() 解锁。
+        # @author aceFelix
+        self._wechat_pairing_q: queue.Queue[str] | None = None
 
     # ---- 只读状态快照（serve 右栏数据源：cost.get / state.get 经 WorkbenchAPI 读取） ----
 
@@ -186,6 +197,31 @@ class ChatEngine:
         """
         vendor = getattr(self._provider_settings, "provider", "")
         return str(vendor or self._settings.provider or "")
+
+    @property
+    def current_permission_mode(self) -> str:
+        """当前权限模式（state.get 的 permission_mode 字段，桌面工作模式选择器初值）。
+
+        permission_mode 为枚举时取 .value，兼容字符串。@author aceFelix
+        """
+        mode = getattr(self._settings, "permission_mode", "default")
+        return str(getattr(mode, "value", mode) or "default")
+
+    @property
+    def current_thinking_effort(self) -> str:
+        """当前思考强度档位（state.get 的 thinking_effort 字段，桌面思考选择器初值）。
+
+        已装配则取 loop 实际生效档位，否则回退 settings（off/on/low/medium/high）。@author aceFelix
+        """
+        loop = getattr(self, "_query_loop", None)
+        if loop is not None and getattr(self, "_session_ready", False):
+            eff = loop.is_thinking_effort()
+            if eff is not None:
+                return str(eff)
+        s = self._settings
+        if not getattr(s, "enable_thinking", True):
+            return "off"
+        return str(getattr(s, "thinking_effort", "on") or "on")
 
     @property
     def mcp_status(self) -> dict[str, Any] | None:
@@ -314,6 +350,15 @@ class ChatEngine:
             # _ensure_session，交由处理函数判定是否需延迟，不为一次切换提前触发重型装配。
             # @author aceFelix
             await self._handle_set_workdir(cmd.get("path", ""))
+        elif action == "set_mode":
+            # 权限模式热切换（mode.set / 终端 /mode）：写 settings 后重建
+            # checker/orchestrator 换进现有 loop（保留会话）。未装配时只写
+            # settings，装配时 _build_checker 自然读到新模式。@author aceFelix
+            await self._handle_set_mode(cmd.get("mode", ""))
+        elif action == "set_thinking":
+            # 思考强度切换（think.set / 终端 /think）：写 settings 后同步到 loop/provider，
+            # 开关变化时重建系统提示词。未装配时只写 settings。@author aceFelix
+            await self._handle_set_thinking(cmd.get("effort", ""))
         elif action == "start_talk":
             await self._handle_start_talk(cmd)
         elif action == "stop_talk":
@@ -326,6 +371,93 @@ class ChatEngine:
             await self._handle_interrupt_voice()
         elif action == "answer_user":
             self._ui.answer_user(cmd.get("text", ""))
+        elif action == "connect_phone":
+            # 跨设备协同（桌面 phone.connect）：实现见 remote_bridge，在本引擎
+            # loop 上先 ensure_session 再以共享锁/本 loop 起绑 0.0.0.0 的手机桥接。
+            # @author aceFelix
+            await remote_bridge.connect_phone(self)
+        elif action == "disconnect_phone":
+            await remote_bridge.disconnect_phone(self)
+        elif action == "connect_wechat":
+            await remote_bridge.connect_wechat(self)
+        elif action == "disconnect_wechat":
+            await remote_bridge.disconnect_wechat(self)
+        elif action == "wechat_pairing":
+            # 桌面回填微信数字配对码：放进 login 线程阻塞等待的队列。
+            # @author aceFelix
+            q = getattr(self, "_wechat_pairing_q", None)
+            if q is not None:
+                try:
+                    q.put_nowait(str(cmd.get("code", "")))
+                except Exception:
+                    pass
+
+    # ---- 权限模式 / 思考强度运行时切换 ----
+
+    async def _handle_set_mode(self, mode: str) -> None:
+        """热切换权限模式（default/plan/accept_edits/yolo），保留当前会话。
+
+        先写 settings.permission_mode（未装配时 _ensure_session 的 _build_checker 会读到），
+        已装配则用新 mode 重建 checker/orchestrator 并 set_orchestrator 换进 loop。
+        @author aceFelix
+        """
+        from agent.permissions.modes import parse_mode
+
+        new_mode = parse_mode(mode)
+        self._settings.permission_mode = new_mode
+        if not getattr(self, "_session_ready", False):
+            return
+        from agent.bootstrap import _build_checker, _build_recovery_executor
+        from agent.core.orchestrator import ToolOrchestrator
+
+        checker = _build_checker(self._settings)
+        recovery = _build_recovery_executor(self._settings)
+        orchestrator = ToolOrchestrator(
+            registry=self._active_registry,
+            permission_checker=checker,
+            recovery_executor=recovery,
+        )
+        self._query_loop.set_orchestrator(orchestrator)
+        self._emitter.emit("status", f"工作模式：{getattr(new_mode, 'value', new_mode)}")
+
+    async def _handle_set_thinking(self, effort: str) -> None:
+        """切换思考强度（off/low/medium/high/on），同步 settings 与运行中的 loop/provider。
+
+        off 等价关闭思考；开关态变化时重建系统提示词（enable_thinking 影响工具说明，
+        与终端 /think 同口径）。未装配时只写 settings，装配时 _build_provider 会应用档位。
+        @author aceFelix
+        """
+        s = self._settings
+        prev_on = bool(getattr(s, "enable_thinking", True))
+        s.thinking_effort = effort
+        s.enable_thinking = effort != "off"
+        if not getattr(self, "_session_ready", False):
+            return
+        self._query_loop.set_thinking_effort(effort)
+        if bool(s.enable_thinking) != prev_on:
+            self._rebuild_system_prompt()
+        self._emitter.emit("status", f"思考：{effort}")
+
+    def _rebuild_system_prompt(self) -> None:
+        """按当前 settings（含 enable_thinking/workdir）重建系统提示词并热替换进 loop。
+
+        思考开关、切项目等改变提示词口径的场景共用；不重建 QueryLoop，只换 _system。
+        @author aceFelix
+        """
+        from agent.prompts.system import build_system_prompt
+
+        s = self._settings
+        registry = getattr(self, "_active_registry", None)
+        if registry is None:
+            return
+        prompt = build_system_prompt(
+            s.workdir, registry, enable_thinking=s.enable_thinking, settings=s
+        )
+        if s.system_prompt_append:
+            prompt = prompt + "\n\n" + s.system_prompt_append
+        loop = getattr(self, "_query_loop", None)
+        if loop is not None:
+            loop.update_system_prompt(prompt)
 
     # ---- 文本对话 ----
 
@@ -418,6 +550,9 @@ class ChatEngine:
         self._provider = provider
         self._provider_settings = s
         self._query_loop = loop
+        # 装配后的活跃 registry 快照：权限模式热切换重建 orchestrator 需复用
+        # 同一份工具表（含已连 MCP/harness/ToolSearch），不能另 build 一份。@author aceFelix
+        self._active_registry = registry
         self._model = model
         self._messages: list[Message] = []
         self._ctx = _build_context(s, self._ui, self._messages)
@@ -491,11 +626,19 @@ class ChatEngine:
         self._emitter.emit("user_message", text)
         # 记录当前任务句柄：abort_current_reply 从其他线程取消它实现"停止回复"
         self._send_task = asyncio.current_task()
+        # 与手机 / 微信桥接共用唯一 query 锁：抢锁期间跑 run，锁把三通道串行化。
+        # run_in_executor 把阻塞式 acquire 丢线程池，等待时不冻结本 loop（其余
+        # 协程仍可推进），拿到锁再 await run —— 与桥接侧 _exec_query 同构。
+        # 用当前运行 loop（生产环境即 self._loop；单测直接 await 本协程时也可用），
+        # 避免依赖 engine.start() 才赋值的 self._loop。
+        # @author aceFelix
+        await asyncio.get_running_loop().run_in_executor(None, self._query_lock.acquire)
         try:
             await self._query_loop.run(composed, self._ctx, images=img_blocks or None)
         except Exception as e:
             self._emitter.emit("error", f"运行出错: {type(e).__name__}: {e}")
         finally:
+            self._query_lock.release()
             self._send_task = None
             self._ui.assistant_done()
             self._after_turn()
@@ -516,6 +659,20 @@ class ChatEngine:
             return False
         loop.call_soon_threadsafe(task.cancel)
         return True
+
+    def _remote_query_begin(self) -> None:
+        """手机 / 微信桥接在引擎 loop 上开跑一轮 query 前登记当前任务句柄。
+
+        _send_task 此前只在本地 _handle_send 里置位，远端轮次走桥接自己的
+        run_query / _exec_query 不经它，导致 reply.abort 只能取消桌面本地输入、
+        对手机/微信在跑的轮次无效。本方法由桥接在拿到 query 锁、即将跑
+        query_loop.run 时回调（已在引擎 loop 上），把当前任务登记为 _send_task，
+        使“停止”按钮能取消任意来源的在跑轮次。三通道由 query 锁串行化，同一
+        时刻只有一个在跑，登记不会互相覆盖。
+
+        @author aceFelix
+        """
+        self._send_task = asyncio.current_task()
 
     def _after_turn(self) -> None:
         """一轮对话后的持久化：增量保存 + 标题生成（与 REPL 同规则）。"""

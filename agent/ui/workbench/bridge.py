@@ -93,6 +93,15 @@ class WorkbenchUI:
     def error(self, text: str) -> None:
         self._emit("error", text)
 
+    def remote_user_message(self, channel: str, text: str) -> None:
+        """远端通道（手机 / 微信）用户消息：前端按普通用户气泡渲染并标注来源。
+
+        与本地 ``user_message``（前端发送时已自行上屏、事件被跳过防双气泡）不同，
+        远端消息桌面端没有本地回显，需专门事件驱动一条带来源标记（微信 / 手机）的
+        用户气泡，而非居中系统提示。@author aceFelix
+        """
+        self._emit("remote_user_message", {"channel": channel, "text": text})
+
     def ask_user(self, prompt: str) -> str:
         """阻塞式询问：推事件给前端弹窗，等待 answer_user 回填。
 

@@ -213,6 +213,9 @@ class OpenAIProvider(LLMProvider):
         # _force_no_thinking: 强制关闭思考的兜底标志（即使 _enable_thinking=True 也不发 enable_thinking）
         # voice_loop 语音模式用 set_thinking_enabled(False) 统一控制，内部同时管理这两个标志。
         self._force_no_thinking = False
+        # _thinking_effort: 运行时思考强度档位（low/medium/high；None/on = 用厂商默认）。
+        # 由 set_thinking_effort 统一维护，stream() 传给 apply_thinking 翻译成厂商参数。
+        self._thinking_effort: str | None = None
         # 根据 base_url 推断实际后端名
         self._display_name = self._derive_name(self._base_url)
         kwargs: dict[str, Any] = {"timeout": 180.0}
@@ -243,6 +246,26 @@ class OpenAIProvider(LLMProvider):
     def is_thinking_enabled(self) -> bool:
         """返回当前思考模式是否开启（综合两个标志判断）。"""
         return self._enable_thinking and not self._force_no_thinking
+
+    def set_thinking_effort(self, level: str | None) -> None:
+        """设置思考强度档位：off 关闭思考；low/medium/high 开启并记录档位；on/None 用默认。
+
+        档位仅记录到 _thinking_effort，真正的参数翻译在 stream() 里由
+        apply_thinking 按当前厂商 THINKING_CONFIGS 完成（不同厂商语义不同）。
+        @author aceFelix
+        """
+        if level in (None, "off"):
+            self.set_thinking_enabled(False)
+            self._thinking_effort = None
+            return
+        self.set_thinking_enabled(True)
+        self._thinking_effort = None if level == "on" else level
+
+    def is_thinking_effort(self) -> str | None:
+        """返回当前思考强度档位（关闭时为 None）。"""
+        if not self.is_thinking_enabled():
+            return "off"
+        return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
         """动态切换模型类型（multimodal / text）。
@@ -301,7 +324,10 @@ class OpenAIProvider(LLMProvider):
         thinking_on = self._enable_thinking and not getattr(self, '_force_no_thinking', False)
         cfg = THINKING_CONFIGS.get(self.name)
         if cfg:
-            apply_thinking(request_kwargs, cfg, thinking_on, self._thinking_budget)
+            apply_thinking(
+                request_kwargs, cfg, thinking_on, self._thinking_budget,
+                getattr(self, '_thinking_effort', None),
+            )
 
         # 上下文缓存 —— 配置表驱动（显式模式注入 cache_control，隐式不动）
         from agent.llm.cache_policy import CACHE_POLICIES, apply_cache_markers

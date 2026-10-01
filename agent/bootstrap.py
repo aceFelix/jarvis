@@ -59,7 +59,14 @@ def _build_provider(settings: Settings, model_type: str = "multimodal"):
             val = getattr(settings, key, None)
             kwargs[key] = val or None if key in _STR_KEYS else val
 
-    return meta.create(**kwargs)
+    provider = meta.create(**kwargs)
+    # 应用运行时思考强度档位（off/low/medium/high/on）：仅在思考开启时下发，
+    # 避免把已关闭的思考又打开；关闭态由 enable_thinking 决定。@author aceFelix
+    if getattr(settings, "enable_thinking", True):
+        effort = getattr(settings, "thinking_effort", None)
+        if effort:
+            provider.set_thinking_effort(effort)
+    return provider
 
 
 def _build_checker(settings: Settings) -> PermissionChecker:

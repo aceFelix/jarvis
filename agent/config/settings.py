@@ -73,6 +73,9 @@ class Settings:
     # 深度思考（思维链）—— enable_thinking 通过 extra_body 传给 DashScope
     enable_thinking: bool = True
     thinking_budget: int = 2000
+    # 思考强度统一档位：off/low/medium/high/on（桌面壳/终端运行期可改）。
+    # 后端按厂商 THINKING_CONFIGS 翻译成 thinking_budget / reasoning_effort。
+    thinking_effort: str = "high"
     # Provider 故障转移：主模型挂了自动切到备选厂商的模型
     # 留空表示不做故障转移。如设置为 "deepseek" 则主模型失败后尝试 DeepSeek 模型。
     vendor_fallback: str = ""
@@ -432,7 +435,11 @@ def load_settings(workdir: str | None = None) -> Settings:
             cfg = s.custom_models[s.last_model]
             # 兼容旧配置字段名 provider_type → api_format
             api_fmt = cfg.get("api_format") or cfg.get("provider_type", s.api_format)
-            provider = cfg.get("provider", api_fmt)  # 自定义模型的 provider（vendor）字段
+            # 自定义模型的厂商（provider 字段，供思考能力等按厂商判定）：优先取
+            # provider，其次 vendor，最后才退回 api_format（传输协议）。旧配置常把
+            # 厂商记在 vendor、provider_type 记传输协议（如 deepseek 走 anthropic 兼容
+            # 端点），只按 api_format 兜底会把厂商误判成 anthropic。@author aceFelix
+            provider = cfg.get("provider") or cfg.get("vendor") or api_fmt
             s = s.with_overrides(
                 model=s.last_model,
                 provider=provider,
@@ -506,7 +513,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "enable_tool_self_healing", "tool_retry_max",
         "tool_retry_backoff_base", "tool_retry_backoff_max",
         "enable_lsp",
-        "enable_thinking", "thinking_budget",
+        "enable_thinking", "thinking_budget", "thinking_effort",
         "vendor_fallback",
         "daemon_hotkey", "daemon_hotkey_native", "daemon_hotkey_debounce_ms",
     ):
@@ -802,9 +809,12 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
                 c = dict(cfg)
                 if "provider_type" in c and "api_format" not in c:
                     c["api_format"] = c.pop("provider_type")
-                # 如果没写 provider（vendor），从 api_format 推断
+                # provider（厂商，用于思考能力等按厂商判定）缺失时：优先取 vendor
+                # 字段，再退回 api_format（传输协议）。只按 api_format 兜底会把
+                # “deepseek 走 anthropic 兼容端点”这类模型的厂商误判成 anthropic，
+                # 导致桌面思考选择器置灰。@author aceFelix
                 if "provider" not in c:
-                    c["provider"] = c.get("api_format", "openai")
+                    c["provider"] = c.get("vendor") or c.get("api_format", "openai")
                 normalized[cname] = c
             updates["custom_models"] = normalized
     return s.with_overrides(**updates)
