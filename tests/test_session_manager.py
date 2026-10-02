@@ -210,30 +210,25 @@ class TestRenameSessionFile:
         data = json.loads((d / "标题-2.json").read_text(encoding="utf-8"))
         assert data["meta"]["name"] == "标题-2"
 
-    def test_auto_latest_pointer_kept_on_rename(self, jarvis_home) -> None:
-        """重命名 auto-latest 时保留恢复指针（复制而非移走）。
+    def test_rename_moves_file_without_copy(self, jarvis_home) -> None:
+        """改名是移动而非复制：旧文件不再残留。
 
-        回归背景：自动恢复后会话名为 auto-latest，标题改名把指针文件
-        移走导致 auto-latest.json 消失、恢复链断裂。
-
-        @author aceFelix
+        历史：auto-latest 恢复指针时代对 auto-latest 名特例走复制，
+        指针特性已下线，现在所有会话统一直接改名。@author aceFelix
         """
         d = jarvis_home / "sessions"
         d.mkdir(parents=True, exist_ok=True)
-        pointer = d / "auto-latest.json"
-        pointer.write_text(
+        old = d / "auto-latest.json"
+        old.write_text(
             json.dumps({"meta": {"name": "auto-latest"}, "messages": []}),
             encoding="utf-8",
         )
 
         result = _rename_session_file("auto-latest", "新标题")
         assert result == "新标题"
-        assert pointer.exists()  # 指针文件必须留在原位
-        # 副本 meta 同步为新名，指针内部仍为 auto-latest
+        assert not old.exists()  # 旧文件已被移走
         copy_data = json.loads((d / "新标题.json").read_text(encoding="utf-8"))
         assert copy_data["meta"]["name"] == "新标题"
-        pointer_data = json.loads(pointer.read_text(encoding="utf-8"))
-        assert pointer_data["meta"]["name"] == "auto-latest"
 
 
 class TestGenerateTitleFromFirstUser:
@@ -245,7 +240,7 @@ class TestGenerateTitleFromFirstUser:
             Message.assistant_text("你好，有什么可以帮你？"),
             Message.user_text("请帮我优化一下登录页面的性能问题，谢谢！"),
         ]
-        result = await _generate_title_from_first_user(ui, messages, "auto-latest")
+        result = await _generate_title_from_first_user(ui, messages, "session-old")
         # 前 15 字符（去掉标点后）
         assert result == "请帮我优化一下登录页面的性能问"
         assert ui.calls and ui.calls[0][0] == "info"
@@ -253,8 +248,8 @@ class TestGenerateTitleFromFirstUser:
     async def test_no_user_message_returns_old_name(self, jarvis_home) -> None:
         ui = StubUI()
         messages = [Message.assistant_text("只有助手消息")]
-        result = await _generate_title_from_first_user(ui, messages, "auto-latest")
-        assert result == "auto-latest"
+        result = await _generate_title_from_first_user(ui, messages, "session-old")
+        assert result == "session-old"
         assert ui.calls == []
 
     async def test_empty_user_text_skipped(self, jarvis_home) -> None:
@@ -369,15 +364,16 @@ class TestAutoSave:
         _auto_save(ui, [], session_name="x")
         save_mock.assert_not_called()
 
-    def test_saves_session_and_auto_latest(self, jarvis_home, monkeypatch) -> None:
+    def test_saves_only_named_session(self, jarvis_home, monkeypatch) -> None:
+        """只写指定会话文件一份，不再写 auto-latest 恢复指针。@author aceFelix"""
         save_mock = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
         monkeypatch.setattr(store_mod, "save_session", save_mock)
         ui = StubUI()
         messages = [Message.user_text("hello")]
         _auto_save(ui, messages, workdir="/wd", model="qwen", provider="ds", session_name="s1")
-        assert save_mock.call_count == 2
+        assert save_mock.call_count == 1
         names = [c.args[0] for c in save_mock.call_args_list]
-        assert names == ["s1", "auto-latest"]
+        assert names == ["s1"]
         assert ui.calls[0][0] == "info"
 
     def test_verbose_false_no_info(self, jarvis_home, monkeypatch) -> None:

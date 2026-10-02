@@ -116,7 +116,8 @@ tool_result_keep_recent = 4    # 工具结果折叠时保留最近 N 条完整�
 # 记忆持久化：会话存盘/恢复 + 长期记忆注入 system prompt。
 # /save /load /sessions 管理会话；/memory 查看长期记忆文件。
 # 长期记忆: ~/.jarvis/MEMORY.md（用户级）+ <workdir>/.jarvis/MEMORY.md（项目级）
-auto_resume_session = true     # 启动时自动恢复最近会话（退出时自动保存到 auto-latest）
+# 注：旧版的 auto_resume_session 启动自动恢复已下线（恢复指针不区分
+# 项目目录，多项目并行会串台），历史会话用 /load 手动恢复。
 long_term_memory = true         # 启动时加载长期记忆注入 system prompt
 
 # ── 画像记忆（长期记忆 Phase 1a）──

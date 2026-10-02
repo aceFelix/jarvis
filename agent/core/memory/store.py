@@ -288,9 +288,21 @@ def rename_session(old: str, new: str) -> bool:
 
 
 def list_sessions() -> list[SessionMeta]:
-    """列出所有已保存会话，按更新时间倒序。"""
+    """列出所有已保存会话，按更新时间倒序。
+
+    顺带清理历史遗留的 auto-latest* 恢复指针文件：启动自动恢复特性已
+    下线（全局单指针不区分项目，多项目并行会互相覆盖串台），这些文件
+    既不该再出现在列表里（"幽灵"条目），也无后续读者，见到即删。
+    @author aceFelix
+    """
     sessions: list[SessionMeta] = []
     for path in sessions_dir().glob("*.json"):
+        if path.stem.startswith("auto-latest"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             meta_d = data.get("meta", {})
@@ -316,12 +328,6 @@ def delete_session(name: str) -> bool:
         path.unlink()
         return True
     return False
-
-
-def latest_session_name() -> str | None:
-    """返回最近更新的会话名（用于自动恢复）。无会话返回 None。"""
-    sessions = list_sessions()
-    return sessions[0].name if sessions else None
 
 
 # ---- 长期记忆 ----

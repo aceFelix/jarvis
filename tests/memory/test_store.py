@@ -25,7 +25,6 @@ from agent.core.memory.store import (
     _session_path,
     delete_session,
     get_memory_files,
-    latest_session_name,
     list_sessions,
     load_long_term_memory,
     load_session,
@@ -213,16 +212,20 @@ class TestSessionList:
         """无会话时返回空列表。"""
         assert list_sessions() == []
 
-    def test_latest_session_name(self, jarvis_home) -> None:
-        """latest_session_name 返回最近更新的会话名。"""
-        d = store.sessions_dir()
-        self._write_session(d / "a.json", "a", updated_at=100.0)
-        self._write_session(d / "b.json", "b", updated_at=500.0)
-        assert latest_session_name() == "b"
+    def test_list_sessions_purges_auto_latest_pointer(self, jarvis_home) -> None:
+        """遗留的 auto-latest* 恢复指针不进列表且被顺手清理。
 
-    def test_latest_session_name_none(self, jarvis_home) -> None:
-        """无会话时 latest_session_name 返回 None。"""
-        assert latest_session_name() is None
+        启动自动恢复特性已下线（全局单指针不区分项目会串台），
+        list_sessions 见到 auto-latest* 文件即删，不再出现"幽灵"条目。
+        @author aceFelix
+        """
+        d = store.sessions_dir()
+        self._write_session(d / "good.json", "good", updated_at=100.0)
+        self._write_session(d / "auto-latest.json", "auto-latest", updated_at=500.0)
+
+        sessions = list_sessions()
+        assert [s.name for s in sessions] == ["good"]
+        assert not (d / "auto-latest.json").exists()
 
 
 class TestDeleteSession:

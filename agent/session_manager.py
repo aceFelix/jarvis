@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -62,21 +61,6 @@ def _sync_meta_name(path: Path, new_name: str) -> None:
         pass
 
 
-def _move_or_copy_pointer(old_name: str, old_path: Path, new_path: Path) -> None:
-    """移动会话文件到新路径；old_name 为 auto-latest 时改为复制。
-
-    auto-latest.json 是启动自动恢复的指针文件，被重命名移走后恢复指针即
-    丢失（列表还会出现一条 meta 为 auto-latest 的"幽灵"条目），故保留原
-    文件、仅复制出一份带标题的副本。
-
-    @author aceFelix
-    """
-    if old_name == "auto-latest":
-        shutil.copy2(old_path, new_path)
-    else:
-        old_path.rename(new_path)
-
-
 def _rename_session_file(old_name: str, title: str) -> str:
     """重命名会话文件。返回最终可用的新名称。
 
@@ -99,7 +83,9 @@ def _rename_session_file(old_name: str, title: str) -> str:
 
     new_path = sessions_dir() / f"{title}.json"
     if not new_path.exists():
-        _move_or_copy_pointer(old_name, old_path, new_path)
+        # 直接改名：历史会话文件与文件名一对一，无指针特例
+        # （auto-latest 恢复指针已下线）。@author aceFelix
+        old_path.rename(new_path)
         _sync_meta_name(new_path, title)
         return title
 
@@ -108,7 +94,7 @@ def _rename_session_file(old_name: str, title: str) -> str:
         candidate = f"{title}-{n}"
         candidate_path = sessions_dir() / f"{candidate}.json"
         if not candidate_path.exists():
-            _move_or_copy_pointer(old_name, old_path, candidate_path)
+            old_path.rename(candidate_path)
             _sync_meta_name(candidate_path, candidate)
             return candidate
 
@@ -223,7 +209,7 @@ def _auto_save(
     workdir: str = "",
     model: str = "",
     provider: str = "",
-    session_name: str = "auto-latest",
+    session_name: str = "",
     verbose: bool = True,
     dialog_count: int = 0,
     title_generated: bool = False,
@@ -231,9 +217,11 @@ def _auto_save(
 ) -> None:
     """保存会话到指定名称（增量刷新，每次对话后都会调用）。
 
-    同时写入 auto-latest.json 确保重启时自动恢复。
     session_name 为空时使用时间戳自动命名。
     dialog_count/title_generated 随会话持久化，供 /load 恢复后续计。
+    历史：曾额外写一份 auto-latest.json 作为启动自动恢复指针，但它是
+    全局单文件、不区分项目目录，多项目并行使用时互相覆盖且列表里以
+    "幽灵"条目出现，自动恢复特性已整体下线（会话靠左栏 /load 手动恢复）。
 
     settings 传入时顺带触发画像记忆提炼（Phase 1a）：
     后台异步 + 节流（10 分钟一次），不影响保存路径。
@@ -247,15 +235,6 @@ def _auto_save(
         # 写入独立的会话文件
         save_session(
             session_name, messages,
-            workdir=workdir,
-            model=model,
-            provider=provider,
-            dialog_count=dialog_count,
-            title_generated=title_generated,
-        )
-        # 同时写入 auto-latest 作为恢复指针
-        save_session(
-            "auto-latest", messages,
             workdir=workdir,
             model=model,
             provider=provider,

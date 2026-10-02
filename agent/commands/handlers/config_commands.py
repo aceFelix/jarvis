@@ -122,7 +122,6 @@ def _show_context(ui: RichCLI, settings: Any) -> None:
         ["compact_refreeze_growth", f"{settings.compact_refreeze_growth}x"],
         ["compact_max_output_tokens", f"{settings.compact_max_output_tokens} tokens"],
         ["long_term_memory", _bool_icon(settings.long_term_memory)],
-        ["auto_resume_session", _bool_icon(settings.auto_resume_session)],
     ]
     render_table(rows, headers=["配置项", "值"], title="上下文管理")
 

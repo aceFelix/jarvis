@@ -171,8 +171,8 @@ class Settings:
     compact_max_output_tokens: int = 2048  # 压缩摘要请求的输出 token 上限
 
     # 记忆持久化（阶段四第二刀）
-    # 启动时自动恢复最近会话（/resume 也可手动恢复）
-    auto_resume_session: bool = False
+    # 注：曾有 auto_resume_session 启动自动恢复（全局 auto-latest 指针，
+    # 不区分项目目录、多项目串台），已下线；历史会话靠 /load 手动恢复。
     # 启动时加载长期记忆注入 system prompt（~/.jarvis/MEMORY.md + 项目级）
     long_term_memory: bool = True
 
@@ -505,7 +505,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "context_compaction",
         "context_window", "compact_ratio",
         "compact_refreeze_growth", "compact_max_output_tokens",
-        "auto_resume_session", "long_term_memory",
+        "long_term_memory",
         "enable_skills",
         "enable_mcp",
         "enable_plugins", "plugin_marketplace", "plugin_market_local",
@@ -611,7 +611,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
     mem_table = data.get("memory", {})
     if isinstance(mem_table, dict):
         for sub_key, field in (
-            ("auto_resume_session", "auto_resume_session"),
+            # auto_resume_session 已下线：用户旧配置里残留该键时静默忽略
             ("long_term_memory", "long_term_memory"),
             # 画像记忆（Phase 1a）
             ("profile_enabled", "profile_enabled"),
