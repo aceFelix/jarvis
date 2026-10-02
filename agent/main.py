@@ -51,12 +51,7 @@ from agent.bootstrap import (
 from agent.bridge import get_bridge_server
 from agent.commands.router import CommandContext, dispatch_command
 from agent.config.settings import Settings, load_settings
-from agent.core.images import (
-    _auto_attach_clipboard_image,
-    _hash_image,
-    _load_image_from_clipboard,
-    _pending_images,
-)
+from agent.core.images import paste_clipboard_image
 from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
@@ -221,18 +216,16 @@ async def repl(settings: Settings) -> int:
     )
 
     messages: list[Message] = []
-
-    # 自动恢复上次会话
-    if settings.auto_resume_session:
-        from agent.core.memory.store import latest_session_name, load_session
-        latest_name = latest_session_name()
-        if latest_name:
-            session = load_session(latest_name)
-            if session and session.messages:
-                messages.extend(session.messages)
-                ui.info(f"已自动恢复上次会话「{latest_name}」({len(session.messages)} 条消息)")
+    # 启动即全新会话：历史会话由 /load（桌面左栏点选）手动恢复。
+    # 曾有 auto_resume_session 启动自动恢复，但恢复指针 auto-latest 是
+    # 全局单文件、不区分项目目录，多项目并行时互相覆盖串台，已下线。
+    # @author aceFelix
 
     ctx = _build_context(settings, ui, messages)
+
+    # Ctrl+V 贴图：把读剪贴板回调注入终端 UI 的按键绑定（仅显式触发，
+    # 回车/发消息不再自动读剪贴板）。@author aceFelix
+    ui.set_paste_image_handler(lambda: paste_clipboard_image(ctx, ui))
 
     # 生成本次会话的唯一名称（时间戳），自动保存时写入独立文件
     from datetime import datetime as _dt
@@ -281,10 +274,8 @@ async def repl(settings: Settings) -> int:
                 ui.info(f"已恢复 {len(point.messages)} 条消息（{point.dialog_count} 轮对话）")
             else:
                 clear_recovery_point()
-                # 跳过恢复 = 全新会话：启动时 auto_resume_session 已把上次会话
-                # 消息加载进 messages，必须一并清空。否则第一轮标题生成会取
-                # 旧会话首条消息（如「jarvis在干嘛」），新会话上下文也被旧对话
-                # 污染。ctx.messages 与 messages 共享同一列表，clear() 即可同步。
+                # 跳过恢复 = 全新会话：清空消息列表并同步 ctx（共享同一列表），
+                # 防标题生成等后续逻辑误读残留上下文。@author aceFelix
                 messages.clear()
                 ui.info("已跳过恢复，恢复点已清除，开始全新会话")
     except Exception as e:
@@ -324,16 +315,9 @@ async def repl(settings: Settings) -> int:
 
         stripped = user_input.strip() if user_input else ""
 
-        # 空行提交：检测剪贴板图片，允许「复制图片 → 直接回车」的粘贴操作
+        # 空行提交：忽略。剪贴板图片不再自动检测（残留图片会被误带进
+        # 普通提问），改用 Ctrl+V / /paste 显式添加。@author aceFelix
         if not stripped:
-            img = _load_image_from_clipboard()
-            if img:
-                h = _hash_image(img)
-                if h != ctx.extra.get("_last_clipboard_image_hash"):
-                    _pending_images(ctx).append(img)
-                    ctx.extra["_last_clipboard_image_hash"] = h
-                    ui.info("✅ 检测到剪贴板图片，已添加到待发送列表，请输入消息")
-                    continue
             continue
 
         # ---- 斜杠命令 ----
@@ -385,7 +369,9 @@ async def repl(settings: Settings) -> int:
 
         # ---- 普通对话 ----
         try:
-            pending = _auto_attach_clipboard_image(ctx, ui)
+            # 只取显式添加（Ctrl+V / /paste / /image）的待发送图片，
+            # 不再发消息前自动读剪贴板。@author aceFelix
+            pending = ctx.extra.pop("pending_images", None) or []
 
             # P3-1 跨设备协同：电脑端发消息时同步到手机端
             bridge_server = get_bridge_server()

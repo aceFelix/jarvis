@@ -2,7 +2,7 @@
 
 覆盖 _hash_image 去重哈希、_load_image_from_path（真实 PIL 编码）、
 _load_image_from_clipboard（mock 剪贴板，覆盖 Image / 文件路径列表 / None
-三种情况）、_pending_images 与 _auto_attach_clipboard_image 的自动附加逻辑。
+三种情况）、_pending_images 与 paste_clipboard_image 的 Ctrl+V 显式贴图逻辑。
 
 需要真实 Pillow 读写图片的用例（TestLoadImageFromPath /
 TestLoadImageFromClipboard）在 Pillow 未安装（CI 仅装 dev 依赖）时跳过；
@@ -143,7 +143,7 @@ class TestPendingImages:
 
 
 class FakeUI:
-    """用于验证 ui.info 调用的 UI 桩。"""
+    """用于验证 ui.info / ui.warn 调用的 UI 桩。"""
 
     def __init__(self) -> None:
         self.messages: list[str] = []
@@ -151,59 +151,49 @@ class FakeUI:
     def info(self, text: str) -> None:
         self.messages.append(text)
 
+    def warn(self, text: str) -> None:
+        self.messages.append(text)
 
-class TestAutoAttachClipboardImage:
-    """自动附加剪贴板图片。"""
 
-    def _ctx_with_pending(self) -> ToolContext:
-        ctx = ToolContext(workdir="/w", messages=[Message(role="user")])
-        ctx.extra["pending_images"] = [ImageContent(data="abc")]
-        return ctx
+class TestPasteClipboardImage:
+    """Ctrl+V 显式粘贴剪贴板图片。"""
 
-    def test_existing_pending_returns_directly(self) -> None:
-        """已有待发送图片时直接返回，不碰剪贴板。"""
-        ctx = self._ctx_with_pending()
-        ui = FakeUI()
-        result = images._auto_attach_clipboard_image(ctx, ui)
-        assert result == [ImageContent(data="abc")]
-        assert ui.messages == []
-
-    def test_no_clipboard_image_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_clipboard_image_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """剪贴板无图：警告且不新增。"""
         ctx = ToolContext(workdir="/w", messages=[Message(role="user")])
         monkeypatch.setattr(images, "_load_image_from_clipboard", lambda: None)
         ui = FakeUI()
-        assert images._auto_attach_clipboard_image(ctx, ui) == []
-        assert ui.messages == []
+        assert images.paste_clipboard_image(ctx, ui) == 0
+        assert images._pending_images(ctx) == []
+        assert len(ui.messages) == 1
 
-    def test_new_clipboard_image_attached(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_new_clipboard_image_appended_to_pending(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """剪贴板有图：加入待发送列表并提示。"""
         ctx = ToolContext(workdir="/w", messages=[Message(role="user")])
         img = ImageContent(data="new-img")
         monkeypatch.setattr(images, "_load_image_from_clipboard", lambda: img)
         ui = FakeUI()
-        result = images._auto_attach_clipboard_image(ctx, ui)
-        assert result == [img]
-        # 记录哈希，避免下次重复附加
-        assert ctx.extra["_last_clipboard_image_hash"] == images._hash_image(img)
-        assert len(ui.messages) == 1
+        assert images.paste_clipboard_image(ctx, ui) == 1
+        assert images._pending_images(ctx) == [img]
         assert "剪贴板图片" in ui.messages[0]
 
-    def test_same_clipboard_image_deduplicated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_same_image_pasted_twice_deduplicated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """同一张图连按 Ctrl+V：列表内去重，不重复添加。"""
         ctx = ToolContext(workdir="/w", messages=[Message(role="user")])
         img = ImageContent(data="dup")
         monkeypatch.setattr(images, "_load_image_from_clipboard", lambda: img)
         ui = FakeUI()
-        first = images._auto_attach_clipboard_image(ctx, ui)
-        assert len(first) == 1
-        # 第二次：剪贴板同一张图 → 去重，不附加
-        second = images._auto_attach_clipboard_image(ctx, ui)
-        assert second == []
-        assert len(ui.messages) == 1
+        assert images.paste_clipboard_image(ctx, ui) == 1
+        assert images.paste_clipboard_image(ctx, ui) == 0
+        assert len(images._pending_images(ctx)) == 1
 
-    def test_pending_cleared_after_consume(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pending 被 pop 后，再调用会回到剪贴板路径。"""
-        ctx = self._ctx_with_pending()
+    def test_paste_after_send_accumulates_second_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """不同图片可多张叠加待发（模拟 /image 已贴一张后再 Ctrl+V）。"""
+        ctx = ToolContext(workdir="/w", messages=[Message(role="user")])
+        ctx.extra["pending_images"] = [ImageContent(data="first")]
+        img = ImageContent(data="second")
+        monkeypatch.setattr(images, "_load_image_from_clipboard", lambda: img)
         ui = FakeUI()
-        images._auto_attach_clipboard_image(ctx, ui)
-        # pending 已清空；剪贴板返回 None → 空列表
-        monkeypatch.setattr(images, "_load_image_from_clipboard", lambda: None)
-        assert images._auto_attach_clipboard_image(ctx, ui) == []
+        assert images.paste_clipboard_image(ctx, ui) == 1
+        assert [i.data for i in images._pending_images(ctx)] == ["first", "second"]
+        assert "2 张" in ui.messages[0]

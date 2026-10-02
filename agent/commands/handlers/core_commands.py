@@ -73,7 +73,7 @@ def _print_help(ui: RichCLI) -> None:
         "  /cli_anything uninstall <id> 卸载 harness\n"
         "  /image <path> 添加本地图片到待发送列表（下条消息附带）\n"
         "  /img <path>   添加本地图片（/image 别名）\n"
-        "  /paste       添加剪贴板图片到待发送列表（下条消息附带）\n"
+        "  /paste       添加剪贴板图片到待发送列表（同 Ctrl+V，下条消息附带）\n"
         "  /p           添加剪贴板图片（/paste 别名）\n"
         "  /say <text>  用语音朗读一段文字\n"
         "  /listen      录音并识别成文字（麦克风→文字）\n"

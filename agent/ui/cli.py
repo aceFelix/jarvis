@@ -89,13 +89,24 @@ try:
             pass  # 非 win32 控制台（如 ConPTY），静默跳过
 
     def _make_pt_bindings() -> KeyBindings:
-        """Shift+Enter 换行、Enter 提交。"""
+        """Shift+Enter 换行、Enter 提交、Ctrl+V 粘贴剪贴板图片。"""
         kb = KeyBindings()
 
         @kb.add("escape", "enter")
         def _(event):
             """Shift+Enter / Escape+Enter: 在光标处插入换行符。"""
             event.current_buffer.insert_text("\n")
+
+        @kb.add("c-v")
+        def _(event):
+            """Ctrl+V：显式添加剪贴板图片到待发送列表（回调由 REPL 注入，
+            见 core.images.paste_clipboard_image）。不再自动读剪贴板，
+            避免普通回车误带残留图片。@author aceFelix"""
+            if _PASTE_IMAGE_CALLBACK is not None:
+                try:
+                    _PASTE_IMAGE_CALLBACK()
+                except Exception:
+                    pass  # 剪贴板读取失败不打断输入
 
         return kb
 
@@ -165,7 +176,7 @@ SLASH_COMMANDS = [
     ("/tools",      "列出可用工具列表"),
     ("/image <path>", "添加本地图片到待发送列表（下条消息附带）"),
     ("/img <path>",   "添加本地图片（/image 别名）"),
-    ("/paste",        "添加剪贴板图片到待发送列表（下条消息附带）"),
+    ("/paste",        "添加剪贴板图片到待发送列表（同 Ctrl+V，下条消息附带）"),
     ("/p",            "添加剪贴板图片（/paste 别名）"),
     ("/say <text>", "用 TTS 语音朗读一段文字"),
     ("/listen",     "录音并识别成文字（麦克风→STT→文本）"),
@@ -482,6 +493,12 @@ class _SlashCompleter(Completer):
         return results
 
 
+# Ctrl+V 贴图回调：由 main.repl() 启动时注入（读剪贴板图片加入待发送列表）。
+# 放在模块级供 _make_pt_bindings 的按键回调调用，避免 ui 层反向依赖 core 层。
+# @author aceFelix
+_PASTE_IMAGE_CALLBACK = None
+
+
 class RichCLI(UIProtocol):
     """基于 Rich 的命令行 UI。"""
 
@@ -520,6 +537,14 @@ class RichCLI(UIProtocol):
                 self._pt_session = None
 
     # ---- UIProtocol 实现 ----
+
+    def set_paste_image_handler(self, handler) -> None:
+        """注入 Ctrl+V 贴图回调（无参可调用）：由 main.repl() 在命令
+        上下文建好后调用，回调内部读剪贴板图片加入待发送列表。
+        @author aceFelix
+        """
+        global _PASTE_IMAGE_CALLBACK
+        _PASTE_IMAGE_CALLBACK = handler
 
     def assistant_text(self, text: str) -> None:
         """流式助手文本。直接打到 stdout，不加换行。"""

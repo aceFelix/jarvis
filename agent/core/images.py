@@ -1,7 +1,10 @@
 """图片 / 剪贴板助手 —— 加载、编码、去重待发送图片。
 
-从 main 拆出，供 main（REPL 空行贴图 / 自动附加）与 media_commands
+从 main 拆出，供 main（REPL Ctrl+V 贴图）与 media_commands
 （/paste /image 命令）共用。
+
+历史：曾在"空回车"与"每次发消息"时自动检测剪贴板图片，但剪贴板内容
+长期残留，导致普通提问被反复误贴图，已改为仅 Ctrl+V / /paste 显式添加。
 """
 
 from __future__ import annotations
@@ -80,21 +83,22 @@ def _hash_image(img: ImageContent) -> str:
     return hashlib.md5(f"{img.media_type}:{img.data}".encode()).hexdigest()
 
 
-def _auto_attach_clipboard_image(ctx: ToolContext, ui: RichCLI) -> list[ImageContent]:
-    """如果剪贴板有新图片，自动加入待发送列表并返回。
+def paste_clipboard_image(ctx: ToolContext, ui: RichCLI) -> int:
+    """Ctrl+V / /paste 显式添加剪贴板图片到待发送列表，返回新增张数。
 
+    与 _pending_images 同一列表（ctx.extra["pending_images"]），随下一条
+    用户消息发出；同一张图连按去重（按内容哈希比对已在列表中的图）。
     @author aceFelix
     """
-    pending = ctx.extra.pop("pending_images", None) or []
-    if pending:
-        return pending
     img = _load_image_from_clipboard()
     if img is None:
-        return []
+        ui.warn("剪贴板中没有图片（或缺少 Pillow）")
+        return 0
+    pending = _pending_images(ctx)
     h = _hash_image(img)
-    if h == ctx.extra.get("_last_clipboard_image_hash"):
-        return []
+    if any(_hash_image(p) == h for p in pending):
+        ui.info("剪贴板图片已在待发送列表中，未重复添加")
+        return 0
     pending.append(img)
-    ctx.extra["_last_clipboard_image_hash"] = h
-    ui.info("✅ 检测到剪贴板图片，已自动附加到当前消息")
-    return pending
+    ui.info(f"✅ 已添加剪贴板图片（待发送 {len(pending)} 张），随下一条消息发出")
+    return 1

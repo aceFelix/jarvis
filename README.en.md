@@ -493,9 +493,9 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 | Command | Description |
 |---|---|
 | `/image <path>` `/img <path>` | Add local image to pending send list |
-| `/paste` `/p` `/clipboard` | Add clipboard image to pending send list |
+| `/paste` `/p` `/clipboard` | Add clipboard image to pending send list (same as Ctrl+V) |
 
-> Images auto-attach on next message. Supported formats: PNG / JPG / WEBP / BMP. Auto-scaled to max 1280px longest side.
+> Images attach on the next message. Supported formats: PNG / JPG / WEBP / BMP. Auto-scaled to max 1280px longest side. Press **Ctrl+V** in the terminal input to paste a clipboard image; the clipboard is **no longer auto-detected** (stale images used to leak into plain questions).
 
 ### Multi-Agent & Plugins
 
@@ -733,14 +733,15 @@ Jarvis supports attaching images in conversation (requires multimodal vision mod
 ```bash
 /image C:\Users\me\photo.png   # Add local image
 /img C:\Users\me\photo.png     # Alias
-/paste                          # Add image from clipboard
+/paste                          # Add image from clipboard (same as Ctrl+V)
 /p                              # Alias
 ```
 
-- Images added to pending send list, auto-attached on next message
+- Images added to pending send list, attached on next message
 - Supports PNG / JPG / WEBP / BMP formats
 - Auto-scales to max 1280px longest side, JPEG quality 85
-- Clipboard images auto-detected and deduplicated (MD5 check)
+- Explicit add only (Ctrl+V / `/paste` / `/image`), deduplicated by MD5 within the
+  pending list; the old "auto-scan clipboard on Enter/send" behavior is removed
 
 ---
 
