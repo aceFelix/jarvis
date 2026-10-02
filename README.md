@@ -1670,14 +1670,6 @@ git push github v2.1.0
 
 ---
 
-## 许可证
-
-本项目采用 [MIT License](LICENSE) 许可协议。
-
-> 本项目借鉴了 ClaudeCode 等优秀工具的设计思想。作者保留创作署名权。
-
-详细条款请参阅 [LICENSE](LICENSE) 文件。
-
 ---
 
 ## 反馈声明

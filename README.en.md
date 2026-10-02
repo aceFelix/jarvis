@@ -1579,14 +1579,6 @@ Pushing a `v*` tag triggers [publish.yml](.github/workflows/publish.yml), which 
 
 ---
 
-## License
-
-This project uses [MIT License](LICENSE).
-
-> This project references design ideas from excellent tools like ClaudeCode. Author retains creation attribution rights.
-
-For detailed terms, see [LICENSE](LICENSE) file.
-
 ---
 
 ## Disclaimer
