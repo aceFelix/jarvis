@@ -286,6 +286,16 @@ class TestClassifierMore:
         assert p.auto_fix is True
         assert p.ask_user_on_fail is True
 
+    def test_unknown_policy_never_asks_user(self) -> None:
+        """UNKNOWN 策略 fail-fast：不弹「是否重试」阻塞问句。
+
+        无法分类的错误（如历史误报的 shell 非零退出）同参重试无意义，
+        阻塞询问在桌面/serve 宿主下用户不应答会干等 600s 表现为卡死。
+        @author aceFelix
+        """
+        p = DEFAULT_POLICIES[ToolErrorCategory.UNKNOWN]
+        assert p.ask_user_on_fail is False
+
 
 class TestAutoFix:
     """自动修复逻辑（直接调用 _try_auto_fix）。"""
@@ -377,6 +387,25 @@ class TestRecoveryExecutorMore:
         assert result.final_result.is_error is True
         assert result.asked_user is False  # 认证类不询问
         assert ui.questions == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_error_fails_fast_without_asking(self) -> None:
+        """未知错误重试耗尽后直接失败交回模型，不阻塞询问用户。@author aceFelix"""
+
+        async def call_fn(args, ctx):
+            return ToolResult.error("weird random message 123")
+
+        ui = FakeUI()
+        ui.answers = ["y"]  # 即使准备了应答，也不应被消费
+        executor = ToolRecoveryExecutor(
+            global_enabled=True, policies=self._fast_policies()
+        )
+        result = await executor.execute("Bash", call_fn, {}, FakeContext(ui=ui))
+        assert result.final_result.is_error is True
+        assert result.original_error.category == ToolErrorCategory.UNKNOWN
+        assert result.asked_user is False
+        assert ui.questions == []
+        assert ui.answers == ["y"]
 
     @pytest.mark.asyncio
     async def test_ask_user_yes_retries_and_succeeds(self) -> None:

@@ -202,10 +202,16 @@ class TestBashExecution:
         assert "[exit=0" in str(result.data)
 
     @pytest.mark.asyncio
-    async def test_nonzero_exit_is_error(self, tmp_path: Path) -> None:
+    async def test_nonzero_exit_is_normal_result(self, tmp_path: Path) -> None:
+        """非零退出属正常命令结果：不标 is_error，带 [exit=N] 表头回传模型。
+
+        旧行为把 exit!=0 当工具失败，会触发自愈重试 + 阻塞式「是否重试」
+        问句导致整轮卡死（docs/fixlogs/serve-bash-tool-hang-fix.md）。
+        @author aceFelix
+        """
         tool = BashTool()
         result = await tool.call({"command": "exit 3"}, make_ctx(tmp_path))
-        assert result.is_error is True
+        assert result.is_error is False
         assert "[exit=3" in str(result.data)
 
     @pytest.mark.asyncio
@@ -321,13 +327,15 @@ class TestBashSandboxed:
 
     @pytest.mark.asyncio
     async def test_sandbox_nonzero_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """沙箱路径同口径：非零退出是正常结果，stderr 仍原样回传。@author aceFelix"""
         result = SimpleNamespace(
             sandboxed=True, exit_code=2, timed_out=False,
             resource_exceeded=False, error=None, stdout="bad", stderr="boom",
         )
         tool, ctx, _ = self._run(monkeypatch, result)
         r = await tool.call({"command": "git commit -m x"}, ctx)
-        assert r.is_error is True
+        assert r.is_error is False
+        assert "[exit=2" in str(r.data)
         assert "[stderr]" in str(r.data)
         assert "boom" in str(r.data)
 

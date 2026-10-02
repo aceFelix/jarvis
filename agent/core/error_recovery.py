@@ -242,7 +242,11 @@ DEFAULT_POLICIES: dict[ToolErrorCategory, RecoveryPolicy] = {
         backoff_base_seconds=1.0,
         backoff_max_seconds=5.0,
         auto_fix=False,
-        ask_user_on_fail=True,
+        # 未知错误无法判断重试是否有意义，同参重试耗尽后直接 fail-fast
+        # 把错误交回大模型自行决策；不再弹「是否重试」阻塞问句——
+        # 桌面/serve 宿主下用户若未应答会干等到 600s 超时，表现为整轮「卡死」。
+        # @author aceFelix
+        ask_user_on_fail=False,
     ),
 }
 

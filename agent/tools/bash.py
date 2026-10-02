@@ -58,6 +58,7 @@ class BashTool(Tool):
         "Windows 上使用 Git Bash（bash -c），支持 Unix 风格路径和命令。"
         "默认会询问用户确认；只读命令（ls/cat/grep 等）和用户配置了 allow 规则的命令会自动放行。"
         "有超时保护（默认 120 秒）。"
+        "命令非零退出属正常结果，会以 [exit=N] 表头原样返回输出，由你自行判断下一步。"
     )
     input_schema: JSONSchema = {
         "type": "object",
@@ -192,8 +193,11 @@ class BashTool(Tool):
         if result.resource_exceeded:
             header += "⚠️ 资源超限（内存/进程数），进程已被终止\n"
 
-        if result.exit_code != 0:
-            return ToolResult(data=header + body, is_error=True)
+        # 非零退出是命令的正常业务结果（curl 连不上=7、grep 无匹配=1、&& 断链等），
+        # 带 [exit=N] 表头原样回传给大模型自行决策；不标记 is_error，避免自愈层
+        # 把它误分类为「未知错误」后重试 + 弹「是否重试」阻塞问句导致整轮卡死。
+        # 真正的工具级失败（找不到 shell/超时/沙箱错误）仍走上面的 error 分支。
+        # @author aceFelix
         return ToolResult.ok(data=header + body)
 
     async def _call_normal(self, command: str, work_dir: str, timeout: int) -> ToolResult:
@@ -256,8 +260,8 @@ class BashTool(Tool):
         body = "\n\n".join(parts) if parts else "(无输出)"
 
         header = f"[exit={code} | cwd={work_dir}]\n"
-        if code != 0:
-            return ToolResult(data=header + body, is_error=True)
+        # 同上：非零退出属正常命令结果，原样回传交模型判断，不进自愈/交互阻塞链路。
+        # @author aceFelix
         return ToolResult.ok(data=header + body)
 
     @staticmethod
