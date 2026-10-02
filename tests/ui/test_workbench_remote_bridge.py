@@ -467,7 +467,10 @@ def test_bridge_server_uses_injected_shared_lock_or_self():
     srv = BridgeServer(object(), None, host="127.0.0.1", query_lock=shared)
     assert srv._query_lock is shared
     srv2 = BridgeServer(object(), None, host="127.0.0.1")
-    assert isinstance(srv2._query_lock, threading.Lock) and srv2._query_lock is not shared
+    # 用 type(shared)（真实 _thread.lock 类型）做 isinstance：threading.Lock 在
+    # 旧版 CPython（如 CI 的 3.11）是工厂函数而非类型，直接传入会抛
+    # TypeError: isinstance() arg 2 must be a type。@author aceFelix
+    assert isinstance(srv2._query_lock, type(shared)) and srv2._query_lock is not shared
 
 
 def test_bridge_server_client_callbacks_fire_on_transitions():
