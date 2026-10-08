@@ -261,3 +261,12 @@ auto_allow_medium = true   # 沙箱开启时自动放行中等风险命令
 audit = true               # 记录沙箱审计日志（~/.jarvis/sandbox_audit.jsonl）
 max_snapshots = 20         # 文件快照最大保留数
 excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
+
+[checkpoint]
+# 消息级回溯检查点：每轮对话前用 shadow git 对工作目录打检查点，
+# /rewind 或桌面撤回消息时可连带回滚文件修改（工作区恢复到发消息前）。
+# 检查点存于 ~/.jarvis/checkpoints/<会话名>/，不污染项目 git 历史；
+# 未安装 git 时自动降级为仅对话回退。@author aceFelix
+enabled = true             # 总开关（false = 只回退对话，不回滚文件）
+max_per_session = 20       # 每会话检查点保留上限（超出修剪最旧）
+timeout_seconds = 10       # 单条 git 命令超时（秒）

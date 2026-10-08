@@ -107,6 +107,29 @@ class TestMessageSerialization:
         assert isinstance(block, TextContent)
         assert block.text == ""
 
+    def test_extra_roundtrip_and_omit_empty(self) -> None:
+        """extra（含 checkpoint_id）非空时往返一致；空时不写入 JSON 键。"""
+        msg = Message(role="user", content=[TextContent(text="问题")])
+        msg.extra["checkpoint_id"] = "abc123"
+        d = _message_to_dict(msg)
+        assert d["extra"] == {"checkpoint_id": "abc123"}
+        restored = _message_from_dict(d)
+        assert restored.extra == {"checkpoint_id": "abc123"}
+
+        # 空 extra 不落盘：旧会话格式不膨胀
+        plain = Message(role="user", content=[TextContent(text="无检查点")])
+        assert "extra" not in _message_to_dict(plain)
+
+    def test_extra_missing_in_legacy_dict(self) -> None:
+        """旧会话文件无 extra 字段 → 反序列化默认空 dict（向后兼容）。"""
+        legacy = {"role": "user", "content": [{"type": "text", "text": "旧消息"}]}
+        msg = _message_from_dict(legacy)
+        assert msg.extra == {}
+        # 默认 dict 各自独立，不共享可变对象
+        other = _message_from_dict(legacy)
+        other.extra["checkpoint_id"] = "x"
+        assert msg.extra == {}
+
 
 class TestSessionSaveLoad:
     """会话存盘与加载。"""

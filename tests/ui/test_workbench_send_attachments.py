@@ -42,11 +42,20 @@ class _FakeLoop:
 
 @pytest.fixture
 def engine_with_fake_loop(monkeypatch):
-    """引擎 + 假 loop：_after_turn 打桩防测试写真实会话存档。"""
-    engine, event_queue = _make_engine()
+    """引擎 + 假 loop：_after_turn 打桩防测试写真实会话存档。
+
+    预置空 _messages（正常由 _ensure_session 创建，轮前检查点/绑定
+    会读写它）并关检查点，防测试对真实工作目录跑 git。
+    @author aceFelix
+    """
+    event_queue: queue.Queue = queue.Queue()
+    settings = Settings()
+    settings.checkpoint_enabled = False
+    engine = ChatEngine(settings, event_queue, queue.Queue())
     loop = _FakeLoop()
     engine._query_loop = loop
     engine._ctx = object()
+    engine._messages = []
     monkeypatch.setattr(engine, "_after_turn", lambda: None)
     return engine, loop, event_queue
 

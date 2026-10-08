@@ -102,6 +102,17 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/exit` 或 `/quit` | 退出 REPL |
 | `Ctrl+D` | 退出（Linux/macOS） |
 
+### 发错了怎么办（消息级回溯）
+
+每条用户消息发出前，Jarvis 会自动对工作目录打一个检查点（shadow git，不污染你的仓库）。发现发错了：
+
+| 入口 | 操作 |
+|------|------|
+| 终端 | `/rewind [n]` 回退最近 n 条消息；若该轮改过文件，会先列出改动清单再询问是否连带回滚工作区；加 `--chat-only` 跳过询问仅回退对话 |
+| 桌面 | 悬停用户气泡→点「撤回」→确认弹窗展示该轮改动文件，勾选「同时回滚工作区文件」后确认 |
+
+降级规则：未安装 git、`[checkpoint] enabled = false`、或检查点已被配额修剪时，仅回退对话，文件不动。详见 [docs/architecture/15-消息回溯与检查点.md](docs/architecture/15-消息回溯与检查点.md)。
+
 ---
 
 ## 命令速查
@@ -121,7 +132,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/compact` | 手动压缩上下文（对话太长时用） |
 | `/cost` | 查看 token 用量与估算成本 |
 | `/context` | 查看上下文窗口占用情况 |
-| `/rewind [n]` | 回退最近 n 条消息 |
+| `/rewind [n]` | 回退最近 n 条消息；该轮涉及文件修改时列清单确认后连带回滚工作区（`--chat-only` 仅回退对话） |
 | `/diff [path]` | 查看工作目录的 git diff |
 | `/reset` | 清空对话重新开始 |
 | `/verbose` | 开关详细输出（token 统计、缓存命中等） |
@@ -523,6 +534,12 @@ check_time = "09:00"           # 每日检查截止日期的时间 HH:MM
 enabled = false
 max_memory_mb = 512
 max_cpu_seconds = 60
+
+# 消息级回溯检查点（shadow git，每轮对话前打检查点，/rewind / 桌面撤回可连带回滚文件）
+[checkpoint]
+enabled = true                 # 总开关（关闭后仅支持对话回退）
+max_per_session = 20           # 每会话检查点保留上限（超出修剪最早的）
+timeout_seconds = 10           # 单条 git 命令超时（秒）
 ```
 
 ---

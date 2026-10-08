@@ -34,6 +34,11 @@ message             text: str                   null（结果走流式事件）
 sessions.list       —                           [{name, updated_at, ...}]
 sessions.open       name: str                   null（结果走 session_loaded）
 sessions.new        —                           null（结果走 session_new）
+checkpoint.preview  user_tail_count: int        {ok, has_checkpoint, files,
+                                                  untracked, reason}（撤回预览：
+                                                  回滚会改动哪些工作区文件）
+checkpoint.rewind   user_tail_count: int,       {ok: true, pending: true}（真实
+                    restore_files: bool         结果走 rewound 事件）
 models.list         —                           [{name, vendor, current, ...}]
 models.select       name: str                   bool（是否持久化成功）
 models.add          name: str, vendor: str,     {name, vendor, api_format,
@@ -68,7 +73,11 @@ schedule.list       —                           {reminders: [...],
 cost.get            —                           {model, input_tokens,
                                                  output_tokens, ...,
                                                  cache_hit_rate（百分比，
-                                                 口径同 REPL /cost）}
+                                                 口径同 REPL /cost）,
+                                                 context_used/context_window/
+                                                 context_percent/
+                                                 context_configured（上下文
+                                                 窗口占用，口径同 /context）}
 answer_user         text: str                   null（回填 ask_user 弹窗）
 talk.start          duplex?: bool（全双工           null（结果走 talk_started）
                     桥接，桌面端传 true）
@@ -88,6 +97,13 @@ mode.set            mode: str                   {ok, mode}（default/plan/
                                                 accept_edits/yolo；非法 ok=false）
 think.set           effort: str                 {ok, effort}（off/on/low/
                                                 medium/high；非法 ok=false）
+slash.exec          command: str（斜杠命令文本） {ok, command}（受理确认；白名单/
+                                                拦截在引擎 slash_bridge，执行
+                                                结果走 slash_result 事件）
+slash.commands      —                           [{name, description, source}]
+                                                （桌面可执行斜杠命令补全目录：
+                                                source=passthrough/native/skill，
+                                                只读不入队，随 workdir 技能变化）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -98,6 +114,13 @@ think.set           effort: str                 {ok, effort}（off/on/low/
   ``remote_user_message``（手机/微信入站消息，桌面渲染为带来源标记的用户气泡）
 - 会话：``session_ready`` / ``session_renamed``（标题改名，前端只刷列表
   不清屏） / ``session_loaded`` / ``session_new``
+- 消息回溯：``rewound``（payload ``{ok, removed, removed_user, files_restored,
+  reason}``，checkpoint.rewind 落地后推一次，前端据此裁掉对应气泡并提示
+  文件回滚结果）
+- 斜杠命令透传：``slash_result``（payload ``{command, ok, text}``；slash.exec
+  每执行一条回推一次，text = 捕获的命令行输出全文（含表格/面板，Rich 渲染后
+  纯文本），前端渲染为等宽命令输出卡片；技能命令 /<skill-name> 除本事件外
+  照常走对话流式事件，可被 reply.abort 中止）
 - 项目工作区：``project_switched``（payload ``{workdir, name}``，project.set
   引擎侧重建完成后推一次，与 model_switched 同为「入队即返回、落地走事件」）
 - 提示：``info`` / ``warn`` / ``error`` / ``status`` / ``ask_user``
@@ -133,6 +156,14 @@ CMD_SESSIONS_OPEN = "sessions.open"
 CMD_SESSIONS_NEW = "sessions.new"
 CMD_SESSIONS_RENAME = "sessions.rename"
 CMD_SESSIONS_DELETE = "sessions.delete"
+# checkpoint.*（消息级回溯，2026-10）：桌面气泡「撤回」。preview 只读预览
+# 回滚影响面；rewind 截断对话 + 可选 shadow git 检查点回滚工作区文件
+#（入队即返回，真实结果走 rewound 事件）。定位口径 = user_tail_count：
+# 从尾部数第 N 条用户消息——桌面与后端按用户消息顺序共享计数，不依赖
+# 消息 id（emit 时后端消息尚未创建；上下文压缩会使绝对索引漂移）。
+# @author aceFelix
+CMD_CHECKPOINT_PREVIEW = "checkpoint.preview"
+CMD_CHECKPOINT_REWIND = "checkpoint.rewind"
 CMD_MODELS_LIST = "models.list"
 CMD_MODELS_SELECT = "models.select"
 # models.add（2026-09）：桌面壳左栏「添加模型」表单提交 —— 写用户级 models.toml
@@ -194,6 +225,15 @@ CMD_WECHAT_CONNECT = "wechat.connect"
 CMD_WECHAT_DISCONNECT = "wechat.disconnect"
 CMD_WECHAT_STATUS = "wechat.status"
 CMD_WECHAT_PAIRING = "wechat.pairing"
+# slash.exec（斜杠命令透传，2026-10）：把桌面聊天输入的 / 前缀命令转进引擎
+# 指令队列，复用终端命令路由 dispatch_command（实现见 ui/workbench/
+# slash_bridge.py）。白名单放行、交互禁令（禁抢 stdin 的 picker/input）与
+# 输出捕获都在桥内；命令执行结果以 slash_result 事件回推。
+CMD_SLASH_EXEC = "slash.exec"
+# slash.commands（斜杠命令补全目录，2026-10）：只读返回桌面可执行命令列表
+# （白名单透传 + 原生控件 + 已安装技能），供输入框 / 前缀弹层补全，
+# 口径与 slash_bridge 执行护栏一致（build_desktop_commands）。
+CMD_SLASH_COMMANDS = "slash.commands"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -203,6 +243,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_SESSIONS_NEW,
     CMD_SESSIONS_RENAME,
     CMD_SESSIONS_DELETE,
+    CMD_CHECKPOINT_PREVIEW,
+    CMD_CHECKPOINT_REWIND,
     CMD_MODELS_LIST,
     CMD_MODELS_SELECT,
     CMD_MODELS_ADD,
@@ -240,6 +282,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_WECHAT_DISCONNECT,
     CMD_WECHAT_STATUS,
     CMD_WECHAT_PAIRING,
+    CMD_SLASH_EXEC,
+    CMD_SLASH_COMMANDS,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----
@@ -253,6 +297,15 @@ EVT_MCP_READY = "mcp_ready"
 # 串行重建（换 workdir → 重生提示词/重挂 harness/开新会话）完成后推一次；
 # 与 model_switched 同构（入队即返回，落地走事件）。@author aceFelix
 EVT_PROJECT_SWITCHED = "project_switched"
+# 消息撤回落地事件：payload = {ok, removed, removed_user, files_restored,
+# reason}。checkpoint.rewind 入队后由引擎串行执行，完成时推一次。
+# @author aceFelix
+EVT_REWOUND = "rewound"
+# 斜杠命令透传执行结果事件（slash.exec，2026-10）：payload =
+# {"command": 命令原文, "ok": bool, "text": 捕获输出全文}。引擎侧
+# slash_bridge 每执行（或拒绝）一条命令推一次，前端渲染为命令输出卡片。
+# @author aceFelix
+EVT_SLASH_RESULT = "slash_result"
 EVT_PROACTIVE_NOTIFY = "proactive_notify"
 EVT_VOICE_STARTED = "voice_started"
 EVT_VOICE_STOPPED = "voice_stopped"

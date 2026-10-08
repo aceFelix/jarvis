@@ -135,6 +135,49 @@ def test_message_oversized_file_rejected():
     assert command_queue.empty()
 
 
+# ---- checkpoint.preview / checkpoint.rewind（消息级回溯） ----
+
+def test_checkpoint_preview_passes_args_and_rejects_invalid():
+    """预览直返：合法参数透传 API；非整数/小于 1 → 失败回执。"""
+    server, api, _, _ = _make()
+    calls: list[int] = []
+    api.checkpoint_preview = lambda n: calls.append(n) or {
+        "ok": True, "has_checkpoint": True, "files": [], "untracked": [], "reason": "",
+    }
+    reply = _call(server, "checkpoint.preview", {"user_tail_count": 2})
+    assert reply["data"]["ok"] is True
+    assert reply["data"]["result"]["has_checkpoint"] is True
+    assert calls == [2]
+    bad = _call(server, "checkpoint.preview", {"user_tail_count": 0})
+    assert bad["data"]["ok"] is False and "user_tail_count" in bad["data"]["error"]
+    bad = _call(server, "checkpoint.preview", {"user_tail_count": "abc"})
+    assert bad["data"]["ok"] is False
+
+
+def test_checkpoint_rewind_enqueues_with_defaults():
+    """撤回：restore_files 默认 True；入队即返 pending，真实结果走事件。"""
+    server, api, _, command_queue = _make()
+    seen: list[tuple] = []
+    api.checkpoint_rewind = lambda n, r: seen.append((n, r)) or {
+        "ok": True, "pending": True,
+    }
+    reply = _call(server, "checkpoint.rewind", {"user_tail_count": 1})
+    assert reply["data"]["ok"] is True and reply["data"]["result"]["pending"] is True
+    assert seen == [(1, True)]
+    reply = _call(server, "checkpoint.rewind", {
+        "user_tail_count": 3, "restore_files": False,
+    })
+    assert reply["data"]["ok"] is True
+    assert seen[-1] == (3, False)
+    # 缺字段：默认撤回最后 1 条用户消息 + 连带回滚文件
+    _call(server, "checkpoint.rewind", {})
+    assert seen[-1] == (1, True)
+    # 非法值：失败回执，不再透传
+    bad = _call(server, "checkpoint.rewind", {"user_tail_count": -2})
+    assert bad["data"]["ok"] is False
+    assert seen[-1] == (1, True)
+
+
 # ---- request/response 型指令 ----
 
 def test_sessions_list_reply():
@@ -651,7 +694,8 @@ def test_cost_get_shape_defaults_zero():
     """cost.get 返回用量统计（引擎未装配时 token/轮数/消息数全 0）。
 
     cache_hit_rate 为后端统一口径算好的百分数（Usage.cache_hit_rate），
-    桌面壳用量卡直接展示，不在前端重算。@author aceFelix
+    桌面壳用量卡直接展示，不在前端重算。上下文窗口占用（context_*）
+    口径同 /context，引擎未装配时 used=0、窗口回退 128000 假设值。@author aceFelix
     """
     server, _, _, _ = _make()
     reply = _call(server, "cost.get", {})
@@ -665,6 +709,10 @@ def test_cost_get_shape_defaults_zero():
         "cache_read_tokens",
         "cache_creation_tokens",
         "cache_hit_rate",
+        "context_used",
+        "context_window",
+        "context_percent",
+        "context_configured",
         "dialogs",
         "messages",
     } <= set(result.keys())
@@ -672,6 +720,11 @@ def test_cost_get_shape_defaults_zero():
     assert result["cache_hit_rate"] == 0.0
     assert result["dialogs"] == 0
     assert result["messages"] == 0
+    # 未装配：已用 0、回退假设窗口 128000、占比 0、未标记配置
+    assert result["context_used"] == 0
+    assert result["context_window"] == 128000
+    assert result["context_percent"] == 0.0
+    assert result["context_configured"] is False
 
 
 def test_answer_user_enqueues():

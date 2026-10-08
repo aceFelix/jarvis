@@ -233,6 +233,19 @@ async def repl(settings: Settings) -> int:
     _title_generated = False   # 2轮后 LLM 自动生成标题
     _dialog_count = 0
 
+    # 消息级回溯检查点：每轮对话前用 shadow git 对工作目录打检查点，
+    # /rewind 时可连带回滚文件。存储按 workdir 定位，/load 旧会话仍可命中；
+    # 未装 git / 关闭开关时 available()=False，自动退化为仅对话回退。
+    # @author aceFelix
+    from agent.core.checkpoint import CheckpointManager
+    ckpt_mgr = CheckpointManager(
+        settings.workdir, _session_name,
+        enabled=getattr(settings, "checkpoint_enabled", True),
+        max_checkpoints=getattr(settings, "checkpoint_max_per_session", 20),
+        timeout_seconds=getattr(settings, "checkpoint_timeout_seconds", 10),
+    )
+    ctx.extra["checkpoint_mgr"] = ckpt_mgr
+
     # 启用诊断日志（settings.debug=True 时同时输出到 stderr）
     from agent.core.diag import set_debug as _set_diag_debug
     _set_diag_debug(settings.debug)
@@ -369,6 +382,11 @@ async def repl(settings: Settings) -> int:
 
         # ---- 普通对话 ----
         try:
+            # 轮前检查点：记录工作区"发消息前"状态，绑定到本轮用户消息，
+            # 供 /rewind / 桌面撤回连带回滚文件。@author aceFelix
+            ckpt_id = ckpt_mgr.create(reason=stripped) if ckpt_mgr.available() else None
+            _pre_msg_len = len(messages)
+
             # 只取显式添加（Ctrl+V / /paste / /image）的待发送图片，
             # 不再发消息前自动读剪贴板。@author aceFelix
             pending = ctx.extra.pop("pending_images", None) or []
@@ -396,6 +414,13 @@ async def repl(settings: Settings) -> int:
                 if broadcast_ui is not None:
                     ctx.ui = original_ui
                     broadcast_ui.finish()
+                # 无论本轮成败都绑定检查点（loop.run 已把用户消息 append
+                # 进 messages），出错轮次同样可撤回回滚。@author aceFelix
+                if ckpt_id:
+                    for _m in messages[_pre_msg_len:]:
+                        if _m.role == "user":
+                            _m.extra["checkpoint_id"] = ckpt_id
+                            break
 
             if settings.verbose:
                 _cache_hint = f" cache={stats.usage.cache_read_tokens}" if stats.usage.cache_read_tokens else ""

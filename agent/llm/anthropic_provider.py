@@ -147,7 +147,8 @@ class AnthropicProvider(LLMProvider):
         # stream() 会根据此标志注入 thinking={"type": "enabled"} 参数。
         self._thinking_enabled = True
         # 运行时思考强度档位（low/medium/high）：Anthropic 原生映射 budget_tokens；
-        # DeepSeek 等兼容端点仅支持开/关，档位不改变参数。
+        # DeepSeek 兼容端点 budget_tokens 被忽略，改走顶层 output_config.effort 透传；
+        # 其余兼容端点仅支持开/关，档位不改变参数。
         self._thinking_effort: str | None = None
 
     @property
@@ -267,7 +268,17 @@ class AnthropicProvider(LLMProvider):
                 }
             else:
                 # DeepSeek 等兼容端点只需 type，不需要 budget_tokens
+                #（DeepSeek 官方 Anthropic 兼容文档：thinking.budget_tokens is ignored）
                 request_kwargs["thinking"] = {"type": "enabled"}
+                # DeepSeek 的思考强度走顶层 output_config.effort 透传（官方文档：
+                # output_config 仅支持 effort；档位 low/high/max，medium 官方映射为
+                # high）。此前档位不下发，低/中/高发出的请求完全相同。
+                # @author aceFelix
+                if self.name == "deepseek" and self._thinking_effort:
+                    _effort_map = {"low": "low", "medium": "high", "high": "max"}
+                    _effort = _effort_map.get(self._thinking_effort)
+                    if _effort:
+                        request_kwargs["output_config"] = {"effort": _effort}
             # 思考模式下不传 temperature（DeepSeek 文档：思考模式不支持 temperature）
         else:
             # 显式关闭思考模式——DeepSeek 兼容端点默认是开的，不传会漏

@@ -45,7 +45,14 @@ from agent.ui.workbench.voice_adapter import (  # noqa: F401
 # 引擎旁路能力（MCP 预热 / 模型热切换）实现在同包模块，见各自模块头注释。
 # 方法名与行为保持不变（测试与调用方直接调 engine._prewarm 等）。
 # @author aceFelix
-from agent.ui.workbench import mcp_runtime, model_switch, project_switch, remote_bridge
+from agent.ui.workbench import (
+    checkpoint_ops,
+    mcp_runtime,
+    model_switch,
+    project_switch,
+    remote_bridge,
+    slash_bridge,
+)
 
 
 class ChatEngine:
@@ -164,6 +171,35 @@ class ChatEngine:
     def message_count(self) -> int:
         """当前会话消息条数（cost.get 数据源；未装配时为 0）。"""
         return len(getattr(self, "_messages", None) or [])
+
+    @property
+    def context_usage(self) -> dict[str, Any]:
+        """上下文窗口占用估算（cost.get 数据源，桌面壳右栏用量卡）。
+
+        口径与 REPL /context 完全一致：已用 token = 当前会话消息估算
+        （estimate_tokens）+ system prompt 估算（estimate_text_tokens，system
+        不在 messages 里但实占窗口）；窗口优先取引擎配置的 context_window
+        （如用户设的 200000），未配置（0）回退保守假设值 128000。仅用于
+        估算占比，非模型侧精确值。context_configured 区分窗口来源，供文案
+        层区分「窗口」/「假设窗口」。@author aceFelix
+        """
+        from agent.core.memory.compactor import estimate_tokens, estimate_text_tokens
+
+        loop = getattr(self, "_query_loop", None)
+        messages = getattr(self, "_messages", None) or []
+        system_prompt = str(getattr(loop, "_system", "") or "") if loop else ""
+        window = int(getattr(loop, "context_window", 0) or 0) if loop else 0
+        used = estimate_tokens(list(messages)) + (
+            estimate_text_tokens(system_prompt) if system_prompt else 0
+        )
+        effective = window or 128000
+        percent = round(used / effective * 100, 1) if effective else 0.0
+        return {
+            "context_used": int(used),
+            "context_window": int(effective),
+            "context_configured": bool(window),
+            "context_percent": percent,
+        }
 
     @property
     def session_name(self) -> str:
@@ -359,6 +395,11 @@ class ChatEngine:
             # 思考强度切换（think.set / 终端 /think）：写 settings 后同步到 loop/provider，
             # 开关变化时重建系统提示词。未装配时只写 settings。@author aceFelix
             await self._handle_set_thinking(cmd.get("effort", ""))
+        elif action == "slash_exec":
+            # 桌面 slash.exec 透传：复用终端命令路由（白名单/交互禁令/输出捕获
+            # 全在 slash_bridge，engine 已超大体量只挂路由），结果走 slash_result
+            # 事件。@author aceFelix
+            await slash_bridge.run_slash(self, cmd.get("command", ""))
         elif action == "start_talk":
             await self._handle_start_talk(cmd)
         elif action == "stop_talk":
@@ -371,6 +412,14 @@ class ChatEngine:
             await self._handle_interrupt_voice()
         elif action == "answer_user":
             self._ui.answer_user(cmd.get("text", ""))
+        elif action == "checkpoint_rewind":
+            # 桌面气泡撤回：截断对话 + 可选回滚工作区文件（shadow git
+            # 检查点，见 checkpoint_ops）。结果走 rewound 事件。
+            # 未装配会话时无消息可撤回，直接回执失败。@author aceFelix
+            await self._handle_checkpoint_rewind(
+                int(cmd.get("user_tail_count", 1) or 1),
+                bool(cmd.get("restore_files")),
+            )
         elif action == "connect_phone":
             # 跨设备协同（桌面 phone.connect）：实现见 remote_bridge，在本引擎
             # loop 上先 ensure_session 再以共享锁/本 loop 起绑 0.0.0.0 的手机桥接。
@@ -624,6 +673,13 @@ class ChatEngine:
             # 纯图片消息：补一句最小指令文本，让模型有回应落点
             composed = "请结合附带的图片回答。"
         self._emitter.emit("user_message", text)
+        # 轮前检查点：记录工作区"发消息前"状态，绑定到本轮用户消息，
+        # 供桌面撤回（checkpoint.rewind）连带回滚文件。创建是同步 git
+        # 操作（超时保护在 CheckpointManager 内部），失败静默降级。
+        # @author aceFelix
+        ckpt_mgr = checkpoint_ops.make_manager(self)
+        ckpt_id = ckpt_mgr.create(reason=composed) if ckpt_mgr.available() else None
+        _pre_msg_len = len(self._messages)
         # 记录当前任务句柄：abort_current_reply 从其他线程取消它实现"停止回复"
         self._send_task = asyncio.current_task()
         # 与手机 / 微信桥接共用唯一 query 锁：抢锁期间跑 run，锁把三通道串行化。
@@ -640,6 +696,13 @@ class ChatEngine:
         finally:
             self._query_lock.release()
             self._send_task = None
+            # 无论本轮成败都绑定检查点（query_loop.run 已把用户消息
+            # append 进 _messages），出错轮次同样可撤回。@author aceFelix
+            if ckpt_id:
+                for _m in self._messages[_pre_msg_len:]:
+                    if _m.role == "user":
+                        _m.extra["checkpoint_id"] = ckpt_id
+                        break
             self._ui.assistant_done()
             self._after_turn()
 
@@ -659,6 +722,21 @@ class ChatEngine:
             return False
         loop.call_soon_threadsafe(task.cancel)
         return True
+
+    async def _handle_checkpoint_rewind(self, user_tail_count: int, restore_files: bool) -> None:
+        """桌面消息撤回：截断对话并可选回滚工作区文件（实现见 checkpoint_ops）。
+
+        结果以 rewound 事件推给前端（裁气泡/回滚提示）；会话未装配时
+        无消息可撤，直接回执失败。@author aceFelix
+        """
+        if not getattr(self, "_session_ready", False):
+            self._emitter.emit("rewound", {
+                "ok": False, "removed": 0, "files_restored": False,
+                "reason": "会话尚未装配，无消息可撤回",
+            })
+            return
+        result = await checkpoint_ops.rewind(self, user_tail_count, restore_files)
+        self._emitter.emit("rewound", result)
 
     def _remote_query_begin(self) -> None:
         """手机 / 微信桥接在引擎 loop 上开跑一轮 query 前登记当前任务句柄。

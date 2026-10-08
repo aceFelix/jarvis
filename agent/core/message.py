@@ -105,12 +105,16 @@ class Message:
         content: 内容块列表。
         id: 消息唯一 ID（用于日志/持久化）。
         timestamp: 创建时间戳。
+        extra: 消息级元数据（不参与发给 provider 的序列化），如
+            checkpoint_id——消息级回溯检查点绑定，随会话 JSON 持久化。
+            @author aceFelix
     """
 
     role: Literal["user", "assistant", "system"]
     content: list[ContentBlock] = field(default_factory=list)
     id: str = field(default_factory=_new_id)
     timestamp: float = field(default_factory=time.time)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def user_text(cls, text: str) -> Self:

@@ -221,6 +221,12 @@ Zai / DashScope 原生 SDK 走各自的工具块协议，暂未接入，若复�
 - **Provider 名推断**：从 base_url 动态推断 provider 名
 - **多模态图片**：image content → Anthropic image block
 - **思考模式默认开启**：DeepSeek-v4-flash 等通过 Anthropic 兼容 API 接入的模型，默认开启 thinking 模式
+- **思考强度档位下发（2026-10-03）**：`set_thinking_effort(low/medium/high)` 按端点类型翻译——
+  anthropic 原生端点映射 `thinking.budget_tokens`（low 1024 / medium 4096 / high 10000）；
+  DeepSeek 兼容端点的 `budget_tokens` 被服务端忽略（官方文档），改走顶层
+  `output_config.effort`（low→low / medium→high / high→max，与 DeepSeek 官方档位口径一致）；
+  其余兼容端点与 `on` 档位不发强度。此前 deepseek 兼容路径档位完全不下发，
+  低/中/高发出的请求相同（桌面选择器形同虚设），见下方代码示例
 - **thinking_delta 事件处理**：流式响应中处理 `thinking_delta` 事件，emit `ThinkingDelta`
 - **显式 disabled 状态**：关闭思考时显式注入 `thinking: {"type": "disabled"}`，而不是省略参数
 
@@ -232,9 +238,16 @@ Zai / DashScope 原生 SDK 走各自的工具块协议，暂未接入，若复�
 
 ```python
 # stream() 里的思考参数注入
-if self.is_thinking_enabled():
-    request_kwargs["thinking"] = {"type": "enabled"}
-    # 注入 thinking_budget 等
+if self._thinking_enabled:
+    if self.name == "anthropic":
+        # 原生端点：档位 → budget_tokens（最小 1024），无档位回退 10000
+        request_kwargs["thinking"] = {"type": "enabled", "budget_tokens": _budget}
+    else:
+        # 兼容端点：只发 type；budget_tokens 会被忽略
+        request_kwargs["thinking"] = {"type": "enabled"}
+        # deepseek 额外透传强度：顶层 output_config.effort（仅支持 effort 字段）
+        if self.name == "deepseek" and self._thinking_effort:
+            request_kwargs["output_config"] = {"effort": _effort}  # low/high/max
 else:
     # 显式关闭：不能省略，否则 DeepSeek-v4-flash 会默认开启
     request_kwargs["thinking"] = {"type": "disabled"}

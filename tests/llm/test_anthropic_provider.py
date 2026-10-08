@@ -415,6 +415,78 @@ class TestStream:
 
 
 # ─────────────────────────────────────────────────────────────
+# 思考强度档位下发（anthropic 协议路径）
+# ─────────────────────────────────────────────────────────────
+
+
+class TestThinkingEffortInjection:
+    """各端点思考强度参数注入：deepseek 兼容端点走 output_config.effort，
+    anthropic 原生走 thinking.budget_tokens，关闭态两者都不发档位。
+
+    背景：此前 deepseek 走 anthropic 协议时档位不下发，低/中/高请求完全
+    相同（2026-10-03 修复，见 docs/fixlogs 与 anthropic_provider.stream）。
+    @author aceFelix
+    """
+
+    @staticmethod
+    def _make(monkeypatch, base_url: str | None) -> AnthropicProvider:
+        """按 base_url 构造挂假客户端的 provider（name 由 URL 推导）。"""
+        mock_client = MagicMock()
+        mock_client.messages.stream.return_value = _FakeStream(
+            [_Ev(type="message_start")],
+            _final_message(usage=_Ev(input_tokens=1, output_tokens=1)),
+        )
+        monkeypatch.setattr(anthropic, "AsyncAnthropic", lambda **kw: mock_client)
+        p = AnthropicProvider(api_key="sk-test", base_url=base_url)
+        p._client = mock_client
+        return p
+
+    @staticmethod
+    async def _run(p: AnthropicProvider) -> dict:
+        """跑一次最小流式请求，返回落到 SDK 的 kwargs。"""
+        _ = [e async for e in p.stream(
+            model="m", system="", messages=[Message.user_text("hi")], tools=[]
+        )]
+        return p._client.messages.stream.call_args.kwargs
+
+    async def test_deepseek_effort_maps_to_output_config(self, monkeypatch) -> None:
+        """deepseek 兼容端点：low/medium/high → output_config.effort low/high/max。"""
+        p = self._make(monkeypatch, "https://api.deepseek.com/anthropic")
+        assert p.name == "deepseek"
+        for effort, expect in (("low", "low"), ("medium", "high"), ("high", "max")):
+            p.set_thinking_effort(effort)
+            kwargs = await self._run(p)
+            assert kwargs["thinking"] == {"type": "enabled"}
+            assert kwargs["output_config"] == {"effort": expect}
+
+    async def test_deepseek_on_level_no_effort_param(self, monkeypatch) -> None:
+        """仅开启（on，无强度档位）时不发 output_config，用端点默认力度。"""
+        p = self._make(monkeypatch, "https://api.deepseek.com/anthropic")
+        p.set_thinking_effort("on")
+        kwargs = await self._run(p)
+        assert kwargs["thinking"] == {"type": "enabled"}
+        assert "output_config" not in kwargs
+
+    async def test_deepseek_off_disables_without_effort(self, monkeypatch) -> None:
+        """off 档位：显式禁用思考且不带 output_config。"""
+        p = self._make(monkeypatch, "https://api.deepseek.com/anthropic")
+        p.set_thinking_effort("low")  # 先设档位再关，验证残留档位不泄漏
+        p.set_thinking_effort("off")
+        kwargs = await self._run(p)
+        assert kwargs["thinking"] == {"type": "disabled"}
+        assert "output_config" not in kwargs
+
+    async def test_native_anthropic_uses_budget_tokens(self, monkeypatch) -> None:
+        """anthropic 原生端点：档位映射 thinking.budget_tokens，不走 output_config。"""
+        p = self._make(monkeypatch, "https://api.anthropic.com")
+        assert p.name == "anthropic"
+        p.set_thinking_effort("medium")
+        kwargs = await self._run(p)
+        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+        assert "output_config" not in kwargs
+
+
+# ─────────────────────────────────────────────────────────────
 # 文本态工具调用兜底（DSML 泄漏进 text block）
 # ─────────────────────────────────────────────────────────────
 

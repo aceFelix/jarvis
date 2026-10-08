@@ -270,6 +270,11 @@ jarvis
 > 桌面入口由 jarvis-desktop（Electron 桌面应用，独立仓库）接管；
 > 本仓库终端内仍可用 `jarvis --gui` 打开三栏工作台窗口。
 
+> **桌面安装包后端冻结**：本仓库 `packaging/` 存放把 `agent.serve` 用 PyInstaller 冻结成
+> 独立 `jarvis-serve.exe` 的入口（`serve_entry.py`）、打包规格（`jarvis-serve.spec`）与构建
+> 脚本（`build_serve.ps1`）；产物 `dist/jarvis-serve/` 由 jarvis-desktop 的 `npm run dist` 经
+> `extraResources` 拷入 NSIS 安装包，使终端用户无需安装 Python。
+
 ### 依赖健康检查
 
 安装完成后或遇到功能不可用时，运行 `--doctor` 一键诊断所有依赖状态：
@@ -366,6 +371,12 @@ tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完�
 # ---- 桌面入口与热键 ----
 [daemon]
 hotkey = "ctrl+shift+j"           # 全局热键（召唤三栏工作台，待接线）
+
+# ---- 消息级回溯检查点（shadow git）----
+[checkpoint]
+enabled = true                    # 总开关：每轮对话前对工作目录打检查点，/rewind / 桌面撤回可连带回滚文件（关闭后仅支持对话回退）
+max_per_session = 20              # 每会话检查点保留上限（超出修剪最早的）
+timeout_seconds = 10              # 单条 git 命令超时（秒）；未装 git 时自动降级为仅对话回退
 ```
 
 > 📖 完整配置项参见 **[config-docs/configuration.md](config-docs/configuration.md)**；各厂商接入见 **[config-docs/providers.md](config-docs/providers.md)**；语音配置见 **[config-docs/voice-setup.md](config-docs/voice-setup.md)**；常见问题见 **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**。
@@ -466,8 +477,8 @@ Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体
 | `/reset` `/clear` | 清空对话历史，重新开始 |
 | `/compact` | 手动压缩上下文（摘要旧消息节省 Token） |
 | `/cost` | 显示本会话 token 用量与估算成本（含 system prompt 统计、缓存命中率） |
-| `/context` | 查看上下文窗口使用情况（按角色分组统计，含 system prompt token） |
-| `/rewind [n]` | 回退最近 n 条消息（默认 1 条） |
+| `/context` | 查看上下文窗口使用情况（按角色分组统计，含 system prompt token；窗口口径取用户配置的 `context_window`（如 200000），统计头显示「窗口」，仅未配置回退默认值时才标注「假设窗口」） |
+| `/rewind [n]` | 回退最近 n 条消息（默认 1 条）；若该轮涉及文件修改，列出改动清单确认后连带回滚工作区（shadow git 检查点），加 `--chat-only` 跳过询问仅回退对话 |
 | `/diff [path]` | 显示工作目录的 git diff（可指定路径） |
 
 ### 模型管理
@@ -1103,7 +1114,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。**任意来源都能停**（2026-10）：手机 / 微信 / 主动任务发起的轮次经桥接 `on_query_begin`（引擎 `_remote_query_begin`）把当前任务登记为 `_send_task`，故 `reply.abort` 对非桌面本地输入的在跑轮次同样生效；桌面侧 `busy` 改由引擎活动事件（`assistant_text`/`assistant_thinking`/`tool_use`）驱动、`assistant_done` 统一撤销，不再只靠本地发送置位。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
 - **项目工作区（桌面壳，2026-08）**：左栏**底部**常驻「项目」区（面板区之后、状态栏之前，配色随主题皮肤）：`＋ 打开文件夹` 由主进程目录选择器取绝对路径后发指令 `project.set`，后端二次校验（存在 + 绝对，不自动建目录）→ 入队引擎线程内串行重建系统提示词 / 重挂 harness / 开新会话，落地推 `project_switched`；最近项目走 `projects.list`（点击即切、右键「从列表移除」= `projects.forget`，只清 `~/.jarvis/projects.toml` 记录、不删磁盘）；serve 启动默认 workdir 取该文件 `last_active`，实现「重开回到上次项目」。另有：`init`（每连接首帧）把左栏状态栏从启动期的「等待后端启动...」切到「就绪」；后端进程未重启（无 `project.*` 注册）时点选会秒级上屏「后端不支持指令 project.set（…请重启后端后重试）」而非干等超时。
-- **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 缓存命中率 + 轮数/消息数，命中率统一由 `Usage.cache_hit_rate` 按协议口径算好、前端不重算）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（📸 截屏发送—主进程截屏复用附件链路走 vision／新会话／停止回复／复制最后回复）已迁入输入栏。刷新时机：init 七路齐刷（含设置回填）、assistant_done 刷用量、proactive_notify 刷任务列表、`mcp_ready` 刷运行健康（MCP 为后台预热约 9s，init 时快照常为 null，“未启用”，连接落定后推 `mcp_ready` 事件驱动右栏补刷）。
+- **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 缓存命中率 + 轮数/消息数，命中率统一由 `Usage.cache_hit_rate` 按协议口径算好、前端不重算；附上下文窗口占比 `context_*`，口径同 REPL `/context`，由引擎只读属性 `context_usage` 经 `get_cost` 透传，2026-10）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（🗜 手动压缩上下文—点击经 `slash.exec` 透传 `/compact`、结果走 `slash_result` 命令输出卡片／新会话／停止回复／复制最后回复）已迁入输入栏（曾有的 📸 主屏截屏因实用性低已于 2026-10 删除）。刷新时机：init 十路齐刷（含设置回填、协同回填与 slash.commands 补全目录，2026-10）、assistant_done 刷用量、proactive_notify 刷任务列表、`mcp_ready` 刷运行健康（MCP 为后台预热约 9s，init 时快照常为 null，“未启用”，连接落定后推 `mcp_ready` 事件驱动右栏补刷）。
 - **添加模型（桌面壳，2026-09）**：左栏模型面板列表末项「＋ 添加模型」（虚线框）→ 点击后独立组件 `ModelForm` 整体替换列表（同右栏设置面板模式），六个字段（模型厂商/模型名/API Key/接口类型/Base URL/模型类型）与 REPL `/models` → 添加其他模型完全同口径；提交走 `models.add` 指令：serve 二次校验（模型名必填、接口类型/模型类型白名单）→ 复用 `save_custom_model` 写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（API Key 同步系统 keyring）+ `_infer_base_url` 推断空 Base URL → 成功后壳刷 `models.list` 并提示「模型「X」已添加」，失败保持表单打开可修正。表单字段区带 `.form-scroll` 滚动容器（面板高度不足时自身滚动，不溢出压到左栏底部「项目」区；报错与保存/取消常驻滚动区之外，2026-09-30），音色表单 `VoiceForm` 同口径。
 - **修改与删除模型配置（桌面壳，2026-09）**：左栏模型项交互对齐会话列表 —— **双击**模型项进 `ModelForm` 编辑该模型（预填 `models.list` 每项 `config` 现值），**右键**模型项则项内出现删除按钮、再点才真删（二次确认）。编辑走 `models.edit` 指令（`name` 必填，`new_name`/`vendor`/`api_format`/`base_url`/`api_key`/`model_type` 留空表示不改）：内置模型（命中项目级 `[llm.models]`）**名字锁定不可改**（改名只会产生「幽灵模型」），自定义模型可改名（写新段删旧段，`api_key` 留空则**保持原 Key** —— 桌面壳不回显密钥，与 REPL「留空即清空」刻意不同）；改的是当前运行模型时 serve 侧入队 `{"cmd": "switch_model", "force": true}` **强制重建 provider**，端点/接口类型改动立即生效（回执带 `hot_switched`，壳提示「当前会话已按新配置重连」）。删除走 `models.remove`：仅自定义模型可删（内置模型与「用户级 models.toml 无该段」均回 ok=false，后者防「删不掉但重启复活」），删的是当前模型时回执 `was_current` 且**不动运行中的 provider**（提示用户另选）。
 - **音色管理（桌面壳，2026-09-28）**：左栏「音色」面板与模型面板同范式 —— `voices.list` 返回**全量音色目录**（内置 + 自定义，每项 `{name, voice_id, description, vendor, model, linked, current, custom}`，当前音色置顶；副行透出「适配 X」/「联动 X」预告）；点选音色走 `voices.select`（回执从 bool 升级为 `{ok, name, voice_id, linked_model, old_model}`：与终端 `/tts-voice` 同口径立即写盘并在不兼容时**自动联动 tts_model**，`linked_model` 带回壳提示「联动 TTS 模型 X，下次语音生效」）；末项「＋ 添加音色」表单提交 `voices.add`（name/voice_id 必填、内置名遮蔽拒绝，upsert 即编辑——双击自定义项进表单预填）；右键自定义项显删除按钮、再点发 `voices.delete`（仅 custom 可删，后端经 `remove_custom_voice` 外科式删 `models.toml` 段）。
@@ -1111,8 +1122,10 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **项目工作区（桌面壳，2026-08）**：左栏顶部新增「项目」区，把 serve 启动时固定的 `settings.workdir`（工具执行、项目级 `.jarvis/MEMORY.md`、`.jarvis/skills/`、`SessionMeta.workdir` 都基于它）升级为可运行时切换：「＋ 打开文件夹」经主进程 `dialog.showOpenDialog` 选目录 → `project.set` 上送后端二次校验存在 + 绝对→ 引擎 `project_switch.handle_set_workdir` 串行落地（重建系统提示词 + 重挂 harness + **开新会话**，同 model_switch 范式不打断流式），落地后推 `project_switched` 事件；与最近项目列表 `projects.list`/`project.get`/`projects.forget` 同环，持久化到 `~/.jarvis/projects.toml`（`[[project]] {path,name,last_opened}` + `last_active`）；`python -m agent.serve` 与 `jarvis --serve` 启动都默认取 `get_last_active_existing()`，重开自动回到上次项目。**与切模型正交**：provider 不重建、模型不变；**前缀缓存失效一次属预期**（system prompt 含 workdir）。安全边界：后端二次校验拒绝空/相对/不存在，不自动建目录；切项目不改 `permission_mode`。
 - **未知指令失败回执（2026-09 加固）**：WS 分发对**未注册**的指令 type 立即回 `{"event":"reply","data":{"type","ok":false,"error"}}`（旧行为是静默忽略，既不回 ok 也不回 error），错误文案为「后端不支持指令 X（后端进程可能未加载最新代码，请重启后端后重试）」；缺 `type` 字段同样回失败回执。原因是前端（Vite 热更新）可能先支持新指令、而后端进程仍是旧代码（`python -m agent.serve` 不热重载），静默丢弃只会让桌面壳干等到 15s 超时、用户看不到任何原因（典型症状「指令 models.add 回执超时」）；手机 PWA 不消费 `reply` 事件，行为不受影响。
 - **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
+- **斜杠命令透传（`slash.exec`，2026-10）**：桌面壳输入框识别 `/` 前缀，经 `slash.exec` 指令把命令原文转发到引擎侧新模块 [agent/ui/workbench/slash_bridge.py](agent/ui/workbench/slash_bridge.py)，复用终端同一个 `dispatch_command` 执行、捕获 stdout 输出以 `slash_result` 事件（`{command, ok, text}`）回推，桌面渲染成命令输出卡片——一次改动把 `/compact` `/context` `/cost` `/diff` `/doctor` `/tools` `/mcp` `/skills` `/memory` `/plugin` 等一大批终端能力带进桌面。三道护栏：白名单只放行非交互命令（桌面已有原生控件的 mode/think/model/sessions/rewind 等不透传，防双入口口径漂移）；交互禁令（执行期临时把 `pick_from_list` / `form_input` / `ask_user` / `terminal_picker` 等换成抛错实现——serve 的 stdin 是协议管道，任何命令试图交互都干净失败而不挂起、不抢管道）；白名单外命中已安装技能（`/<skill-name>`）动态放行，与手机/微信共用 query 锁串行、可被 `reply.abort` 停止、轮后正常落盘。
+- **斜杠命令补全目录（`slash.commands`，2026-10）**：新增第 47 条只读指令 `slash.commands`，返回桌面可执行斜杠命令目录 `[{name, description, source}]`（`source`：passthrough=白名单透传 / native=桌面原生控件对应命令 / skill=已安装技能），数据源 [agent/ui/workbench/slash_bridge.py](agent/ui/workbench/slash_bridge.py) 的 `build_desktop_commands`——口径与 `run_slash` 执行护栏严格对齐，补出来的每条命令必然可执行。桌面壳据此实现输入框 `/` 前缀弹层补全（输 `/c` 匹配所有 c 开头命令、输 `/` 展示全部），手感对齐终端 REPL。
 
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：34 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*`（含 `add` 添加自定义音色 / `delete` 删除音色，`select` 回执带 tts_model 联动） / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}` / `project.{set,get}` + `projects.{list,forget}`（2026-08 项目工作区））+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`） / 主动播报（`proactive_notify`） / 项目热切换（`project_switched`，2026-08）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」与「项目热切换」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
+协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：47 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*`（含 `add` 添加自定义音色 / `delete` 删除音色，`select` 回执带 tts_model 联动） / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `mode.set` / `think.set`（2026-09 工作模式与思考强度选择器） / `checkpoint.*`（`preview` 撤回前预览 / `rewind` 消息级回溯与文件回滚，2026-10） / `slash.exec`（斜杠命令透传，结果走 `slash_result` 事件，2026-10） / `slash.commands`（斜杠命令补全目录，只读，2026-10） / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}` / `project.{set,get}` + `projects.{list,forget}`（2026-08 项目工作区） / `phone.*` / `wechat.*`（协同与配对管理））+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`） / 主动播报（`proactive_notify`） / 项目热切换（`project_switched`，2026-08） / 命令输出（`slash_result`，2026-10）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」与「项目热切换」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
 
 ---
 

@@ -102,7 +102,7 @@ def test_reply_abort_routes_to_api():
 
 
 def test_desktop_commands_count():
-    """指令总数契约：message + 41 个 rpc + talk.audio（无回执帧通道）= 43。
+    """指令总数契约：message + 44 个 rpc + talk.audio（无回执帧通道）= 46。
 
     2026-09-28 音色-模型适配接入桌面壳：+voices.add / voices.delete（28→30）。
     2026 桌面项目工作区：+project.set / project.get / projects.list /
@@ -110,9 +110,14 @@ def test_desktop_commands_count():
     2026-09 桌面输入区工作模式/思考强度：+mode.set / think.set（34→36）。
     2026-10 跨设备协同桌面接入：+phone.connect/disconnect/status +
     wechat.connect/disconnect/status/pairing（36→43）。
+    2026-10 消息级回溯（撤回+文件回滚）：+checkpoint.preview / checkpoint.rewind
+    （43→45）。
+    2026-10 斜杠命令透传：+slash.exec（45→46，实现见 ui/workbench/
+    slash_bridge.py，结果走 slash_result 事件）；同月补全目录
+    +slash.commands（46→47，只读返回桌面可执行命令列表）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 43
+    assert len(protocol.DESKTOP_COMMANDS) == 47
 
 
 def test_all_registered_rpcs_declared():

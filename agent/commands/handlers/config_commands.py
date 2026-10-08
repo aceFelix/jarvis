@@ -91,6 +91,11 @@ def _show_permissions(ui: RichCLI, settings: Any) -> None:
             ["sandbox_timeout", f"{settings.sandbox_timeout}s"],
             ["sandbox_block_network", _bool_icon(settings.sandbox_block_network)],
         ]
+    # 消息级回溯检查点（shadow git）@author aceFelix
+    rows += [
+        ["checkpoint_enabled", _bool_icon(getattr(settings, "checkpoint_enabled", True))],
+        ["checkpoint_max_per_session", str(getattr(settings, "checkpoint_max_per_session", 20))],
+    ]
     render_table(rows, headers=["配置项", "值"], title="权限与沙箱")
 
 

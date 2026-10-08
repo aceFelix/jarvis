@@ -99,6 +99,40 @@ def test_engine_is_busy_voice_sessions():
     assert engine.is_busy is False
 
 
+def test_engine_context_usage_uses_configured_window():
+    """context_usage：窗口取引擎配置值（如 200000）且标记 configured，
+    已用 token = 消息估算 + system prompt 估算，占比据此算。@author aceFelix
+    """
+    from agent.core.memory.compactor import estimate_text_tokens, estimate_tokens
+
+    engine = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    msgs = [Message(role="user", content=[TextContent(text="一二三四五")])]
+    engine._messages = msgs
+    engine._query_loop = SimpleNamespace(context_window=200000, _system="系统提示词")
+    cu = engine.context_usage
+    assert cu["context_window"] == 200000
+    assert cu["context_configured"] is True
+    expect_used = estimate_tokens(msgs) + estimate_text_tokens("系统提示词")
+    assert cu["context_used"] == expect_used
+    assert cu["context_percent"] == round(expect_used / 200000 * 100, 1)
+
+
+def test_engine_context_usage_falls_back_when_unconfigured():
+    """未配置窗口（loop.context_window=0）/ 无 loop → 回退假设值 128000、
+    configured=False，不抛错。@author aceFelix
+    """
+    engine = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    engine._messages = [Message(role="user", content=[TextContent(text="hi")])]
+    engine._query_loop = SimpleNamespace(context_window=0, _system="")
+    cu = engine.context_usage
+    assert cu["context_window"] == 128000
+    assert cu["context_configured"] is False
+    # 完全未装配（无 _query_loop）同样安全回退
+    engine2 = ChatEngine(Settings(), queue.Queue(), queue.Queue())
+    assert engine2.context_usage["context_used"] == 0
+    assert engine2.context_usage["context_percent"] == 0.0
+
+
 def test_engine_new_session_resets_state():
     """new_session 指令清空轮数并推送 session_new 事件。"""
     settings = Settings()

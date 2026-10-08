@@ -749,6 +749,28 @@
 | T-340 | 语音 `<standby/>` 不泄漏上屏 | 语音模式说「退下吧」，观察桌面/终端气泡 | 告别语气泡**不出现字面 `<standby/>`**（全量 `on_ai_text` 与流式 `on_ai_text_delta` 均剥标）；仍正常进入待机（退下检测读原始消息不受影响）；单测 `test_voice_standby_display.py` |
 | T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_workbench_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/serve-toolsearch-registration-fix.md) |
 
+## 36. 消息回溯与检查点（2026-10，shadow git）
+
+> 机制与协议详见 [15-消息回溯与检查点](../architecture/15-消息回溯与检查点.md)；单测：`tests/core/test_checkpoint.py`、`tests/memory/test_store.py`（extra 往返）、`/rewind` 联动用例、serve `checkpoint.*` 用例；桌面：`test/renderer/` chatStore(5)/dispatcher(5)/backendStore(6)。
+
+### 36.1 终端
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-349 | 轮前打检查点 | 正常对话一轮（让 AI 改文件）后查 `~/.jarvis/checkpoints/<指纹>/` | shadow git 目录生成，manifest.json 有条目；会话 JSON 中该轮用户消息 `extra.checkpoint_id` 非空 |
+| T-350 | `/rewind` 联动回滚 | AI 改过文件后 `/rewind 1`，询问时输 y | 先列改动文件清单（describe）再确认；回滚后工作区文件内容/新增/删除均恢复到发消息前，消息同步弹出 |
+| T-351 | `/rewind` 只退对话 | 同上询问时输 N；或直接 `/rewind 1 --chat-only` | 仅弹消息，文件不动；`--chat-only` 不弹询问 |
+| T-352 | 无检查点降级 | 删掉 `~/.jarvis/checkpoints/` 后 `/rewind 1`（或 `[checkpoint] enabled=false` / 未装 git） | 不报错，退化为仅对话回退并提示原因 |
+| T-353 | 配额修剪 | `max_per_session=3` 连打 5 轮 | 最早 2 个检查点 ref 被删；对应旧消息撤回时提示「检查点已被清理」仅退对话 |
+
+### 36.2 serve / 桌面
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-354 | checkpoint.preview | 发 `{"type":"checkpoint.preview","user_tail_count":1}` | 回执 `{ok,has_checkpoint,checkpoint_id,files,untracked,reason}`；只读不入队；用户消息不足回 ok=false |
+| T-355 | checkpoint.rewind + rewound | 发 `{"type":"checkpoint.rewind","user_tail_count":1,"restore_files":true}` | 入队即返 `{ok:true,pending:true}`；真实结果走 `rewound` 事件 `{ok,removed,removed_user,files_restored,reason}` |
+| T-356 | 桌面撤回交互 | 悬停用户气泡→「撤回」→确认弹窗→确认 | 弹窗展示改动文件列表 + 「同时回滚工作区文件」复选框；确认后气泡裁掉、系统提示「已撤回…」；无检查点时复选框禁用仅提示 |
+| T-357 | 回滚失败原子性 | mock restore 失败后触发撤回 | `rewound` 回 `{ok:false,…}`，前端气泡**不裁**、聊天流弹错，后端消息也不截断 |
+| T-358 | /load 后跨重启撤回 | 对话几轮→退出→`/load` 旧会话（桌面：重开选历史会话）→撤回 | `extra.checkpoint_id` 随会话 JSON 持久化，检查点按 workdir 指纹定位仍可命中，文件回滚成功 |
+
 ---
 
 ## 快速冒烟测试（每次改动必跑）
@@ -774,7 +796,7 @@
 
 ---
 
-> **总计：348 项测试，覆盖 35 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348）
+> **总计：358 项测试，覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358）
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >

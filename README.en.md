@@ -350,6 +350,12 @@ tool_result_keep_recent = 4       # Keep recent N full tool outputs when folding
 # ---- Desktop entry & hotkey ----
 [daemon]
 hotkey = "ctrl+shift+j"           # Global hotkey (kept for the new GUI workbench)
+
+# ---- Message-level rewind checkpoints (shadow git) ----
+[checkpoint]
+enabled = true                    # Master switch: checkpoint the workdir before each turn so /rewind / desktop rewind can also roll back files (off = conversation-only rewind)
+max_per_session = 20              # Max checkpoints kept per session (oldest trimmed)
+timeout_seconds = 10              # Timeout (s) per git command; falls back to conversation-only rewind when git is missing
 ```
 
 > 📖 Full config options see **[config-docs/configuration.md](config-docs/configuration.md)**; vendor integration see **[config-docs/providers.md](config-docs/providers.md)**; voice config see **[config-docs/voice-setup.md](config-docs/voice-setup.md)**; FAQ see **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**.
@@ -444,7 +450,7 @@ After startup, type `/` to bring up command list; Tab for auto-completion:
 | `/compact` | Manually compact context (summarize old messages to save tokens) |
 | `/cost` | Show this session's token usage and estimated cost (including system prompt stats, cache hit rate) |
 | `/context` | View context window usage (grouped by role, including system prompt tokens) |
-| `/rewind [n]` | Rewind last n messages (default 1) |
+| `/rewind [n]` | Rewind last n messages (default 1); if that turn modified files, show changed-file list and roll back the workspace after confirmation (shadow git checkpoints); add `--chat-only` to skip the prompt and rewind the conversation only |
 | `/diff [path]` | Show git diff of working directory (can specify path) |
 
 ### Model Management

@@ -300,6 +300,12 @@ class Settings:
     sandbox_audit: bool = True             # 是否记录沙箱审计日志
     sandbox_max_snapshots: int = 20        # 文件快照最大保留数
 
+    # 消息级回溯检查点（shadow git，见 core/checkpoint.py）：每轮对话前
+    # 对工作目录打检查点，/rewind / 桌面撤回可连带回滚文件。@author aceFelix
+    checkpoint_enabled: bool = True        # 总开关（关闭后仅支持对话回退）
+    checkpoint_max_per_session: int = 20   # 每会话检查点保留上限（超出修剪最旧）
+    checkpoint_timeout_seconds: int = 10   # 单条 git 命令超时（秒）
+
     # 工具延迟加载（参考 Claude Code deferred tool loading）
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
@@ -786,6 +792,16 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         # excluded_commands 是数组
         if "excluded_commands" in sandbox_table:
             updates["sandbox_excluded_commands"] = list(sandbox_table["excluded_commands"])
+    # [checkpoint] 表 → 消息级回溯检查点字段（shadow git）@author aceFelix
+    checkpoint_table = data.get("checkpoint", {})
+    if isinstance(checkpoint_table, dict):
+        for sub_key, field in (
+            ("enabled", "checkpoint_enabled"),
+            ("max_per_session", "checkpoint_max_per_session"),
+            ("timeout_seconds", "checkpoint_timeout_seconds"),
+        ):
+            if sub_key in checkpoint_table:
+                updates[field] = checkpoint_table[sub_key]
     # [tools] 表 → 工具延迟加载字段
     tools_table = data.get("tools", {})
     if isinstance(tools_table, dict):

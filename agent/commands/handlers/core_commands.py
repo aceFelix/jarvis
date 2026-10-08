@@ -45,7 +45,7 @@ def _print_help(ui: RichCLI) -> None:
         "  /compact     手动压缩上下文（摘要旧消息）\n"
         "  /cost        显示本会话 token 用量与成本估算\n"
         "  /context     显示上下文窗口使用情况\n"
-        "  /rewind [n]  回退最近 n 条消息（默认 1）\n"
+        "  /rewind [n]  回退最近 n 条消息（默认 1，可连带回滚工作区文件）\n"
         "  /diff [path] 显示 git diff（工作区改动）\n"
         "  /doctor      系统诊断（环境/配置/日志/迁移状态）\n"
         "  /config show 查看当前生效的完整配置（含 MCP 状态）\n"
@@ -292,14 +292,15 @@ def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
 
 def _print_context(
     ui: RichCLI, messages: list[Message], model: str, system_prompt: str = "",
-    window: int = 0,
+    window: int = 0, window_configured: bool = False,
 ) -> None:
     """/context: 显示上下文窗口使用情况，按角色分组统计消息数。
 
     system_prompt 单独传入并单独统计 token，因为 system prompt 不在
     messages 列表内，但实际占上下文窗口。窗口占比必须含 system 才准确。
-    window 传入用户配置的 context_window（比例压缩模式）；未配置时回退
-    主流大模型的保守假设值 128k。
+    window 传入用户配置的 context_window（比例压缩模式）；window_configured
+    区分窗口来源——用户配置值直接标「窗口」，未配置回退保守假设值 128k
+    才标「假设窗口」，不把真实配置写成假设口径。
 
     @author aceFelix
     """
@@ -322,7 +323,10 @@ def _print_context(
     if not window:
         window = 128000
     pct = (total / window * 100) if window else 0
-    ui.info(f"上下文使用情况（模型: {model}，假设窗口 {window:,} tokens）")
+    # 文案区分窗口来源：用户配置值是真实窗口，只有回退值才叫「假设窗口」。
+    # @author aceFelix
+    window_label = "窗口" if window_configured else "假设窗口"
+    ui.info(f"上下文使用情况（模型: {model}，{window_label} {window:,} tokens）")
     rows = [
         [role, str(role_counts.get(role, 0)), f"{role_tokens.get(role, 0):,}"]
         for role in ["system", "user", "assistant", "tool"]
@@ -346,14 +350,21 @@ def _print_context(
 
 def handle_context(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /context。"""
-    # 优先使用用户配置的 context_window（比例压缩模式），未配置回退 128k 假设值
+    # 优先使用用户配置的 context_window（比例压缩模式），未配置回退 128k 假设值；
+    # window_configured 透传给文案层，配置值不叫「假设窗口」。@author aceFelix
     window = getattr(ctx.loop, "context_window", 0) if getattr(ctx, "loop", None) else 0
-    _print_context(ctx.ui, ctx.messages, ctx.model, ctx.system_prompt, window=window or 128000)
+    _print_context(
+        ctx.ui, ctx.messages, ctx.model, ctx.system_prompt,
+        window=window or 128000, window_configured=bool(window),
+    )
     return True
 
 
 def _rewind(ui: RichCLI, messages: list[Message], cmd: str) -> None:
-    """/rewind [n]: 回退最近 n 条消息（默认 1 条）。"""
+    """/rewind [n]: 回退最近 n 条消息（默认 1 条）。纯对话回退。
+
+    保留为 handle_rewind 解析失败时的行为基准；文件回滚联动见 handle_rewind。
+    """
     parts = cmd.split()
     n = 1
     if len(parts) > 1:
@@ -373,9 +384,80 @@ def _rewind(ui: RichCLI, messages: list[Message], cmd: str) -> None:
     ui.info(f"已回退 {n} 条消息，当前 {len(messages)} 条")
 
 
-def handle_rewind(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /rewind [n]。"""
-    _rewind(ctx.ui, ctx.messages, stripped)
+async def _confirm_restore_files(ui: RichCLI, mgr, cid: str) -> None:
+    """列出检查点的回滚影响面，交互确认是否连带回滚工作区文件。
+
+    @author aceFelix
+    """
+    desc = mgr.describe(cid) or {}
+    files = desc.get("files") or []
+    untracked = desc.get("untracked") or []
+    if files or untracked:
+        ui.info("该消息有工作区检查点，回滚将恢复以下文件：")
+        _marks = {"M": "修改", "A": "新增", "D": "删除"}
+        for f in files[:20]:
+            mark = _marks.get(str(f.get("status", "")), str(f.get("status", "")))
+            ui.info(f"  [{mark}] {f.get('path', '')}")
+        if len(files) > 20:
+            ui.info(f"  …… 共 {len(files)} 项改动")
+        if untracked:
+            ui.info(f"  另有 {len(untracked)} 个新增未跟踪文件将被删除")
+    else:
+        ui.info("该检查点与工作区无差异，无需回滚文件")
+        return
+    try:
+        answer = await ui.read_user_input_async("同时回滚工作区文件？[y/N] ")
+    except Exception:
+        answer = ""
+    if answer.strip().lower() in ("y", "yes"):
+        ok, note = mgr.restore(cid)
+        (ui.info if ok else ui.warn)(f"文件回滚：{note}")
+    else:
+        ui.info("跳过文件回滚，仅回退对话（下次可加 --chat-only 跳过询问）")
+
+
+async def handle_rewind(ctx: "CommandContext", stripped: str) -> bool:
+    """/rewind [n] [--chat-only]: 回退最近 n 条消息，可连带回滚工作区文件。
+
+    回滚目标：回退范围内最早一条带 checkpoint_id 的用户消息的"发出前"状态
+    （shadow git 检查点，见 core/checkpoint.py）。无检查点/未启用/--chat-only
+    时维持纯对话回退。@author aceFelix
+    """
+    parts = stripped.split()[1:]
+    chat_only = "--chat-only" in parts
+    n = 1
+    for p in parts:
+        if p == "--chat-only":
+            continue
+        try:
+            n = int(p)
+        except ValueError:
+            ctx.ui.warn(f"无效参数: {p}（应为正整数或 --chat-only）")
+            return True
+        if n < 1:
+            ctx.ui.warn("参数必须 ≥ 1")
+            return True
+    messages = ctx.messages
+    if n > len(messages):
+        ctx.ui.warn(f"消息数不足：当前 {len(messages)} 条，无法回退 {n} 条")
+        return True
+
+    # 文件回滚联动：从后往前扫，第一条带有效检查点的用户消息即最早目标
+    if not chat_only:
+        tool_ctx = getattr(ctx, "ctx", None)
+        mgr = getattr(tool_ctx, "extra", {}).get("checkpoint_mgr") if tool_ctx else None
+        if mgr is not None and mgr.available():
+            target_cid = ""
+            for m in reversed(messages[-n:]):
+                cid = (m.extra or {}).get("checkpoint_id", "")
+                if m.role == "user" and cid and mgr.has_checkpoint(cid):
+                    target_cid = cid  # 继续往前找更早的
+            if target_cid:
+                await _confirm_restore_files(ctx.ui, mgr, target_cid)
+
+    for _ in range(n):
+        messages.pop()
+    ctx.ui.info(f"已回退 {n} 条消息，当前 {len(messages)} 条")
     return True
 
 

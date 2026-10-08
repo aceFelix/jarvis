@@ -157,6 +157,35 @@ class WorkbenchAPI:
         """
         return self._engine.abort_current_reply()
 
+    # ---- 消息级回溯（撤回） ----
+
+    def checkpoint_preview(self, user_tail_count: int) -> dict[str, Any]:
+        """撤回预览：撤回倒数第 N 条用户消息会连带回滚哪些工作区文件。
+
+        只读操作（读引擎消息快照 + shadow git describe），不入指令队列；
+        实现见 checkpoint_ops.preview。@author aceFelix
+        """
+        from agent.ui.workbench import checkpoint_ops
+
+        try:
+            return checkpoint_ops.preview(self._engine, int(user_tail_count))
+        except Exception as e:
+            return {"ok": False, "has_checkpoint": False,
+                    "reason": f"预览失败: {type(e).__name__}: {e}"}
+
+    def checkpoint_rewind(self, user_tail_count: int, restore_files: bool) -> dict[str, Any]:
+        """撤回消息：入队引擎串行执行（截断对话 + 可选回滚文件）。
+
+        与在跑轮次天然排队；入队即返回，真实结果走 rewound 事件
+        （{ok, removed, files_restored, reason}）。@author aceFelix
+        """
+        self._post({
+            "cmd": "checkpoint_rewind",
+            "user_tail_count": int(user_tail_count),
+            "restore_files": bool(restore_files),
+        })
+        return {"ok": True, "pending": True}
+
     # ---- 实时语音 ----
 
     def start_talk(self, duplex: bool = False) -> Any:
@@ -235,7 +264,8 @@ class WorkbenchAPI:
         """会话用量统计（serve cost.get 指令数据源，桌面壳右栏用量卡）。
 
         口径与 REPL /cost 一致：token 四类累计（输入/输出/缓存读/缓存写）
-        取自引擎 QueryLoop.session_usage，另附对话轮数与消息条数。
+        取自引擎 QueryLoop.session_usage，另附对话轮数与消息条数；并附
+        上下文窗口占用估算（engine.context_usage，口径同 /context）。
 
         @author aceFelix
         """
@@ -244,6 +274,7 @@ class WorkbenchAPI:
             "provider": self._engine.current_vendor,
             "model": self._engine.current_model,
             **self._engine.session_usage,
+            **self._engine.context_usage,
             "dialogs": self._engine.dialog_count,
             "messages": self._engine.message_count,
         }
@@ -307,6 +338,30 @@ class WorkbenchAPI:
             return {"ok": False, "error": f"未知思考档位: {effort}"}
         self._post({"cmd": "set_thinking", "effort": effort})
         return {"ok": True, "effort": effort}
+
+    def exec_slash(self, command: str) -> dict[str, Any]:
+        """透传执行终端斜杠命令（桌面 slash.exec）：校验形态后入队即返。
+
+        结果走 slash_result 事件回推（命令原文 / 捕获输出 / 成败）。这里只
+        校验非空且以 / 开头；白名单放行、交互禁令与实际执行都在引擎侧
+        slash_bridge（复用终端 dispatch_command）。@author aceFelix
+        """
+        text = (command or "").strip()
+        if not text.startswith("/") or len(text) < 2:
+            return {"ok": False, "error": "不是斜杠命令"}
+        self._post({"cmd": "slash_exec", "command": text})
+        return {"ok": True, "command": text}
+
+    def list_slash_commands(self) -> list[dict[str, Any]]:
+        """桌面可执行斜杠命令补全目录（slash.commands）：只读不入队。
+
+        数据源在 slash_bridge.build_desktop_commands（白名单透传 +
+        原生控件 + 已安装技能），与 run_slash 执行护栏口径一致。
+        @author aceFelix
+        """
+        from agent.ui.workbench import slash_bridge
+
+        return slash_bridge.build_desktop_commands(self._settings)
 
     # ---- 跨设备协同（手机 PWA / 微信 ClawBot，2026-10） ----
 

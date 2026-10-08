@@ -119,12 +119,17 @@ def _block_from_dict(d: dict[str, Any]) -> Any:
 
 
 def _message_to_dict(msg: Message) -> dict[str, Any]:
-    return {
+    d: dict[str, Any] = {
         "role": msg.role,
         "content": [_block_to_dict(b) for b in msg.content],
         "id": msg.id,
         "timestamp": msg.timestamp,
     }
+    # extra（含 checkpoint_id）仅在非空时写入，避免旧会话格式膨胀
+    # @author aceFelix
+    if msg.extra:
+        d["extra"] = dict(msg.extra)
+    return d
 
 
 def _message_from_dict(d: dict[str, Any]) -> Message:
@@ -134,6 +139,8 @@ def _message_from_dict(d: dict[str, Any]) -> Message:
         content=blocks,
         id=d.get("id", ""),
         timestamp=d.get("timestamp", time.time()),
+        # 旧会话文件无 extra 字段 → 默认空 dict，向后兼容
+        extra=dict(d.get("extra") or {}),
     )
 
 

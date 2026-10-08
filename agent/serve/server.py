@@ -113,6 +113,10 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_SESSIONS_NEW, lambda data: self._api.new_session())
         self._register_rpc(protocol.CMD_SESSIONS_RENAME, self._rpc_sessions_rename)
         self._register_rpc(protocol.CMD_SESSIONS_DELETE, self._rpc_sessions_delete)
+        # checkpoint.*（消息级回溯，桌面气泡「撤回」）：preview 只读直返；
+        # rewind 入队即返回，真实结果走 rewound 事件。@author aceFelix
+        self._register_rpc(protocol.CMD_CHECKPOINT_PREVIEW, self._rpc_checkpoint_preview)
+        self._register_rpc(protocol.CMD_CHECKPOINT_REWIND, self._rpc_checkpoint_rewind)
         self._register_rpc(protocol.CMD_MODELS_LIST, lambda data: self._api.list_models())
         self._register_rpc(protocol.CMD_MODELS_SELECT, self._rpc_models_select)
         self._register_rpc(protocol.CMD_MODELS_ADD, self._rpc_models_add)
@@ -154,6 +158,14 @@ class DesktopBridgeServer(BridgeServer):
         # @author aceFelix
         self._register_rpc(protocol.CMD_MODE_SET, self._rpc_mode_set)
         self._register_rpc(protocol.CMD_THINK_SET, self._rpc_think_set)
+        # slash.exec（斜杠命令透传，2026-10）：校验与入队由 api.exec_slash 承担，
+        # 实际执行在引擎指令队列的 slash_bridge（结果走 slash_result 事件）。
+        # slash.commands（2026-10 补全目录）：只读返回桌面可执行命令列表。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_SLASH_EXEC, self._rpc_slash_exec)
+        self._register_rpc(
+            protocol.CMD_SLASH_COMMANDS, lambda data: self._api.list_slash_commands()
+        )
         # phone.* / wechat.*（跨设备协同）：connect/disconnect 入队即回执（二维码
         # 走 qrcode 事件异步回推）；status 直读桥接单例回填连接态；wechat.pairing
         # 把配对码入队喂给 login 线程。@author aceFelix
@@ -295,6 +307,34 @@ class DesktopBridgeServer(BridgeServer):
             raise ValueError("缺少会话名 name")
         self._api.delete_session(name)
 
+    def _rpc_checkpoint_preview(self, data: dict) -> dict:
+        """checkpoint.preview：撤回预览（回滚影响文件清单），只读直返。
+
+        user_tail_count = 从尾部数第几条用户消息（含），必须 ≥ 1。
+        @author aceFelix
+        """
+        try:
+            n = int(data.get("user_tail_count", 1))
+        except (TypeError, ValueError):
+            raise ValueError("user_tail_count 必须为整数")
+        if n < 1:
+            raise ValueError("user_tail_count 必须 ≥ 1")
+        return self._api.checkpoint_preview(n)
+
+    def _rpc_checkpoint_rewind(self, data: dict) -> dict:
+        """checkpoint.rewind：撤回消息（截断对话 + 可选回滚文件），入队即返。
+
+        真实结果走 rewound 事件（与在跑轮次经指令队列串行，不可并发截断）。
+        @author aceFelix
+        """
+        try:
+            n = int(data.get("user_tail_count", 1))
+        except (TypeError, ValueError):
+            raise ValueError("user_tail_count 必须为整数")
+        if n < 1:
+            raise ValueError("user_tail_count 必须 ≥ 1")
+        return self._api.checkpoint_rewind(n, bool(data.get("restore_files", True)))
+
     def _rpc_models_select(self, data: dict) -> bool:
         """models.select：切换文本模型（写盘 + 引擎热切换，与工作台一致）。
 
@@ -322,6 +362,14 @@ class DesktopBridgeServer(BridgeServer):
         @author aceFelix
         """
         return self._api.set_thinking(data.get("effort", ""))
+
+    def _rpc_slash_exec(self, data: dict) -> dict:
+        """slash.exec：透传终端斜杠命令，形态校验与入队由 api.exec_slash 承担。
+
+        本 RPC 只确认受理（{ok, command}），执行结果走 slash_result 事件。
+        @author aceFelix
+        """
+        return self._api.exec_slash(data.get("command", ""))
 
     def _rpc_models_add(self, data: dict) -> dict:
         """models.add：添加/覆盖自定义模型（桌面壳左栏「添加模型」表单提交）。
