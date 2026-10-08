@@ -12,9 +12,7 @@
 <a href="https://github.com/aceFelix/jarvis/actions"><img src="https://github.com/aceFelix/jarvis/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 <a href="https://www.deepseek.com"><img src="https://img.shields.io/badge/DeepSeek-API-4D6BFE.svg?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+" alt="DeepSeek" /></a>
 <a href="https://bailian.console.aliyun.com"><img src="https://img.shields.io/badge/DashScope-%E7%99%BE%E7%82%BC-FF6A00.svg?logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
-<a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
-<a href="#%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"><img src="https://img.shields.io/badge/%F0%9F%9B%A0%EF%B8%8F-Personal%20Project-9B59B6.svg" alt="Personal" /></a>
-<a href="#%E5%BC%80%E5%8F%91%E5%8F%82%E8%80%83"><img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F-Inspired%20by%20Iron%20Man-E23636.svg" alt="Iron Man" /></a>
+<a href="#反馈声明"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
 <a href="https://github.com/aceFelix/jarvis"><img src="https://img.shields.io/github/stars/aceFelix/jarvis?style=social" alt="GitHub stars" /></a>
 
 </div>
@@ -25,1698 +23,183 @@
 
 </div>
 
-
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 >
 > 「随时为您效劳，先生。」
 
-一个为个人电脑打造的 AI Agent 智能管家 —— 致敬《钢铁侠》里的贾维斯。与你对话、帮你操作电脑、常驻后台听你召唤、能听会说。它把「终端原生、工具驱动、可扩展」的智能助手带到你自己的个人电脑系统中。
+**J.A.R.V.I.S. 是一个主动陪伴你电脑的 AI 智能管家**——致敬《钢铁侠》里的贾维斯。它常驻你的操作系统，能看、能听、能说、能动手：对话只是入口，**把事情办了才是目的**。你说"下周五前交项目报告"，它登记截止日期并提前提醒你；你说"退下"，它安静待机，第二天早上用一句"先生，早上好"向你播报今日简报。
+
+> 北极星：让每个人拥有一位真正懂你、主动打理、随叫随到的电脑管家。
+> 不是聊天框，不是语音助手——你还没开口，它已经把事情办了。
 
 ---
 
-## 目录
+## 为什么需要 JARVIS？
 
-- [平台支持](#平台支持)
-- [安装](#安装)
-- [快速开始](#快速开始)
-- [配置指南](#配置指南)
-- [核心概念](#核心概念)
-  - [五层权限系统](#五层权限系统)
-  - [上下文压缩](#上下文压缩)
-  - [工具延迟加载](#工具延迟加载)
-  - [记忆系统](#记忆系统)
-  - [Skill 技能包](#skill-技能包)
-  - [MCP 集成](#mcp-集成)
-- [REPL 命令参考](#repl-命令参考)
-- [模型管理](#模型管理)
-- [深度思考模式](#深度思考模式)
-- [安全性](#安全性)
-- [性能优化](#性能优化)
-- [语音功能](#语音功能)
-  - [语音对话 `/voice`](#语音对话-voice)
-  - [实时双工 `/talk`](#实时双工-talk)
-  - [TTS 朗读 `/say`](#tts-朗读-say)
-  - [录音识别 `/listen`](#录音识别-listen)
-- [图片输入](#图片输入)
-- [GUI 自动化](#gui-自动化)
-- [桌面入口（三栏工作台）](#桌面入口三栏工作台)
-- [外部前端接入（serve 模式）](#外部前端接入serve-模式)
-- [多 Agent 协作](#多-agent-协作)
-- [插件系统](#插件系统)
-- [CLI-Anything 外部软件控制](#cli-anything-外部软件控制)
-- [邮件发送](#邮件发送)
-- [开发服务器](#开发服务器)
-- [工具错误自愈](#工具错误自愈)
-- [目录结构](#目录结构)
-- [测试与 CI](#测试与-ci)
-- [自动发布流程](#自动发布流程)
-- [开发路线](#开发路线)
-- [许可证](#许可证)
-- [反馈声明](#反馈声明)
-- [开发参考](#开发参考)
-
----
-
-## 平台支持
-
-| 功能 | Windows | macOS | Linux |
-|---|---|---|---|
-| REPL 对话 + 文件/命令工具 | ✅ | ✅ | ✅ |
-| LLM Provider（OpenAI / Anthropic / DashScope） | ✅ | ✅ | ✅ |
-| MCP 集成 / 会话记忆 / 上下文压缩 | ✅ | ✅ | ✅ |
-| Rich 终端 UI + 启动动画 | ✅ | ✅ | ✅ |
-| 语音对话 `/voice`（STT + TTS） | ✅ | ✅ | ✅ |
-| 实时双工语音 `/talk`（全双工） | ✅ | ✅ | ✅ |
-| 三栏工作台窗口（方舟反应炉动画） | ✅ | ✅ | ✅ |
-| 外部前端接入（`--serve` headless WS API） | ✅ | ✅ | ✅ |
-| 鼠标 / 键盘 / 截屏（pyautogui） | ✅ | ✅¹ | ✅² |
-| 摄像头 / 视觉监控 | ✅ | ✅ | ✅ |
-| 桌面图标启动三栏工作台（`--gui`） | ✅ | ✅ | ⚠️ 终端内运行³ |
-| 开机自启 | ✅ Startup | ✅ LaunchAgent | ❌ 手动 systemd |
-| 桌面快捷方式 | ✅ .lnk | ✅ .command | ⚠️ 终端内运行⁴ |
-| 全局热键 | ✅ | ❌ | ⚠️ 需 root |
-
-> ¹ macOS 需在「系统设置 → 隐私与安全 → 辅助功能」中授权终端/Python
-> ² Linux 鼠标键盘操作需 DISPLAY 环境变量（X11/Wayland 桌面环境）
-> ³ Linux 桌面入口在终端内以工作台窗口运行（关窗口即退出）
-> ⁴ Linux 桌面快捷方式双击会在终端内以 REPL 对话界面运行 jarvis（等同 Windows 的 cmd 窗口运行，关窗口即退出）
-
-> ⚠️ **重要提示**：本项目在 **Windows** 上完成全部功能开发与实机验证。macOS 和 Linux 仅做了代码层面的适配，**未经过完整实机测试**，可能存在未发现的兼容性问题。建议优先在 Windows 上使用 J.A.R.V.I.S. 以获得最佳体验。
-
----
-
-## 安装
-
-### 从 PyPI 安装（推荐）
-
-```bash
-# 一键安装全功能（语音 + GUI + daemon + MCP + 浏览器 + 摄像头/视觉 + 实时聊天窗口）
-pip install "jarvis-agent[all]"
-
-# 仅安装核心对话功能
-pip install jarvis-agent
-```
-
-### 从 GitHub 安装
-
-```bash
-# 克隆仓库
-git clone https://github.com/aceFelix/jarvis.git
-cd jarvis
-
-# 安装核心包（开发模式）
-pip install -e .
-
-# 开发模式全功能
-pip install -e ".[all]"
-```
-
-> **注意**：`jarvis` 命令入口生成在**当前环境**的 Scripts/bin 目录。
-> 在 venv 里安装后必须先激活虚拟环境，否则终端会报 `jarvis: command not found`：
-> - Windows Git Bash：`source .venv/Scripts/activate`
-> - Windows PowerShell：`.venv\Scripts\Activate.ps1`
-> - Linux/macOS：`source .venv/bin/activate`
-
-### 用 uv 安装（更快）
-
-[uv](https://docs.astral.sh/uv/) 是 Rust 编写的高性能 Python 包管理器，推荐新用户尝试：
-
-```bash
-# 作为全局工具安装
-uv tool install "jarvis-agent[all]"
-
-# 之后直接用
-jarvis
-```
-
-### 用 npm 安装
-
-通过 npm 一键安装：
-
-```bash
-npm install -g @acefelix/jarvis
-
-# 之后直接用
-jarvis
-```
-
-> **环境要求**：
-> - **Node.js ≥ 18**（推荐 **Node 20 LTS** 或更高版本，Node 14/16 已停止维护）
-> - **Python 3.11+** 并加入 PATH
->
-> npm 包会自动检测 Python 环境并通过 pip 安装 `jarvis-agent[all]`。
-
-### 默认安装路径
-
-安装方式决定**程序本体**的位置（跟随 Python / 包管理器），而**用户数据**统一存放在 `~/.jarvis`（与 Python 无关）。
-
-**程序本体：**
-
-| 安装方式 | 包（agent）位置 | 命令入口 `jarvis` |
-|---|---|---|
-| pip（系统 Python） | `Python安装目录\Lib\site-packages`（Windows）<br>`/usr/lib/python3.x/site-packages` 或 `~/.local/lib/python3.x/site-packages`（Linux/macOS） | `Python安装目录\Scripts\jarvis.exe`（Windows）<br>`~/.local/bin/jarvis`（Linux/macOS） |
-| pip（venv 虚拟环境） | `<虚拟环境>\Lib\site-packages`（Windows）<br>`<虚拟环境>\lib\python3.x\site-packages`（Linux/macOS） | `<虚拟环境>\Scripts\jarvis.exe`（Windows）<br>`<虚拟环境>\bin\jarvis`（Linux/macOS） |
-| GitHub 开发模式（`pip install -e .`） | editable 安装，`agent` 包直接指向克隆的源码目录 | 同上（Scripts/bin 下生成入口） |
-| uv（`uv tool install`） | Windows: `%APPDATA%\uv\tools\jarvis-agent`<br>Linux/macOS: `~/.local/share/uv/tools/jarvis-agent`（uv 管理的隔离 venv） | `~/.local/bin/jarvis`（uv 自动链接） |
-| npm（`npm install -g`） | npm 包本体在全局 node_modules（Windows: `%APPDATA%\npm\node_modules`；Linux/macOS: `/usr/lib/node_modules` 或 `~/.npm-global`）；Python 包由 install.js 装到对应 Python 的 site-packages | npm 全局 bin 目录的 `jarvis`（Windows: `%APPDATA%\npm`） |
-
-**用户数据（所有安装方式统一，卸载/重装不丢）：**
-
-| 内容 | 路径 |
+| 现状痛点 | JARVIS 的回答 |
 |---|---|
-| 通用配置（`settings.toml`：运行时/语音/记忆/沙箱等） | `~/.jarvis/settings.toml`（Windows: `C:\Users\<用户名>\.jarvis`） |
-| 模型配置（`models.toml`：模型选择 / Base URL / **API key** / 可选模型 / 自定义模型） | `~/.jarvis/models.toml`（同上目录，2026-09 从 settings.toml 拆出） |
-| daemon 日志 | `~/.jarvis/daemon.log` |
-| 插件 / 技能 / 会话记忆 | `~/.jarvis/` |
-| 截图临时目录 | `%TEMP%\jarvis-shots`（Windows）`/tmp/jarvis-shots`（Linux/macOS） |
+| AI 聊天工具很多，但**没几个能真正替你操作电脑** | 100+ 内置工具：文件、命令、浏览器、键鼠操控、截屏识图、摄像头、邮件——ReAct 循环自主规划执行，GUI 自动化像人一样点按拖拽 |
+| 云端助手**不认识你的电脑**，数据也不在你手里 | 本地优先：常驻你的系统、读你的文件、操控你的软件；记忆、日志、配置全在本地 `~/.jarvis`，密钥进系统凭据管理器 |
+| 大多数助手**每次都像初见**，交代过的背景全忘 | 三层记忆：会话存盘 + 长期记忆 + 画像记忆（自动提炼你的习惯偏好），越用越懂你 |
 
-> **提示**：site-packages 路径跟随"执行 pip 的那个 Python"。机器上装了多个 Python（3.11/3.12/3.13）时，用 `python -m pip install` 可强制绑定当前 `python`，用 `python -m pip show jarvis-agent` 查看实际安装位置（`Location` 字段）。
+<div align="center">
+  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw_%E5%8D%81%E7%BB%B4%E8%83%BD%E5%8A%9B%E9%9B%B7%E8%BE%BE%E5%9B%BE.png" alt="JARVIS vs Claude Code vs OpenClaw 十维能力对比" width="640"/>
+  <p><em>十维能力实测对比：JARVIS 在语音交互、电脑控制、视觉感知、主动服务上差异化领先</em></p>
+</div>
 
-### 安装可选功能
+## 效果展示
 
-jarvis 将不同能力拆分为可选依赖组，按需安装：
+<div align="center">
 
-| 依赖组 | 功能 | 安装命令 |
+**jarvis-desktop 桌面工作台** — 三主题皮肤 · 三栏布局（左：控制台 / 中：对话流 / 右：任务中心 · 用量 · 系统状态）
+
+<table>
+<tr>
+  <td width="33%"><img src="assets/screenshots/desktop-workbench0.png" width="100%"/><br/><sub>荧光绿 · 任务中心与系统状态</sub></td>
+  <td width="33%"><img src="assets/screenshots/desktop-workbench1.png" width="100%"/><br/><sub>电光蓝 · 设置面板</sub></td>
+  <td width="33%"><img src="assets/screenshots/desktop-workbench2.png" width="100%"/><br/><sub>金属银 · 设置面板</sub></td>
+</tr>
+</table>
+
+**终端 REPL** — 一轮关于记忆的对话：「贾维斯你对我了解多少？」（技能加载 → MCP 知识图谱 → 画像记忆）
+
+<table>
+<tr>
+  <td width="33%"><img src="assets/screenshots/repl-chat0.png" width="100%"/><br/><sub>启动：方舟反应炉 + MCP/LSP 就绪</sub></td>
+  <td width="33%"><img src="assets/screenshots/repl-chat1.png" width="100%"/><br/><sub>思考过程：规划多源信息</sub></td>
+  <td width="33%"><img src="assets/screenshots/repl-chat2.png" width="100%"/><br/><sub>LoadSkill 技能加载</sub></td>
+</tr>
+<tr>
+  <td width="33%"><img src="assets/screenshots/repl-chat3.png" width="100%"/><br/><sub>ToolSearch 检索 MCP 工具</sub></td>
+  <td width="33%"><img src="assets/screenshots/repl-chat4.png" width="100%"/><br/><sub>查询知识图谱画像</sub></td>
+  <td width="33%"><img src="assets/screenshots/repl-chat5.png" width="100%"/><br/><sub>思考汇总：整合画像数据</sub></td>
+</tr>
+<tr>
+  <td width="33%"><img src="assets/screenshots/repl-chat6.png" width="100%"/><br/><sub>回答：三层记忆 · 越用越懂你</sub></td>
+  <td width="33%"><img src="assets/screenshots/model-manage.png" width="100%"/><br/><sub>/models 模型管理（11 厂商）</sub></td>
+  <td width="33%"><img src="assets/screenshots/voice-manage.png" width="100%"/><br/><sub>/tts-voice 音色管理</sub></td>
+</tr>
+</table>
+
+**语音交互** — `/voice` 逐轮对话 · `/talk` 实时双工（说话即打断）
+
+<table>
+<tr>
+  <td width="33%"><img src="assets/screenshots/realtime-talk0.png" width="100%"/><br/><sub>/voice：聆听→查时间→贴心提醒→打断</sub></td>
+  <td width="33%"><img src="assets/screenshots/realtime-talk1.png" width="100%"/><br/><sub>/talk：启动横幅（server_vad + AEC）</sub></td>
+  <td width="33%"><img src="assets/screenshots/realtime-talk2.png" width="100%"/><br/><sub>/talk：语音讲个程序员笑话</sub></td>
+</tr>
+</table>
+
+**跨设备协同** — 手机扫码接管同一会话（/connect-phone）
+
+<table>
+<tr>
+  <td width="33%"><img src="assets/screenshots/phone-connect0.png" width="100%"/><br/><sub>终端生成二维码 + 消息双端同步</sub></td>
+  <td width="33%"><img src="assets/screenshots/phone-connect1.png" width="100%"/><br/><sub>手机端：思考过程可视</sub></td>
+  <td width="33%"><img src="assets/screenshots/phone-connect2.png" width="100%"/><br/><sub>手机端：MCP 工具查天气</sub></td>
+</tr>
+</table>
+
+**微信 ClawBot** — 在微信里随时使唤管家（/connect-wechat）
+
+<table>
+<tr>
+  <td width="33%"><img src="assets/screenshots/wechat-clawbot0.png" width="100%"/><br/><sub>终端扫码连接（24h 有效）</sub></td>
+  <td width="33%"><img src="assets/screenshots/wechat-clawbot1.png" width="100%"/><br/><sub>微信发消息即可对话</sub></td>
+  <td width="33%"><img src="assets/screenshots/wechat-clawbot2.png" width="100%"/><br/><sub>完整工具能力随身携带</sub></td>
+</tr>
+</table>
+
+<!-- proactive-briefing（主动简报播报「先生，提醒您：」）截图待补，补齐后在此追加一行 -->
+
+</div>
+
+## 核心能力
+
+| 能力 | 一句话 | 文档 |
 |---|---|---|
-| `gui` | 鼠标/键盘/截屏/窗口管理 | `pip install "jarvis-agent[gui]"` |
-| `browser` | 浏览器自动化（Playwright） | `pip install "jarvis-agent[browser]"` |
-| `mcp` | MCP 工具集成 | `pip install "jarvis-agent[mcp]"` |
-| `camera` | 摄像头拍照 | `pip install "jarvis-agent[camera]"` |
-| `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
-| `voice` | 语音对话 `/voice` + 实时双工 `/talk`（STT+TTS+全双工） | `pip install "jarvis-agent[voice]"` |
-| `daemon` | 桌面入口/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | 三栏工作台窗口（方舟反应炉动画，`--gui`/`--talk`） | `pip install "jarvis-agent[realtime_ui]"` |
-| `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
+| 🖥️ **终端原生 Agent** | Rich 终端 REPL + 100+ 工具 + ReAct 编排，Ctrl+C 任意阶段打断 | [核心机制](docs/guide/concepts.md) · [命令参考](docs/guide/commands.md) |
+| 🎙️ **能听会说** | `/voice` 逐轮语音对话，`/talk` 全双工实时聊天（说话即打断），TTS 播报主动提醒 | [语音系统](docs/guide/voice.md) |
+| 🖱️ **操控电脑** | 鼠标/键盘/截屏/窗口管理 + 视觉模板定位，像人一样操作任意软件 | [GUI 自动化](docs/guide/ecosystem.md#gui-自动化) |
+| 🗓️ **主动管家** | 每日简报、定时提醒、截止日期追踪、系统监控——不用叫，它自己看着办 | [主动提醒系统](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
+| 🧠 **三层记忆** | 会话存盘 + 长期记忆 + 画像提炼，越用越懂你 | [记忆系统](docs/guide/concepts.md#记忆系统) |
+| 📱 **多端同会话** | jarvis-desktop 桌面壳 / 手机扫码 / 微信 ClawBot，三端共享同一会话 | [桌面与多端](docs/guide/desktop.md) |
+| 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |
+| 🔐 **安全底线** | 五层权限 + 四级沙箱 + 操作审计 + keyring 加密存储，危险操作硬阻断 | [核心机制](docs/guide/concepts.md#五层权限系统) |
 
-### 平台系统依赖
-
-**Windows**: 无需额外系统依赖，直接 `pip install` 即可。
-
-> 三栏工作台窗口需要 Edge WebView2 Runtime（Win10/11 通常已预装），如未安装请从 [Microsoft 官网](https://developer.microsoft.com/microsoft-edge/webview2/) 下载。
-
-**macOS**:
-
-```bash
-brew install portaudio          # pyaudio 编译依赖（语音功能必需）
-# 系统设置 → 隐私与安全 → 辅助功能 → 允许终端/Python（GUI 操作必需）
-# 系统设置 → 隐私与安全 → 麦克风 → 允许终端/Python（语音输入必需）
-```
-
-**Linux (Ubuntu/Debian)**:
-
-```bash
-sudo apt install portaudio19-dev python3-pyaudio  # 语音功能
-sudo apt install python3-tk                        # pyautogui 截屏依赖
-```
-
-**Linux (Fedora/RHEL)**:
-
-```bash
-sudo dnf install portaudio-devel gtk3-devel
-```
-
----
+**接入自由**：支持 11 家厂商（阿里云 DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务），`/models` 双击即改、运行中热切换。
 
 ## 快速开始
 
-### 首次使用（推荐）
-
 ```bash
-jarvis --init
-```
-交互式引导：选厂商 → 确认模型 → 选多模态/纯文本 → 输 Key → 自动测试连接 → 保存。
-支持 11 个厂商（DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务）。
+# 三选一安装（Python 3.11+）
+pip install "jarvis-agent[all]"          # PyPI 全功能
+uv tool install "jarvis-agent[all]"      # uv（更快）
+npm install -g @acefelix/jarvis          # npm（需 Node 18+ / Python 3.11+）
 
-### 手动配置
-
-```bash
-# 默认接阿里云 DashScope（qwen3.7-plus，多模态视觉模型）
-export DASHSCOPE_API_KEY=sk-xxx
-jarvis
+jarvis --init    # 交互式配置：选厂商 → 确认模型 → 输 Key → 自动测试连接 → 保存
+jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab 补全
 ```
 
-> Windows PowerShell 用 `$env:DASHSCOPE_API_KEY = "sk-xxx"` 设置环境变量。
+- 默认接阿里云 DashScope（`qwen3.7-plus` 多模态），也可 `export DASHSCOPE_API_KEY=sk-xxx` 后直接启动
+- 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
+- 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 
-默认配置在 `configs/settings.toml`（通用）+ `configs/models.toml`（模型，含密钥），环境变量 `JARVIS_*` 和 CLI 参数可覆盖。
-各厂商专属环境变量：`DASHSCOPE_API_KEY` / `DEEPSEEK_API_KEY` / `ZAI_API_KEY` / `ANTHROPIC_API_KEY` / `KIMI_API_KEY` / `MINIMAX_API_KEY` / `MIMO_API_KEY`。
+> 安装路径、可选依赖组、各平台系统依赖、`--gui` 工作台入口等详见 [安装指南](docs/guide/installation.md)。
+> 想一句话理解这个项目要去哪，读 [愿景文档](docs/VISION.md)。
 
-启动后进入 REPL 终端界面，输入问题即可与 AI 对话：
-- 直接输入自然语言，AI 会自动调用工具完成任务
-- 输入 `/` 弹出命令列表，Tab 键自动补全
-- `Shift+Enter` 换行（Windows 终端自动转换）
-- `Ctrl+C` **任意阶段中断**（LLM 流式输出中 / 工具执行中 / 思考中均可立即停止）
+## 平台支持
 
-> **桌面入口**：桌面快捷方式（`autostart desktop`）已于 2026-09 下线，
-> 桌面入口由 jarvis-desktop（Electron 桌面应用，独立仓库）接管；
-> 本仓库终端内仍可用 `jarvis --gui` 打开三栏工作台窗口。
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| 全部功能（对话/语音/工作台/桌面壳/GUI 操控/自启） | ✅ **全功能实机验证** | ✅ 代码适配 | ✅ 代码适配 |
 
-> **桌面安装包后端冻结**：本仓库 `packaging/` 存放把 `agent.serve` 用 PyInstaller 冻结成
-> 独立 `jarvis-serve.exe` 的入口（`serve_entry.py`）、打包规格（`jarvis-serve.spec`）与构建
-> 脚本（`build_serve.ps1`）；产物 `dist/jarvis-serve/` 由 jarvis-desktop 的 `npm run dist` 经
-> `extraResources` 拷入 NSIS 安装包，使终端用户无需安装 Python。
+> ⚠️ 本项目在 Windows 上完成全部开发与实机验证，macOS / Linux 仅代码层适配、未完整实机测试，建议优先 Windows。逐项差异见 [安装指南](docs/guide/installation.md#平台系统依赖)。
 
-### 依赖健康检查
+## 文档地图
 
-安装完成后或遇到功能不可用时，运行 `--doctor` 一键诊断所有依赖状态：
-
-```bash
-jarvis --doctor
-```
-
-检查内容（用 rich 表格渲染，退出码 0=全部就绪 / 1=有缺失）：
-
-| 类别 | 检查项 |
+| 想了解 | 文档 |
 |---|---|
-| 📦 Python 包 | 语音 / 系统监控 / GUI 工作台 / 浏览器 / 摄像头 / 视觉监控 / MCP / 实时窗口 / 微信 / LLM 核心等可选包，按 extras 组归类并给出 `pip install` 命令 |
-| 🔧 系统级依赖 | Python 版本（>=3.11） / pip / uv（推荐） / Playwright 浏览器 / Edge WebView2 Runtime（Windows） / 麦克风权限提示 |
-| ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
-
-> 包检查用 `importlib.util.find_spec` 探测，不实际 import，避免触发未安装包的副作用日志。
-
----
-
-## 配置指南
-
-Jarvis 配置按「同层 settings.toml → models.toml，用户级整体覆盖项目级」四文件分层合并：
-
-1. **项目默认配置** — `configs/settings.toml`（随项目分发）
-2. **项目模型配置** — `configs/models.toml`（模型域独立文件，同层覆盖上一项）
-3. **用户级覆盖** — `~/.jarvis/settings.toml`（自动创建，持久化个人设置）
-4. **用户级模型配置** — `~/.jarvis/models.toml`（模型选择 + 密钥，同层覆盖上一项）
-5. **环境变量覆盖** — `JARVIS_*` 前缀 + 厂商专属 `*_API_KEY`（优先级更高）
-6. **CLI 参数** — `--model` / `--provider` / `--api-key`（最高）
-
-> **模型配置为什么单独一个文件**：模型域（`provider` / `api_format` / `model` / `last_model` / `api_key` / `base_url` / `max_tokens` / `enable_thinking` / `thinking_budget` / `vendor_fallback` + `[llm.models]` + `[llm.custom_models.*]`）由程序频繁回写（`/models`、`jarvis init`、切换模型）且含明文密钥，独立成文件后与运行时配置互不牵连，也便于单独备份/轮换密钥。
-> **向后兼容**：老配置把模型键留在 `settings.toml` 里仍然生效；首次启动会自动整理到 `models.toml`（幂等，原文件留 `.bak` 备份）。
-> **模型切换何时生效**：`/model`（REPL）与工作台 / 桌面壳左栏点选都写 `last_model`（重启自动恢复），**并立即热切换运行中的引擎** —— 工作台 / 桌面壳把 `switch_model` 指令发给引擎线程，就地换 provider / 模型（保留会话上下文，正有一轮回复在跑时在该轮结束后落地），无需重启进程；TTS 音色仍是「下次语音会话生效」。
-
-### 核心配置项
-
-```toml
-# ---- LLM（写在 configs/models.toml 或 ~/.jarvis/models.toml）----
-provider = "dashscope"          # 模型提供商
-api_format = "openai"           # 协议格式（openai / anthropic / dashscope / zai）
-model = "qwen3.7-plus"          # 默认模型（多模态视觉）
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-max_tokens = 20480              # 单次输出最大 Token
-# ⚠️ 顶层键必须写在任何 [section] 之前：写进 [llm.models] 之后会被 TOML 静默解析进该子表（表现为配置不生效）
-
-# ---- 运行时（写在 settings.toml）----
-workdir = "E:\\J.A.R.V.I.S_Work" # 默认工作目录
-permission_mode = "yolo"         # 权限模式（default / plan / accept_edits / yolo）
-max_iterations = 50              # 单轮最大工具调用次数
-
-# ---- 语音 ----
-[tts]
-model = "cosyvoice-v3-flash"     # TTS 模型（v3-flash/v3-plus/v3.5-plus）
-voice = "longanlang_v3"          # 音色（/tts-voice 可切换，自定义音色带适配模型、切换自动联动）
-volume = 50                      # 音量 0-100
-speech_rate = 1.0                # 语速 0.5-2.0
-pitch_rate = 1.0                 # 音高 0.5-2.0
-
-[stt]
-# 单一后端：QwenASR（OmniRealtimeConversation，服务端 VAD，中英混合强）
-# model 原样透传给 DashScope，需填 qwen 实时识别模型名
-model = "qwen3-asr-flash-realtime"
-max_seconds = 15                  # 单次录音最长秒数
-silence_seconds = 1.5             # 静音检测秒数
-
-[voice]
-barge_in = false                  # 语音打断：播报中开口自动打断（默认关，避免 PyAudio 冲突）
-barge_in_key = true               # 键盘打断：播报中按 ESC 立即停止（默认开）
-
-# ---- 实时双工语音（用户级配置 ~/.jarvis/settings.toml）----
-[realtime_talk]
-model = "qwen-audio-3.0-realtime-flash"  # DashScope 实时语音模型
-voice = "longanqian"                      # 音色
-event_log = false                  # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
-echo_suppress_with_aec = true      # AI 说话时压低麦克风抑制回声（仅戴耳机时才建议关）
-half_duplex = true                 # 半双工：AI 说话时静音麦克风（外放稳定多轮）；戴耳机想随口打断设为 false
-rescue = true                      # 响应救援：服务端吞轮时补发 response.create（默认开）
-turn_detection = "server_vad"      # 轮次检测：server_vad（默认，免提推荐）/ smart_turn
-silence_ms = 500                   # server_vad 判停静音时长（毫秒）
-tools_mode = "builtin"             # 工具面：builtin（默认 2 工具低延迟）/ all（Registry+MCP）
-
-# ---- 上下文压缩 ----
-[context]
-compaction = true
-# 压缩条件：总 token（冻结摘要+活跃窗口+system prompt）≥ context_window × compact_ratio 才压缩，
-# 未超比例绝不压缩，用满窗口前半程。
-context_window = 128000           # 模型上下文窗口（token），换模型时同步修改，勿设 0
-compact_ratio = 0.5               # 触发比例（占窗口百分比），如 0.5 = 超 50% 才压缩
-compact_refreeze_growth = 1.25    # 防抖：冻结后总量增长不足此倍数不重复压缩
-compact_max_output_tokens = 2048  # 压缩摘要请求的输出 token 上限
-tool_result_keep_recent = 4       # 工具结果折叠时保留最近 N 条完整输出（其余缩成一行摘要）
-
-# ---- 桌面入口与热键 ----
-[daemon]
-hotkey = "ctrl+shift+j"           # 全局热键（召唤三栏工作台，待接线）
-
-# ---- 消息级回溯检查点（shadow git）----
-[checkpoint]
-enabled = true                    # 总开关：每轮对话前对工作目录打检查点，/rewind / 桌面撤回可连带回滚文件（关闭后仅支持对话回退）
-max_per_session = 20              # 每会话检查点保留上限（超出修剪最早的）
-timeout_seconds = 10              # 单条 git 命令超时（秒）；未装 git 时自动降级为仅对话回退
-```
-
-> 📖 完整配置项参见 **[config-docs/configuration.md](config-docs/configuration.md)**；各厂商接入见 **[config-docs/providers.md](config-docs/providers.md)**；语音配置见 **[config-docs/voice-setup.md](config-docs/voice-setup.md)**；常见问题见 **[config-docs/troubleshooting.md](config-docs/troubleshooting.md)**。
-
----
-
-## 核心概念
-
-### 五层权限系统
-
-Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
-
-| 层级 | 说明 |
-|---|---|
-| **L1 硬阻断** | `.ssh`/`.aws`/`.gnupg` 等敏感目录永久拒绝访问；`rm -rf /` 等危险命令永久拦截 |
-| **L2 路径守护** | 限制 AI 的文件操作范围，防止读写关键系统目录 |
-| **L3 命令分类** | 将命令分为安全/危险/敏感三级，危险命令需确认 |
-| **L4 权限模式** | `default` 逐次确认 / `plan` 只读规划 / `accept_edits` 编辑自动通过 / `yolo` 全自动 |
-| **L5 用户确认** | 关键操作（删除文件、执行脚本）弹窗确认 |
-
-切换权限模式：`/mode yolo`
-
-### 上下文压缩
-
-采用**分层上下文管理**（冻结前缀 + 滑动窗口）——压缩后的摘要锁定为「冻结区」永不修改，后续请求前缀稳定 → LLM 缓存持续命中。
-
-- **比例触发**：总 token（冻结摘要 + 活跃窗口 + system prompt）≥ `context_window` × `compact_ratio`（默认 128000 × 0.5 = 64000）才压缩，未超比例绝不压缩，用满窗口前半程；冻结后总量增长不足 `compact_refreeze_growth`（默认 1.25 倍）不重复压缩（防抖）
-- **冻结策略**：压缩后的摘要锁定为「冻结前缀」永不修改，后续请求前缀稳定，LLM 缓存持续命中
-- **图片驱逐**：旧图片替换为文字占位符释放 Token（仅作用于活跃窗口）
-- **工具结果折叠**：旧工具结果缩成一行摘要（仅作用于活跃窗口）
-- **反应式压缩**：遇到 Context Too Long 错误自动压缩后重试
-- 手动触发：`/compact`
-
-### 记忆系统
-
-Jarvis 支持多层记忆持久化：
-
-- **会话记忆**：每轮对话后自动存盘，`/save` `/load` `/sessions` 手动管理恢复（启动不再自动恢复上次会话——旧 auto-latest 全局指针不区分项目目录，多项目并行会串台，已下线）
-- **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
-- **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
-  存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
-  后台异步提炼（默认 600 秒节流，可用 `profile_refine_interval` 配置，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
-  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory refine` 立即提炼。
-  可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼。
-  `/memory sync` 可把本地画像同步到 aceFelix 知识图谱（先预览后确认，图谱为唯一事实源）
-- **知识图谱画像桥**：`[profile_bridge] enabled = true` 后，启动时经 MCP 拉取 aceFelix
-  知识图谱画像注入系统提示（技能/项目/兴趣等结构化信息，无需重新聊天）；
-  前提：`~/.jarvis/mcp.json` 已配置 `acefelix-knowledge` server
-- **自动恢复**：异常退出后下次启动自动提示恢复
-
-### Skill 技能包
-
-通过 Skill 文件为 AI 注入专业知识和工作流程：
-
-```
-~/.jarvis/skills/<name>/SKILL.md        # 用户级技能包
-<workdir>/.jarvis/skills/<name>/SKILL.md # 项目级技能包
-```
-
-SKILL.md 包含：
-- **Frontmatter**：name / description / when_to_use / trigger_words
-- **正文**：Markdown 格式的专业知识指令
-
-查看已加载技能：`/skills`
-
-### 工具延迟加载
-
-Jarvis 集成 100+ 工具后，采用**分组延迟加载**策略控制请求体积：
-
-- **核心工具**（~15 个）：Bash / FileRead / FileEdit / WebSearch 等高频工具始终携带
-- **延迟工具**（~80 个）：MCP / GUI / 浏览器 / 摄像头 / 协作工具等仅发名字摘要
-- **ToolSearch**：模型需要延迟工具时搜索关键词加载完整 Schema，下轮即可调用
-- **纯聊天检测**：短问候（"你好"、"在吗"）发 0 工具，秒回
-
-> 参考 Claude Code deferred tool loading 机制，兼顾功能完整性与响应速度。
-
-### MCP 集成
-
-支持 [Model Context Protocol](https://modelcontextprotocol.io/) 接入外部工具：
-
-- 配置文件：`~/.jarvis/mcp.json`
-- 工具命名：`mcp__<server>__<tool>` 格式注册
-- 默认 ASK 权限（外部进程），yolo 模式可放宽
-- 查看状态：`/mcp`
-
----
-
-## REPL 命令参考
-
-启动后输入 `/` 弹出命令列表，Tab 键自动补全：
-
-### 对话控制
-
-| 命令 | 说明 |
-|---|---|
-| `/help` `/h` | 查看所有命令帮助 |
-| `/exit` `/quit` `/q` | 退出贾维斯 |
-| `/reset` `/clear` | 清空对话历史，重新开始 |
-| `/compact` | 手动压缩上下文（摘要旧消息节省 Token） |
-| `/cost` | 显示本会话 token 用量与估算成本（含 system prompt 统计、缓存命中率） |
-| `/context` | 查看上下文窗口使用情况（按角色分组统计，含 system prompt token；窗口口径取用户配置的 `context_window`（如 200000），统计头显示「窗口」，仅未配置回退默认值时才标注「假设窗口」） |
-| `/rewind [n]` | 回退最近 n 条消息（默认 1 条）；若该轮涉及文件修改，列出改动清单确认后连带回滚工作区（shadow git 检查点），加 `--chat-only` 跳过询问仅回退对话 |
-| `/diff [path]` | 显示工作目录的 git diff（可指定路径） |
-
-### 模型管理
-
-| 命令 | 说明 |
-|---|---|
-| `/model <前缀>` | 前缀匹配切换模型（支持模糊输入，多匹配时弹选择器） |
-| `/models` | 交互式模型管理（↑↓选择、Enter切换、空格编辑配置，按厂商分组） |
-| `/think` | 开关/调节深度思考（`/think on\|off\|low\|medium\|high`，支持模糊前缀与 1/2/3 速记；桌面输入区同提供四档选择器） |
-
-### 权限控制
-
-| 命令 | 说明 |
-|---|---|
-| `/mode <模式>` | 切换权限模式（default / plan / accept_edits / yolo，无参时弹选择器） |
-| `/tools` | 列出所有可用工具 |
-
-### 会话管理
-
-| 命令 | 说明 |
-|---|---|
-| `/save [名称]` | 保存当前会话 |
-| `/load <前缀>` | 前缀匹配加载已保存会话 |
-| `/loads` | 列出并交互选择已保存会话 |
-| `/sessions` `/ls-sessions` | 列出所有已保存会话 |
-
-### 记忆与知识
-
-| 命令 | 说明 |
-|---|---|
-| `/memory` | 画像记忆管理（查看/add/del/clear/refine；`file` 看长期记忆文件） |
-| `/skills` | 列出已加载的技能包 |
-
-### 语音功能
-
-| 命令 | 说明 |
-|---|---|
-| `/voice` | 进入语音对话模式（连续 STT→LLM→TTS 循环） |
-| `/talk` | 进入实时双工语音对话（终端半双工轮替；桌面壳为说话即打断的真全双工） |
-| `/tts-voice [前缀]` | 切换/添加 TTS 音色（仅 DashScope；音色带适配模型，不兼容自动联动 tts_model） |
-| `/say <文本>` | TTS 朗读指定文字 |
-| `/listen` `/mic` | 录音并识别为文字 |
-
-### 图片输入
-
-| 命令 | 说明 |
-|---|---|
-| `/image <路径>` `/img <路径>` | 添加本地图片到待发送列表 |
-| `/paste` `/p` `/clipboard` | 添加剪贴板图片到待发送列表（同 Ctrl+V） |
-
-> 图片在下次发送消息时附带。支持格式：PNG / JPG / WEBP / BMP。自动缩放到最长边 1280px。
-> 终端输入框按 **Ctrl+V** 即可粘贴剪贴板图片；剪贴板**不再自动检测**（残留图片会被误带进普通提问）。
-
-### 多 Agent 与插件
-
-| 命令 | 说明 |
-|---|---|
-| `/agents` | 查看多 Agent 团队状态与成员 |
-| `/tasks` | 查看共享任务列表进度 |
-| `/plan` | 切换规划模式（进入/退出只读规划） |
-| `/plugin` `/plugins` | 列出已安装插件（Plugin 系统） |
-| `/plugin search [关键词]` | 搜索 Plugin 系统市场 |
-| `/plugin install <名称>` | 安装 Plugin 系统的插件 |
-| `/plugin uninstall <名称>` | 卸载 Plugin 系统的插件 |
-| `/plugin info <名称>` | 查看 Plugin 插件详情 |
-| `/plugin update` | 检查 Plugin 插件更新 |
-| `/plugin enable <名称>` | 启用被禁用的 Plugin 插件 |
-| `/plugin disable <名称>` | 禁用 Plugin 插件，不卸载 |
-| `/plugin create <名称>` | 创建 Plugin 插件脚手架 |
-| `/plugin validate <路径>` | 校验 plugin.json 合法性 |
-| `/cli_anything` `/harnesses` | 列出已安装 CLI-Anything harness |
-| `/cli_anything market` | 列出市场可用 harness |
-| `/cli_anything install <id>` | 安装指定 harness |
-| `/cli_anything uninstall <id>` | 卸载指定 harness |
-| `/cli_anything enable <id>` | 启用被禁用的 harness |
-| `/cli_anything disable <id>` | 禁用 harness，不卸载 |
-| `/cli_anything create <id>` | 创建 harness 脚手架 |
-| `/cli_anything validate <路径>` | 校验 SKILL.md 合法性 |
-
-### MCP 工具
-
-| 命令 | 说明 |
-|---|---|
-| `/mcp` | 查看 MCP server 连接状态与工具列表 |
-
-### 系统与诊断
-
-| 命令 | 说明 |
-|---|---|
-| `/init` | 交互式首次配置引导（选厂商→输Key→测试→保存） |
-| `/doctor` | 查看自愈统计与系统诊断 |
-| `/config [show]` | 查看当前生效的完整配置（LLM/语音/权限/MCP/自定义模型等） |
-| `/server [目录]` | 一键启动前端开发服务器 |
-| `/connect-phone` `/phone` | 跨设备协同（手机扫码连接当前会话） |
-| `/connect-wechat` `/wechat` | 微信扫码连接 JARVIS（通过 ClawBot 在微信中对话） |
-| `/disconnect-wechat` | 断开微信 ClawBot 连接 |
-| `/verbose` | 开关详细输出（token 统计、缓存命中等） |
-
-> 已加载的 Skill 也可直接作为斜杠命令调用：`/<skill-name> [参数]`（动态技能分发）。
-
----
-
-## 模型管理
-
-### 内置模型
-
-开箱即用，接入阿里云 DashScope：
-
-- `qwen3.7-plus` — 通义千问 3.7 Plus（默认，多模态视觉）
-- `qwen3.6-plus` — 通义千问 3.6 Plus
-- `qwen3.6-flash` — 通义千问 3.6 Flash（快速响应）
-- `qwen3.5-plus` — 通义千问 3.5 Plus
-- `qwen3.5-flash` — 通义千问 3.5 Flash（快速响应）
-
-### 添加自定义模型
-
-通过 `/models` 命令交互式添加自定义模型，支持四种接口类型：
-
-| 接口类型 | 适用模型 | 说明 |
-|---|---|---|
-| **OpenAI 兼容** | DeepSeek / GPT-4o / 各类兼容服务 | 标准 OpenAI API 格式 |
-| **Anthropic 兼容** | Claude 系列 | Anthropic Messages API 格式 |
-| **DashScope SDK** | qwen 系列原生协议 | 支持 MultiModalConversation 和 Generation 双端点 |
-| **智谱 ZhipuAi SDK** | GLM 系列原生协议 | 绕过 OpenAI 兼容层，获得更稳定的响应 |
-
-配置会自动保存到 `~/.jarvis/models.toml` 的 `[llm.custom_models]` 中（密钥跟随模型配置同文件，并同步写入系统 keyring），重启后保持。
-
-### 自定义模型配置示例
-
-写入 `~/.jarvis/models.toml`：
-
-```toml
-[llm.custom_models."deepseek-v4"]
-api_format = "openai"
-base_url = "https://api.deepseek.com/v1"
-api_key = "sk-your-deepseek-key"
-model_type = "text"              # "text" 纯文本 / "multimodal" 多模态
-
-[llm.custom_models."glm-4.7-flash"]
-provider = "zhipu"
-api_format = "zai"
-api_key = "sk-your-zhipu-key"
-model_type = "text"              # GLM-4.7-flash 为纯文本模型
-```
-
----
-
-## 深度思考模式
-
-启用后，模型在每次回复前先输出 `reasoning_content`（思考过程），形成完整的 **Think → Act → Observe** ReAct 循环。
-
-- **视觉效果**：思考内容在终端显示为暗色面板「💭 思考过程」
-- **运行中开关与强度**：`/think on` / `/think off` / `/think low|medium|high`（无需重启），参数支持
-  模糊前缀（`/think l` = low、`/think h` = high）与数字速记（`1/2/3` = low/medium/high），
-  输入 `/think ` 后 Tab 可补全档位；桌面输入区「思考」选择器提供 **关闭 / 低 / 中 / 高** 四档统一强度
-- **配置项**：
-  ```toml
-  enable_thinking = true
-  thinking_budget = 800    # 思考过程 Token 上限（无强度档位时的回退值）
-  thinking_effort = "high" # 统一强度档位：off/on/low/medium/high（后端按厂商翻译）
-  ```
-  环境变量 `JARVIS_THINKING_EFFORT` 可覆盖档位。
-- **厂商适配**：采用 `ThinkingConfig` 配置表驱动，把统一档位翻译成各厂商原生参数：
-  - Qwen / DashScope：`enable_thinking` + `thinking_budget`（extra_body/top_level），档位经 `budget_map` 映射 低=512 / 中=2000 / 高=8000
-  - DeepSeek / Kimi(Moonshot)：`thinking.type` + `reasoning_effort`，档位映射 低=`low` / 中=`high` / 高=`max`（文档无 medium，就近取档）
-  - 智谱 GLM：`thinking.type` + `reasoning_effort`，档位映射原生 低/中/高
-  - 小米 MiMo：`thinking.type` 仅开/关（无强度档位）
-  - OpenAI / MiniMax / Google / SiliconFlow 等无干净思考控制的厂商自动跳过（桌面选择器对其置灰）
-- **桌面壳联动**：输入区「工作模式」「思考」两个选择器经 `mode.set` / `think.set` 指令走引擎队列串行落地，**下一条消息生效**（与终端 `/mode`、`/think` 同口径）
-- **语音模式**：自动关闭思考（降低首字延迟）
-
----
-
-## 安全性
-
-### API Key 加密存储
-
-J.A.R.V.I.S 使用操作系统原生凭据管理器加密存储 API Key，替代 TOML 文件明文：
-
-- **Windows**：Windows Credential Manager（WinVaultKeyring）
-- **macOS**：Keychain
-- **Linux**：Secret Service / KWallet
-
-存储时优先写入 keyring，失败降级到 TOML 明文。读取时按 环境变量 → keyring → TOML 优先级查询。
-
-### 操作审计日志
-
-所有工具调用自动记录到 `~/.jarvis/tool_audit.jsonl`：工具名、参数、权限模式、耗时、成功/失败、写操作标记。yolo 模式下的 FileWrite / Bash / DeleteFile 等写操作特别标记。
-
-### 敏感字段脱敏
-
-`/config show`、`/doctor`、错误提示中所有 API Key 自动脱敏为 `sk-xxxx...xxxx`。
-
----
-
-## 性能优化
-
-| 优化 | 说明 |
-|---|---|
-| MCP 连接并行化 | 7 个 server 并发连接，启动时间从 ΣT 降到 max(T) |
-| HTTP 连接池复用 | 所有 Provider 共享 httpx.AsyncClient，切换模型不重建 TCP 连接 |
-| 工具注册缓存 | `build_default_registry()` 结果由 `@lru_cache` 缓存，多处调用仅执行一次 |
-| 实时语音延迟加载 | 先连 WebSocket 显示"已连接"，MCP 工具后台加载完热更新 |
-| 工具延迟加载 | 14 核心工具始终携带，~80 延迟工具按需搜索，纯聊天零工具 |
-
----
-
-## 语音功能
-
-Jarvis 提供两套独立的语音系统：
-
-| 模式 | 技术路线 | 特点 |
-|---|---|---|
-| **`/voice` 语音对话** | STT → LLM → TTS 管线 | 识别→思考→朗读，逐轮对话 |
-| **`/talk` 实时聊天** | 全双工 WebSocket 直连 | 终端半双工轮替；桌面壳全双工（说话打断） |
-
-> 两套系统独立运行，但共用麦克风硬件。同时开启可能导致 PyAudio 设备冲突。
-
-### 语音对话 `/voice`
-
-进入语音对话模式后，形成 **听 → 想 → 说** 闭环：
-
-```
-🎤 聆听 → STT 识别 → LLM 思考回答 → TTS 朗读 → 🎤 聆听 → ...
-```
-
-- **语音输入**：单一 STT 后端 **QwenASR**（`settings.toml` 的 `[stt].model`，默认 `qwen3-asr-flash-realtime`）
-  - WebSocket（OmniRealtimeConversation）流式识别，服务端 VAD 断句，中英混合强
-  - 对话聆听与待机唤醒共用同一实例；识别语言由 `language` 参数控制（默认 `zh`）
-
-- **语音输出**：两种 TTS 模式
-  - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
-  - **StreamTTSPlayer**：WebSocket 流式合成，LLM 逐句输出 → 即时合成播放，首句延迟 ~500ms
-  - 默认音色 `longanlang_v3`；内置 7 个音色，`/tts-voice` 可切换或添加自定义音色（音色带「适配模型」字段：系统音色按模型系列隔离、声音复刻绑定 target_model，切换时不兼容自动联动切 `tts_model`）
-- **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
-- **思考隔离**：思考过程只显示在终端面板，不进入 TTS
-- **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
-
-### 实时双工 `/talk`
-
-基于 DashScope 实时语音 WebSocket 服务（`qwen-audio-3.0-realtime-flash`），2026-09-28 重构为
-**传输无关引擎（`RealtimeEngine`）+ 终端/桌面双适配器**：
-
-- **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
-  轮次；`turn_detection = "smart_turn"` 可切语义判停（支持环境音转写/声纹增强）
-- **半双工轮替（终端默认）**：AI 说话期间静音麦克风（发静音帧维持送流），外放稳定多轮；
-  戴耳机设 `half_duplex = false` 恢复随口打断
-- **桌面端真全双工（jarvis-desktop）**：浏览器 `getUserMedia` 系统级 AEC 消除回声，音频经
-  serve 协议（`talk.audio` 上行 / `talk_audio` 下行）桥接，说话即打断，无需配置
-- **响应救援（rescue）**：服务端吞轮（取消后不补答/建响应超时）时客户端补发
-  `response.create` 兜底，防“说了话永远不回复”
-- **AEC 回声消除（终端可选）**：基于 WebRTC AEC3（`aec-audio-processing`），未安装时靠
-  半双工静音从源头防回声
-- **Function Calling**：默认 `tools_mode = "builtin"`（时间查询/结束对话 2 工具，低延迟；
-  实测大工具表会拖慢服务端建响应）；`"all"` 装配 ToolRegistry 全部工具 + MCP（文件读写、
-  Bash、WebSearch 等），MCP 在首个 `session.update` 前一次性加载。高风险操作先语音确认再执行
-- **纯终端 UI**：转录文字流实时显示（2026-09 起不再弹出 pywebview 独立窗口）
-- **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式）与 jarvis-desktop 桌面应用（真全双工）承担
-- 退出方式：ESC 键或说"退下"
-
-> **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，
-已包含在 `[voice]` 可选依赖组中；未安装时半双工静音兜底。架构与静音/救援策略详见
-[docs/architecture/06-语音系统.md](docs/architecture/06-语音系统.md)。
-
-### TTS 朗读 `/say`
-
-```bash
-/say 你好，我是贾维斯
-```
-
-将文字转为语音朗读。使用 DashScope CosyVoice 引擎。
-
-### 录音识别 `/listen`
-
-```bash
-/listen      # 录音并输出识别文本
-/mic         # 别名
-```
-
----
-
-## 图片输入
-
-Jarvis 支持在对话中附带图片（需要多模态视觉模型，如 `qwen3.7-plus`）：
-
-```bash
-/image C:\Users\me\photo.png   # 添加本地图片
-/img C:\Users\me\photo.png     # 别名
-/paste                          # 添加剪贴板中的图片（同 Ctrl+V）
-/p                              # 别名
-```
-
-- 图片加入待发送列表，下次发送消息时附带
-- 支持 PNG / JPG / WEBP / BMP 格式
-- 自动缩放到最长边 1280px，JPEG 质量 85
-- 仅显式添加（Ctrl+V / `/paste` / `/image`），同一张图在待发送列表内按 MD5 去重；
-  旧版"回车/发消息自动扫剪贴板"已下线（剪贴板残留会误带进普通提问）
-
----
-
-## GUI 自动化
-
-Jarvis 可以直接控制鼠标、键盘、窗口和屏幕，像人一样操作电脑 GUI。安装 `gui` 依赖组后自动启用：
-
-```bash
-pip install "jarvis-agent[gui]"
-```
-
-### 基础操作
-
-| 工具 | 能力 |
-|---|---|
-| **GetScreenSize** | 查询屏幕分辨率 |
-| **ScreenShot** | 全屏/局部截图，图片直接回传给模型 |
-| **MouseClick** | 在屏幕绝对坐标点击（支持左/右/中键、双击） |
-| **MouseDrag** | 从一个坐标拖拽到另一个坐标（文件、滑块、调整大小） |
-| **MouseMove** | 移动光标 |
-| **MouseScroll** | 滚轮滚动 |
-| **TypeText** | 输入文字（ASCII 打字，中文走剪贴板粘贴） |
-| **KeyTap** | 按键/组合键（如 `["ctrl","s"]`） |
-
-### 多窗口协调
-
-操作具体应用窗口时，建议先聚焦窗口，再用窗口相对坐标操作：
-
-```text
-1. WindowFocus(title="Chrome")      # 激活窗口
-2. WindowRect(title="Chrome")       # 获取窗口屏幕绝对坐标
-3. WindowClick(title="Chrome", x=100, y=50)  # 在窗口内相对坐标点击
-```
-
-这样即使窗口被移动过，`WindowClick` 仍能通过相对坐标准确点击。
-
-### 等待与视觉定位
-
-| 工具 | 能力 |
-|---|---|
-| **WaitFor** | 等待屏幕/区域出现目标图片，或等待画面发生变化 |
-| **VisualClick** | 用模板匹配找图标/按钮并自动点击 |
-
-视觉定位适合按钮/图标位置不固定的场景：传入目标小图，Jarvis 会自动在屏幕上找到匹配位置并点击，避免写死坐标的脆弱性。
-
-### 右键菜单
-
-`MouseClick` 支持 `button=right`。右键弹出菜单后，可配合 `KeyTap` 用方向键选择菜单项并按 Enter 确认。
-
-### 使用原则
-
-1. **先看再动**：操作前先用 `ScreenShot` 看清屏幕，不要盲点坐标。
-2. **小步验证**：完成一步后截图确认结果，再执行下一步。
-3. **危险操作需确认**：点击、输入、关窗口等会改状态的操作默认需要用户确认（yolo 模式可关闭）。
-
----
-
-## 桌面入口（三栏工作台）
-
-```bash
-jarvis --gui           # 启动三栏工作台窗口（--talk 与 --gui 等价）
-```
-
-双击桌面「JARVIS」图标（或开机自启）打开单窗口三栏工作台：
-透明背景透出桌面，方舟反应炉淡蓝动效居中律动（核心呼吸 + 三角线圈轮流点亮，说话时加速）。
-
-- **左栏**：模式切换（💬 文本 / 🎙️ 实时）+ 三面板切换（📜 历史会话 ⇄ 🤖 模型 ⇄ 🎵 音色）
-- **中栏**：气泡对话流（流式渲染；思考块与本轮连续工具调用在回复结束后各自折叠成一行，可点开查看）+ 文本输入框，支持历史会话恢复
-- **右栏**：CPU / 内存 / 磁盘实时指标
-- **窗口行为**：无边框铺满工作区启动（不盖任务栏；自绘标题栏可拖动，带最小化/关闭按钮，不提供全屏）、单实例（二次双击唤起已驻留窗口）
-- 日志位于 `~/.jarvis/workbench.log`
-
-> 📌 **架构说明**：原「无窗口 daemon + 托盘遥控」常驻模式（`--daemon`、pystray 托盘菜单、
-> 托盘语音/文本终端派生）已于 2026-08 下线；原 `--talk` 独立实时窗口已合并进工作台。
-> 定时提醒/每日简报等主动感知服务已由 jarvis-desktop 桌面壳（serve 宿主 `ProactiveHub`）接线播报（详见下文「主动提醒系统」）；pywebview 工作台宿主暂未接。
-> 完整开发计划见 [docs/plans/workbench-gui.md](docs/plans/workbench-gui.md)。
-
-### 开机自启
-
-```bash
-python -m agent.daemon.autostart install            # 安装开机自启
-python -m agent.daemon.autostart uninstall          # 卸载开机自启
-python -m agent.daemon.autostart status             # 查看状态
-```
-
-| 平台 | 开机自启 |
-|---|---|
-| Windows | Startup 文件夹 .lnk（指向静默 VBS，打开三栏工作台） |
-| macOS | LaunchAgent plist（`launchctl load`） |
-| Linux | 不支持（提示手动 systemd） |
-
-> 📌 桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status` 子命令）
-> 已于 2026-09 下线：桌面入口由 jarvis-desktop 桌面应用接管，旧桌面图标
-> 与桌面应用功能冲突。存量桌面 JARVIS.lnk 可直接手动删除。
-
-### 实时双工配置
-
-在 `~/.jarvis/settings.toml` 中配置：
-
-```toml
-[realtime_talk]
-api_key = "sk-xxx"              # DashScope API Key（实时语音必需）
-model = "qwen-audio-3.0-realtime-flash"
-voice = "longanqian"
-event_log = false               # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
-echo_suppress_with_aec = true   # AI 说话时压低麦克风抑制回声（仅戴耳机时才建议关）
-half_duplex = true      # 半双工：AI 说话时静音麦克风；戴耳机想随口打断设为 false（桌面全双工路径不受影响）
-rescue = true           # 响应救援：吞轮时补发 response.create（默认开）
-turn_detection = "server_vad"   # 轮次检测：server_vad（默认）/ smart_turn
-silence_ms = 500        # server_vad 判停静音时长（毫秒，200~6000）
-tools_mode = "builtin"  # 工具面：builtin（默认）/ all（Registry+MCP 全量）
-```
-
-> `api_key` 用于 `/talk` 实时双工语音鉴权（映射到 `dashscope_api_key`）。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量；当前 LLM 厂商就是 dashscope 时也可直接复用主 `api_key`。**不会借用 deepseek/openai 等其它厂商的 key**（2026-09 起防呆 fail-fast：缺配置时直接给出中文配置指引，不发起注定被 1007 Access denied 拒绝的连接）。
-
-### 全局热键（保留）
-
-全局热键能力已保留（Windows 默认用原生 `RegisterHotKey`），预留新一代 GUI 工作台的「热键召唤窗口」场景：
-
-```toml
-[daemon]
-hotkey = "ctrl+shift+j"        # 全局热键
-hotkey_native = true            # Windows 优先使用 RegisterHotKey（更快）
-hotkey_debounce_ms = 200        # 去抖毫秒，防止一次按下触发多次
-```
-
-REPL 仍可用 `--quick` 快速启动，跳过开机动画、MCP、LSP 等可选初始化，首次调用相关命令时再懒加载：
-
-```bash
-jarvis --quick                # REPL 快速启动
-```
-
-### 系统资源监控（休眠态）
-
-监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，
-当前处于休眠态，将由新一代 GUI 工作台重新接线。配置项预留：
-
-```toml
-[monitor]
-enabled = true
-cpu_threshold = 85.0       # CPU 超 85% 持续 30s 告警
-memory_threshold = 90.0    # 内存超 90% 告警
-disk_threshold = 10.0      # 磁盘剩余低于 10% 告警
-check_interval = 10        # 检查间隔（秒）
-alert_cooldown = 600       # 同类告警冷却（10 分钟）
-# P2-3 增强
-disk_trend_days = 7        # 磁盘趋势预测：预测几天后将满
-high_cpu_duration = 600    # 异常进程：CPU > 50% 持续多少秒通知
-work_break_interval = 7200 # 连续工作 2 小时提醒休息
-```
-
-### 主动提醒系统（P2-3，已接线）
-
-主动感知能力（`agent.core.daemon` 下 Scheduler / ProactiveEngine / DeadlineTracker）
-原由常驻 daemon 拉起，2026-08 随托盘下线休眠，**2026-09 已由 serve 宿主的
-`ProactiveHub` 重新接线**：每日简报 / 对话内「提醒我」定时任务 / 截止日期检查到期后，
-经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报（聊天气泡 + Windows 系统通知），
-**2026-09 二期起并行用本机 CosyVoice 做待机 TTS 朗读**（复活老 daemon「待机语音」通道：
-对话/语音忙时跳过不打断，提醒加「先生，提醒您：」前缀，简报/截止日期只读前 200 字，
-`proactive_tts_enabled` 可关，桌面壳设置面板亦可运行时开关——经 `settings.get/set` 写回 settings.toml）。
-因 serve 随桌面壳启停，**播报仅在 `--serve` / 桌面壳运行期间生效**（错过依赖
-`schedule.json` 补偿 + 简报补播窗口，默认 2 小时、`briefing_catchup_window_min` 可配）；pywebview 工作台宿主与日历集成暂未接（二期）。
-详见 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。能力清单：
-
-**每日简报**：每天 08:30 自动播报今日概览（待触发提醒、节假日、系统状态、截止日期、日历事件）。
-
-**截止日期追踪**：对贾维斯说“下周五之前交项目报告”，自动注册截止日期，分级提醒（提前 7/3/1/0 天 + 逾期每天）。
-
-**提醒升级**：提醒触发后未确认会自动重复通知（5→10→20 分钟，最多 3 次），说“知道了”即可确认。
-
-**日历集成**（可选）：读取 Outlook/ICS 日历事件，在简报中展示 + 提前 30 分钟提醒。
-
-```toml
-[daemon]
-briefing_enabled = true
-briefing_time = "08:30"    # 每日简报时间
-briefing_catchup_window_min = 120  # 简报补播窗口（分钟）：错过 ≤ 此值启动补播一次；≤0 关闭
-proactive_tts_enabled = true  # 待机 TTS 朗读（忙时跳过；TTS 参数复用 tts_model/tts_voice 等）
-
-[deadline]
-enabled = true
-check_time = "09:00"       # 每日检查截止日期的时间
-
-[calendar]
-enabled = false            # 日历集成（需配置 Outlook 或 ICS）
-backend = "auto"           # auto / outlook / ics
-ics_path = ""              # 本地 .ics 文件路径
-ics_url = ""               # 远程 .ics 订阅 URL
-remind_minutes_before = 30
-```
-
-Agent 工具：
-
-| 工具 | 说明 |
-|------|------|
-| `ScheduleReminder` | 安排定时提醒（“明天 3 点提醒我开会”） |
-| `AddDeadline` | 注册截止日期（“下周五之前交报告”） |
-| `ListDeadlines` | 查看活跃截止日期 |
-| `CompleteDeadline` | 标记截止日期完成 |
-| `AcknowledgeReminder` | 确认提醒（停止升级重复通知） |
-
-### 跨设备协同（P3-1）
-
-在终端输入 `/connect-phone`，电脑端会显示一个二维码，手机扫码即可连接当前 JARVIS 会话，出门在外也能远程操控电脑。
-
-```toml
-[bridge]
-http_port = 8765               # PWA 页面端口
-ws_port = 8766                 # WebSocket 通信端口
-token = ""                     # 认证 token，留空自动生成
-```
-
-**使用方式**：
-1. 在 JARVIS 终端输入 `/connect-phone`
-2. 终端显示二维码和访问地址
-3. 手机和电脑连同一局域网 Wi-Fi
-4. 手机扫码或手动访问 URL 开始对话
-
-终端效果示例：
-
-```
-🌐 跨设备协同已启动
-   手机访问: http://192.168.1.100:8765/?token=a1b2c3d4e5f6g7h8
-   手机和电脑需在同一局域网（Wi-Fi）
-
-████  ████  █  ████  ████
-█  █  █  █  █  █     █  █
-...
-
-提示: 手机扫码或手动访问上方 URL 即可开始对话
-      输入 /connect-phone 可重新生成二维码
-```
-
-**核心特性**：
-- **共享会话**：手机端与电脑端共享同一对话历史，手机上发的消息会同步到电脑终端
-- **权限隔离**：手机端默认 PLAN 模式（只读），写操作需手机端确认
-- **流式输出**：JARVIS 回复实时推送到手机端，支持 Markdown 渲染
-- **工具调用可视化**：手机端可查看工具调用过程和结果
-- **Token 认证**：每次 `/connect-phone` 自动生成 token，防止未授权访问
-- **中断支持**：手机端可随时中断 JARVIS 的回复
-- **终端会话生命周期**：随当前 JARVIS 终端退出而关闭
-
-> 外网访问需配合内网穿透（如 frp、Cloudflare Tunnel）。
-
-> **桌面端**：jarvis-desktop 输入栏的「跨设备协同」下拉按钮（`[LNK]`）可直接发起手机连接，
-> 二维码内联显示在中间聊天区（重连时总在底部刷新，无需往上翻找）；手机发来的消息以带「手机」
-> 标记的用户气泡上屏、每轮对话即时存到电脑会话历史；桌面文本 / 手机 /
-> 微信三端共享同一会话并抢引擎唯一 query 锁串行发送（详见 jarvis-desktop README 与
-> `docs/architecture/14-跨设备与微信接入.md` 第六节）。
-
-### 微信 ClawBot 接入
-
-在终端输入 `/connect-wechat`，扫码连接微信 ClawBot，之后在微信中发消息即可与 JARVIS 对话（含完整工具调用能力）。
-
-**使用方式**：
-1. 在 JARVIS 终端输入 `/connect-wechat`
-2. 终端显示二维码（或扫码链接）
-3. 手机微信扫码并确认连接
-4. 在微信中找到 ClawBot 发消息即可对话
-
-**核心特性**：
-- **官方接口**：基于腾讯 iLink Bot API，安全合规不封号
-- **完整能力**：微信端可使用 JARVIS 全部工具（文件、命令、搜索等）
-- **共享会话**：微信对话与电脑终端共享同一对话历史
-- **24h 续期**：连接有效期 24 小时，到期前终端提醒重新扫码
-- **长消息分段**：超过 2000 字自动分段发送
-
-**依赖**：`pip install "jarvis-agent[wechat]"`（aiohttp + qrcode）
-
-> 需微信版本 ≥ 8.0.70，设置 → 插件中可看到 ClawBot。
-
-> **桌面端**：jarvis-desktop 输入栏的「跨设备协同」下拉按钮可直接发起微信连接，二维码内联聊天区（重连
-> 时总在底部刷新），**扫上即连**（微信配对码为服务端偶发兜底，桌面不再内联输入）；微信发来的消息以带「微信」标记的
-> 用户气泡上屏、每条回复各自成独立气泡、每轮对话即时存到电脑会话历史；与手机、桌面文本共享同一会话并串行发送。
-
-### 安全沙箱执行（P3-8）
-
-高风险操作在隔离环境中运行，防止误操作破坏系统。跨平台支持：
-
-| 平台 | 沙箱机制 | 说明 |
-|------|------|------|
-| Windows | Job Object | 内存/进程数限制，KILL_ON_JOB_CLOSE 终止进程树 |
-| Linux | resource.setrlimit | RLIMIT_AS/CPU/NPROC 资源限制 |
-| macOS | sandbox-exec + rlimit | Apple Sandbox 命令包装 + 资源限制 |
-
-**四级风险分类**：
-
-| 风险等级 | 策略 | 示例命令 |
-|------|------|------|
-| LOW | 直接放行 | ls, cat, git status |
-| MEDIUM | 沙箱开启时自动放行 | npm install, git commit, python script.py |
-| HIGH | 强制沙箱 + 文件快照 | rm, del, git push --force |
-| CRITICAL | 沙箱 + 快照 + 用户确认 | rm -rf, sudo, format, reg delete |
-
-**文件快照保护**：高风险操作前自动备份目标文件，操作失败可回滚（`~/.jarvis/sandbox_snapshots/`）。
-
-**审计日志**：所有沙箱操作记录到 `~/.jarvis/sandbox_audit.jsonl`，支持统计查询。
-
-```toml
-[sandbox]
-enabled = false              # 总开关
-max_memory_mb = 512          # 沙箱内最大内存（MB）
-max_cpu_seconds = 60         # 最大 CPU 时间（秒）
-max_processes = 10           # 最大子进程数（防 fork bomb）
-timeout = 120                # 命令总超时（秒）
-block_network = false        # 是否阻断网络
-auto_allow_medium = true     # 沙箱开启时自动放行中等风险
-audit = true                 # 记录审计日志
-max_snapshots = 20           # 文件快照最大保留数
-excluded_commands = []       # 不走沙箱的命令（如 ["docker", "wsl"]）
-```
-
----
-
-## 外部前端接入（serve 模式）
-
-```bash
-jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供外部前端接入）
-```
-
-`--serve` 把 J.A.R.V.I.S 的对话引擎以 **WebSocket API** 形式对外服务，供 jarvis-desktop（Electron 桌面壳，独立仓库）等外部前端接入。它与 `--gui`/`--talk` 互斥：后者在本进程内渲染 pywebview 工作台，`--serve` 不渲染任何本地 UI，只装配与工作台**完全相同**的引擎零件（`ChatEngine` + `WorkbenchAPI` + `MetricsCollector`），经 `DesktopBridgeServer` 以 WS 事件流对外服务。
-
-- **绑定收敛**：仅监听 `127.0.0.1` + 系统分配的随机端口，不对局域网暴露（这是与手机协同模式 `0.0.0.0` + 固定端口的关键差异）。
-- **token 认证**：WS 连接须带 token（`ws://127.0.0.1:<port>/?token=xxx`），token 错误服务端以 `4401` 关闭。
-- **就绪握手**：进程就绪后向 stdout 打印**单行** JSON，外部宿主（Electron 主进程）逐行解析：
-
-  ```json
-  {"type": "jarvis-serve-ready", "port": 51234, "http_port": 51235, "token": "<hex>", "pid": 999}
-  ```
-
-- **停机信号**：stdin EOF（父进程退出 / 杀管道）或 `SIGINT` 触发优雅停机（先关传输层，再停采集与引擎）。
-- **依赖**：`websockets` 已为核心依赖（随 `pip install` 自动安装，2026-09 起）；仍保留缺失降级：import 失败时以退出码 `3` 报错退出。
-- **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内“提醒我”定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知），二期起并行待机 TTS 朗读（`proactive_tts_enabled`，忙时跳过）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
-- **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
-- **全双工实时语音音频桥（2026-09-28 已接线）**：`talk.start` 带 `duplex: true` 时，音频不再走 serve 本机 pyaudio，而是双向桥接：渲染进程 `getUserMedia`（浏览器 AEC）采集 16kHz PCM16 经指令 `talk.audio`（base64 帧，fire-and-forget）上行喂 `BridgeMic` → `RealtimeEngine`；AI 24kHz 语音帧经事件 `talk_audio` 下行，由 Web Audio 顺序排播；打断时下行空 payload 表示 flush。浏览器系统级回声消除使桌面壳成为**说话即打断的真全双工**（引擎路径内自动关半双工/软件压低/软件 AEC）。采集/播放实现见 jarvis-desktop `src/renderer/src/audio/`。
-- **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。**任意来源都能停**（2026-10）：手机 / 微信 / 主动任务发起的轮次经桥接 `on_query_begin`（引擎 `_remote_query_begin`）把当前任务登记为 `_send_task`，故 `reply.abort` 对非桌面本地输入的在跑轮次同样生效；桌面侧 `busy` 改由引擎活动事件（`assistant_text`/`assistant_thinking`/`tool_use`）驱动、`assistant_done` 统一撤销，不再只靠本地发送置位。
-- **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。
-- **项目工作区（桌面壳，2026-08）**：左栏**底部**常驻「项目」区（面板区之后、状态栏之前，配色随主题皮肤）：`＋ 打开文件夹` 由主进程目录选择器取绝对路径后发指令 `project.set`，后端二次校验（存在 + 绝对，不自动建目录）→ 入队引擎线程内串行重建系统提示词 / 重挂 harness / 开新会话，落地推 `project_switched`；最近项目走 `projects.list`（点击即切、右键「从列表移除」= `projects.forget`，只清 `~/.jarvis/projects.toml` 记录、不删磁盘）；serve 启动默认 workdir 取该文件 `last_active`，实现「重开回到上次项目」。另有：`init`（每连接首帧）把左栏状态栏从启动期的「等待后端启动...」切到「就绪」；后端进程未重启（无 `project.*` 注册）时点选会秒级上屏「后端不支持指令 project.set（…请重启后端后重试）」而非干等超时。
-- **右栏四区块（桌面壳）**：任务中心（`schedule.list` 待触发提醒 + 活跃截止日期倒计时 + 最近简报）、会话与用量（`cost.get`，口径同 REPL `/cost`：token 四类累计 + 缓存命中率 + 轮数/消息数，命中率统一由 `Usage.cache_hit_rate` 按协议口径算好、前端不重算；附上下文窗口占比 `context_*`，口径同 REPL `/context`，由引擎只读属性 `context_usage` 经 `get_cost` 透传，2026-10）、系统状态三指标卡、运行健康（`state.get` 的 `mcp` 连接快照 + 事件日志流）；快捷操作（🗜 手动压缩上下文—点击经 `slash.exec` 透传 `/compact`、结果走 `slash_result` 命令输出卡片／新会话／停止回复／复制最后回复）已迁入输入栏（曾有的 📸 主屏截屏因实用性低已于 2026-10 删除）。刷新时机：init 十路齐刷（含设置回填、协同回填与 slash.commands 补全目录，2026-10）、assistant_done 刷用量、proactive_notify 刷任务列表、`mcp_ready` 刷运行健康（MCP 为后台预热约 9s，init 时快照常为 null，“未启用”，连接落定后推 `mcp_ready` 事件驱动右栏补刷）。
-- **添加模型（桌面壳，2026-09）**：左栏模型面板列表末项「＋ 添加模型」（虚线框）→ 点击后独立组件 `ModelForm` 整体替换列表（同右栏设置面板模式），六个字段（模型厂商/模型名/API Key/接口类型/Base URL/模型类型）与 REPL `/models` → 添加其他模型完全同口径；提交走 `models.add` 指令：serve 二次校验（模型名必填、接口类型/模型类型白名单）→ 复用 `save_custom_model` 写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（API Key 同步系统 keyring）+ `_infer_base_url` 推断空 Base URL → 成功后壳刷 `models.list` 并提示「模型「X」已添加」，失败保持表单打开可修正。表单字段区带 `.form-scroll` 滚动容器（面板高度不足时自身滚动，不溢出压到左栏底部「项目」区；报错与保存/取消常驻滚动区之外，2026-09-30），音色表单 `VoiceForm` 同口径。
-- **修改与删除模型配置（桌面壳，2026-09）**：左栏模型项交互对齐会话列表 —— **双击**模型项进 `ModelForm` 编辑该模型（预填 `models.list` 每项 `config` 现值），**右键**模型项则项内出现删除按钮、再点才真删（二次确认）。编辑走 `models.edit` 指令（`name` 必填，`new_name`/`vendor`/`api_format`/`base_url`/`api_key`/`model_type` 留空表示不改）：内置模型（命中项目级 `[llm.models]`）**名字锁定不可改**（改名只会产生「幽灵模型」），自定义模型可改名（写新段删旧段，`api_key` 留空则**保持原 Key** —— 桌面壳不回显密钥，与 REPL「留空即清空」刻意不同）；改的是当前运行模型时 serve 侧入队 `{"cmd": "switch_model", "force": true}` **强制重建 provider**，端点/接口类型改动立即生效（回执带 `hot_switched`，壳提示「当前会话已按新配置重连」）。删除走 `models.remove`：仅自定义模型可删（内置模型与「用户级 models.toml 无该段」均回 ok=false，后者防「删不掉但重启复活」），删的是当前模型时回执 `was_current` 且**不动运行中的 provider**（提示用户另选）。
-- **音色管理（桌面壳，2026-09-28）**：左栏「音色」面板与模型面板同范式 —— `voices.list` 返回**全量音色目录**（内置 + 自定义，每项 `{name, voice_id, description, vendor, model, linked, current, custom}`，当前音色置顶；副行透出「适配 X」/「联动 X」预告）；点选音色走 `voices.select`（回执从 bool 升级为 `{ok, name, voice_id, linked_model, old_model}`：与终端 `/tts-voice` 同口径立即写盘并在不兼容时**自动联动 tts_model**，`linked_model` 带回壳提示「联动 TTS 模型 X，下次语音生效」）；末项「＋ 添加音色」表单提交 `voices.add`（name/voice_id 必填、内置名遮蔽拒绝，upsert 即编辑——双击自定义项进表单预填）；右键自定义项显删除按钮、再点发 `voices.delete`（仅 custom 可删，后端经 `remove_custom_voice` 外科式删 `models.toml` 段）。
-- **设置面板（桌面壳，2026-09；同年 09 第一批扩键）**：设置独立成面板（标题栏齿轮进入，整体替换右栏信息面板）：外观（主题/语言，纯前端 localStorage 偏好）+ 后端联动三组（经 `settings.get`/`settings.set` 与 serve 联动：校验→先外科式落盘 settings.toml 对应节→再改运行时，失败回滚）：语音播报（待机 TTS 开关 + 音量/语速）、每日简报（开关 + 时间）、截止日期追踪（开关 + 检查时间）；简报/截止日期改动额外触发 `ProactiveHub` 调度热重注册（无需重启）。白名单单一真源在 `agent/config/desktop_settings.py`（密钥/自由路径永不入协议）。
-- **项目工作区（桌面壳，2026-08）**：左栏顶部新增「项目」区，把 serve 启动时固定的 `settings.workdir`（工具执行、项目级 `.jarvis/MEMORY.md`、`.jarvis/skills/`、`SessionMeta.workdir` 都基于它）升级为可运行时切换：「＋ 打开文件夹」经主进程 `dialog.showOpenDialog` 选目录 → `project.set` 上送后端二次校验存在 + 绝对→ 引擎 `project_switch.handle_set_workdir` 串行落地（重建系统提示词 + 重挂 harness + **开新会话**，同 model_switch 范式不打断流式），落地后推 `project_switched` 事件；与最近项目列表 `projects.list`/`project.get`/`projects.forget` 同环，持久化到 `~/.jarvis/projects.toml`（`[[project]] {path,name,last_opened}` + `last_active`）；`python -m agent.serve` 与 `jarvis --serve` 启动都默认取 `get_last_active_existing()`，重开自动回到上次项目。**与切模型正交**：provider 不重建、模型不变；**前缀缓存失效一次属预期**（system prompt 含 workdir）。安全边界：后端二次校验拒绝空/相对/不存在，不自动建目录；切项目不改 `permission_mode`。
-- **未知指令失败回执（2026-09 加固）**：WS 分发对**未注册**的指令 type 立即回 `{"event":"reply","data":{"type","ok":false,"error"}}`（旧行为是静默忽略，既不回 ok 也不回 error），错误文案为「后端不支持指令 X（后端进程可能未加载最新代码，请重启后端后重试）」；缺 `type` 字段同样回失败回执。原因是前端（Vite 热更新）可能先支持新指令、而后端进程仍是旧代码（`python -m agent.serve` 不热重载），静默丢弃只会让桌面壳干等到 15s 超时、用户看不到任何原因（典型症状「指令 models.add 回执超时」）；手机 PWA 不消费 `reply` 事件，行为不受影响。
-- **子进程 stdin 隔离（2026-09 修复）**：Bash 工具与沙箱执行器创建子进程时显式 `stdin=DEVNULL`，不再继承宿主 stdin——serve 宿主的 stdin 是 Electron 永不关闭的管道且有 watch 线程阻塞读，MSYS2 bash 继承后会挂死（工具永不返回），见 [docs/fixlogs/serve-bash-hang-fix.md](docs/fixlogs/serve-bash-hang-fix.md)。另 `ask_user` 新增异步版 `ask_user_async`，权限询问不再阻塞引擎事件循环。
-- **斜杠命令透传（`slash.exec`，2026-10）**：桌面壳输入框识别 `/` 前缀，经 `slash.exec` 指令把命令原文转发到引擎侧新模块 [agent/ui/workbench/slash_bridge.py](agent/ui/workbench/slash_bridge.py)，复用终端同一个 `dispatch_command` 执行、捕获 stdout 输出以 `slash_result` 事件（`{command, ok, text}`）回推，桌面渲染成命令输出卡片——一次改动把 `/compact` `/context` `/cost` `/diff` `/doctor` `/tools` `/mcp` `/skills` `/memory` `/plugin` 等一大批终端能力带进桌面。三道护栏：白名单只放行非交互命令（桌面已有原生控件的 mode/think/model/sessions/rewind 等不透传，防双入口口径漂移）；交互禁令（执行期临时把 `pick_from_list` / `form_input` / `ask_user` / `terminal_picker` 等换成抛错实现——serve 的 stdin 是协议管道，任何命令试图交互都干净失败而不挂起、不抢管道）；白名单外命中已安装技能（`/<skill-name>`）动态放行，与手机/微信共用 query 锁串行、可被 `reply.abort` 停止、轮后正常落盘。
-- **斜杠命令补全目录（`slash.commands`，2026-10）**：新增第 47 条只读指令 `slash.commands`，返回桌面可执行斜杠命令目录 `[{name, description, source}]`（`source`：passthrough=白名单透传 / native=桌面原生控件对应命令 / skill=已安装技能），数据源 [agent/ui/workbench/slash_bridge.py](agent/ui/workbench/slash_bridge.py) 的 `build_desktop_commands`——口径与 `run_slash` 执行护栏严格对齐，补出来的每条命令必然可执行。桌面壳据此实现输入框 `/` 前缀弹层补全（输 `/c` 匹配所有 c 开头命令、输 `/` 展示全部），手感对齐终端 REPL。
-
-协议契约（指令 / 事件 schema）唯一来源在 [agent/serve/protocol.py](agent/serve/protocol.py)：47 条桌面指令（`message` / `sessions.*`（含 `rename` / `delete`） / `models.*`（含 `add` 添加自定义模型 / `edit` 修改配置 / `remove` 删除模型） / `voices.*`（含 `add` 添加自定义音色 / `delete` 删除音色，`select` 回执带 tts_model 联动） / `metrics.get` / `state.get` / `schedule.list` / `cost.get` / `answer_user` / `reply.abort` / `mode.set` / `think.set`（2026-09 工作模式与思考强度选择器） / `checkpoint.*`（`preview` 撤回前预览 / `rewind` 消息级回溯与文件回滚，2026-10） / `slash.exec`（斜杠命令透传，结果走 `slash_result` 事件，2026-10） / `slash.commands`（斜杠命令补全目录，只读，2026-10） / `talk.*`（含 `talk.audio` 上行音频帧） / `voice.{start,stop,interrupt}` / `proactive.ack` / `settings.{get,set}` / `project.{set,get}` + `projects.{list,forget}`（2026-08 项目工作区） / `phone.*` / `wechat.*`（协同与配对管理））+ 对话流 / 会话 / 提示 / 指标 / 实时语音（含 `talk_audio` 下行音频帧） / 半双工语音（`voice_*`） / 主动播报（`proactive_notify`） / 项目热切换（`project_switched`，2026-08） / 命令输出（`slash_result`，2026-10）事件。架构细节见 [docs/architecture/07-UI层.md](docs/architecture/07-UI层.md) 的「外部前端接入（serve 模式）」与「项目热切换」小节，立项计划见 [docs/plans/jarvis-desktop.md](docs/plans/jarvis-desktop.md) 与 [docs/plans/proactive-desktop.md](docs/plans/proactive-desktop.md)。
-
----
-
-## 开发服务器
-
-Jarvis 内置 `/server` 命令和 `DevServer` 工具，用于一键启动前端/Node 开发服务器：
-
-```bash
-/server                                  # 启动当前目录项目
-/server jarvis-website                   # 启动指定目录项目
-/server --port 3000                      # 指定端口（被占用时自动递增）
-/server --command "pnpm run dev"         # 自定义启动命令
-/server jarvis-website --port 3000 --wait 15
-```
-
-支持自动识别的项目类型：
-
-| 项目类型 | 检测依据 | 默认命令 |
-|---|---|---|
-| Vite | `vite.config.*` 或依赖 `vite` | `npm run dev` / `npx vite --port {port}` |
-| Next.js | `next.config.*` 或依赖 `next` | `npm run dev` / `npx next dev --port {port}` |
-| Nuxt | `nuxt.config.*` 或依赖 `nuxt` | `npm run dev` / `npx nuxt dev --port {port}` |
-| Vue CLI | `vue.config.*` 或依赖 `@vue/cli-service` | `npm run dev` / `npx vue-cli-service serve --port {port}` |
-| Webpack | `webpack.config.*` 或依赖 `webpack` | `npm run dev` / `npx webpack serve --port {port}` |
-| Create React App | 依赖 `react-scripts` | `npm start`（自动注入 `PORT`） |
-| Gatsby | `gatsby-config.*` 或依赖 `gatsby` | `npx gatsby develop --port {port}` |
-
-特性：
-
-- **自动检测 package manager**：根据 `pnpm-lock.yaml` / `yarn.lock` 选择 `pnpm` / `yarn` / `npm`
-- **端口占用自动递增**：默认端口被占用时自动找下一个可用端口
-- **日志重定向**：stdout/stderr 写入 `~/.jarvis/dev_server_logs/<项目名>_<时间戳>.log`
-- **URL 提取**：从日志中自动提取 `http://localhost:port` 返回
-
-AI 工具：`DevServer(project_dir=..., port=..., command=...)`
-
----
-
-## 工具错误自愈
-
-Jarvis 内置 **Tool Self-Healing**，工具调用失败时不会立刻把错误抛给 LLM，而是先自动分类、重试、降级或询问用户：
-
-- **错误分类**：网络抖动、API 限流、超时、文件缺失、权限不足、依赖缺失、配置错误等
-- **自动重试**：临时网络错误 / 限流按指数退避重试
-- **自动修复**：文件缺失时自动创建父目录；超时时自动延长 `timeout`
-- **用户询问**：可分类的可恢复错误重试耗尽后询问用户是否再试一次；**未知错误不再询问**，直接 fail-fast 交回 LLM 决策（避免桌面/serve 宿主下阻塞等待导致整轮卡死）
-- **非零退出≠工具失败**：Bash 命令非零退出（curl 连不上=7、grep 无匹配=1 等）属正常结果，带 `[exit=N]` 表头原样回传给 LLM 自行判断，不进入自愈重试/询问链路
-- **遥测统计**：`/doctor` 可查看自愈配置、错误分布、最近事件
-
-### 配置
-
-在 `configs/settings.toml` 或 `~/.jarvis/settings.toml` 中配置：
-
-```toml
-[self_healing]
-enable_tool_self_healing = true
-tool_retry_max = 3
-tool_retry_backoff_base = 1.0
-tool_retry_backoff_max = 30.0
-```
-
-### 命令
-
-```bash
-/doctor              # 查看自愈统计与系统诊断
-```
-
-### 会话历史自愈（悬空工具调用）
-
-LLM 协议要求每个 `assistant.tool_use` 在**紧随的下一条消息**里都有配对的 `tool_result`。若只写了调用、没写结果（如工具执行中被用户中断、输出被截断），残缺片段会留在会话历史里，导致该会话**此后每次请求都被 API 拒收**——重试、换措辞、换模型均无效。
-
-Jarvis 用「三道源头 + 一道出口」自动修好：
-
-- **源头补齐**：工具执行被中断 / 抛异常 / 输出被截断 / 编排器缺项 → 立即注入 `is_error=True` 的占位结果（说明该调用已失效）
-- **出口兜底**：所有发往 LLM 的消息在 provider 转换入口先跑 `ensure_tool_pairing()` 校验配对，并可**自愈已中毒的旧会话**（无需丢弃历史）
-- **不破坏缓存**：仅在有违规时重建发送副本，健康历史零拷贝返回（`id`/`timestamp` 不变），冻结前缀的 prompt cache 不受影响
-
-详见 [docs/fixlogs/dangling-tool-use-fix.md](docs/fixlogs/dangling-tool-use-fix.md)。
-
----
-
-## 多 Agent 协作
-
-Jarvis 支持派生子 Agent 并行处理复杂任务，以及团队协作模式：
-
-- **子代理**：主 Agent 可创建子代理处理独立的子任务，结果汇总后继续
-- **批量并行**：一次调用 `Agent` 工具可同时派发多个同步子任务，结果按编号聚合
-- **团队模式**：创建 Agent 团队，分配不同角色和工具集
-- **后台队友**：`Agent` 工具的 `run_in_background=true` 模式会创建持久 teammate，加入团队并通过邮箱持续通信
-- **自动任务领取**：后台 teammate 空闲时会自动从共享 `TaskList` 领取 pending 且无阻塞的任务并执行
-- **计划审批**：在 PLAN/ASK 权限模式下，teammate 执行写操作前会向 leader 发送 `plan_approval_request`，leader 审批后才继续
-- **任务管理**：共享任务列表，支持依赖链、owner 分配、完成回调
-- **团队状态查询**：`TeamStatus` 工具可查看成员状态、任务统计、未读邮件数
-- **生命周期管理**：`TaskStop` 工具可终止后台 teammate；teammate 每 30 秒发送心跳保活
-- **消息邮箱**：Agent 之间通过文件邮箱通信
-
-管理命令：`/agents` `/tasks` `/plan`
-
-### 典型用法
-
-```text
-> 创建 code-review 团队，分配 reviewer 和 tester
-> 用 TaskCreate 创建审查任务和测试任务
-> 用 Agent run_in_background=true 启动 reviewer/tester
-> 队友会自动领取并执行任务，完成后通过邮箱通知 leader
-> 用 TeamStatus 查看进度，用 TaskStop 终止队友
-```
-
-详见 [docs/architecture/11-多Agent协作.md](docs/architecture/11-多Agent协作.md)。
-
----
-
-## 插件系统
-
-Jarvis 有两个独立的插件市场，各自管理：
-
-### Plugin 系统（GitHub 插件）
-
-```bash
-/plugin                       # 列出已安装插件
-/plugin search [关键词]        # 搜索 Plugin 系统市场（远程 + 本地）
-/plugin install <名称>        # 安装插件
-/plugin uninstall <名称>      # 卸载插件
-/plugin info <名称>           # 查看插件详情
-/plugin update                # 检查插件更新
-```
-
-Plugin 系统默认同时搜索远程 `marketplace.json` 和本地插件市场目录。
-本地市场在 `configs/settings.toml` 的 `[plugins]` 表中配置：
-
-```toml
-[plugins]
-marketplace_local = "../jarvis-plugins"
-```
-
-支持两种本地目录结构：
-- 扁平布局：`<marketplace_local>/<plugin>/plugin.json`
-- 仓库布局：`<marketplace_local>/plugins/<plugin>/plugin.json`（与 `aceFelix/jarvis-plugins` 仓库一致）
-
-### CLI-Anything harness（CLI 工具封装）
-
-```bash
-/cli_anything                 # 列出已安装 harness
-/cli_anything market          # 列出市场可用 harness
-/cli_anything install <id>    # 安装指定 harness
-/cli_anything uninstall <id>  # 卸载指定 harness
-```
-
-### Plugin 通用功能
-
-```bash
-/plugin enable <名称>         # 启用被禁用的 Plugin 插件
-/plugin disable <名称>        # 禁用 Plugin 插件，不卸载
-/plugin create <名称>         # 创建 Plugin 插件脚手架
-/plugin validate <路径>       # 校验 plugin.json 合法性
-```
-
-**启用/禁用**：禁用的 Plugin 插件 skills 会被移出 `~/.jarvis/skills/`，保留在 `~/.jarvis/plugins/disabled/<名称>/` 中，可快速重新启用。状态持久化到 `~/.jarvis/plugins/disabled.json`。
-
-**插件创建**：`/plugin create my-tool` 生成 `plugin.json` + `skills/` 目录 + `README.md` 脚手架。
-
-**插件校验**：`/plugin validate <路径>` 检查 `plugin.json` 是否符合规范。
-
-### CLI-Anything 通用功能
-
-```bash
-/cli_anything enable <id>         # 启用被禁用的 harness
-/cli_anything disable <id>        # 禁用 harness，不卸载
-/cli_anything create <id>         # 创建 harness 脚手架
-/cli_anything validate <路径>      # 校验 SKILL.md 合法性
-```
-
-**启用/禁用**：禁用的 harness 不会被加载，保留文件。状态持久化到 `~/.jarvis/cli_anything/disabled.json`。
-
-**harness 创建**：`/cli_anything create my-tool` 生成 `SKILL.md` + `README.md` 脚手架。
-
-**harness 校验**：`/cli_anything validate <路径>` 检查 `SKILL.md` 是否符合规范。
-
-详见 [docs/architecture/10-扩展生态.md](docs/architecture/10-扩展生态.md)。
-
----
-
-## CLI-Anything 外部软件控制
-
-Jarvis 内置 **CLI-Anything harness** 机制，可以把任意第三方软件（如 Blender、Obsidian、GIMP、Godot、WPS 等）包装成 Agent 可调用的工具。
-
-### 安装 harness
-
-在 `~/.jarvis/cli_anything/<软件名>/` 目录下放置：
-
-- `SKILL.md`：描述软件能力、参数、触发场景
-- `run.py`：执行入口（接收 `--<参数名>` 和 `--harness-dir`、`--workdir`）
-
-示例：
-
-```
-~/.jarvis/cli_anything/
-├── blender/
-│   ├── SKILL.md
-│   └── run.py
-└── wps/
-    └── SKILL.md       # pip 型 harness 只需 SKILL.md（全局命令已安装）
-```
-
-### SKILL.md 示例
-
-```markdown
----
-name: Blender
-id: blender
-description: 通过 CLI 控制 Blender 3D 建模软件
-when_to_use: 用户需要创建/修改 3D 模型、渲染场景时
-trigger_words: [blender, 3d, 建模, 渲染]
-command: python
-args:
-  - name: operation
-    type: string
-    enum: [create_mesh, render, export, info]
-    required: true
-    description: 操作类型
-  - name: prompt
-    type: string
-    required: false
-    description: 自然语言描述要执行的操作
-examples:
-  - "用 Blender 创建一个立方体"
----
-```
-
-### 市场命令
-
-Jarvis 支持 **CLI-Anything官方市场**（CLI-Anything GitHub 仓库）和 **jarvis自定义市场**（如 jarvis-harness-market）两个来源：
-
-```text
-/cli_anything market              # 查看市场可用 harness（官方 + 自定义）
-/cli_anything install blender     # 从官方仓库安装 Blender harness
-/cli_anything install wps         # 从自定义市场安装 WPS harness（自动 pip install）
-/cli_anything uninstall blender   # 卸载已安装 harness
-/cli_anything list                # 列出本地已安装 harness
-```
-
-网络不可用时，命令会自动回退到本地 `../CLI-Anything-main` 仓库（如果存在）。
-
-### jarvis自定义 Harness 市场
-
-通过配置 `market_url` / `market_local` 接入自定义市场（如 [jarvis-harness-market](https://github.com/aceFelix/jarvis-harness-market)）：
-
-```toml
-# ~/.jarvis/settings.toml
-[cli_anything]
-market_url = "https://raw.githubusercontent.com/aceFelix/jarvis-harness-market/main"
-market_local = "path/to/jarvis-harness-market"   # 本地回退路径
-```
-
-自定义市场的 harness 支持两种安装模式：
-
-| 模式 | 说明 | 安装行为 |
-|------|------|----------|
-| **pip 型**（推荐） | harness 是标准 Python 包，有 `setup.py` + `install_cmd` | 自动 `pip install` + 迁移 SKILL.md |
-| **目录型** | harness 是自包含目录，无 `install_cmd` | 整目录复制到 `~/.jarvis/cli_anything/<id>/` |
-
-pip 型 harness 安装后提供全局命令（如 `jarvis-harness-wps`），与官方 CLI-Anything harness 行为一致。
-
-### 使用
-
-启动 Jarvis 后，harness 会自动注册为工具 `cli_anything__<id>`。例如：
-
-```
-> 用 Blender 创建一个立方体
-```
-
-Jarvis 会调用 `cli_anything__blender`，并在执行前询问你确认（默认 ASK 权限）。
-
-### 安全说明
-
-- 所有 harness 工具默认 **ASK** 权限，执行前需要确认。
-- 不通过 shell 执行，避免命令注入。
-- 支持超时和强制终止（默认 120 秒）。
-
----
-
-## 邮件发送
-
-Jarvis 可以通过 `SendEmail` 工具主动给用户发邮件，适用于提醒、摘要、报告转发等场景。
-
-### 配置
-
-在 `~/.jarvis/settings.toml` 中添加 `[email]` 表：
-
-```toml
-[email]
-enabled = true
-smtp_host = "smtp.163.com"
-smtp_port = 465
-smtp_user = "your_163_email@163.com"
-smtp_password = "your_authorization_code"   # 163 邮箱授权码，不是登录密码
-sender = "your_163_email@163.com"
-default_recipient = "13985465782@136.com"   # 用户未指定收件人时的默认地址
-```
-
-### 使用
-
-直接用自然语言告诉 Jarvis：
-
-```text
-> 发邮件提醒我今晚8点开会
-> 把这份总结发到我的邮箱，主题是今日工作摘要
-```
-
-Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件人、抄送、密送和本地附件。
-
----
-
-## 目录结构
-
-```
-agent/
-├── main.py            # 入口（REPL / --gui 工作台 / --doctor 分发）
-├── bootstrap.py       # 装配工厂（provider / checker / recovery / context 构建）
-├── doctor.py          # 依赖健康检查（--doctor：Python 包 / 系统级依赖 / 配置）
-├── model_manager.py   # 模型切换与管理（/model /models 逻辑）
-├── session_manager.py # 会话自动保存 / 标题生成
-├── commands/          # 斜杠命令系统
-│   ├── router.py      # 命令路由（精确匹配 + 前缀匹配 + 动态技能分发）
-│   └── handlers/      # 各命令处理器（core/session/model/voice/media/plugin/collab...）
-├── cli_anything/      # CLI-Anything harness 集成（包装任意软件为 CLI）
-├── core/              # 核心运行时
-│   ├── query_loop.py  # 对话循环（REPL 驱动 + 语音对话流程）
-│   ├── layered_context.py # 分层上下文管理（冻结前缀 + 滑动窗口）
-│   ├── orchestrator.py # Agent 编排器（ReAct 循环）
-│   ├── tool.py        # Tool 协议定义
-│   ├── context.py     # 工具上下文 + UI 协议（RealtimeTalkUI）
-│   ├── message.py     # 消息/内容块类型（Message / ContentBlock）
-│   ├── tool_pairing.py # 配对不变量（tool_use ↔ tool_result 补齐/去孤儿）
-│   ├── team_notify.py # 多 Agent 邮箱同步注入
-│   ├── result.py      # 工具调用结果（ToolResult）
-│   ├── hooks.py       # 钩子系统
-│   ├── diag.py        # 诊断日志
-│   ├── error_recovery.py # 工具错误自愈（分类/重试/降级/询问）
-│   ├── images.py     # 图片/剪贴板助手（/image /paste 加载与去重）
-│   ├── logging.py    # 日志
-│   ├── audit/        # 工具审计日志
-│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日/截止日期/日历）
-│   ├── extensions/    # 外部扩展机制（MCP客户端/插件/Skill加载）
-│   ├── memory/        # 记忆持久化（上下文压缩/恢复/文件状态/存储）
-│   └── sandbox/       # 安全沙箱（风险评分/隔离执行/文件守护/审计日志）
-├── collaboration/     # 多 Agent 协作框架
-│   ├── subagent.py    # 子代理定义与运行
-│   ├── team.py        # Agent 团队管理
-│   ├── teammate.py    # 团队成员
-│   ├── teammate_registry.py # 队友注册表（全局生命周期管理）
-│   ├── mailbox.py     # Agent 间消息邮箱
-│   └── task_list.py   # 共享任务列表
-├── lsp/               # LSP 代码智能
-│   ├── client.py      # LSP 客户端
-│   └── manager.py     # 多语言 LSP Server 管理
-├── permissions/       # 五层权限系统
-│   ├── rules.py       # 权限规则定义
-│   ├── checker.py     # 权限校验器
-│   ├── path_guard.py  # 路径安全守护
-│   ├── shell_classifier.py # Shell 命令危险分级
-│   └── modes.py       # 权限模式（default/plan/accept_edits/yolo）
-├── tools/             # 内置工具（30+）
-│   ├── base.py        # 基础工具执行器
-│   ├── bash.py        # 命令执行
-│   ├── ask_user.py    # 向用户提问
-│   ├── location.py    # IP 定位
-│   ├── todo.py        # 任务计划
-│   ├── tool_search.py # 延迟工具搜索（ToolSearch）
-│   ├── file_ops/      # 文件读写/编辑/搜索（glob/grep）
-│   ├── system/        # 系统操作（鼠标/键盘/屏幕/窗口）
-│   ├── web/           # 浏览器自动化 + 网络请求
-│   ├── vision/        # 摄像头拍照 + 视觉监控
-│   ├── collaboration/ # 多Agent协作工具（子代理/团队/任务/计划）
-│   └── extensions/    # 扩展工具（LSP/市场/MCP代理/日程/邮箱/CLI-Anything）
-├── llm/               # LLM 抽象层
-│   ├── base.py        # 基础 Provider 接口
-│   ├── thinking.py    # ThinkingConfig 配置表（思考参数策略化）
-│   ├── provider_registry.py # ProviderMeta 厂商注册表（延迟导入 + URL 检测）
-│   ├── openai_provider.py    # OpenAI 兼容协议
-│   ├── anthropic_provider.py # Anthropic Messages API
-│   ├── dashscope_provider.py # DashScope SDK 原生协议
-│   ├── zai_provider.py       # 智谱 ZhipuAi SDK 原生协议
-│   └── mock.py        # Mock Provider（测试用）
-├── ui/                # 用户界面
-│   ├── cli.py         # Rich 终端 REPL + 命令补全
-│   ├── boot_animation.py # 启动动画（方舟反应炉粒子动画 + 定格帧分流）
-│   ├── markdown_renderer.py # Markdown 终端渲染
-│   ├── model_picker.py # 交互式模型选择器
-│   ├── session_picker.py # 交互式会话选择器
-│   ├── terminal_picker.py # 交互式终端选择器
-│   └── workbench/     # 三栏 GUI 工作台（--gui/--talk，桌面图标宿主）
-│       ├── app.py     # run_workbench() 入口（守卫→队列→装配→建窗）
-│       ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
-│       ├── api.py     # WorkbenchAPI（pywebview js_api）
-│       ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
-│       ├── metrics.py # CPU/内存/磁盘采集（2 秒推事件）
-│       ├── single_instance.py # 单实例守卫（端口 47812 + 锁文件心跳）
-│       └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
-├── voice/             # 语音引擎
-│   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
-│   ├── stt/           # STT 识别包（单一后端 QwenASR）
-│   │   ├── common.py    # 音频常量 / RMS 计算 / 停止标志（跨模块共享）
-│   │   ├── qwen.py      # QwenASR（OmniRealtime，服务端 VAD）
-│   │   └── __init__.py  # create_stt() 工厂 + 符号 re-export
-│   ├── stream_tts.py  # StreamTTSPlayer（句子级流式 TTS，逐句播放）
-│   ├── realtime_engine.py # /talk 协议引擎核心（WebSocket 状态机/静音策略/响应救援，传输无关）
-│   ├── realtime_talk.py # /talk 终端适配器（PyAudio 采集 + ESC + 工具装配）
-│   ├── realtime_bridge_audio.py # 桌面桥接适配器（BridgeMic/BridgeSpk，serve 音频帧 ⇄ 引擎）
-│   ├── realtime_audio.py # /talk 音频纯函数（RMS/衰减/静音判定）
-│   ├── realtime_tools.py # /talk 工具层（内置工具 + MCP 注册表聚合 + Function Calling 执行）
-│   ├── realtime_mcp.py # /talk MCP 工具装配（首个 session.update 前一次性加载）
-│   ├── realtime_events.py # /talk 可观测层（环境音转写 + 事件时间线 + 轮次统计）
-│   ├── voice_loop.py  # /voice 语音对话循环（听→想→说 + 对话⇄待机状态机）
-│   ├── voice_config.py # 语音配置（关键词/唤醒词/待机参数/语音 system prompt）
-│   ├── tts_text.py    # TTS 文本清洗（markdown/<think>/工具标签剥离）
-│   ├── barge_in.py    # 打断监听器（ESC 键盘 / 麦克风能量 / 打断词）
-│   ├── tts_voices.py  # TTS 音色目录（/tts-voice 数据源，含音色-模型适配联动）
-│   ├── audio.py       # PyAudio 全局单例（防 segfault）
-│   ├── aec.py         # AEC 回声消除（WebRTC AEC3，外放防自言自语）
-│   └── client_vad.py  # 客户端 VAD（静音检测/语音活动判断）
-├── bridge/            # 跨设备协同（P3-1）
-│   ├── server.py      # BridgeServer（HTTP 静态文件 + WebSocket 通信）
-│   ├── ui.py          # BridgeUI（UIProtocol 实现，事件转发到 WS）
-│   └── static/        # PWA 前端（单文件 HTML，暗色主题）
-├── wechat/            # 微信 ClawBot 接入（iLink Bot API）
-│   ├── ilink.py       # iLink API 客户端（扫码登录/长轮询/发消息）
-│   ├── server.py      # WeChatBridge（消息循环 + 单例管理 + 24h 重连）
-│   └── ui.py          # WeChatUI（UIProtocol 实现，收集回复文本）
-├── daemon/            # 常驻模式
-│   ├── daemon.py      # 守护进程（后台分离/托盘/热键/主动服务）
-│   ├── tray.py        # 系统托盘
-│   ├── hotkey.py      # 全局热键（跨平台）
-│   ├── hotkey_native.py # Windows 原生 RegisterHotKey（更快响应）
-│   ├── sessions.py    # 语音会话管理（stop_event 中断）
-│   ├── realtime.py    # 实时聊天会话管理
-│   ├── autostart.py   # 开机自启/桌面快捷方式
-│   ├── terminal_spawner.py # 终端窗口生成（warm 预启动）
-│   ├── voice_state.py # 语音互斥锁与开关状态
-│   ├── notifications.py # 系统通知
-│   └── platform_utils.py # 跨平台工具
-├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
-│   ├── settings.py    # Settings 数据类 + TOML 加载 + 字段映射
-│   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
-│   ├── keyring_store.py # API Key 加密存储（系统凭据管理器）
-│   ├── model_registry.py # 模型 TOML 持久化（save/load）
-│   └── migrations.py  # 配置迁移
-├── prompts/           # 系统提示组装（动态思维模式/语音模式）
-└── utils/             # 通用工具
-    └── mask.py        # API Key 脱敏
-
-tests/                 # 测试套件（2034 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
-├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
-├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
-├── collaboration/     # 多 Agent 协作测试
-├── core/ tools/ daemon/ voice/ # 各模块单元测试
-├── test_command_router.py # 命令路由集成测试
-├── test_query_loop.py     # 上下文压缩/图片淘汰测试
-├── _query_loop_fakes.py   # QueryLoop 测试共享替身与工厂
-├── test_query_loop_run.py # QueryLoop.run 主流程/工具循环/故障转移测试
-├── test_query_loop_stream.py  # 内容累积/Hooks/辅助方法/_stream_once 测试
-├── test_query_loop_branches.py # 团队邮箱注入/hooks 容错/延迟工具测试
-├── test_query_loop_session.py # 会话持久化/模型切换测试
-├── test_orchestrator.py   # 工具编排器测试
-├── test_session_manager.py# 会话标题生成/保存测试
-├── test_permissions.py    # 五层权限系统测试
-├── test_p23_proactive.py  # 主动感知提醒测试
-└── test_p38_sandbox.py    # 安全沙箱测试
-
-.github/workflows/     # GitHub Actions CI（自动测试 + 语法检查）
-└── ci.yml             # push/PR 触发，Python 3.11-3.14 矩阵
-
-npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g 安装）
-├── package.json       # npm 包定义（bin 指向 run.js）
-├── install.js         # postinstall：检测 Python + pip install jarvis-agent[all]
-└── run.js             # CLI 入口：转发参数给 jarvis 命令
-```
-
----
-
-## 测试与 CI
-
-项目配备 **2034 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
-
-```bash
-# 运行全部测试
-pytest tests/ -v
-
-# 查看覆盖率
-coverage run --source=agent -m pytest tests/ -q
-coverage report
-```
-
-每次 push 或 PR 到 `main` 分支，**GitHub Actions 自动跑全量测试**（Python 3.11 / 3.12 / 3.13 / 3.14 矩阵），不通过不允许合并。
-
----
-
-## 自动发布流程
-
-Jarvis 通过 **GitHub Actions + Git Tag** 实现一键自动发布到 PyPI 和 npm，无需手动构建上传。
-
-### 触发方式
-
-```bash
-# 1. 更新版本号（pyproject.toml 的 version 字段 + npm/package.json 的 version 字段
-#    + agent/__init__.py 的 __version__，供 jarvis --version 读取）
-# 2. 提交版本变更
-git add pyproject.toml npm/package.json agent/__init__.py
-git commit -m "chore: bump version to 2.1.0"
-
-# 3. 打 tag 并推送（v 前缀必须）
-git tag v2.1.0
-git push github v2.1.0
-```
-
-推送 `v*` tag 后，[publish.yml](.github/workflows/publish.yml) 自动执行：
-1. **测试** — 跑全量 pytest，失败则中止发布
-2. **版本一致性校验** — tag 版本号必须与 `pyproject.toml` / `npm/package.json` 一致，否则报错（`agent/__init__.py` 不在 CI 校验范围内，需手动同步）
-3. **构建** — `python -m build` 生成 wheel + sdist
-4. **发布 PyPI** — 通过 Trusted Publisher（OIDC 无凭证）上传
-5. **发布 npm** — 通过 `NPM_TOKEN` 上传 npm wrapper 包
-6. **创建 GitHub Release** — 自动附带 wheel/sdist 下载，从 commit 提取 changelog
-
-### 首次配置（仅做一次）
-
-#### PyPI Trusted Publisher（无 API Token）
-
-1. 登录 [pypi.org](https://pypi.org) → Account settings → Publishing
-2. Add a new pending publisher，填入：
-   - **PyPI Project Name**: `jarvis-agent`
-   - **Owner**: `aceFelix`
-   - **Repository name**: `jarvis`
-   - **Workflow name**: `publish.yml`
-   - **Environment name**: `pypi`
-3. 第一次发布后，publisher 自动激活。后续版本无需再次配置。
-
-#### npm Token
-
-1. 登录 [npmjs.com](https://www.npmjs.com) → Access Tokens → Generate New Token → **Automation**（绕过 2FA 限制）
-2. 在 GitHub repo → Settings → Secrets and variables → Actions → New repository secret
-   - **Name**: `NPM_TOKEN`
-   - **Value**: 上一步生成的 token
-
-> 配置完成后，每次推送 `v*` tag 即可全自动发布。无需本地装 twine、无需手动 `npm publish`、无需管理 API token 轮换。
-
----
+| **新手第一站**：贾维斯亲自带你上手（人设化指南） | [USER_GUIDE.md](USER_GUIDE.md) |
+| 安装 / 升级 / 平台依赖 | [docs/guide/installation.md](docs/guide/installation.md) |
+| 全部命令 / 模型管理 / 深度思考 | [docs/guide/commands.md](docs/guide/commands.md) |
+| 语音对话 / 实时双工 / 音色 | [docs/guide/voice.md](docs/guide/voice.md) |
+| 桌面壳 / 主动提醒 / 手机 / 微信 / serve 协议 | [docs/guide/desktop.md](docs/guide/desktop.md) |
+| 权限 / 压缩 / 记忆 / 沙箱 / 自愈 | [docs/guide/concepts.md](docs/guide/concepts.md) |
+| 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
+| 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
+| 架构设计（15 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
+| 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
+| 愿景与演进路线 | [docs/VISION.md](docs/VISION.md) |
 
 ## 开发路线
 
 - [x] **阶段 1**：最小可用 Agent（对话 + 文件 + 命令 + 五层权限）
 - [x] **阶段 2**：电脑操作能力（GUI + 多模态视觉 + 浏览器自动化 + 摄像头拍照）
 - [x] **阶段 3**：实时语音（TTS + STT + `/voice` 闭环 + `/talk` 全双工）
-- [x] **阶段 4**：记忆与生态（会话持久化/长期记忆/MCP接入/上下文压缩/Skill系统）
-- [x] **阶段 5**：贾维斯形态（daemon常驻+全局热键+系统托盘+开机自启+子代理+主动感知+视觉监控+主动提醒系统）
+- [x] **阶段 4**：记忆与生态（会话持久化 / 长期记忆 / MCP 接入 / 上下文压缩 / Skill 系统）
+- [x] **阶段 5**：贾维斯形态（主动感知 + 子代理 + 主动提醒 + jarvis-desktop 桌面壳）
 - [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
-- [x] **阶段 7**：实时聊天 UI（方舟反应炉动画窗口 + 全双工打断 + 单例管理）
+- [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
 
----
-
----
+> 详细规划见 [docs/roadmap/](docs/roadmap/jarvis-upgrade-roadmap.md) 与 [愿景文档](docs/VISION.md)。
 
 ## 反馈声明
 
-J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳定。使用过程中可能会出现一些小 Bug，纯属本人疏忽未能验证完全，对此深表歉意。
-
-如您在体验过程中遇到任何问题或体验不佳，欢迎通过以下方式反馈：
-
-- **邮箱**：13985465782@163.com
-
-您的每一条反馈都是我改进的动力，感谢支持与包容！
-
----
-
----
+J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳定。使用中如遇问题或体验不佳，欢迎反馈：**13985465782@163.com**。您的每一条反馈都是我改进的动力，感谢支持与包容！
 
 ## 感谢支持
-
 
 <div align="center">
 
 **感谢您使用 J.A.R.V.I.S.！**
 
-</div>
-
-<div align="center">
-
 **「J.A.R.V.I.S. ——— 随时为您效劳，先生。」**
 
 </div>
 
-<div>
+<div align="center">
 
 <table>
 <tr>
