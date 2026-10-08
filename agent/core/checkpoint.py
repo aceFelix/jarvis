@@ -41,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -92,13 +93,21 @@ def _workdir_key(workdir: str) -> str:
     """工作目录 → 检查点存储子目录名（哈希 + 可读 basename）。
 
     按 workdir 而非会话名定位：/load 旧会话、/rename 改标题后检查点
-    仍可命中；Windows 路径大小写不敏感，统一小写后再哈希。
+    仍可命中。大小写敏感语义随平台文件系统对齐：Windows 路径大小写
+    不敏感，统一小写后哈希（同一目录不同拼写命中同一检查点库）；
+    POSIX 上仅大小写不同的路径是两个不同目录，保持原样区分
+    （Linux CI 上过强归一会把不同目录哈希撞车）。
     @author aceFelix
     """
-    norm = str(Path(workdir).resolve()).lower().replace("\\", "/")
+    resolved = Path(workdir).resolve()
+    norm = str(resolved)
+    if os.name == "nt":
+        # 仅 Windows 做大小写归一；POSIX 保留原样
+        norm = norm.lower()
+    norm = norm.replace("\\", "/")
     digest = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]
     # 可读段用解析后的原始大小写（仅哈希归一），方便从目录名识别项目
-    base = _safe_session_dir_name(Path(workdir).resolve().name)[:32]
+    base = _safe_session_dir_name(resolved.name)[:32]
     return f"{base}-{digest}"
 
 

@@ -9,6 +9,7 @@ skip（CI 各平台均自带 git）。
 
 from __future__ import annotations
 
+import os
 import shutil
 
 import pytest
@@ -130,12 +131,24 @@ class TestDegradation:
 
 
 def test_workdir_key_stable_and_distinct(tmp_path):
-    """存储键：同目录稳定；不同目录不同；大小写归一（Windows 语义）。"""
+    """存储键：同目录稳定；不同目录不同；大小写语义随平台文件系统对齐
+    （Windows 不敏感→不同拼写命中同键；POSIX 敏感→区分）。
+    Windows 上大小写异拼目录在磁盘上本就是同一目录，resolve() 归一
+    到盘上真实大小写后两拼写天然同键，无需造目录；POSIX 上直接建
+    一个仅大小写不同的真目录验证区分。@author aceFelix
+    """
     d1 = tmp_path / "Proj"
     d1.mkdir()
     k1 = _workdir_key(str(d1))
     assert k1 == _workdir_key(str(d1))
-    assert k1 == _workdir_key(str(d1).upper())
+    if os.path.normcase("Aa") == "aa":
+        # 大小写不敏感 FS（Windows）：同目录不同拼写 → 同键
+        assert k1 == _workdir_key(str(d1).upper())
+    else:
+        # POSIX：仅大小写不同 = 两个不同目录 → 键必须区分
+        other_case = tmp_path / "PROJ"
+        other_case.mkdir()
+        assert k1 != _workdir_key(str(other_case))
     d2 = tmp_path / "Other"
     d2.mkdir()
     assert k1 != _workdir_key(str(d2))

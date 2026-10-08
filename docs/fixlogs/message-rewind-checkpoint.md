@@ -79,3 +79,14 @@ README.md / README.en.md（命令表 + `[checkpoint]` 配置）、USER_GUIDE.md�
 场景 + 配置详解）、docs/architecture/00-索引、07-UI层（撤回交互链路）、09-记忆与压缩
 （extra 持久化）、12-配置系统（新节）、**15-消息回溯与检查点.md（新增）**、
 docs/test/TEST_CHECKLIST.md（T-349–T-358）、桌面 README / architecture.md（撤回章节）。
+
+## Linux CI 平台差异修复（2026-10-08）
+
+推送后 jarvis CI（ubuntu pytest）1 例失败：`test_workdir_key_stable_and_distinct` 断言
+`_workdir_key(d) == _workdir_key(d.upper())`。根因：实现无条件 `.lower()` 归一后哈希 + 可读段
+保留原始大小写，开发现实基于 Windows（resolve() 会把大小写异拼路径归一到盘上真实大小写，
+两拼写天然同键）而编写了 Windows 语义断言；Linux 上 `Proj`/`PROJ` 本就是两个不同目录，
+键理应区分。**修复**：`_workdir_key` 改为仅 `os.name == "nt"` 时小写归一，POSIX 保留原样；
+测试用 `os.path.normcase("Aa") == "aa"` 探测文件系统语义分支断言（Windows 验同键、POSIX 建
+同名异大小写真目录验区分）。本地 Windows 10/10、checkpoint+rewind 相关 42 例全过；
+Linux 分支由 CI 重跑验收。
