@@ -36,8 +36,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: true  # 在 PR 上评论检测结果
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false  # 不上传 artifact（避免泄露 secrets 到 artifact）
-        with:
-          config-path: .gitleaks.toml  # 自定义规则
+          # 注：gitleaks-action@v2 不支持 config-path 输入；
+          # 仓库根的 .gitleaks.toml 会被 gitleaks 自动检测并加载
 
       - name: Scan result summary
         if: always()
