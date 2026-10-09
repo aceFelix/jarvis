@@ -58,12 +58,18 @@
         return div;
     }
 
-    function addUserBubble(text) {
+    /** 用户气泡入列。
+     * @param text 转写/输入文本
+     * @param beforeEl 可选锚点：传实时语音本轮流式 AI 气泡根节点时插到它前面——
+     *  服务端输入转写（input_audio_transcription.completed）异步滞后，常晚于回复
+     *  转写到达，直接追加会出现「用户的话排在 AI 回复之后」。@author aceFelix */
+    function addUserBubble(text, beforeEl) {
         endToolRun();
         const div = makeMessage('user', '你');
         const body = document.createElement('div');
         body.textContent = text;
         div.appendChild(body);
+        if (beforeEl) chatHistory.insertBefore(div, beforeEl);
         scrollBottom();
     }
 
@@ -680,7 +686,9 @@
                 reactor.setAiSpeaking(payload);
                 break;
             case 'user_transcript':
-                addUserBubble(payload);
+                // 实时语音：输入转写常晚于回复转写到达；本轮流式 AI 气泡已建时
+                // 把用户气泡插到它前面，保持「问在上、答在下」。@author aceFelix
+                addUserBubble(payload, streamingBody ? streamingBody.closest('.message') : null);
                 break;
             case 'ai_transcript_delta':
                 appendAssistantText(payload);

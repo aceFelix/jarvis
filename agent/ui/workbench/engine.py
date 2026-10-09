@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from agent.config.settings import Settings
-from agent.core.message import Message
+from agent.core.message import Message, TextContent
 from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
 # 附件/渲染纯函数拆到 render.py（控本文件行数）；此处再导出保持
 # tests/ui 既有导入路径（from engine import _messages_to_render）不变。
@@ -94,7 +94,9 @@ class ChatEngine:
         self._mcp_status: dict[str, Any] | None = None
         self._emitter = _EventEmitter(event_queue)
         self._ui = WorkbenchUI(self._emitter)
-        self._realtime_ui = WorkbenchRealtimeUI(self._emitter)
+        # owner=self：实时语音转写经 WorkbenchRealtimeUI 配对后回调
+        # commit_voice_turn 落入会话历史（不传则只透传事件不落库）
+        self._realtime_ui = WorkbenchRealtimeUI(self._emitter, owner=self)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event = threading.Event()
@@ -802,6 +804,33 @@ class ChatEngine:
             # 同上：LLM 标题任务句柄留存供改名取消
             self._title_task = asyncio.get_event_loop().create_task(_gen_llm())
 
+    def commit_voice_turn(self, user_text: str | None, ai_text: str | None) -> None:
+        """实时语音一轮转写落库：按 [问, 答] 顺序追加消息并触发持久化。
+
+        实时语音对话发生在 DashScope 实时通道内，不经 QueryLoop →
+        ``self._messages``，此前语音内容从不进会话历史（恢复会话只剩文本轮，
+        2026-10 修复）。由 WorkbenchRealtimeUI 在转写配对完整后调用（配对规则
+        见该类注释：正常顺序 / 转写滞后 / 开场白 / 回声轮过滤 / 收尾 flush）；
+        user/ai 至少一项非空。落库后复用 ``_after_turn`` 走与文本对话同一套
+        自动保存 + 标题生成（语音问句同样可作标题来源）。
+
+        Args:
+            user_text: 用户转写文本，None 表示本轮无用户问句（开场白/主动播报）。
+            ai_text: AI 回复转写文本，None 表示用户问句未获回复（被打断）。
+
+        @author aceFelix
+        """
+        if not getattr(self, "_session_ready", False):
+            return
+        messages = getattr(self, "_messages", None)
+        if messages is None or (not user_text and not ai_text):
+            return
+        if user_text:
+            messages.append(Message(role="user", content=[TextContent(text=user_text)]))
+        if ai_text:
+            messages.append(Message(role="assistant", content=[TextContent(text=ai_text)]))
+        self._after_turn()
+
     async def _handle_load(self, name: str) -> None:
         """恢复历史会话：载入消息并把历史渲染给前端。"""
         from agent.core.memory.store import load_session
@@ -942,6 +971,8 @@ class ChatEngine:
             except Exception as e:
                 self._emitter.emit("error", f"实时对话异常: {type(e).__name__}: {e}")
             finally:
+                # 收尾落库：停止瞬间仍在配对缓冲里的转写残轮写入会话历史
+                self._realtime_ui.flush_pending_transcripts()
                 self._talk_task = None
                 self._emitter.emit("talk_stopped", "")
 
@@ -967,7 +998,7 @@ class ChatEngine:
         from agent.voice.realtime_bridge_audio import BridgeMic, BridgeSpk
         from agent.voice.realtime_engine import RealtimeEngine
         from agent.voice.realtime_mcp import load_mcp_tools_async as mcp_load_tools
-        from agent.voice.realtime_talk import DEFAULT_WS_URL
+        from agent.voice.realtime_talk import DEFAULT_WS_URL, default_instructions
         from agent.voice.realtime_tools import BUILTIN_TOOLS, build_all_tools
 
         s = self._settings
@@ -998,6 +1029,12 @@ class ChatEngine:
             api_key,
             model=getattr(s, "realtime_model", "qwen-audio-3.0-realtime-flash"),
             voice=getattr(s, "realtime_voice", "longanqian"),
+            # 贾维斯人设指令（与 RealtimeTalk 终端路径同口径回退）：此路径直接
+            # 构造父类 RealtimeEngine，无子类的默认话术回退，不传会得到空
+            # instructions → DashScope 实时模型回落自带默认人设（自称"小云"）。
+            instructions=default_instructions(
+                getattr(s, "realtime_tools_mode", "builtin")
+            ),
             ws_url=getattr(s, "realtime_ws_url", "") or DEFAULT_WS_URL,
             turn_detection=getattr(s, "realtime_turn_detection", "server_vad"),
             silence_duration_ms=int(getattr(s, "realtime_silence_ms", 500)),
@@ -1038,6 +1075,8 @@ class ChatEngine:
                 mic.close()
                 spk.close()
                 self._talk_mic = None
+                # 收尾落库：停止瞬间仍在配对缓冲里的转写残轮写入会话历史
+                self._realtime_ui.flush_pending_transcripts()
                 self._talk_task = None
                 self._emitter.emit("talk_stopped", "")
 
@@ -1116,6 +1155,10 @@ class ChatEngine:
                     adapter, s, self._query_loop, self._ctx,
                     stop_event=self._voice_stop,
                     interrupt_event=self._voice_interrupt,
+                    # 每轮语音对话落库：ctx.messages 即 self._messages（同一
+                    # 列表），轮次结束走与文本对话同一套自动保存/标题生成——
+                    # 此前半双工语音只写内存不存盘，重启即丢（2026-10 修复）。
+                    on_turn_end=self._after_turn,
                 )
             except Exception as e:
                 self._emitter.emit("error", f"半双工语音异常: {type(e).__name__}: {e}")

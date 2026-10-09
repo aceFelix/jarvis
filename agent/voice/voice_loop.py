@@ -43,7 +43,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.context import ToolContext
@@ -396,6 +396,7 @@ async def voice_loop(
     *,
     stop_event: threading.Event | None = None,
     interrupt_event: threading.Event | None = None,
+    on_turn_end: Callable[[], None] | None = None,
 ) -> None:
     """进入语音模式。对话 ⇄ 待机 循环，直到外部停止 / Ctrl+C 彻底退出。
 
@@ -424,6 +425,11 @@ async def voice_loop(
         （后者仅中断当前录音，继续聆听/待机）。None 时内部自建（REPL 宿主由
         Ctrl+C 信号处理器置位）。
     interrupt_event: 外部打断信号；None 时内部自建（无即时打断来源）。
+    on_turn_end: 每轮对话结束回调（可选，2026-10 新增）。本轮 ``ctx.messages``
+        有增长（产生了新的用户/助手消息，含被打断的半轮）时调用——宿主据此
+        触发会话持久化（工作台引擎传 ``_after_turn``，与文本对话同一套自动
+        存盘；此前语音轮只进内存不落盘，重启即丢）。回调异常静默，不影响
+        语音循环；未传时行为零变化（REPL 宿主）。
 
     @author aceFelix
     """
@@ -519,10 +525,18 @@ async def voice_loop(
                     if stop_event and stop_event.is_set():
                         break
                     interrupt_event.clear()  # 每轮重置打断信号
+                    msg_count_before_round = len(ctx.messages)
                     cont = await _voice_loop_round(
                         events, settings, loop, ctx, tts, stt, interrupt_event,
                         stop_event
                     )
+                    # 每轮落库钩子：本轮消息有增长（正常回复或被打断的半轮）
+                    # 即通知宿主持久化（工作台 _after_turn；异常静默不影响语音）
+                    if on_turn_end is not None and len(ctx.messages) > msg_count_before_round:
+                        try:
+                            on_turn_end()
+                        except Exception:
+                            pass
                     if stop_event and stop_event.is_set():
                         break
                     # ESC / 停止标志打断了 stt.listen() → 清标志回到聆听
