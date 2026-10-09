@@ -231,7 +231,7 @@ AI 在 system prompt 中会被提示：操作某应用时，先聚焦窗口，�
 1. 新增 `/workflow` 命令与 `workflow.py` 工具。
 2. 编写测试。
 3. 更新 `README.md` 与 `docs/architecture/*.md`。
-4. 更新 `jarvis-upgrade-roadmap.md` 中 P1 状态。
+4. 更新 `docs/BLUEPRINT.md` 中 P1 状态。
 
 ---
 
@@ -260,7 +260,7 @@ AI 在 system prompt 中会被提示：操作某应用时，先聚焦窗口，�
 | `agent/main.py` | 可选：新增 `/workflow` 命令 |
 | `docs/architecture/*.md` | 更新 GUI 章节 |
 | `README.md` | 更新 GUI 操作说明 |
-| `docs/roadmap/jarvis-upgrade-roadmap.md` | 更新 P1 状态 |
+| `docs/BLUEPRINT.md` | 更新 P1 状态 |
 | `tests/tools/system/*.py` | 新增单元测试 |
 
 ---

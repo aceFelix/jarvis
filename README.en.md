@@ -150,7 +150,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot
 
 > Install paths, optional dependency groups, per-OS system dependencies and the `--gui` workbench entry: see the [Installation Guide](docs/guide/installation.md) (Chinese).
-> To grasp where this project is heading in one read: the [Vision doc](docs/VISION.md).
+> To grasp where this project is heading in one read: the [Blueprint](docs/BLUEPRINT.md).
 
 ## Platform Support
 
@@ -174,7 +174,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | Config reference / vendor setup / FAQ | [config-docs/](config-docs/configuration.md) (中文) |
 | Architecture (15 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
 | Testing / CI / publishing / directory layout | [docs/guide/development.md](docs/guide/development.md) (中文) |
-| Vision & roadmap | [docs/VISION.md](docs/VISION.md) |
+| Blueprint (vision · capability model · roadmap) | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) |
 
 ## Development Roadmap
 
@@ -186,7 +186,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - [x] **Phase 6**: Cross-platform (Windows / macOS / Linux)
 - [x] **Phase 7**: Realtime chat UI (Arc Reactor workbench + full-duplex interrupt + desktop app)
 
-> Detailed plans: [docs/roadmap/](docs/roadmap/jarvis-upgrade-roadmap.md) and the [Vision doc](docs/VISION.md).
+> Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
 ## Disclaimer
 

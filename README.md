@@ -149,7 +149,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 
 > 安装路径、可选依赖组、各平台系统依赖、`--gui` 工作台入口等详见 [安装指南](docs/guide/installation.md)。
-> 想一句话理解这个项目要去哪，读 [愿景文档](docs/VISION.md)。
+> 想一句话理解这个项目要去哪，读 [蓝图文档](docs/BLUEPRINT.md)。
 
 ## 平台支持
 
@@ -173,7 +173,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
 | 架构设计（15 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
 | 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
-| 愿景与演进路线 | [docs/VISION.md](docs/VISION.md) |
+| 蓝图（愿景 · 能力模型 · 演进路线） | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) |
 
 ## 开发路线
 
@@ -185,7 +185,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
 - [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
 
-> 详细规划见 [docs/roadmap/](docs/roadmap/jarvis-upgrade-roadmap.md) 与 [愿景文档](docs/VISION.md)。
+> 阶段 8–11（判断层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 
 ## 反馈声明
 

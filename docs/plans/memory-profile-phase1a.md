@@ -1,6 +1,6 @@
 # Phase 1a：画像记忆（Profile Memory）实施计划
 
-> 对应 [VISION.md](../VISION.md) 目标蓝图 · 维度一「记忆」的第一步
+> 对应 [BLUEPRINT.md](../BLUEPRINT.md) 能力模型 · 记忆贯穿轴的第一步
 > 目标：JARVIS 从"每次初见"变成"记得你"——最小组间、最快体感
 
 ---
@@ -242,4 +242,4 @@ refine_min_messages = 6   # 会话至少多少条消息才触发提炼
 ---
 
 **文档版本**：v1.0 | **创建**：2026-08-15 | **状态**：待评审
-**关联**：[VISION.md](../VISION.md) 维度一 | 决策记录：embedding 选 tongyi-embedding-vision-flash（1b 启用）、首期仅画像、提炼模型独立可配
+**关联**：[BLUEPRINT.md](../BLUEPRINT.md) 记忆维度 | 决策记录：embedding 选 tongyi-embedding-vision-flash（1b 启用）、首期仅画像、提炼模型独立可配

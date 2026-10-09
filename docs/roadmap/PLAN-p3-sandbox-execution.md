@@ -165,4 +165,4 @@ excluded_commands = []       # 不走沙箱的命令（如 ["docker", "wsl"]）
 - `agent/tools/bash.py` — 集成沙箱执行 + 风险感知权限
 - `agent/config/settings.py` — 新增 11 个 sandbox_* 配置字段
 - `configs/settings.toml` — 新增 [sandbox] 配置段
-- `docs/roadmap/jarvis-upgrade-roadmap.md` — P3-8 标记 ✅
+- `docs/BLUEPRINT.md` — P3-8 标记 ✅

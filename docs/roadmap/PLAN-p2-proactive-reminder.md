@@ -210,5 +210,5 @@ work_break_interval = 7200     # 连续工作多少秒提醒休息（2小时）
 - `jarvis/agent/daemon/daemon.py`
 - `jarvis/configs/settings.toml`
 - `jarvis/configs/settings.example.toml`
-- `jarvis/docs/roadmap/jarvis-upgrade-roadmap.md`
+- `jarvis/docs/BLUEPRINT.md`
 - `jarvis/README.md`

@@ -1,6 +1,6 @@
 # 桌面文件操作升级（FileOps Desktop Upgrade）实施计划
 
-> 对应 [VISION.md](../VISION.md) 维度四「维护」（`tools/system/maintenance.py`）与路线图 P2-6「文件系统守望」的落地文档
+> 对应 [BLUEPRINT.md](../BLUEPRINT.md) 「系统维护」维度（`tools/system/maintenance.py`）与能力条目 P2-6「文件系统守望」的落地文档
 > 目标：从"模型临时拼 Bash 搬文件"到"原生文件工具 + 回收站 + 整理闭环"，让"帮我整理桌面/下载目录"第一次成为产品能力
 
 ---
@@ -322,4 +322,4 @@ organizer 出 plan 时读取 ProfileStore（`agent/core/memory/profile_store.py`
 ---
 
 **文档版本**：v1.0 | **创建**：2026-08-29 | **状态**：待评审
-**关联**：[VISION.md](../VISION.md) 维度四「维护」· 维度六「安全」| roadmap P2-6、Phase 4 maintenance.py | 依赖画像记忆 Phase 1a（已完成）
+**关联**：[BLUEPRINT.md](../BLUEPRINT.md) 系统维护 · 安全维度 | roadmap P2-6、系统维护工具集 | 依赖画像记忆 Phase 1a（已完成）

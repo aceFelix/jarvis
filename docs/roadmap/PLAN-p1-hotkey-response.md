@@ -144,6 +144,6 @@ text_terminal_warm = false     # 是否预启动隐藏文本终端（极速唤�
 - `jarvis/agent/config/settings.py`
 - `jarvis/agent/main.py`
 - `jarvis/configs/settings.example.toml`
-- `jarvis/docs/roadmap/jarvis-upgrade-roadmap.md`
+- `jarvis/docs/BLUEPRINT.md`
 - `jarvis/README.md`
 - `jarvis/tests/daemon/test_hotkey.py`（新增测试）
