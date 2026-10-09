@@ -19,8 +19,10 @@ WebSocket 协议、会话状态机、半双工静音策略、响应救援与 Fun
    response.done[cancelled, reason=turn_detected] 掐死，且被检出的"轮次"再无
    下文。故**默认切换为官方对免提场景推荐的 server_vad**（尾音会延长当前轮
    而非触发新轮次），smart_turn 仅作可选（配轮末静音窗口缓解）。
-3. **工具表必须瘦身**：299 个工具 schema 的会话出现过"轮次提交后服务端迟迟
-   不自动创建响应"。默认只注册 2 个内置工具；tools_mode="all" 才全量。
+3. **工具表必须瘦身**：响应创建延迟随工具数近似线性增长（探针实测：2 个 0.67s
+   → 294 个 3.45s → 450 个 4.89s；服务端始终会建响应，不是拒绝）。默认只注册
+   2 个内置工具；tools_mode="all" 才全量。全量时该延迟与响应救援、server_vad
+   尾音重检叠加会造成响应被取消的死循环。工具调用场景请走半双工 /voice。
    另需 sanitize_tools_for_realtime 清洗非法函数名（防模型受限解码停滞）。
 
 @author aceFelix

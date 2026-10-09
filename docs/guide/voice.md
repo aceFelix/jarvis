@@ -48,9 +48,15 @@ Jarvis 提供两套独立的语音系统：
   `response.create` 兜底，防"说了话永远不回复"
 - **AEC 回声消除（终端可选）**：基于 WebRTC AEC3（`aec-audio-processing`），未安装时靠
   半双工静音从源头防回声
-- **Function Calling**：默认 `tools_mode = "builtin"`（时间查询/结束对话 2 工具，低延迟；
-  实测大工具表会拖慢服务端建响应）；`"all"` 装配 ToolRegistry 全部工具 + MCP（文件读写、
-  Bash、WebSearch 等），MCP 在首个 `session.update` 前一次性加载。高风险操作先语音确认再执行
+- **Function Calling**：默认 `tools_mode = "builtin"`——只注册 get_current_time /
+  end_conversation 两个工具，低延迟优先。
+  **注意**：`"all"`（装配 ToolRegistry 全部 + MCP，实测 294 个 schema）会让响应创建
+  延迟随工具数近似线性增长（探针实测 2 个 0.67s → 294 个 3.45s → 450 个 4.89s），
+  该延迟与响应救援、server_vad 尾音重检叠加会造成响应被取消的死循环——用户说完话
+  半天无回复（2026-10-09 曾误把默认改为 `"all"` 造成实时语音完全不可用，已回退）。
+  **需要调用工具时请走半双工语音 `/voice`**（走标准 LLM API，天然支持全量工具）。
+  若确要在实时语音里用工具，精选 10~20 个常用工具子集（勿一次性注册全量）并实机验证。
+  高风险操作先语音确认再执行
 - **纯终端 UI**：转录文字流实时显示（2026-09 起不再弹出 pywebview 独立窗口）
 - **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式）与 jarvis-desktop 桌面应用（真全双工）承担
 - 退出方式：ESC 键或说"退下"
@@ -74,7 +80,7 @@ half_duplex = true      # 半双工：AI 说话时静音麦克风；戴耳机想
 rescue = true           # 响应救援：吞轮时补发 response.create（默认开）
 turn_detection = "server_vad"   # 轮次检测：server_vad（默认）/ smart_turn
 silence_ms = 500        # server_vad 判停静音时长（毫秒，200~6000）
-tools_mode = "builtin"  # 工具面：builtin（默认）/ all（Registry+MCP 全量）
+tools_mode = "builtin"  # 工具面：builtin（默认，2 工具低延迟）/ all（全量，延迟致死循环，勿用）
 ```
 
 > `api_key` 用于 `/talk` 实时双工语音鉴权（映射到 `dashscope_api_key`）。不配置时回退到 `DASHSCOPE_API_KEY` 环境变量；当前 LLM 厂商就是 dashscope 时也可直接复用主 `api_key`。**不会借用 deepseek/openai 等其它厂商的 key**（2026-09 起防呆 fail-fast：缺配置时直接给出中文配置指引，不发起注定被 1007 Access denied 拒绝的连接）。

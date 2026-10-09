@@ -14,9 +14,15 @@
 重构要点（详见 realtime_engine.py docstring 与 fixlogs）：
 - 默认 ``turn_detection = "server_vad"``（官方免提推荐）：尾音延长当前轮，
   规避 smart_turn 语义提前判停导致的"尾音重检 → turn_detected 掐死响应"。
-- 默认 ``tools_mode = "builtin"``：只注册 get_current_time / end_conversation
-  两个工具；299 工具 schema 的全量会话实测会出现"轮次提交后服务端迟迟不
-  创建响应"。tools_mode = "all" 恢复注册表 + MCP 全量（需自行验证）。
+- 默认 ``tools_mode = "builtin"``（勿改为 "all"）：只注册 get_current_time /
+  end_conversation 两个工具。**全量工具表会让响应创建延迟随工具数近似线性增长**
+  （探针实测：2 个 0.67s → 294 个 3.45s → 450 个 4.89s，服务端始终会建响应，
+  只是越来越慢）。该延迟与「响应救援」(1.8s 补发 response.create) 和 server_vad
+  尾音重检叠加，形成 response.done[cancelled] 死循环——表现为用户说完话半天无回复。
+  2026-10-09 曾误把默认改成 "all" 导致实时语音完全不可用，已回退。产品定位：
+  **实时语音只做闲聊/低延迟对话，需要工具时走半双工 /voice**。确需工具子集时
+  精选 10~20 个（勿一次性注册全量），并实机验证。详见
+  docs/fixlogs/realtime-talk-tools-mode-default-fix.md。
 - MCP 工具仍在首个 session.update 之前加载（会话配置一次性 IDLE 完成）。
 
 用法: /talk 启动，ESC 退出
@@ -87,6 +93,21 @@ _INSTRUCTIONS_ALL = (
 )
 
 
+def default_instructions(tools_mode: str = "builtin") -> str:
+    """按工具模式返回默认系统指令（贾维斯人设）。
+
+    RealtimeTalk 终端路径与桌面全双工路径（workbench engine
+    `_handle_start_talk_duplex` 直接构造父类 RealtimeEngine）共用此回退，
+    保证两条路径人设一致——桌面路径若不传 instructions，DashScope 实时
+    模型会回落自带默认人设（自称"小云"，见 dashscope-docs 示例）。
+    默认 tools_mode 与 settings.realtime_tools_mode 同步为 "builtin"
+    （2026-10-09 误改 "all" 导致实时语音不可用后回退，勿再改）。
+
+    @author aceFelix
+    """
+    return _INSTRUCTIONS_ALL if tools_mode == "all" else _INSTRUCTIONS_BUILTIN
+
+
 class RealtimeTalk(RealtimeEngine):
     """实时双工语音对话（终端 PyAudio 适配器）。
 
@@ -110,14 +131,14 @@ class RealtimeTalk(RealtimeEngine):
         half_duplex: bool = True,
         rescue: bool = True,
         turn_detection: str = "server_vad",
+        # 工具模式（默认 "builtin" 仅内置两工具，与 settings.realtime_tools_mode
+        # 同步；"all" 全量 294 schema 会让服务端不建响应，勿轻易切）
         tools_mode: str = "builtin",
     ) -> None:
         self._tools_mode = tools_mode
-        # 未显式传入 instructions 时按工具模式选择默认话术
+        # 未显式传入 instructions 时按工具模式选择默认话术（贾维斯人设回退）
         if not instructions:
-            instructions = (
-                _INSTRUCTIONS_ALL if tools_mode == "all" else _INSTRUCTIONS_BUILTIN
-            )
+            instructions = default_instructions(tools_mode)
         super().__init__(
             api_key,
             model=model,

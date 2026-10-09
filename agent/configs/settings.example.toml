@@ -89,9 +89,12 @@ rescue = true
 turn_detection = "server_vad"
 # silence_ms: server_vad 判停静音时长（毫秒，200~6000，默认 500；对话场景推荐 400~800）。
 silence_ms = 500
-# tools_mode: 语音会话工具模式（默认 "builtin"）——只注册 get_current_time /
-# end_conversation，低延迟优先。"all" 装配 ToolRegistry + MCP 全量（约 300 个 schema，
-# 会话启动慢，且实测大工具表可能拖慢服务端响应触发）。
+# tools_mode: 语音会话工具模式。默认 "builtin"——只注册 get_current_time /
+# end_conversation 两个工具，低延迟优先。
+# 警告：改为 "all"（装配 ToolRegistry + MCP 全量，实测 294 个 schema）会导致
+# DashScope 实时 API 在轮次提交后迟迟不创建响应：用户说完话半天无回复，并触发
+# 「响应救援」反复补发 response.create 的死循环。2026-10-09 曾误将默认改为 "all"
+# 造成实时语音完全不可用，已回退。确需全量请自行实机验证。
 tools_mode = "builtin"
 
 [ui]

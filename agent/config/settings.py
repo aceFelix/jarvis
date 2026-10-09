@@ -146,9 +146,13 @@ class Settings:
     # server_vad 判停静音时长（毫秒，范围 200~6000，默认 500）：越短响应越快，
     # 但短暂停顿会误触发；对话场景推荐 400~800。
     realtime_silence_ms: int = 500
-    # 语音会话工具模式（默认 "builtin"）：只注册 get_current_time /
-    # end_conversation，低延迟优先。"all" 装配 ToolRegistry + MCP 全量工具
-    # （约 300 个 schema，会话启动慢，且实测大工具表可能拖慢服务端响应触发）。
+    # 语音会话工具模式（默认 "builtin"，勿改为 "all"）：只注册 get_current_time /
+    # end_conversation 两个工具，低延迟优先。"all" 装配 ToolRegistry + MCP 全量
+    # 工具（实测 294 个 schema）——实机验证会导致 DashScope 实时 API 在轮次提交后
+    # 迟迟不创建响应：用户说完话半天无回复，且触发「响应救援」反复补发
+    # response.create 的死循环（事件链 response.done[cancelled] reason=turn_deleted）。
+    # 2026-10-09 曾误将默认改为 "all" 造成实时语音完全不可用，已回退，详见
+    # docs/fixlogs/realtime-talk-tools-mode-default-fix.md。
     realtime_tools_mode: str = "builtin"
 
     # P3-1 跨设备协同（手机通过 PWA 连接）

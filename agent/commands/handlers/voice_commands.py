@@ -188,7 +188,8 @@ async def _realtime_talk(ui, settings) -> None:
         # 轮次检测（默认 server_vad 官方免提推荐；smart_turn 仅安静环境/耳机）
         "turn_detection": getattr(settings, "realtime_turn_detection", "server_vad"),
         "silence_duration_ms": int(getattr(settings, "realtime_silence_ms", 500)),
-        # 工具模式（默认 builtin 仅内置两工具；all 为注册表+MCP 全量）
+        # 工具模式（默认 builtin 仅内置两工具，低延迟优先；all 为注册表+MCP
+        # 全量，实测 294 schema 会导致服务端不建响应，勿轻易切）
         "tools_mode": getattr(settings, "realtime_tools_mode", "builtin"),
     }
 
