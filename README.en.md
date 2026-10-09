@@ -42,7 +42,7 @@
 | Most assistants **forget you every session** | Three-layer memory: session persistence + long-term memory + profile distillation (auto-learns your habits) — it knows you better the longer you use it |
 
 <div align="center">
-  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw_%E5%8D%81%E7%BB%B4%E8%83%BD%E5%8A%9B%E9%9B%B7%E8%BE%BE%E5%9B%BE.png" alt="JARVIS vs Claude Code vs OpenClaw ten-dimension capability comparison" width="640"/>
+  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw.png" alt="JARVIS vs Claude Code vs OpenClaw ten-dimension capability comparison" width="640"/>
   <p><em>Measured ten-dimension comparison: JARVIS leads on voice interaction, computer control, visual perception and proactive service</em></p>
 </div>
 

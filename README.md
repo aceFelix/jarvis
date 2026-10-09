@@ -43,7 +43,7 @@
 | 大多数助手**每次都像初见**，交代过的背景全忘 | 三层记忆：会话存盘 + 长期记忆 + 画像记忆（自动提炼你的习惯偏好），越用越懂你 |
 
 <div align="center">
-  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw_%E5%8D%81%E7%BB%B4%E8%83%BD%E5%8A%9B%E9%9B%B7%E8%BE%BE%E5%9B%BE.png" alt="JARVIS vs Claude Code vs OpenClaw 十维能力对比" width="640"/>
+  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw.png" alt="JARVIS vs Claude Code vs OpenClaw 十维能力对比" width="640"/>
   <p><em>十维能力实测对比：JARVIS 在语音交互、电脑控制、视觉感知、主动服务上差异化领先</em></p>
 </div>
 
