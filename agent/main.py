@@ -66,11 +66,42 @@ from agent.session_manager import (
 from agent.ui.cli import RichCLI
 
 
+def _install_quiet_loop_exception_handler() -> None:
+    """过滤 asyncio 关闭 async generator 时对 MCP stdio 的报错刷屏。
+
+    ``asyncio.run`` 退出时 ``loop.shutdown_asyncgens()`` 会逐个 ``aclose()``
+    所有 async generator。MCP ``stdio_client`` 的 anyio task group 跨 task
+    关闭会抛 ``BaseExceptionGroup``（内含 ``RuntimeError: Attempted to exit
+    cancel scope in a different task``），该异常经 ``loop.call_exception_handler``
+    打印成 "an error occurred during closing of asynchronous generator ..."。
+
+    注意：这条路径走的是 ``call_exception_handler``，**不是** asyncgen 的 GC
+    finalizer，所以 main.py / mcp_client.py 里替换 finalizer 的做法拦不住它，
+    必须在 loop 的异常处理器上过滤。报错发生在进程即将退出时，纯属噪音。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    def _handler(loop_: asyncio.AbstractEventLoop, context: dict) -> None:
+        msg = context.get("message", "") or ""
+        exc = context.get("exception")
+        if "closing of asynchronous generator" in msg:
+            return
+        if "cancel scope" in msg or "cancel scope" in str(exc):
+            return
+        loop_.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
+
+
 async def repl(settings: Settings) -> int:
     """REPL 主循环。返回退出码。
 
     @author aceFelix
     """
+    _install_quiet_loop_exception_handler()
     ui = RichCLI(verbose=settings.verbose, boot_animation=settings.boot_animation)
     provider = _build_provider(settings, model_type=_model_type_for(settings))
     registry: ToolRegistry = build_default_registry()

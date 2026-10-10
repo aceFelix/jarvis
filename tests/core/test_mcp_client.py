@@ -283,6 +283,16 @@ class TestNoiseSuppression:
         mcp._silent_asyncgen_finalizer(ag)  # 不抛异常
         mcp._silent_asyncgen_finalizer(object())  # 非 generator 也不抛
 
+    def test_asyncgen_finalizer_install_uses_correct_api(self):
+        """回归：安装代码用带下划线的 sys.set_asyncgen_hooks。
+
+        历史上这里误写成 sys.setasyncgenhooks()（无下划线、不存在），抛出的
+        AttributeError 被静默吞掉，导致自定义 finalizer 从未真正安装。
+        """
+        assert not hasattr(sys, "setasyncgenhooks")
+        assert hasattr(sys, "set_asyncgen_hooks")
+        assert hasattr(sys, "get_asyncgen_hooks")
+
 
 # =====================================================================
 # MCPClient

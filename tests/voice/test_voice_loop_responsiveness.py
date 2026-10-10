@@ -158,6 +158,32 @@ class TestStopVsInterruptIntent:
         assert asyncio.run(self._run_round(False)) is None
 
 
+class TestSigintHandler:
+    """Ctrl+C（SIGINT）处理器只置标志、绝不抛异常。
+
+    回归：处理器若 ``raise KeyboardInterrupt``，异常会在主线程事件循环
+    select() 期间抛出，不会进入协程的 except，而是撕裂 ``asyncio.run``，
+    最终被 main.py ``except KeyboardInterrupt: return 130`` 捕获 → 整个进程
+    退出（现象：/voice 里 Ctrl+C 后回不到文本模式，直接退到 shell）。
+    """
+
+    def test_sets_flags_without_raising(self) -> None:
+        from agent.voice.voice_loop import _build_sigint_handler
+
+        calls: list[str] = []
+
+        class _Stt:
+            @staticmethod
+            def _request_stop() -> None:
+                calls.append("stop")
+
+        stop_event = threading.Event()
+        handler = _build_sigint_handler(_Stt, stop_event)
+        handler(2, None)  # 只置标志，不应抛异常
+        assert calls == ["stop"]
+        assert stop_event.is_set()
+
+
 class TestVoiceLoopStopDuringListen:
     def test_stop_event_ends_session_and_loop_free(self, monkeypatch) -> None:
         """全链路：聆听阻塞期间 stop_event + 停止标志能及时终止会话且循环不饿死。"""

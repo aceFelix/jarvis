@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from typing import Any, Iterator
 
 from agent.core.result import ToolResult
@@ -51,6 +52,14 @@ _PCM_RATE = 22050
 _PCM_CHANNELS = 1
 _PCM_WIDTH = 2  # 16-bit = 2 bytes
 
+# 收尾排空上限（秒）：finish()/speak() 返回前，扬声器缓冲里可能还有未播完的
+# 音频，最多再等这么久，防止异常情况下无上限阻塞。
+_DRAIN_MAX_SECONDS = 20.0
+# 合成停滞判定（秒）：长时间既收不到新音频、也未收到完成/关闭信号 → 判 WS 卡死
+_STALL_SECONDS = 15.0
+# 合成总时长绝对上限（秒）：兜底，防止死等
+_SYNTH_TOTAL_CAP_SECONDS = 300.0
+
 
 class _PlaybackCallback:
     """CosyVoice 回调实现：收到音频数据用 pyaudio 实时播放。
@@ -64,6 +73,7 @@ class _PlaybackCallback:
         self._stop_flag = threading.Event()
         self._on_first_data = on_first_data
         self._first_data_fired = False
+        self._play_start: float | None = None   # 首块音频到达时刻（播放起点）
         self._error: str | None = None
         self._data_chunks: int = 0
         self._total_bytes: int = 0
@@ -98,6 +108,7 @@ class _PlaybackCallback:
             return
         if not self._first_data_fired:
             self._first_data_fired = True
+            self._play_start = time.time()
             if self._on_first_data:
                 try:
                     self._on_first_data()
@@ -106,6 +117,19 @@ class _PlaybackCallback:
         self._stream.write(data)
         self._data_chunks += 1
         self._total_bytes += len(data)
+
+    def remaining_play_seconds(self) -> float:
+        """估算扬声器里还有多久才能把已下发的音频播完。
+
+        ``on_complete`` 只表示服务端把音频发完了，物理播放存在缓冲滞后：
+        自此到扬声器真正静音还有一段时间。以首块音频到达时刻为播放起点，
+        按累计字节数折算总时长，减去已过时间即为剩余。返回 0 表示已播完。
+        """
+        if self._total_bytes <= 0 or self._play_start is None:
+            return 0.0
+        total = self._total_bytes / (_PCM_RATE * _PCM_CHANNELS * _PCM_WIDTH)
+        rem = total - (time.time() - self._play_start)
+        return rem if rem > 0 else 0.0
 
     def on_complete(self) -> None:
         """所有文本合成完成且音频全部返回。"""
@@ -116,7 +140,16 @@ class _PlaybackCallback:
         self._error = message
 
     def on_close(self) -> None:
-        """WebSocket 连接关闭。释放播放流（不 terminate PyAudio——全局单例）。"""
+        """WebSocket 连接关闭。排空扬声器缓冲后释放播放流。
+
+        WS 关闭通常紧跟合成完成，此刻扬声器缓冲里可能仍有未播完的音频。
+        若立即 stop_stream() 会截断尾音——表现为"贾维斯话没说完，STT 已在
+        录音"。因此先按剩余播放时长排空（被打断时跳过），再停止 / 关闭。
+        """
+        if self._stream is not None and not self._stop_flag.is_set():
+            rem = self.remaining_play_seconds()
+            if rem > 0:
+                time.sleep(min(rem + 0.15, _DRAIN_MAX_SECONDS))
         if self._stream is not None:
             try:
                 self._stream.stop_stream()
@@ -237,9 +270,7 @@ class CosyVoiceTTS:
             _th.Thread(target=_wait_evt, args=(callback._completed,), daemon=True).start()
             _th.Thread(target=_wait_evt, args=(callback._closed,), daemon=True).start()
 
-            ok = done.wait(timeout=30)
-            if not ok:
-                sc_error.append("TTS 合成超时 30s")
+            self._wait_for_playback(done, sc_error)
             t.join(timeout=3)
         except Exception as e:
             return {**callback.stats, "error": f"合成失败: {type(e).__name__}: {e}"}
@@ -279,10 +310,11 @@ class CosyVoiceTTS:
         self._synthesizer.streaming_call(text)
 
     def finish(self) -> dict[str, Any]:
-        """结束流式合成，阻塞直到所有文本合成播放完毕。
+        """结束流式合成，阻塞直到所有文本合成**播放**完毕。
 
-        stop()（ESC 打断）或 WS 关闭或 30s 超时任一发生时提前返回，
-        避免朗读中打断后仍长时间阻塞。
+        stop()（ESC 打断）/ WS 关闭 / 合成停滞或超时任一发生时提前返回，
+        避免朗读中打断后仍长时间阻塞；正常完成时额外排空扬声器缓冲，
+        确保返回时物理层已播完（否则下一轮 STT 会录到本轮尾音）。
 
         Returns: 统计字典。
         """
@@ -304,8 +336,8 @@ class CosyVoiceTTS:
             t.start()
 
             # 并发等三个信号：正常完成 / WS 关闭 / 收到 stop() 请求。
-            # 任一触发即解除阻塞（streaming_complete 可能因 WS RST 永久阻塞，
-            # 与 speak() 的兜底策略一致），最多等 30 秒。
+            # 任一触发即解除阻塞（streaming_complete 可能因 WS RST 永久阻塞），
+            # 停滞 / 总量双上限由 _wait_for_playback 兜底，并在返回前排空音频。
             done = _th.Event()
 
             def _wait_evt(evt):
@@ -324,9 +356,7 @@ class CosyVoiceTTS:
                     _time.sleep(0.05)
             _th.Thread(target=_watch_stop, daemon=True).start()
 
-            ok = done.wait(timeout=30)
-            if not ok:
-                sc_error.append("TTS 合成超时 30s")
+            self._wait_for_playback(done, sc_error)
             t.join(timeout=3)
         except Exception as e:
             return {**self._callback.stats, "error": f"结束合成失败: {type(e).__name__}: {e}"}
@@ -346,6 +376,44 @@ class CosyVoiceTTS:
             self._callback.stop()
 
     # ---- 内部 ----
+
+    def _wait_for_playback(self, done: threading.Event, sc_error: list) -> None:
+        """等待合成播完（停滞 / 总量双上限），返回前排空扬声器缓冲。
+
+        原实现用 ``done.wait(timeout=30)`` 一刀切：长回复（音频 >30s）会在
+        播到一半时提前返回，voice_loop 随即进入下一轮聆听，STT 便录到了
+        贾维斯自己的尾音。改为：
+
+        - 长时间（>_STALL_SECONDS）既无新音频、也无完成 / 关闭信号 → 判 WS
+          卡死，追加错误并放弃；
+        - 总时长超过 _SYNTH_TOTAL_CAP_SECONDS → 放弃（绝对兜底）；
+        - 正常返回前按 ``remaining_play_seconds()`` 排空扬声器缓冲，确保物理
+          层真的播完（``on_complete`` 只代表服务端发完了音频）。
+        """
+        start = time.time()
+        cb = self._callback
+        last_bytes = cb._total_bytes if cb else 0
+        last_progress = start
+        while not done.is_set():
+            done.wait(0.2)
+            if done.is_set():
+                break
+            now = time.time()
+            cur_bytes = cb._total_bytes if cb else 0
+            if cur_bytes != last_bytes:
+                last_bytes = cur_bytes
+                last_progress = now
+            if now - last_progress > _STALL_SECONDS:
+                sc_error.append(f"TTS 合成停滞 {_STALL_SECONDS:.0f}s")
+                return
+            if now - start > _SYNTH_TOTAL_CAP_SECONDS:
+                sc_error.append("TTS 合成超时")
+                return
+        # 排空扬声器缓冲（被打断时不排空，保证 barge-in 即时响应）
+        if cb is not None and not cb._stop_flag.is_set():
+            rem = cb.remaining_play_seconds()
+            if rem > 0:
+                time.sleep(min(rem + 0.15, _DRAIN_MAX_SECONDS))
 
     def _create_synthesizer(self, callback: _PlaybackCallback) -> Any:
         """创建 SpeechSynthesizer 实例。失败时设置 callback.error 并返回 None。"""

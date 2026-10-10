@@ -93,25 +93,38 @@ def _silent_asyncgen_finalizer(agen):
     import asyncio as _asyncio
     try:
         coro = agen.aclose()
-        # finalizer 在 GC 时调用，可能没有运行中的 event loop。
-        # 尝试用现有 loop 调度 aclose()；若没有 loop 则同步关闭。
-        try:
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(coro)
-            else:
-                loop.run_until_complete(coro)
-        except RuntimeError:
-            # 没有 event loop，直接忽略（generator 会被 Python 自动清理）
-            coro.close()
     except BaseException:
-        pass
+        return
+    try:
+        # 仅当当前线程有"运行中"的 event loop 才调度关闭。
+        #（不用已废弃的 asyncio.get_event_loop()，它在 3.14 起会报错。）
+        loop = _asyncio.get_running_loop()
+        task = loop.create_task(coro)
+        # 关键：aclose() 关闭 stdio_client（anyio task group）时可能抛
+        # BaseExceptionGroup（"Attempted to exit cancel scope in a different
+        # task"）。若不取回该异常，asyncio 会以"未处理 task 异常"打印完整
+        # traceback——这条路不经过 sys.unraisablehook，上面的过滤层拦不住。
+        # done 回调里主动取回并丢弃即可静默。
+        task.add_done_callback(
+            lambda t: None if t.cancelled() else t.exception()
+        )
+    except BaseException:
+        # 无运行中的 loop（含解释器关闭阶段）：无法安全 await，直接关闭协程。
+        # generator 由 Python 自动回收，不触发 anyio/cancel-scope 报错。
+        try:
+            coro.close()
+        except BaseException:
+            pass
 
 
-# 安装 finalizer（仅对 Python 3.11+ 生效）
+# 安装 finalizer。
+# 注意：正确的 API 是带下划线的 sys.get_asyncgen_hooks() / sys.set_asyncgen_hooks()
+#（Python 3.6+）。历史上这里误写成 sys.setasyncgenhooks()（无下划线、不存在），
+# 抛出的 AttributeError 被静默吞掉，导致自定义 finalizer 从未真正安装——这正是
+# /voice 退出时 stdio_client 的 anyio cancel-scope 报错仍会刷屏的根因。
 try:
-    _default_asyncgen_finalizer = sys.getasyncgenhooks()[0]
-    sys.setasyncgenhooks(finalizer=_silent_asyncgen_finalizer)
+    _default_asyncgen_finalizer = sys.get_asyncgen_hooks().finalizer
+    sys.set_asyncgen_hooks(finalizer=_silent_asyncgen_finalizer)
 except (AttributeError, IndexError):
     pass
 

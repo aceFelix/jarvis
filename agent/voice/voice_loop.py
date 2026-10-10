@@ -387,6 +387,31 @@ async def _standby_round(settings: Settings, stt: Any) -> str:
     return result.get("text", "").strip()
 
 
+def _build_sigint_handler(stt_module: Any, stop_event: threading.Event):
+    """构造 /voice 的 SIGINT（Ctrl+C）处理器。
+
+    只置停止标志、**绝不抛异常**：Windows 上 signal handler 在主线程执行，
+    而此刻主线程正阻塞在事件循环的 select() 里。若在此 ``raise
+    KeyboardInterrupt``，异常不会进入协程的 ``except``，而会撕裂
+    ``asyncio.run``，最终被 main.py 的 ``except KeyboardInterrupt: return
+    130`` 捕获 → 直接退出整个进程（现象：语音模式里 Ctrl+C 后整个 jarvis
+    退出，回不到文本模式）。
+
+    只置标志时：``stt.listen()`` 每 ~200ms 轮询 ``_stop_flag``（pyaudio 的
+    ``stream.read`` 单次 200ms）自行返回，``await asyncio.to_thread`` 随之
+    结束；协程检测到 ``stop_event`` 后**在协程内部**抛 KeyboardInterrupt，
+    被 ``voice_loop`` 的 ``except KeyboardInterrupt`` 正常捕获 → 干净退回
+    文本模式。思考/播报阶段则由 ``_poll_interrupt`` 观察 ``stop_event`` 触发
+    barge-in，同样不依赖信号异常。
+    """
+
+    def _on_sigint(sig, frame):  # noqa: ANN001
+        stt_module._request_stop()
+        stop_event.set()  # 标记退出意图：录音返回后的标志检查走退出分支
+
+    return _on_sigint
+
+
 async def voice_loop(
     events: VoiceSessionEvents,
     settings: Settings,
@@ -500,15 +525,15 @@ async def voice_loop(
     # 用 signal handler 触发 stt._request_stop() 来非阻塞地中断录音循环。
     # 注意：signal.signal 只能在主线程调用；serve 子线程运行语音时跳过，
     # 依赖 stop_event / interrupt_event 退出。
+    # 处理器只置标志、不抛异常——原因见 _build_sigint_handler 文档。
     from agent.voice import stt as stt_module
     _in_main_thread = threading.current_thread() == threading.main_thread()
     prev_sigint = None
     if _in_main_thread:
-        def _on_sigint(sig, frame):
-            stt_module._request_stop()
-            stop_event.set()  # 标记退出意图：录音返回后的标志检查走退出分支
-            raise KeyboardInterrupt
-        prev_sigint = __import__("signal").signal(__import__("signal").SIGINT, _on_sigint)
+        prev_sigint = __import__("signal").signal(
+            __import__("signal").SIGINT,
+            _build_sigint_handler(stt_module, stop_event),
+        )
 
     try:
         in_dialog = True  # True=对话阶段, False=待机阶段
