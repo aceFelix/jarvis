@@ -195,11 +195,11 @@ Jarvis 通过 **GitHub Actions + Git Tag** 实现一键自动发布到 PyPI 和 
 #    + agent/__init__.py 的 __version__，供 jarvis --version 读取）
 # 2. 提交版本变更
 git add pyproject.toml npm/package.json agent/__init__.py
-git commit -m "chore: bump version to 2.1.0"
+git commit -m "chore: bump version to 2.1.1"
 
 # 3. 打 tag 并推送（v 前缀必须）
-git tag v2.1.0
-git push github v2.1.0
+git tag v2.1.1
+git push github v2.1.1
 ```
 
 推送 `v*` tag 后，[publish.yml](../../.github/workflows/publish.yml) 自动执行：
