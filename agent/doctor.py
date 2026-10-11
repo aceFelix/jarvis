@@ -24,6 +24,7 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 
 # Python 包检查表：(功能, import 名, extras 组)
@@ -410,7 +411,10 @@ def _render_pkg_table(console: Console, rows: list[tuple[str, str, str, str]]) -
 
     passed = 0
     for feature, pkg, status, install_cmd in rows:
-        table.add_row(feature, pkg, status, install_cmd)
+        # 状态列有意使用 rich markup（如 [green]✓ 已安装[/green]），需按 markup 渲染；
+        # 但安装命令含 extras 方括号（如 "jarvis-agent[voice]"），若按 markup 解析
+        # 方括号会被当成样式标签剥掉，显示成 "jarvis-agent"。故用 Text 强制字面渲染。
+        table.add_row(feature, pkg, status, Text(install_cmd))
         if "已安装" in status:
             passed += 1
 
