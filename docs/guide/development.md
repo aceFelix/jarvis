@@ -233,3 +233,50 @@ git push github v2.1.1
 > 配置完成后，每次推送 `v*` tag 即可全自动发布。无需本地装 twine、无需手动 `npm publish`、无需管理 API token 轮换。
 
 更多发布细节见 [docs/publish/PUBLISH.md](../publish/PUBLISH.md)。
+
+## 安装态验收（回归测试台）
+
+发布新版本后，除了跑 `pytest`，还需要**以普通用户的视角**验证"装出来的包"确实能用——即从 PyPI 正常安装、不依赖源码目录。为此长期保留一个隔离的安装态测试台，每个版本复用它做回归验收。
+
+### 为什么放在仓库外
+
+测试台放在 `jarvis` 仓库的**上一级**目录（如 `<workspace>/.jv-test`），与仓库平级：
+
+- 不进入 `git status`，不会被误提交、误打包；
+- 只升级"程序本体"，与仓库源码隔离，测的是**真实的发布产物**（源码目录的改动不会混进来）。
+
+### 一次性搭建
+
+```bash
+# 用独立 venv 隔离程序本体（避免污染开发用的 .venv）
+python -m venv <workspace>/.jv-test/venv
+
+# 进入 venv 的 Scripts（Windows）/ bin（Linux/macOS）目录
+cd <workspace>/.jv-test/venv/Scripts          # Linux/macOS: ../bin
+
+# 装全功能 + 下载 Playwright 浏览器
+./python.exe -m pip install -U "jarvis-agent[all]"
+./python.exe -m playwright install
+```
+
+> 用户配置**无需隔离**，直接复用现有的 `~/.jarvis` 即可——测试台要验证的正是"用户的真实配置能被安装态正确读取"。
+
+### 每个新版本复用
+
+```bash
+cd <workspace>/.jv-test/venv/Scripts
+./python.exe -m pip install -U "jarvis-agent[all]"   # 拉取最新发布版
+./python.exe -m agent.main --version                 # 确认版本号已更新
+./python.exe -m agent.main --doctor                  # 依赖体检，应基本全绿
+./python.exe -m agent.main                           # 进入实测
+```
+
+逐功能手工走查见 [docs/test/TEST_CHECKLIST.md](../test/TEST_CHECKLIST.md)。
+
+### 注意事项
+
+- **务必用该 venv 的 `./python.exe`（或其绝对路径）**，不要用系统全局 `python`，否则会装到别处、测错对象。
+- Git Bash 里赋变量时 `VAR=值` 等号两侧**不能有空格**——`JVPY= "..."` 会被解析成"用空变量执行该命令"，从而误进 Python REPL（`>>>`）。直接 `cd` 进 `Scripts` 后用 `./python.exe` 最省事。
+- Playwright 浏览器缓存在 `%LOCALAPPDATA%\ms-playwright`（Windows）/ `~/.cache/ms-playwright`（macOS/Linux），不在 venv 内，升级版本无需重新下载。
+- `[all]` 会拉入视觉组（mediapipe / paddleocr 等），体积较大、安装较慢属正常。
+- 需要彻底重测时，直接删除整个 `venv` 目录重建即可；磁盘紧张时可 `./python.exe -m pip cache purge` 清 pip 缓存。
