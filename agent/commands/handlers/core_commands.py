@@ -48,6 +48,7 @@ def _print_help(ui: RichCLI) -> None:
         "  /rewind [n]  回退最近 n 条消息（默认 1，可连带回滚工作区文件）\n"
         "  /diff [path] 显示 git diff（工作区改动）\n"
         "  /doctor      系统诊断（环境/配置/日志/迁移状态）\n"
+        "  /update      检查并升级 jarvis 到最新版本（重启生效）\n"
         "  /config show 查看当前生效的完整配置（含 MCP 状态）\n"
         "  /save [name] 保存当前会话\n"
         "  /load [前缀]  前缀匹配加载会话（支持模糊输入）\n"

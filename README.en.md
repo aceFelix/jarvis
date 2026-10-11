@@ -149,6 +149,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - Defaults to Alibaba DashScope (`qwen3.7-plus`, multimodal); or just `export DASHSCOPE_API_KEY=sk-xxx` and launch
 - All config lives in `~/.jarvis/` (settings.toml + models.toml); `/mode` switches permission mode, `/think` tunes deep thinking
 - Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot
+- Checks for a new release in the background on startup; when found, run `/update` to upgrade (disable with `--no-update-check`)
 
 > Install paths, optional dependency groups, per-OS system dependencies and the `--gui` workbench entry: see the [Installation Guide](docs/guide/installation.md) (Chinese).
 > To grasp where this project is heading in one read: the [Blueprint](docs/BLUEPRINT.md).

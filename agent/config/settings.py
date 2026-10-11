@@ -316,6 +316,11 @@ class Settings:
     tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）
     tools_chat_detection: bool = True      # 纯聊天零工具检测
 
+    # 版本自更新（Phase 1）：启动时后台检查 PyPI 最新版并提示，/update 一键升级。
+    # 仅检查不自动改文件，避免运行中替换自身；可用 --no-update-check 或
+    # JARVIS_UPDATE_CHECK=0 关闭。@author aceFelix
+    update_check: bool = True
+
     def with_overrides(self, **kwargs: object) -> "Settings":
         """返回一个用 kwargs 覆盖部分字段的新 Settings（None 值不覆盖）。"""
         data = {k: v for k, v in kwargs.items() if v is not None}
@@ -837,6 +842,11 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
                     c["provider"] = c.get("vendor") or c.get("api_format", "openai")
                 normalized[cname] = c
             updates["custom_models"] = normalized
+    # [update] 表 → 版本自更新字段（Phase 1）
+    update_table = data.get("update", {})
+    if isinstance(update_table, dict):
+        if "check" in update_table:
+            updates["update_check"] = bool(update_table["check"])
     return s.with_overrides(**updates)
 
 

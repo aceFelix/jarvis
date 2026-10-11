@@ -103,6 +103,14 @@ async def repl(settings: Settings) -> int:
     """
     _install_quiet_loop_exception_handler()
     ui = RichCLI(verbose=settings.verbose, boot_animation=settings.boot_animation)
+
+    # 版本自检（Phase 1）：后台线程查 PyPI 最新版，非阻塞、24h 节流。
+    # 检出更新时仅打印一行提示（/update 一键升级），不影响启动速度。
+    # @author aceFelix
+    if settings.update_check:
+        from agent import update as _update
+        _update.start_background_check(ui)
+
     provider = _build_provider(settings, model_type=_model_type_for(settings))
     registry: ToolRegistry = build_default_registry()
 
@@ -606,6 +614,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="检查依赖安装状态（Python 包 / 系统级依赖 / 配置文件）",
     )
+    p.add_argument(
+        "--no-update-check",
+        action="store_true",
+        dest="no_update_check",
+        help="跳过启动时的版本更新检查（等价 settings.toml [update] check = false）",
+    )
     return p.parse_args(argv)
 
 
@@ -653,6 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         overrides["enable_mcp"] = False
         overrides["enable_lsp"] = False
         overrides["quick_start"] = True
+    if args.no_update_check:
+        overrides["update_check"] = False
     settings = settings.with_overrides(**overrides)
 
     # serve 模式（桌面壳）未显式指定 --workdir 时，回到上次活跃项目：

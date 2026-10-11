@@ -74,6 +74,7 @@ enable_thinking = true
 | `JARVIS_BASE_URL` | 覆盖 base_url |
 | `JARVIS_PERMISSION_MODE` | 覆盖权限模式 |
 | `JARVIS_DEBUG` | `1` 开启调试模式 |
+| `JARVIS_UPDATE_CHECK` | `0` 关闭启动时的版本更新检查（`JARVIS_NO_UPDATE_CHECK=1` 等价） |
 
 > Windows PowerShell：`$env:DASHSCOPE_API_KEY = "sk-xxx"`
 
@@ -227,3 +228,22 @@ email_default_recipient = "target@qq.com"
 | `--quick` | 快速启动（跳过 MCP/LSP） |
 | `--gui` | 启动三栏 GUI 工作台（桌面图标同款入口） |
 | `--talk` | 与 `--gui` 等价（兼容旧快捷方式），启动三栏工作台 |
+| `--no-update-check` | 跳过启动时的版本更新检查（等价 `[update] check = false`） |
+
+---
+
+## 版本更新
+
+启动时后台检查 PyPI 最新版（非阻塞，最多 24 小时一次），发现更新仅打印提示；会话内用 `/update` 一键升级（自动识别 pip / uv 渠道，重启生效）。
+
+```toml
+# ~/.jarvis/settings.toml
+[update]
+check = true    # 是否在启动时检查更新（false 关闭）
+```
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `check` | `true` | 启动时是否检查 PyPI 最新版本 |
+
+> `/update` 只在 pip / uv tool 安装下可自动升级；开发模式（`pip install -e .`）与未作为包安装的场景会跳过，仅给出指引。升级只更新主包，已安装的 extras 依赖不会被卸载。

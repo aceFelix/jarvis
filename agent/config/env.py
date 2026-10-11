@@ -88,6 +88,14 @@ def apply_env_overrides(s: "Settings") -> "Settings":
     if compaction:
         updates["context_compaction"] = compaction.lower() in ("1", "true", "yes")
 
+    # 版本自更新检查（Phase 1）：JARVIS_UPDATE_CHECK=0 或 JARVIS_NO_UPDATE_CHECK=1 关闭
+    no_update = _env("JARVIS_NO_UPDATE_CHECK", "MY_AGENT_NO_UPDATE_CHECK")
+    if no_update and no_update.lower() in ("1", "true", "yes"):
+        updates["update_check"] = False
+    update_check = _env("JARVIS_UPDATE_CHECK", "MY_AGENT_UPDATE_CHECK")
+    if update_check:
+        updates["update_check"] = update_check.lower() in ("1", "true", "yes")
+
     # 思考强度档位（off/low/medium/high/on）；JARVIS_ENABLE_THINKING=0 等价 off。
     effort = _env("JARVIS_THINKING_EFFORT", "MY_AGENT_THINKING_EFFORT")
     if effort:

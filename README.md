@@ -148,6 +148,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 默认接阿里云 DashScope（`qwen3.7-plus` 多模态），也可 `export DASHSCOPE_API_KEY=sk-xxx` 后直接启动
 - 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
+- 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
 
 > 安装路径、可选依赖组、各平台系统依赖、`--gui` 工作台入口等详见 [安装指南](docs/guide/installation.md)。
 > 想一句话理解这个项目要去哪，读 [蓝图文档](docs/BLUEPRINT.md)。

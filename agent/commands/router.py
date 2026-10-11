@@ -66,6 +66,7 @@ from agent.commands.handlers.tool_commands import (
     handle_server,
     handle_tools,
 )
+from agent.commands.handlers.update_commands import handle_update
 from agent.commands.handlers.voice_commands import (
     handle_listen,
     handle_talk,
@@ -175,6 +176,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/cli_anything": handle_cli_anything,
     "/init": handle_init,
     "/config": handle_config_show,
+    "/update": handle_update,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）

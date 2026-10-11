@@ -149,3 +149,32 @@ jarvis --doctor
 | ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
 
 > 包检查用 `importlib.util.find_spec` 探测，不实际 import，避免触发未安装包的副作用日志。
+
+## 版本更新
+
+jarvis 启动时会**后台检查** PyPI 上的最新版本（非阻塞、最多 24 小时一次），发现更新时打印一行提示；不会自动改动已安装的文件。
+
+```bash
+# 方式一：会话内一键升级（自动识别 pip / uv 渠道，重启后生效）
+/update
+
+# 方式二：手动升级
+pip install -U "jarvis-agent[all]"     # pip 安装的
+uv tool upgrade jarvis-agent            # uv tool 安装的
+npm update -g @acefelix/jarvis          # npm 安装的
+```
+
+关闭启动检查（三种方式任选）：
+
+```bash
+jarvis --no-update-check                # 本次启动
+export JARVIS_UPDATE_CHECK=0            # 环境变量（Windows: set JARVIS_UPDATE_CHECK=0）
+```
+
+```toml
+# ~/.jarvis/settings.toml
+[update]
+check = false
+```
+
+> 说明：`/update` 只在 pip / uv tool 安装下可自动升级；开发模式（`pip install -e .`）与未作为包安装的场景会跳过，仅给出指引。升级只更新主包，已安装的 extras 依赖不会被卸载。

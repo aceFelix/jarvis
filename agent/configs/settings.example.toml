@@ -273,3 +273,9 @@ excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
 enabled = true             # 总开关（false = 只回退对话，不回滚文件）
 max_per_session = 20       # 每会话检查点保留上限（超出修剪最旧）
 timeout_seconds = 10       # 单条 git 命令超时（秒）
+
+[update]
+# 版本自更新（Phase 1）：启动时后台检查 PyPI 最新版（非阻塞、24h 节流），
+# 发现更新仅打印提示；用 /update 一键升级（pip / uv 自动识别，重启生效）。
+# 也可用 --no-update-check 或环境变量 JARVIS_UPDATE_CHECK=0 关闭。@author aceFelix
+check = true               # 是否在启动时检查更新
