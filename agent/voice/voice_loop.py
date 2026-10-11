@@ -41,6 +41,7 @@ RichCLI 的直接依赖，一切对外输出经 ``voice_events.VoiceSessionEvent
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import threading
 import time
 from typing import Any, Callable
@@ -73,6 +74,23 @@ from agent.voice.voice_events import (
 
 # 打断轮询粒度（秒）：interrupt_event 置位后最多 50ms 内响应
 _INTERRUPT_POLL_SEC = 0.05
+
+
+class _VoiceDependencyError(RuntimeError):
+    """语音可选依赖缺失等永久性错误。
+
+    区别于「本轮偶发识别失败」：依赖缺失时每轮 listen() 都会立即失败，
+    若仍按普通失败 ``return True`` 继续循环，会形成「聆听→失败→再聆听」
+    的无限刷屏（无法自愈）。故上抛本异常，由 voice_loop 干净退出语音模式。
+
+    @author aceFelix
+    """
+
+
+# 语音循环开始前必须可用的顶层模块（均为 [voice] 可选依赖）。
+# dashscope 提供 STT/TTS 网络能力，pyaudio 提供录音/播放；二者皆在方法内
+# 懒导入，包 import 阶段不会报错，必须在这里用 find_spec 主动探测。
+_VOICE_REQUIRED_MODULES = ("dashscope", "pyaudio")
 
 
 def _detect_standby(messages: list, since_index: int = 0) -> bool:
@@ -193,7 +211,12 @@ async def _voice_loop_round(
     listen_elapsed = time.time() - t_listen
 
     if result.get("error"):
-        events.on_error(f"识别失败: {result['error']}，再说一次")
+        err = str(result["error"])
+        # 依赖缺失（dashscope/pyaudio 未安装）属永久性错误：每轮都会立即失败，
+        # 继续 return True 只会无限刷屏。上抛致命错误让 voice_loop 干净退出。
+        if "未安装" in err or "No module named" in err:
+            raise _VoiceDependencyError(err)
+        events.on_error(f"识别失败: {err}，再说一次")
         return True
 
     user_text = result.get("text", "").strip()
@@ -472,6 +495,24 @@ async def voice_loop(
         events.on_error(f"语音模块不可用: {e}")
         return
 
+    # ---- 前置依赖检查（fail-fast，2026-10）----
+    # dashscope / pyaudio 属 [voice] 可选依赖，且均为「方法内懒导入」：包能
+    # import 成功、create_stt() 也能返回对象，直到 stt.listen()/tts.speak()
+    # 内部才抛 ModuleNotFoundError。若不做前置拦截，每轮都会被当作普通识别
+    # 失败 return True → 「聆听→失败→再聆听」无限刷屏（2.1.1 实测复现）。
+    # 这里直接用 find_spec 探测（不实际 import，避免副作用），缺失则拒绝进入
+    # 语音模式并给出安装指引——属正常降级。
+    missing = [
+        name
+        for name in _VOICE_REQUIRED_MODULES
+        if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        events.on_error("语音功能依赖未安装: " + ", ".join(missing))
+        events.on_info('请安装后重试: pip install "jarvis-agent[voice]"')
+        _voice_log("[voice_loop] 语音依赖缺失，拒绝进入语音模式: %s", missing)
+        return
+
     stt = create_stt(
         api_key=_voice_api_key(settings),
         model=settings.stt_model,
@@ -602,6 +643,11 @@ async def voice_loop(
                     events.on_info("🔊 唤醒，回到对话模式")
                     in_dialog = True
                 # 不含唤醒词则静默继续待机（不打印识别内容，避免刷屏）
+    except _VoiceDependencyError as e:
+        # 依赖缺失等永久性错误：干净退出语音模式并给出安装指引（不当作「退下」
+        # 进待机，待机里同样会因缺依赖反复失败）
+        events.on_error(f"语音功能依赖缺失，已退出语音模式: {e}")
+        events.on_info('请安装后重试: pip install "jarvis-agent[voice]"')
     except KeyboardInterrupt:
         events.on_info("\n退出语音模式")
         # 重置 abort_event，避免打断信号残留导致下次语音会话被跳过
