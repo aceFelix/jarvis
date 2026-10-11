@@ -243,6 +243,13 @@ CMD_SLASH_COMMANDS = "slash.commands"
 # 点「发送」即用户确认，故刻意绕过工具默认的 ASK 权限。收发件配置（smtp/授权码/
 # default_recipient）来自 ~/.jarvis/settings.toml 的 [email] 表。首期不支持附件。
 CMD_EMAIL_SEND = "email.send"
+# email.config.get / email.config.set（管家服务 → 邮箱服务，2026-10）：桌面「邮箱
+# 服务」面板查看/修改当前发件邮箱与 SMTP 服务配置（host/port/账号/授权码/发件人/
+# 默认收件人）。读写 ~/.jarvis/settings.toml 的 [email] 表，单一真源见
+# agent/config/email_settings.py。安全范式与模型编辑一致：get 不回传授权码明文（只回
+# has_password），set 中授权码留空 = 保持原值不变。@author aceFelix
+CMD_EMAIL_CONFIG_GET = "email.config.get"
+CMD_EMAIL_CONFIG_SET = "email.config.set"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -294,6 +301,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_SLASH_EXEC,
     CMD_SLASH_COMMANDS,
     CMD_EMAIL_SEND,
+    CMD_EMAIL_CONFIG_GET,
+    CMD_EMAIL_CONFIG_SET,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

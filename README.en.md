@@ -125,7 +125,7 @@
 | 🎙️ **Listens & speaks** | `/voice` turn-by-turn voice chat, `/talk` full-duplex realtime (speak to interrupt), TTS announces proactive reminders | [Voice](docs/guide/voice.md) |
 | 🖱️ **Operates your PC** | Mouse/keyboard/screenshot/window tools + visual template locating, drives any software like a human | [GUI Automation](docs/guide/ecosystem.md#gui-自动化) |
 | 🗓️ **Proactive butler** | Daily briefing, timed reminders, deadline tracking, system monitoring — it acts without being asked | [Proactive System](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
-| 🛎️ **Butler services** | jarvis-desktop title-bar entry: email-send form calls the backend tool directly (first service, more to come) | [Desktop & Remote](docs/guide/desktop.md) |
+| 🛎️ **Butler services** | jarvis-desktop title-bar entry: email service (view/edit the current mailbox + configure SMTP + send mail) calls the backend tools directly (more to come) | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧠 **Three-layer memory** | Session persistence + long-term memory + profile distillation, knows you better over time | [Memory](docs/guide/concepts.md#记忆系统) |
 | 📱 **One session, many ends** | jarvis-desktop shell / phone QR / WeChat ClawBot share the same session | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧩 **Open ecosystem** | MCP, plugin marketplace, Skill packs, CLI-Anything (turn any software into a tool), multi-agent collaboration | [Ecosystem](docs/guide/ecosystem.md) |

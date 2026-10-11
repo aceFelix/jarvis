@@ -34,6 +34,12 @@ from agent.config.desktop_settings import (
     save_setting,
     validate_setting,
 )
+from agent.config.email_settings import (
+    apply_email_config,
+    read_email_config,
+    save_email_config,
+    validate_email_config,
+)
 from agent.config.settings import Settings
 from agent.serve import protocol
 from agent.ui.workbench.api import WorkbenchAPI
@@ -182,6 +188,12 @@ class DesktopBridgeServer(BridgeServer):
         # @author aceFelix
         self.register_ws_handler(protocol.CMD_EMAIL_SEND, self._cmd_email_send)
         self._rpc_types.add(protocol.CMD_EMAIL_SEND)
+        # email.config.get / email.config.set（管家服务 → 邮箱服务，2026-10）：读/写
+        # settings.toml 的 [email] 表。属快速本地 IO（与 settings.get/set 同口径），
+        # 用同步 _register_rpc；授权码「不回传明文、留空=保持」由 email_settings 承担。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_EMAIL_CONFIG_GET, self._rpc_email_config_get)
+        self._register_rpc(protocol.CMD_EMAIL_CONFIG_SET, self._rpc_email_config_set)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -620,6 +632,33 @@ class DesktopBridgeServer(BridgeServer):
         if key in SCHEDULE_KEYS and self._hub is not None:
             self._hub.hot_update_schedule()
         return {key: value}
+
+    def _rpc_email_config_get(self, data: dict) -> dict:
+        """email.config.get：邮箱服务面板数据源（当前发件邮箱与 SMTP 服务信息）。
+
+        授权码**不回传明文**，只回 ``has_password`` 布尔——桌面壳据此把密码框渲染为
+        「已配置，留空即不修改」。字段口径见 agent/config/email_settings.py。
+
+        @author aceFelix
+        """
+        return read_email_config(self._settings)
+
+    def _rpc_email_config_set(self, data: dict) -> dict:
+        """email.config.set：修改邮箱服务配置（校验 → 落盘 → 运行时生效 → 回读）。
+
+        顺序与 settings.set 一致：先落盘 settings.toml 的 [email] 表，再改运行时
+        Settings（SendEmailTool 每次现读，立即生效）；落盘失败则回执报错且不动运行时。
+        授权码留空 = 保持原值（不回传、不覆盖）。回执 result 为落盘后的完整配置快照。
+
+        @author aceFelix
+        """
+        patch = validate_email_config(data)
+        if not patch:
+            raise ValueError("email.config.set 至少需要一个有效的配置项")
+        if not save_email_config(patch):
+            raise RuntimeError("settings.toml 落盘失败，请检查磁盘写权限")
+        apply_email_config(self._settings, patch)
+        return read_email_config(self._settings)
 
     # ---- 桌面项目工作区 project.* ----
 

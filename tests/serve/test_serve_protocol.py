@@ -8,6 +8,8 @@
 - models.edit / models.remove RPC：缺 name / 非法枚举 / 名字不存在 → 不入库
 - settings.get/set RPC：白名单全键取值、校验、先落盘后生效、调度键热更新、
   落盘失败不动运行时
+- email.config.get/set RPC：读不回授权码明文、落盘后运行时生效、授权码留空
+  保持原值、端口/类型校验、落盘失败不动运行时
 
 @author aceFelix
 """
@@ -118,9 +120,12 @@ def test_desktop_commands_count():
     +slash.commands（46→47，只读返回桌面可执行命令列表）。
     2026-10 桌面管家服务：+email.send（47→48，标题栏「管家服务 → 邮件发送」
     表单直连 SendEmailTool，异步处理器 + to_thread，见 server._cmd_email_send）。
+    2026-10 管家服务「邮箱服务」改版：+email.config.get / email.config.set
+    （48→50，查看/修改当前发件邮箱与 SMTP 配置，读写 settings.toml 的 [email]
+    表，授权码不回传明文、留空=保持，见 agent/config/email_settings.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 48
+    assert len(protocol.DESKTOP_COMMANDS) == 50
 
 
 def test_all_registered_rpcs_declared():
@@ -183,6 +188,80 @@ def test_email_send_empty_subject_or_body_rejected():
     )
     assert sent[-1]["data"]["ok"] is False
     assert "正文" in sent[-1]["data"]["error"]
+
+
+# ---- email.config.get / email.config.set RPC（管家服务 → 邮箱服务） ----
+
+def test_email_config_handlers_registered_and_declared():
+    """email.config.get/set：均声明在 DESKTOP_COMMANDS 且已注册进 WS 处理器表。"""
+    server = _make_server()
+    for cmd in (protocol.CMD_EMAIL_CONFIG_GET, protocol.CMD_EMAIL_CONFIG_SET):
+        assert cmd in protocol.DESKTOP_COMMANDS
+        assert cmd in server._ws_handlers
+
+
+def test_email_config_get_hides_password():
+    """email.config.get：返回配置快照但不含授权码明文，只回 has_password。"""
+    server = _make_server()
+    server._settings.email_smtp_user = "me@163.com"
+    server._settings.email_smtp_password = "super-secret-code"
+    result = server._rpc_email_config_get({})
+    assert "smtp_password" not in result
+    assert result["has_password"] is True
+    assert result["smtp_user"] == "me@163.com"
+    assert result["smtp_port"] == 465
+
+
+def test_email_config_set_persist_then_runtime(monkeypatch):
+    """email.config.set：先落盘成功后运行时 Settings 立即生效，回执回读快照。"""
+    calls: list = []
+    monkeypatch.setattr(
+        server_mod, "save_email_config", lambda patch: calls.append(patch) or True
+    )
+    server = _make_server()
+    result = server._rpc_email_config_set(
+        {"enabled": True, "smtp_user": "me@qq.com", "smtp_password": "code123"}
+    )
+    assert calls == [{"enabled": True, "smtp_user": "me@qq.com", "smtp_password": "code123"}]
+    assert server._settings.email_enabled is True
+    assert server._settings.email_smtp_user == "me@qq.com"
+    assert server._settings.email_smtp_password == "code123"
+    assert result["has_password"] is True
+    assert "smtp_password" not in result
+
+
+def test_email_config_set_blank_password_keeps_original(monkeypatch):
+    """授权码留空 = 保持不变（不写入补丁、不覆盖原值，明文不回传）。"""
+    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: True)
+    server = _make_server()
+    server._settings.email_smtp_password = "original-code"
+    server._rpc_email_config_set({"smtp_password": "", "sender": "me@163.com"})
+    assert server._settings.email_smtp_password == "original-code"
+    assert server._settings.email_sender == "me@163.com"
+
+
+def test_email_config_set_validation(monkeypatch):
+    """端口超范围 / 类型不符 → ValueError；无有效字段（全空补丁）→ ValueError。"""
+    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: True)
+    server = _make_server()
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"smtp_port": 0})
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"smtp_port": 70000})
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"enabled": "yes"})
+    # 只有空授权码：视为无有效修改
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"smtp_password": ""})
+
+
+def test_email_config_set_persist_failure_keeps_runtime(monkeypatch):
+    """落盘失败 → RuntimeError 且运行时值不变（避免本次生效重启回退分裂）。"""
+    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: False)
+    server = _make_server()
+    with pytest.raises(RuntimeError):
+        server._rpc_email_config_set({"smtp_user": "me@163.com"})
+    assert server._settings.email_smtp_user == ""
 
 
 # ---- models.edit / models.remove RPC ----
