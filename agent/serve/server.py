@@ -176,6 +176,12 @@ class DesktopBridgeServer(BridgeServer):
         self._register_rpc(protocol.CMD_WECHAT_DISCONNECT, lambda data: self._api.disconnect_wechat())
         self._register_rpc(protocol.CMD_WECHAT_STATUS, lambda data: self._api.wechat_status())
         self._register_rpc(protocol.CMD_WECHAT_PAIRING, self._rpc_wechat_pairing)
+        # email.send（管家服务 → 邮件发送，2026-10）：表单直连邮件工具（不经模型）。
+        # SMTP 是阻塞 IO，故走异步处理器 + asyncio.to_thread（直接跑会冻住事件循环）；
+        # 非 _register_rpc（那只跑同步 fn），手动登记进 _rpc_types 满足契约自检。
+        # @author aceFelix
+        self.register_ws_handler(protocol.CMD_EMAIL_SEND, self._cmd_email_send)
+        self._rpc_types.add(protocol.CMD_EMAIL_SEND)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -207,6 +213,39 @@ class DesktopBridgeServer(BridgeServer):
     def _rpc_wechat_pairing(self, data: dict) -> Any:
         """wechat.pairing：透传手机端显示的数字配对码。"""
         return self._api.wechat_pairing(str(data.get("code", "")))
+
+    async def _cmd_email_send(self, ws: Any, data: dict) -> None:
+        """email.send 指令：管家服务「邮件发送」表单落地（异步，避免阻塞事件循环）。
+
+        校验 subject/body 非空（快速失败，与其它 _rpc_* 抛 ValueError 同口径）后，
+        把实际的 SMTP 发送放进 asyncio.to_thread 的工作线程执行——api.send_email
+        是同步阻塞 IO（timeout 30s），直接 await 会冻住事件循环、掐断流式事件。
+        回执 result 为 {"ok": true, "message": ...}；失败 ok=false + 错误原文
+        （邮件未启用 / 缺配置 / 认证失败等，前端弹窗内联显示）。@author aceFelix
+        """
+        try:
+            subject = str(data.get("subject") or "").strip()
+            body = str(data.get("body") or "").strip()
+            if not subject:
+                raise ValueError("邮件主题不能为空")
+            if not body:
+                raise ValueError("邮件正文不能为空")
+            result = await asyncio.to_thread(
+                self._api.send_email,
+                {
+                    "to": str(data.get("to") or ""),
+                    "cc": str(data.get("cc") or ""),
+                    "bcc": str(data.get("bcc") or ""),
+                    "subject": subject,
+                    "body": body,
+                },
+            )
+            msg = protocol.build_reply(protocol.CMD_EMAIL_SEND, ok=True, result=result)
+        except Exception as e:  # noqa: BLE001 - 回执携带错误，连接不中断
+            msg = protocol.build_reply(
+                protocol.CMD_EMAIL_SEND, ok=False, error=f"{type(e).__name__}: {e}"
+            )
+        await self._send_json(ws, msg)
 
     async def _cmd_talk_audio(self, ws: Any, data: dict) -> None:
         """talk.audio 指令：桌面全双工会话的麦克风帧（fire-and-forget，无回执）。

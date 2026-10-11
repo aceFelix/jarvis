@@ -363,6 +363,50 @@ class WorkbenchAPI:
 
         return slash_bridge.build_desktop_commands(self._settings)
 
+    # ---- 管家服务（2026-10） ----
+
+    def send_email(self, params: dict[str, Any]) -> dict[str, Any]:
+        """管家服务「邮件发送」：直接调用 SendEmailTool（不经模型）。
+
+        桌面标题栏「管家服务 → 邮件发送」表单的落地实现——表单点「发送」即用户
+        确认，故**刻意绕过工具默认的 check_permissions（ASK）**，直接执行 call。
+        配置校验（enabled / smtp_user / 授权码 / 收件人 / 主题 / 正文）全部复用
+        工具，失败以 ValueError 抛出（服务端回执 ok=false，前端表单内联显示原文）。
+
+        注意：本方法是**同步**的，内部用 asyncio.run 驱动工具的 async call——
+        调用方（serve/server.py）必须放进 asyncio.to_thread 的工作线程执行
+        （SMTP 是阻塞网络 IO，timeout 30s，直接跑会冻住事件循环掐断流式事件）。
+
+        Args:
+            params: 表单字段 ``{to?, cc?, bcc?, subject, body}``（首期不含附件）。
+
+        Returns:
+            ``{"ok": True, "message": <工具输出摘要>}``。
+
+        @author aceFelix
+        """
+        import asyncio
+
+        from agent.core.context import ToolContext
+        from agent.tools.extensions.email_tool import SendEmailTool
+
+        args: dict[str, Any] = {
+            "to": str(params.get("to") or "").strip(),
+            "cc": str(params.get("cc") or "").strip(),
+            "bcc": str(params.get("bcc") or "").strip(),
+            "subject": str(params.get("subject") or "").strip(),
+            "body": str(params.get("body") or "").strip(),
+        }
+        ctx = ToolContext(
+            workdir=str(self._settings.workdir or ""),
+            messages=[],
+            settings=self._settings,
+        )
+        res = asyncio.run(SendEmailTool().call(args, ctx))
+        if res.is_error:
+            raise ValueError(str(res.data))
+        return {"ok": True, "message": str(res.data)}
+
     # ---- 跨设备协同（手机 PWA / 微信 ClawBot，2026-10） ----
 
     def connect_phone(self) -> dict[str, Any]:

@@ -104,6 +104,10 @@ slash.commands      —                           [{name, description, source}]
                                                 （桌面可执行斜杠命令补全目录：
                                                 source=passthrough/native/skill，
                                                 只读不入队，随 workdir 技能变化）
+email.send          to?: str（空则用配置默认    {ok: true, message: str}（发送
+                    收件人）[, cc?: str,          成功；失败走 ok=false +
+                    bcc?: str], subject: str,      error：邮件未启用/缺配置/
+                    body: str                     认证失败等原文错误）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -234,6 +238,11 @@ CMD_SLASH_EXEC = "slash.exec"
 # （白名单透传 + 原生控件 + 已安装技能），供输入框 / 前缀弹层补全，
 # 口径与 slash_bridge 执行护栏一致（build_desktop_commands）。
 CMD_SLASH_COMMANDS = "slash.commands"
+# email.send（管家服务 → 邮件发送，2026-10）：桌面标题栏「管家服务」表单直连
+# 邮件工具（agent.tools.extensions.email_tool.SendEmailTool），不经模型——表单
+# 点「发送」即用户确认，故刻意绕过工具默认的 ASK 权限。收发件配置（smtp/授权码/
+# default_recipient）来自 ~/.jarvis/settings.toml 的 [email] 表。首期不支持附件。
+CMD_EMAIL_SEND = "email.send"
 
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
@@ -284,6 +293,7 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_WECHAT_PAIRING,
     CMD_SLASH_EXEC,
     CMD_SLASH_COMMANDS,
+    CMD_EMAIL_SEND,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

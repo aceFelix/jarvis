@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import queue
 
 import pytest
@@ -115,9 +116,11 @@ def test_desktop_commands_count():
     2026-10 斜杠命令透传：+slash.exec（45→46，实现见 ui/workbench/
     slash_bridge.py，结果走 slash_result 事件）；同月补全目录
     +slash.commands（46→47，只读返回桌面可执行命令列表）。
+    2026-10 桌面管家服务：+email.send（47→48，标题栏「管家服务 → 邮件发送」
+    表单直连 SendEmailTool，异步处理器 + to_thread，见 server._cmd_email_send）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 47
+    assert len(protocol.DESKTOP_COMMANDS) == 48
 
 
 def test_all_registered_rpcs_declared():
@@ -147,6 +150,39 @@ def test_talk_audio_handler_registered():
     server = _make_server()
     assert protocol.CMD_TALK_AUDIO in server._ws_handlers
     assert protocol.CMD_TALK_AUDIO in protocol.DESKTOP_COMMANDS
+
+
+# ---- email.send RPC（管家服务 → 邮件发送） ----
+
+def test_email_send_registered_and_declared():
+    """email.send：已声明（DESKTOP_COMMANDS）且已注册进 WS 处理器表（双仓契约防单侧漏改）。"""
+    server = _make_server()
+    assert protocol.CMD_EMAIL_SEND in protocol.DESKTOP_COMMANDS
+    assert protocol.CMD_EMAIL_SEND in server._ws_handlers
+
+
+def test_email_send_empty_subject_or_body_rejected():
+    """email.send：主题 / 正文留空 → 回执 ok=false（不进 SMTP，快速失败）。"""
+    server = _make_server()
+    sent: list[dict] = []
+
+    async def _fake_send_json(ws, msg):
+        sent.append(msg)
+
+    # 用替身捕获回执（不真连 WS）；_cmd_email_send 校验未过时不会触碰 api/SMTP
+    server._send_json = _fake_send_json  # type: ignore[assignment]
+
+    asyncio.run(
+        server._cmd_email_send(object(), {"to": "a@b.com", "subject": "  ", "body": "hi"})
+    )
+    assert sent[-1]["data"]["ok"] is False
+    assert "主题" in sent[-1]["data"]["error"]
+
+    asyncio.run(
+        server._cmd_email_send(object(), {"to": "a@b.com", "subject": "s", "body": "  "})
+    )
+    assert sent[-1]["data"]["ok"] is False
+    assert "正文" in sent[-1]["data"]["error"]
 
 
 # ---- models.edit / models.remove RPC ----
