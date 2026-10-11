@@ -77,6 +77,10 @@ def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, list]:
     monkeypatch.setattr(voice_state, "acquire_voice_lock", lambda: (True, ""))
     monkeypatch.setattr(voice_state, "release_voice_lock", lambda: None)
     monkeypatch.setattr(vl, "_voice_loop_round", fake_round)
+    # 打桩可选依赖探测：dashscope / pyaudio 属 [voice] 可选依赖，CI 仅装
+    # .[dev]，真实环境探测会 fail-fast 提前 return，导致事件与回调全不触发。
+    # 置空探测清单后，voice_loop 正常走完完整流程（本就已 monkeypatch 掉 stt/tts）。
+    monkeypatch.setattr(vl, "_VOICE_REQUIRED_MODULES", ())
 
     calls: list = []
     states: list = []

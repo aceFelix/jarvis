@@ -187,10 +187,16 @@ class TestSigintHandler:
 class TestVoiceLoopStopDuringListen:
     def test_stop_event_ends_session_and_loop_free(self, monkeypatch) -> None:
         """全链路：聆听阻塞期间 stop_event + 停止标志能及时终止会话且循环不饿死。"""
+        import sys
+
         import agent.voice as voice_pkg
         import agent.voice.tts as tts_mod
         import agent.voice.voice_state as voice_state
+        import agent.voice.voice_loop  # noqa: F401
         from agent.voice.voice_loop import voice_loop
+
+        # 包 __init__ 用同名函数重导出遮蔽了模块属性，需从 sys.modules 取模块本体
+        vl = sys.modules["agent.voice.voice_loop"]
 
         stt = _BlockingFakeSTT(block_seconds=30)  # 长录音：只能被停止标志中断
         monkeypatch.setattr(voice_pkg, "create_stt", lambda **kw: stt)
@@ -201,6 +207,9 @@ class TestVoiceLoopStopDuringListen:
         # 隔离跨进程语音锁：避免本机恰有 jarvis 语音会话时测试误败
         monkeypatch.setattr(voice_state, "acquire_voice_lock", lambda: (True, ""))
         monkeypatch.setattr(voice_state, "release_voice_lock", lambda: None)
+        # 打桩可选依赖探测：dashscope / pyaudio 属 [voice] 可选依赖，CI 仅装
+        # .[dev]，真实环境探测会 fail-fast 提前 return（states 为空 → IndexError）。
+        monkeypatch.setattr(vl, "_VOICE_REQUIRED_MODULES", ())
 
         async def _run() -> tuple[int, list]:
             ticks = 0
