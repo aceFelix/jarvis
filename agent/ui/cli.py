@@ -205,6 +205,7 @@ SLASH_COMMANDS = [
     ("/cli_anything uninstall <id>","卸载指定 harness"),
     ("/harnesses",     "列出已安装 CLI-Anything harness（别名）"),
     ("/server [目录] [--port N]", "启动开发服务器（Vite/Next 等）"),
+    ("/server stop [--pid N|--port N]", "关闭由 Jarvis 启动的开发服务器"),
 ]
 
 # 工具名 → 语音播报描述（方言/中文，适合 TTS 朗读）

@@ -78,12 +78,13 @@ class TestVoiceEventsProtocol:
         ev.on_user_transcript("你好")
         ev.on_ai_text_delta("你")
         ev.on_ai_text("你好呀")
+        ev.on_turn_done()
         ev.on_info("提示")
         ev.on_error("出错")
         kinds = [k for k, _ in ev.records]
         assert kinds == [
             "state", "user_transcript", "ai_text_delta",
-            "ai_text", "info", "error",
+            "ai_text", "turn_done", "info", "error",
         ]
         assert ev.states() == [STATE_LISTENING]
 
@@ -93,6 +94,7 @@ class TestVoiceEventsProtocol:
         base = VoiceEventsBase()
         base.on_state("x")
         base.on_user_partial("p")
+        base.on_turn_done()
         base.on_info("i", LEVEL_WARN)
         base.on_error("e")
 
@@ -140,6 +142,18 @@ class TestServeVoiceAdapter:
         assert [p for _, p in em.emitted] == [
             STATE_LISTENING, STATE_THINKING, STATE_SPEAKING,
         ]
+
+    def test_turn_done_maps_to_assistant_done(self) -> None:
+        """on_turn_done 应映射为 assistant_done（复用文本轮收尾路径）。
+
+        语音轮不经过 query_loop 的 assistant_done，若不适配，桌面前端气泡
+        与忙碌态将永久停在「思考中 / 流式」，即用户反馈的"停不下来"。
+        @author aceFelix
+        """
+        ad, em = self._adapter()
+        ad.on_ai_text("已办妥")
+        ad.on_turn_done()
+        assert em.emitted[-1] == ("assistant_done", "")
 
 
 # ---- REPL 适配器（保底） ----

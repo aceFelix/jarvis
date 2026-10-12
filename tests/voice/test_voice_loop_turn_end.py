@@ -57,8 +57,12 @@ class _FakeQueryLoop:
         self._thinking = on
 
 
-def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, list]:
-    """跑 voice_loop 至退出：monkeypatch 音频与轮次函数，返回 (回调实参, 状态)。"""
+def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, object]:
+    """跑 voice_loop 至退出：monkeypatch 音频与轮次函数。
+
+    返回 ``(回调实参列表, CollectingVoiceEvents)``；后者可查 ``states()``
+    或 ``records``（含轮次收尾 turn_done 记录）。
+    """
     import sys
 
     import agent.voice as voice_pkg
@@ -83,9 +87,7 @@ def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, list]:
     monkeypatch.setattr(vl, "_VOICE_REQUIRED_MODULES", ())
 
     calls: list = []
-    states: list = []
     events = CollectingVoiceEvents()
-    # 事件转储到 states（CollectingVoiceEvents 只存状态码序列）
     ctx = _FakeCtx()
     stop_event = threading.Event()
 
@@ -97,7 +99,7 @@ def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, list]:
         )
 
     asyncio.run(_run())
-    return calls, events.states()
+    return calls, events
 
 
 def test_on_turn_end_fires_when_round_grows_messages(monkeypatch) -> None:
@@ -111,11 +113,11 @@ def test_on_turn_end_fires_when_round_grows_messages(monkeypatch) -> None:
         stop.set()  # 一轮后结束会话（不再进待机录音）
         return False
 
-    _calls, states = _run_voice_loop(
+    _calls, events = _run_voice_loop(
         monkeypatch, fake_round, lambda: calls.append(1)
     )
     assert calls == [1]
-    assert states[-1] == STATE_EXITED
+    assert events.states()[-1] == STATE_EXITED
 
 
 def test_on_turn_end_skipped_when_no_message_growth(monkeypatch) -> None:
@@ -126,7 +128,7 @@ def test_on_turn_end_skipped_when_no_message_growth(monkeypatch) -> None:
         stop.set()
         return False
 
-    _calls, _states = _run_voice_loop(
+    _calls, _events = _run_voice_loop(
         monkeypatch, fake_round, lambda: calls.append(1)
     )
     assert calls == []
@@ -143,5 +145,52 @@ def test_on_turn_end_exception_swallowed(monkeypatch) -> None:
     def _boom() -> None:
         raise RuntimeError("存盘失败")
 
-    _calls, states = _run_voice_loop(monkeypatch, fake_round, _boom)
-    assert states[-1] == STATE_EXITED
+    _calls, events = _run_voice_loop(monkeypatch, fake_round, _boom)
+    assert events.states()[-1] == STATE_EXITED
+
+
+# ---- 轮次收尾信号 on_turn_done（语音气泡/忙碌态停不下来的修复） ----
+
+
+def _turn_done_count(events) -> int:
+    """统计 CollectingVoiceEvents 中 turn_done 事件条数。"""
+    return sum(1 for k, _ in events.records if k == "turn_done")
+
+
+def test_turn_done_fires_once_per_growing_round(monkeypatch) -> None:
+    """每轮正常回复（消息有增长）都应补发一次 turn_done 收尾信号。"""
+    state = {"n": 0}
+
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+        state["n"] += 1
+        ctx.messages.append(SimpleNamespace(role="user", get_text=lambda: "问"))
+        ctx.messages.append(SimpleNamespace(role="assistant", get_text=lambda: "答"))
+        if state["n"] >= 2:
+            stop.set()
+        return True  # 继续下一轮
+
+    _calls, events = _run_voice_loop(monkeypatch, fake_round, None)
+    assert state["n"] == 2
+    assert _turn_done_count(events) == 2
+
+
+def test_turn_done_fires_even_on_empty_round(monkeypatch) -> None:
+    """空轮（无消息增长，如没听清）也发 turn_done：无条件收尾，杜绝残留忙碌态。"""
+
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+        stop.set()
+        return False
+
+    _calls, events = _run_voice_loop(monkeypatch, fake_round, None)
+    assert _turn_done_count(events) == 1
+
+
+def test_turn_done_fires_on_round_exception(monkeypatch) -> None:
+    """轮次抛异常（Ctrl+C）也经 finally 补发 turn_done，气泡不残留。"""
+
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+        raise KeyboardInterrupt
+
+    _calls, events = _run_voice_loop(monkeypatch, fake_round, None)
+    assert _turn_done_count(events) == 1
+    assert events.states()[-1] == STATE_EXITED

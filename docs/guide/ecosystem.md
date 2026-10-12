@@ -269,7 +269,7 @@ Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件�
 
 ## 开发服务器
 
-Jarvis 内置 `/server` 命令和 `DevServer` 工具，用于一键启动前端/Node 开发服务器：
+Jarvis 内置 `/server` 命令和 `DevServer` 工具，用于一键启动 / 关闭前端/Node 开发服务器：
 
 ```bash
 /server                                  # 启动当前目录项目
@@ -277,6 +277,9 @@ Jarvis 内置 `/server` 命令和 `DevServer` 工具，用于一键启动前端/
 /server --port 3000                      # 指定端口（被占用时自动递增）
 /server --command "pnpm run dev"         # 自定义启动命令
 /server jarvis-website --port 3000 --wait 15
+/server stop                             # 关闭最近启动的开发服务器
+/server stop --port 5174                 # 关闭监听指定端口的服务器
+/server stop --pid 4321                  # 关闭指定 PID 的服务器
 ```
 
 支持自动识别的项目类型：
@@ -297,5 +300,12 @@ Jarvis 内置 `/server` 命令和 `DevServer` 工具，用于一键启动前端/
 - **端口占用自动递增**：默认端口被占用时自动找下一个可用端口
 - **日志重定向**：stdout/stderr 写入 `~/.jarvis/dev_server_logs/<项目名>_<时间戳>.log`
 - **URL 提取**：从日志中自动提取 `http://localhost:port` 返回
+- **启动即登记**：启动成功后把 pid / port / 项目目录写入 `~/.jarvis/dev_servers.json`
+- **一键关闭**：`/server stop` 或 `DevServer(action="stop")` 按 pid / port / 项目目录定位并结束整棵进程树；关闭 Jarvis 自己启动的服务器无需确认
 
-AI 工具：`DevServer(project_dir=..., port=..., command=...)`
+AI 工具：
+
+```
+DevServer(action="start", project_dir=..., port=..., command=...)
+DevServer(action="stop", port=5174)   # 或 pid / project_dir；都不传则关最近启动的一个
+```

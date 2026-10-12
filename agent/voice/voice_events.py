@@ -65,6 +65,15 @@ class VoiceSessionEvents(Protocol):
         """一轮回复的完整文本（流式结束后的全量校验）。"""
         ...
 
+    def on_turn_done(self) -> None:
+        """一轮语音对话彻底收尾（听→想→说 全部结束）。
+
+        语音轮不经过 query_loop 的 ``assistant_done`` 收尾路径，宿主据此显式
+        结束本轮气泡的流式 / 思考 / 忙碌态（serve 适配器映射为 assistant_done
+        WS 事件）。无论本轮成功回复、被打断、待机退下还是中途出错都应发出。
+        """
+        ...
+
     def on_info(self, msg: str, level: str = LEVEL_INFO) -> None:
         """提示 / 告警信息（level: info / warn）。"""
         ...
@@ -93,6 +102,9 @@ class VoiceEventsBase:
         pass
 
     def on_ai_text(self, text: str) -> None:  # noqa: D102
+        pass
+
+    def on_turn_done(self) -> None:  # noqa: D102
         pass
 
     def on_info(self, msg: str, level: str = LEVEL_INFO) -> None:  # noqa: D102
@@ -128,6 +140,9 @@ class CollectingVoiceEvents(VoiceEventsBase):
 
     def on_ai_text(self, text: str) -> None:  # noqa: D102
         self._rec("ai_text", text)
+
+    def on_turn_done(self) -> None:  # noqa: D102
+        self._rec("turn_done", None)
 
     def on_info(self, msg: str, level: str = LEVEL_INFO) -> None:  # noqa: D102
         self._rec("info", (msg, level))

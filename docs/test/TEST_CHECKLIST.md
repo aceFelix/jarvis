@@ -437,6 +437,14 @@
 | T-194 | ICS 读取 | 配置 ics_path 指向 .ics 文件 | 简报中展示日程 |
 | T-195 | 事件提醒 | 事件前 30 分钟 | 触发提醒 |
 
+### 17.6 日程提醒提示词条件化（2026-10）
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-SP-001 | 终端不注入提醒段 | 终端 REPL 说"提醒我明天上午开会" | system prompt 不含「# 日程提醒」；Jarvis 不反复 ToolSearch 搜 ScheduleReminder，而是如实说明终端暂不支持 |
+| T-SP-002 | 桌面注入提醒段 | 桌面壳启动后查看（或问"我有什么提醒"） | 含「# 日程提醒」，ScheduleReminder/ListSchedule/CancelSchedule 可用 |
+| T-SP-003 | ToolSearch 未命中兜底 | 调 ToolSearch 搜不存在的工具 | 返回含"该能力可能未注册…不要继续反复搜索"兜底提示 |
+| T-SP-004 | 自动化回归 | `pytest tests/core/test_system_prompt.py tests/test_core_tools.py -q` | 全绿（含 TestScheduleSectionConditional、test_no_match_hints_against_retry） |
+
 ---
 
 ## 18. 跨设备协同（Bridge）
@@ -606,6 +614,14 @@
 | T-275 | 包管理器检测 | 有 pnpm-lock.yaml | 使用 pnpm |
 | T-276 | URL 提取 | 服务启动后 | 从日志提取 localhost URL |
 | T-277 | 日志重定向 | 启动后检查 | 日志写入 ~/.jarvis/dev_server_logs/ |
+| T-DS-001 | 关闭最近启动 | `/server stop`（无参数） | 关闭最近一次由 Jarvis 启动的服务器，登记表同步清除 |
+| T-DS-002 | 按端口关闭 | `/server stop --port 5174` | 定位监听该端口的进程并关闭 |
+| T-DS-003 | 按 PID 关闭 | `/server stop --pid <PID>` | 精确关闭指定进程 |
+| T-DS-004 | 在册免确认 | 关闭登记表中存活的服务器 | 权限直接放行（allow），无需二次确认 |
+| T-DS-005 | 未登记需确认 | 关闭非 Jarvis 启动 / 未登记的目标 | 弹出确认提示（ask） |
+| T-DS-006 | 语音模式关闭 | 语音说「把项目关了」 | 直接调用 `DevServer(action="stop")`，不阻塞、不卡死 |
+
+> 自动化实现：[tests/tools/test_dev_server_tool.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/tools/test_dev_server_tool.py)（登记表/进程终止全 monkeypatch，不真正启停进程）。编号用 T-DS-* 前缀避免与后文 T-278 起的连续编号冲突。
 
 ---
 
@@ -796,7 +812,7 @@
 
 ---
 
-> **总计：358 项测试，覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358）
+> **总计：364 项测试，覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358、2026-10 开发服务器关闭能力新增 T-DS-001–T-DS-006）
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >

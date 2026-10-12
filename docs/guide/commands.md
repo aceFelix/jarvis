@@ -113,6 +113,7 @@
 | `/update` | 检查并升级 jarvis 到最新版本（pip / uv 自动识别，重启生效） |
 | `/config [show]` | 查看当前生效的完整配置（LLM/语音/权限/MCP/自定义模型等） |
 | `/server [目录]` | 一键启动前端开发服务器 |
+| `/server stop [--pid N\|--port N]` | 关闭由 Jarvis 启动的开发服务器（不传参数则关闭最近启动的一个） |
 | `/connect-phone` `/phone` | 跨设备协同（手机扫码连接当前会话） |
 | `/connect-wechat` `/wechat` | 微信扫码连接 JARVIS（通过 ClawBot 在微信中对话） |
 | `/disconnect-wechat` | 断开微信 ClawBot 连接 |

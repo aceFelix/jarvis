@@ -757,6 +757,17 @@ class TestToolSearch:
         assert "未找到匹配" in str(r.data)
         assert "mcp__browser__navigate" in str(r.data)  # 提示可用延迟工具
 
+    @pytest.mark.asyncio
+    async def test_no_match_hints_against_retry(self) -> None:
+        """搜不到时给出兜底提示，劝阻反复重试/绕道自造实现。"""
+        tool = ToolSearchTool(_registry_with_deferred())
+        r = await tool.call({"query": "ScheduleReminder 提醒"}, make_ctx("/tmp"))
+        assert r.is_error is False
+        text = str(r.data)
+        assert "未找到匹配" in text
+        assert "未注册" in text  # 说明该能力可能未在本环境注册
+        assert "不要继续反复搜索" in text
+
     def test_score_name_hit_high(self) -> None:
         score = ToolSearchTool._score(_DeferredTool(), ["browser"])
         assert score >= 10

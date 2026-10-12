@@ -108,12 +108,18 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 
 用户说"帮我启动这个项目""跑一下前端""启动开发服务器"时，**直接调用 DevServer 工具**，不要先用 Glob/FileRead 查看项目结构——DevServer 内部已自动识别项目类型。
 
-- **DevServer**: 自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目，处理端口占用、后台进程、日志输出，返回访问 URL。
+- **DevServer**（`action="start"`，默认）：自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目，处理端口占用、后台进程、日志输出，返回访问 URL。
   - `project_dir`: 项目目录（相对或绝对路径，默认当前目录）
   - `port`: 指定端口（可选，被占用时自动递增）
   - `command`: 自定义启动命令（可选）
   - 返回: project_type / pid / port / url / log_file
 - 只有 DevServer 识别失败时，才改用 Bash 启动。
+
+**关闭开发服务器**（重要）：
+- 用户说"把项目关了""关掉开发服务器""停掉这个服务"时，**直接调用 `DevServer(action="stop")`**，不要用 Bash 的 `kill` / `taskkill` / `pkill` / `netstat` 之类命令去关——那些命令在语音模式下会触发阻塞式权限确认，导致贾维斯卡住。
+- `action="stop"` 的可选定位参数：`project_dir`（关哪个项目的服务器）、`port`、`pid`。都不传时关闭最近启动的那一个。
+- 关闭 Jarvis 自己启动的服务器无需确认（直接放行）；返回的 `stopped` 列表里是被关闭的进程。
+- 若返回"当前没有由 Jarvis 启动且仍在运行的开发服务器"，直接如实告诉用户即可，不要再去 Bash 里找进程。
 
   **HMR 热更新规则**（重要）：
   - Vite / Next.js / Webpack dev server 都有 HMR（热模块替换）
@@ -327,36 +333,6 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
 
 方案不通过的常见原因：没读代码就凭空设计、遗漏边界情况、改动范围过大。
 
-# 日程提醒
-
-你可以通过 **ScheduleReminder** 工具为用户安排定时提醒。贾维斯会在到点时主动
-通知用户（语音播报），这是贾维斯"主动感知"能力的一部分。
-
-## 工具
-
-- **ScheduleReminder**: 安排提醒。你需要把用户的自然语言时间转成 ISO 格式。
-  - `trigger_at`: ISO 时间 "YYYY-MM-DDTHH:MM:SS"
-  - `content`: 提醒内容
-  - `repeat`: once(默认)/daily/weekly
-- **ListSchedule**: 查询当前待触发的提醒
-- **CancelSchedule**: 取消提醒（需要任务ID）
-
-## 时间解析规则
-
-把用户的自然语言时间转成具体 ISO 时间（基于当前时间计算）:
-- "明天下午3点" → 明天日期 + T15:00:00
-- "下周一早上9点" → 下周一日期 + T09:00:00
-- "每天早上8点" → 明天日期 + T08:00:00, repeat=daily
-- "一小时后" → 当前时间+1小时
-- "30分钟后" → 当前时间+30分钟
-
-## 使用规范
-
-1. **确认内容**: 安排前简短复述确认（"好的，明天下午3点提醒您开会"）
-2. **内容简洁**: 提醒内容要简短明了，适合语音播报（"开会"而非"您明天下午3点在A会议室有一个关于Q3规划的会议"）
-3. **判断重复**: 用户说"每天"/"每周"→ 对应 repeat；否则 once
-4. **可查询**: 用户问"我有什么提醒"→ 调 ListSchedule
-
 # 摄像头（看现实世界）
 
 你配备了摄像头工具，可以拍摄现实世界的画面并直接"看到"内容（多模态视觉）。
@@ -443,6 +419,42 @@ _NO_THINKING_SECTION = """\
 
 当前已关闭深度思考模式。请直接给出简洁、准确的回复或执行工具调用。
 不要输出 reasoning_content 思维链，也不要在回复中暴露内部思考过程。
+"""
+
+# 日程提醒段。按需注入：只有当前环境真正注册了提醒工具（serve/桌面宿主经
+# registry_hook 挂载 ScheduleReminder 等）时才拼进系统提示。
+# 终端 CLI 不注册这些工具，若不条件化注入，模型会以为能用而反复 ToolSearch
+# 搜索不存在的工具，白白空转（见 fixlogs/schedule-prompt-conditional-fix.md）。
+_SCHEDULE_SECTION = """\
+# 日程提醒
+
+你可以通过 **ScheduleReminder** 工具为用户安排定时提醒。贾维斯会在到点时主动
+通知用户（语音播报），这是贾维斯"主动感知"能力的一部分。
+
+## 工具
+
+- **ScheduleReminder**: 安排提醒。你需要把用户的自然语言时间转成 ISO 格式。
+  - `trigger_at`: ISO 时间 "YYYY-MM-DDTHH:MM:SS"
+  - `content`: 提醒内容
+  - `repeat`: once(默认)/daily/weekly
+- **ListSchedule**: 查询当前待触发的提醒
+- **CancelSchedule**: 取消提醒（需要任务ID）
+
+## 时间解析规则
+
+把用户的自然语言时间转成具体 ISO 时间（基于当前时间计算）:
+- "明天下午3点" → 明天日期 + T15:00:00
+- "下周一早上9点" → 下周一日期 + T09:00:00
+- "每天早上8点" → 明天日期 + T08:00:00, repeat=daily
+- "一小时后" → 当前时间+1小时
+- "30分钟后" → 当前时间+30分钟
+
+## 使用规范
+
+1. **确认内容**: 安排前简短复述确认（"好的，明天下午3点提醒您开会"）
+2. **内容简洁**: 提醒内容要简短明了，适合语音播报（"开会"而非"您明天下午3点在A会议室有一个关于Q3规划的会议"）
+3. **判断重复**: 用户说"每天"/"每周"→ 对应 repeat；否则 once
+4. **可查询**: 用户问"我有什么提醒"→ 调 ListSchedule
 """
 
 
@@ -673,6 +685,21 @@ def _cli_anything_section(registry: ToolRegistry) -> str:
     )
 
 
+def _schedule_section(registry: ToolRegistry) -> str:
+    """日程提醒段（按需注入）。
+
+    只有当前环境实际注册了提醒工具时才返回该段：serve/桌面宿主经
+    registry_hook 挂载 ScheduleReminder/ListSchedule/CancelSchedule，
+    终端 CLI 不注册。若不加判断地注入，终端下的模型会以为能用提醒功能，
+    却怎么 ToolSearch 都搜不到工具，进而反复空转甚至绕道自造实现。
+
+    @author aceFelix
+    """
+    if "ScheduleReminder" not in registry:
+        return ""
+    return _SCHEDULE_SECTION
+
+
 def build_system_prompt(
     workdir: str,
     registry: ToolRegistry,
@@ -721,6 +748,7 @@ def build_system_prompt(
             skills_section(workdir),
             _env_section(workdir),
             _platform_section(),
+            _schedule_section(registry),
             _cli_anything_section(registry),
             _tools_section(registry),
         ]

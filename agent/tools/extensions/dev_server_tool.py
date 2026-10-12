@@ -1,4 +1,4 @@
-"""开发服务器启动工具。
+"""开发服务器启动 / 关闭工具。
 
 让 Jarvis 能够自动识别常见前端项目（Vite / Next.js / Vue CLI / Webpack /
 Create React App / Nuxt / Gatsby 等），启动开发服务器，并处理：
@@ -7,8 +7,10 @@ Create React App / Nuxt / Gatsby 等），启动开发服务器，并处理：
 - stdout/stderr 日志重定向
 - 从日志中提取访问 URL
 - 返回 PID、端口、日志路径
+- 记录已启动的服务器（~/.jarvis/dev_servers.json），支持逐个关闭
 
-用于用户说"帮我启动这个项目""跑一下前端""启动开发服务器"等场景。
+用于用户说"帮我启动这个项目""跑一下前端""启动开发服务器"
+以及"把项目关了""关掉开发服务器"等场景。
 
 @author aceFelix
 """
@@ -19,7 +21,6 @@ import json
 import logging
 import os
 import re
-import socket
 import subprocess
 import sys
 import time
@@ -30,6 +31,17 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult
 from agent.core.tool import JSONSchema, Tool
+from agent.tools.extensions.dev_server_process import (
+    find_pids_by_port,
+    is_port_in_use,
+    kill_process_tree,
+    load_registry,
+    pid_alive,
+    register_server,
+    same_path,
+    unregister_server,
+    wait_for_port_free,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -59,41 +71,66 @@ _FALLBACK_COMMANDS: dict[str, str] = {
 
 
 class DevServerTool(Tool):
-    """启动前端/Node 开发服务器。
+    """启动 / 关闭前端开发服务器。
 
-    自动检测项目类型、package manager、可用端口，后台启动进程并监控日志。
+    - action="start"（默认）：自动检测项目类型、package manager、可用端口，
+      后台启动进程并监控日志，成功后把服务器登记到 ~/.jarvis/dev_servers.json。
+    - action="stop"：关闭之前由本工具启动的开发服务器，支持按 pid / port /
+      project_dir 定位；都不传则关闭最近启动的一个。
+
+    关闭能力的存在是为了让模型"把项目关了"时走一等公民工具，而不是被迫用
+    Bash 的 kill/taskkill（在语音模式下会触发阻塞式确认而卡住）。
     """
 
     name = "DevServer"
     description = (
-        "启动前端或 Node 开发服务器。"
-        "自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目，"
-        "处理端口占用、后台进程、日志输出，并返回访问 URL。"
-        "用于用户说'帮我启动这个项目'/'跑一下前端'/'启动开发服务器'等场景。"
+        "启动或关闭前端 / Node 开发服务器。"
+        "action='start'（默认）：自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / "
+        "Gatsby 等项目，处理端口占用、后台进程、日志输出，并返回访问 URL。"
+        "action='stop'：关闭之前由本工具启动的开发服务器（可用 pid / port / project_dir 定位，"
+        "不传则关最近启动的一个），返回被关闭的进程列表。"
+        "用于用户说'帮我启动这个项目'/'跑一下前端'/'启动开发服务器'，"
+        "以及'把项目关了'/'关掉开发服务器'/'停掉这个服务'等场景。"
     )
     input_schema: JSONSchema = {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["start", "stop"],
+                "description": "操作类型：start=启动（默认），stop=关闭。",
+                "default": "start",
+            },
             "project_dir": {
                 "type": "string",
-                "description": "项目目录路径。支持绝对路径或相对于当前工作目录的相对路径。默认使用当前工作目录。",
+                "description": (
+                    "项目目录路径。start 时表示要启动的项目；stop 时表示要关闭哪个项目的服务器。"
+                    "支持绝对路径或相对于当前工作目录的相对路径。start 时默认使用当前工作目录。"
+                ),
             },
             "command": {
                 "type": "string",
-                "description": "自定义启动命令（可选）。提供时优先使用，不再自动检测项目类型。",
+                "description": "自定义启动命令（可选，仅 action=start）。提供时优先使用，不再自动检测项目类型。",
             },
             "port": {
                 "type": "integer",
-                "description": "指定端口号（可选）。未指定时按项目类型使用默认端口；若被占用则自动递增。",
+                "description": (
+                    "端口号。start 时：未指定则按项目类型使用默认端口，被占用则自动递增。"
+                    "stop 时：用于定位监听该端口的服务器。"
+                ),
+            },
+            "pid": {
+                "type": "integer",
+                "description": "进程 PID（可选，仅 action=stop）。用于精确关闭某个服务器。",
             },
             "auto_port": {
                 "type": "boolean",
-                "description": "端口被占用时是否自动尝试下一个端口。默认 true。",
+                "description": "端口被占用时是否自动尝试下一个端口。默认 true。仅 action=start。",
                 "default": True,
             },
             "wait_seconds": {
                 "type": "integer",
-                "description": "启动后等待服务器就绪的最长秒数。默认 10 秒。",
+                "description": "启动后等待服务器就绪的最长秒数。默认 10 秒。仅 action=start。",
                 "default": 10,
             },
         },
@@ -102,7 +139,7 @@ class DevServerTool(Tool):
     max_result_chars = 3_000
 
     def is_read_only(self, args: dict[str, Any]) -> bool:
-        """启动服务器会创建进程并可能写入日志，非只读。"""
+        """启动/关闭服务器都会创建或终止进程，非只读。"""
         return False
 
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
@@ -110,18 +147,47 @@ class DevServerTool(Tool):
         return True
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
-        """启动外部进程、占用端口，默认需要用户确认。"""
+        """权限判定。
+
+        - stop：若目标命中本工具登记表（即关闭 Jarvis 自己启动的服务器，属安全收尾），
+          直接 ALLOW，避免语音模式下走阻塞式确认导致卡死；未登记的目标仍需 ASK。
+        - start：启动外部进程、占用端口，一律 ASK。
+
+        @author aceFelix
+        """
+        action = (args.get("action") or "start").strip().lower()
+        if action == "stop":
+            if self._find_registered_targets(args, ctx):
+                return PermissionResult.allow("关闭 Jarvis 启动的开发服务器")
+            return PermissionResult.ask("关闭开发服务器（目标未登记，需要确认）")
         project_dir = self._resolve_project_dir(args.get("project_dir", ""), ctx)
         return PermissionResult.ask(f"启动 {project_dir} 的开发服务器")
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
-        """展示给用户的活动描述。"""
+        """展示给用户的活动描述（区分启动 / 关闭）。"""
+        action = (args.get("action") or "start").strip().lower() if args else "start"
+        if action == "stop":
+            if args and args.get("pid"):
+                return f"关闭开发服务器 (PID {args['pid']})"
+            if args and args.get("port"):
+                return f"关闭开发服务器 (端口 {args['port']})"
+            return "关闭开发服务器"
         if args is None:
             return "启动开发服务器"
         project_dir = args.get("project_dir", "")
         return f"启动开发服务器: {project_dir or '当前目录'}"
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        """入口分派：按 action 走启动或关闭。
+
+        @author aceFelix
+        """
+        action = (args.get("action") or "start").strip().lower()
+        if action == "stop":
+            return self._stop_server(args, ctx)
+        return self._start_server(args, ctx)
+
+    def _start_server(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """执行开发服务器启动。
 
         步骤：
@@ -131,7 +197,7 @@ class DevServerTool(Tool):
         4. 构建启动命令
         5. 后台启动进程，重定向日志
         6. 等待端口就绪
-        7. 返回结果（PID / 端口 / URL / 日志路径）
+        7. 登记到 ~/.jarvis/dev_servers.json 并返回结果（PID / 端口 / URL / 日志路径）
 
         @author aceFelix
         """
@@ -161,11 +227,11 @@ class DevServerTool(Tool):
         # 2. 确定端口
         base_port = int(requested_port) if requested_port else _DEFAULT_PORTS.get(project_type, 3000)
         port = base_port
-        if _is_port_in_use(port):
+        if is_port_in_use(port):
             if not auto_port:
                 return ToolResult.error(f"端口 {port} 已被占用，且 auto_port=false。")
             for candidate in range(port + 1, port + 100):
-                if not _is_port_in_use(candidate):
+                if not is_port_in_use(candidate):
                     port = candidate
                     break
             else:
@@ -205,6 +271,19 @@ class DevServerTool(Tool):
             "log_file": str(log_file),
             "status": "已启动" if started else "进程已启动，但端口未在预期时间内就绪",
         }
+
+        # 8. 登记到全局登记表，供后续 action="stop" 定位
+        register_server(
+            {
+                "pid": proc.pid,
+                "port": port,
+                "project_dir": str(project_dir),
+                "command": final_command,
+                "url": url,
+                "log_file": str(log_file),
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
 
         if started:
             return ToolResult(data=json.dumps(result, ensure_ascii=False, indent=2))
@@ -258,6 +337,114 @@ class DevServerTool(Tool):
             env_prefix = f"set PORT={port} && " if sys.platform == "win32" else f"PORT={port} "
 
         return f"{env_prefix}{cmd}"
+
+    def _find_registered_targets(self, args: dict[str, Any], ctx: ToolContext) -> list[dict]:
+        """在登记表中定位要关闭的服务器。
+
+        定位优先级：显式 pid > 显式 port > 显式 project_dir > 最近启动的一个。
+        只返回进程仍存活的登记项，避免对已退出的进程重复操作。
+
+        该方法同时服务于权限判定与真正的关闭逻辑，避免两处逻辑重复。
+
+        @author aceFelix
+        """
+        entries = [e for e in load_registry() if pid_alive(int(e.get("pid") or 0))]
+        if not entries:
+            return []
+
+        pid = args.get("pid")
+        if pid:
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                return []
+            return [e for e in entries if int(e.get("pid") or 0) == pid]
+
+        port = args.get("port")
+        if port:
+            try:
+                port = int(port)
+            except (TypeError, ValueError):
+                return []
+            return [e for e in entries if int(e.get("port") or 0) == port]
+
+        raw_dir = (args.get("project_dir") or "").strip()
+        if raw_dir:
+            target = str(self._resolve_project_dir(raw_dir, ctx))
+            return [e for e in entries if same_path(str(e.get("project_dir", "")), target)]
+
+        # 未指定任何条件：关闭最近启动的那一个
+        return [entries[-1]]
+
+    def _stop_server(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        """关闭由本工具启动的开发服务器。
+
+        步骤：
+        1. 用 _find_registered_targets 定位目标；未登记时按显式 pid/port 构造合成目标
+        2. 逐个终止进程树
+        3. 等待端口释放并从登记表移除
+        4. 返回结果 {action:"stop", stopped:[...], failed:[...]}
+
+        @author aceFelix
+        """
+        targets = self._find_registered_targets(args, ctx)
+
+        # 登记表未命中时，按显式参数兜底
+        if not targets:
+            explicit_pid = args.get("pid")
+            explicit_port = args.get("port")
+            explicit_dir = (args.get("project_dir") or "").strip()
+            if explicit_pid:
+                try:
+                    pid = int(explicit_pid)
+                except (TypeError, ValueError):
+                    return ToolResult.error(f"无效 PID: {explicit_pid}")
+                targets = [{"pid": pid, "port": None, "project_dir": "", "synthetic": True}]
+            elif explicit_port:
+                try:
+                    port = int(explicit_port)
+                except (TypeError, ValueError):
+                    return ToolResult.error(f"无效端口: {explicit_port}")
+                pids = find_pids_by_port(port)
+                if not pids:
+                    return ToolResult.error(f"未发现监听端口 {port} 的进程。")
+                targets = [
+                    {"pid": p, "port": port, "project_dir": "", "synthetic": True} for p in pids
+                ]
+            elif explicit_dir:
+                return ToolResult.error(f"未找到由 Jarvis 启动、目录为 {explicit_dir} 的开发服务器。")
+            else:
+                return ToolResult.error("当前没有由 Jarvis 启动且仍在运行的开发服务器。")
+
+        stopped: list[dict] = []
+        failed: list[dict] = []
+        for entry in targets:
+            pid = int(entry.get("pid") or 0)
+            port = entry.get("port")
+            ok, msg = kill_process_tree(pid)
+            if ok and port:
+                # 进程退出后端口通常需要短暂时间才释放
+                if not wait_for_port_free(int(port), timeout=5):
+                    msg = "进程已终止，但端口仍被占用"
+            unregister_server(pid=pid)
+            item = {
+                "pid": pid,
+                "port": port,
+                "project_dir": entry.get("project_dir", ""),
+                "message": msg,
+            }
+            (stopped if ok else failed).append(item)
+
+        result = {
+            "success": bool(stopped) and not failed,
+            "action": "stop",
+            "stopped": stopped,
+            "failed": failed,
+        }
+        data = json.dumps(result, ensure_ascii=False, indent=2)
+        if not stopped:
+            return ToolResult(data=data, is_error=True)
+        return ToolResult(data=data)
 
 
 def _detect_package_manager(project_dir: Path) -> str:
@@ -359,23 +546,6 @@ def _select_start_command(
     return "npx serve ."
 
 
-def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """检查端口是否被占用。
-
-    同时尝试 IPv4 (127.0.0.1) 和 IPv6 (::1)，因为部分开发服务器
-    （如 Vite）可能仅绑定到 IPv6 环回地址，导致 IPv4 检测不到。
-
-    @author aceFelix
-    """
-    for h in (host, "::1"):
-        try:
-            with socket.create_connection((h, port), timeout=0.5):
-                return True
-        except OSError:
-            continue
-    return False
-
-
 def _prepare_log_file(project_dir: Path) -> Path:
     """准备日志文件路径。"""
     log_dir = Path.home() / ".jarvis" / "dev_server_logs"
@@ -415,7 +585,7 @@ def _wait_for_port(port: int, timeout: int = 10) -> bool:
     """等待端口就绪。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not _is_port_in_use(port):
+        if not is_port_in_use(port):
             time.sleep(0.5)
             continue
         return True

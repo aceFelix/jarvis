@@ -76,3 +76,40 @@ class TestThinkingModeVariants:
         assert "# 交付自查纪律" in p
         # 思考规范段被替换为无思考版本
         assert "深度思考已关闭" in p
+
+
+class _FakeScheduleTool:
+    """最小化的 ScheduleReminder 替身，仅用于验证条件注入触发。"""
+
+    name = "ScheduleReminder"
+    description = "安排定时提醒"
+    input_schema = {"type": "object", "properties": {}}
+    deferred = True
+
+    async def call(self, args, ctx):  # pragma: no cover - 不实际调用
+        raise NotImplementedError
+
+
+class TestScheduleSectionConditional:
+    """「# 日程提醒」段按环境能力条件化注入。
+
+    终端 CLI 不注册提醒工具，若不条件化，模型会反复 ToolSearch 搜索不存在
+    的工具空转（见 fixlogs/schedule-prompt-conditional-fix.md）。
+    """
+
+    def test_absent_when_no_schedule_tool(self):
+        """未注册提醒工具（终端 CLI 场景）时不注入日程提醒段。"""
+        p = build_system_prompt(".", ToolRegistry())
+        assert "# 日程提醒" not in p
+        assert "ScheduleReminder" not in p
+
+    def test_present_when_schedule_tool_registered(self):
+        """注册了提醒工具（serve/桌面宿主场景）时注入日程提醒段。"""
+        reg = ToolRegistry()
+        reg.register(_FakeScheduleTool())
+        p = build_system_prompt(".", reg)
+        assert "# 日程提醒" in p
+        assert "ScheduleReminder" in p
+        assert "ListSchedule" in p
+        assert "CancelSchedule" in p
+

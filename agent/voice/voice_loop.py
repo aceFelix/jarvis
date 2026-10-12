@@ -592,10 +592,19 @@ async def voice_loop(
                         break
                     interrupt_event.clear()  # 每轮重置打断信号
                     msg_count_before_round = len(ctx.messages)
-                    cont = await _voice_loop_round(
-                        events, settings, loop, ctx, tts, stt, interrupt_event,
-                        stop_event
-                    )
+                    try:
+                        cont = await _voice_loop_round(
+                            events, settings, loop, ctx, tts, stt, interrupt_event,
+                            stop_event
+                        )
+                    finally:
+                        # 一轮语音（听→想→说）结束：无论成功回复 / 被打断 /
+                        # 待机退下 / 中途出错，都补发一次收尾信号。
+                        # 语音轮不走 query_loop 的 assistant_done 收尾路径，若不补发，
+                        # 桌面壳气泡会一直停在「思考中 / 流式」、忙碌态（发送键变停止键）
+                        # 也撤不回来——即用户反馈的“语音已回复我办妥了，气泡却仍在
+                        # 疯狂输出思考、停不下来”。@author aceFelix
+                        events.on_turn_done()
                     # 每轮落库钩子：本轮消息有增长（正常回复或被打断的半轮）
                     # 即通知宿主持久化（工作台 _after_turn；异常静默不影响语音）
                     if on_turn_end is not None and len(ctx.messages) > msg_count_before_round:

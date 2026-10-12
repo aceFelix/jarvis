@@ -54,6 +54,16 @@ class ServeVoiceAdapter(VoiceEventsBase):
         """AI 回复全文 → voice_ai_text 事件（流式收尾校验）。"""
         self._emitter.emit(_EVT_VOICE_AI_TEXT, text)
 
+    def on_turn_done(self) -> None:
+        """一轮语音结束 → assistant_done 事件（复用文本轮收尾路径）。
+
+        语音轮不经过 query_loop 的 assistant_done，导致桌面前端气泡一直停在
+        「思考中 / 流式」、忙碌态撤不回来。此处把语音轮收尾映射成文本轮同一
+        assistant_done，前端 Dispatcher 据此定稿气泡并清 busy / aborted。
+        @author aceFelix
+        """
+        self._emitter.emit("assistant_done", "")
+
     def on_info(self, msg: str, level: str = "info") -> None:
         """提示 / 告警 → 复用 info / warn 通道。"""
         self._emitter.emit(level if level in ("info", "warn") else "info", msg)

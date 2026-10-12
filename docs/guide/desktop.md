@@ -116,6 +116,11 @@ Agent 工具：
 | `CompleteDeadline` | 标记截止日期完成 |
 | `AcknowledgeReminder` | 确认提醒（停止升级重复通知） |
 
+> 以上提醒/截止日期类工具**仅桌面壳 / serve 宿主**经 `registry_hook` 注册。
+> 终端 CLI（REPL）不注册这些工具，系统提示中的「# 日程提醒」段也会随之**不注入**
+> （条件化），避免模型追着不存在的工具反复搜索空转。详见
+> [schedule-prompt-conditional-fix.md](../fixlogs/schedule-prompt-conditional-fix.md)。
+
 ## 系统资源监控（休眠态）
 
 监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，
@@ -228,7 +233,7 @@ jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供�
 - **停机信号**：stdin EOF（父进程退出 / 杀管道）或 `SIGINT` 触发优雅停机（先关传输层，再停采集与引擎）。
 - **依赖**：`websockets` 已为核心依赖（随 `pip install` 自动安装，2026-09 起）；仍保留缺失降级：import 失败时以退出码 `3` 报错退出。
 - **主动播报（已接线）**：serve 宿主装配 `ProactiveHub`（复活 2026-08 下线托盘时休眠的主动感知套件），每日简报（默认 08:30）/ 对话内"提醒我"定时任务 / 截止日期检查到期后经 `proactive_notify` 事件推给桌面壳（聊天气泡 + 系统通知），二期起并行待机 TTS 朗读（`proactive_tts_enabled`，忙时跳过）。因 serve 随桌面壳启停，错过依赖 `schedule.json` 错过补偿 + 简报补播窗口（默认 2 小时、`briefing_catchup_window_min` 可配）。
-- **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。
+- **半双工语音（已接线）**：`/voice` 已从 RichCLI 解耦（`VoiceSessionEvents` 协议 + 双适配器），照 `/talk` 模式经 serve 桥接进桌面壳：指令 `voice.{start,stop,interrupt}`、事件 `voice_started/stopped/state/user_transcript/ai_text_delta/ai_text`，与 `/talk` 互斥。**音频 I/O（STT 录音 / TTS 播放）留在 serve 子进程本机 pyaudio**（与桌面壳同机出声），不向桌面壳传音频流；桌面壳只做遥控器 + 状态/文字显示（打断为按钮 + 麦克风 barge-in 双通道）。**轮次收尾（2026-10-12 修复）**：语音轮不走 `query_loop` 的 `assistant_done`，`voice_loop` 每轮 `finally` 补发 `events.on_turn_done()` → serve 适配器映射为 `assistant_done` 事件，桌面壳据此定稿气泡 / 清忙碌态 / 解除停止闸门；`voice_ai_text` 与 `voice_stopped` 亦就地兜底收尾，避免"语音已回复、气泡却仍停在思考中/流式停不下来"，见 [docs/fixlogs/voice-turn-done-fix.md](../fixlogs/voice-turn-done-fix.md)。
 - **全双工实时语音音频桥（2026-09-28 已接线）**：`talk.start` 带 `duplex: true` 时，音频不再走 serve 本机 pyaudio，而是双向桥接：渲染进程 `getUserMedia`（浏览器 AEC）采集 16kHz PCM16 经指令 `talk.audio`（base64 帧，fire-and-forget）上行喂 `BridgeMic` → `RealtimeEngine`；AI 24kHz 语音帧经事件 `talk_audio` 下行，由 Web Audio 顺序排播；打断时下行空 payload 表示 flush。浏览器系统级回声消除使桌面壳成为**说话即打断的真全双工**（引擎路径内自动关半双工/软件压低/软件 AEC）。采集/播放实现见 jarvis-desktop `src/renderer/src/audio/`。
 - **停止回复（已接线）**：指令 `reply.abort` 经 `ChatEngine.abort_current_reply()` 线程安全取消当前 send 任务（不入指令队列，避免串行自死锁）；取消路径仍发 `assistant_done` 收尾 + info「已停止回复」，Bash 子进程被同步回收不留孤儿。桌面壳发送按钮回复中变「■ 停止」，再点即发此指令。**任意来源都能停**（2026-10）：手机 / 微信 / 主动任务发起的轮次经桥接 `on_query_begin`（引擎 `_remote_query_begin`）把当前任务登记为 `_send_task`，故 `reply.abort` 对非桌面本地输入的在跑轮次同样生效；桌面侧 `busy` 改由引擎活动事件（`assistant_text`/`assistant_thinking`/`tool_use`）驱动、`assistant_done` 统一撤销，不再只靠本地发送置位。
 - **消息附件（已接线）**：`message` 指令可选 `images`（`[{data: base64, media_type}]`，≤8 张）与 `files`（`[{name, content}]`，≤5 个文本文件）：图片转 `ImageContent` 走 vision 链路（与 REPL `/image` `/paste` 同一底层），文件由引擎拼进消息正文的「附带文件」代码块（超 2 万字符截断）；上限在 `serve/server.py` 入队校验快速失败。桌面壳入口为输入栏 📎 按钮（多选）与粘贴事件，纯图片消息也可发送。

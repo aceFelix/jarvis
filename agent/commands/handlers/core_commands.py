@@ -58,6 +58,7 @@ def _print_help(ui: RichCLI) -> None:
         "  /mcp         查看 MCP server 连接状态\n"
         "  /tools       列出可用工具\n"
         "  /server [目录] [--port N] [--command \"cmd\"] 启动开发服务器（Vite/Next/...）\n"
+        "  /server stop [--pid N|--port N] 关闭由 Jarvis 启动的开发服务器\n"
         "  /plugin                 列出已安装插件（Plugin 系统）\n"
         "  /plugin search [关键词]  搜索 Plugin 系统市场\n"
         "  /plugin install <名称>   安装 Plugin 系统的插件\n"

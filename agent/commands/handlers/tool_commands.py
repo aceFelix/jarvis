@@ -73,28 +73,45 @@ async def handle_mcp(ctx: "CommandContext", stripped: str) -> bool:
     return True
 
 
-async def _server_start(
-    ui: Any,
-    settings: Any,
-    registry: Any,
-    stripped: str,
-) -> None:
-    """/server [目录] [--port 端口] [--command "命令"] — 启动开发服务器。
+def _split_server_args(stripped: str) -> tuple[str, list[str]]:
+    """从 /server 命令行中拆分出子命令与参数 tokens。
 
-    自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目。
-    端口被占用时会自动递增，日志写入 ~/.jarvis/dev_server_logs/。
+    支持两种写法：
+    - ``/server [start|run|serve] [目录] [选项]`` —— 启动（默认动作）
+    - ``/server [stop|close|kill] [目录/--pid/--port]`` —— 关闭
+
+    返回 ``(action, tokens)``，其中 action 为 ``"start"`` 或 ``"stop"``。
 
     @author aceFelix
     """
     parts = stripped.split(None, 1)
     rest = parts[1] if len(parts) > 1 else ""
+    tokens = shlex.split(rest) if rest else []
 
+    if tokens:
+        head = tokens[0].lower()
+        if head in ("stop", "close", "kill", "shutdown"):
+            return "stop", tokens[1:]
+        if head in ("start", "run", "serve", "up"):
+            return "start", tokens[1:]
+    return "start", tokens
+
+
+def _parse_server_args(ui: Any, tokens: list[str], action: str) -> dict[str, Any] | None:
+    """把 /server 的参数解析为 DevServer 工具的入参字典。
+
+    支持的参数：位置参数（项目目录）、``--port``、``--pid``（仅 stop）、
+    ``--command``（仅 start）、``--wait``（仅 start）。
+    参数非法时打印提示并返回 None，由调用方直接结束。
+
+    @author aceFelix
+    """
     project_dir = ""
     port = None
+    pid = None
     command = ""
     wait_seconds = 10
 
-    tokens = shlex.split(rest) if rest else []
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -103,7 +120,14 @@ async def _server_start(
                 port = int(tokens[i + 1])
             except ValueError:
                 ui.warn(f"端口号无效: {tokens[i + 1]}")
-                return
+                return None
+            i += 2
+        elif tok == "--pid" and i + 1 < len(tokens):
+            try:
+                pid = int(tokens[i + 1])
+            except ValueError:
+                ui.warn(f"PID 无效: {tokens[i + 1]}")
+                return None
             i += 2
         elif tok == "--command" and i + 1 < len(tokens):
             command = tokens[i + 1]
@@ -113,24 +137,44 @@ async def _server_start(
                 wait_seconds = int(tokens[i + 1])
             except ValueError:
                 ui.warn(f"等待秒数无效: {tokens[i + 1]}")
-                return
+                return None
             i += 2
         elif not tok.startswith("-") and not project_dir:
             project_dir = tok
             i += 1
         else:
             ui.warn(f"未知参数: {tok}")
-            return
+            return None
 
     args: dict[str, Any] = {
+        "action": action,
         "project_dir": project_dir,
         "port": port,
-        "command": command,
-        "wait_seconds": wait_seconds,
     }
+    if action == "stop":
+        args["pid"] = pid
+    else:
+        args["command"] = command
+        args["wait_seconds"] = wait_seconds
+    return args
 
-    from agent.tools.extensions.dev_server_tool import DevServerTool
+
+async def _run_dev_server(
+    ui: Any,
+    settings: Any,
+    args: dict[str, Any],
+    *,
+    action_label: str,
+) -> None:
+    """统一执行 DevServer 工具：权限确认 → 调用 → 打印结果。
+
+    启动与关闭共用同一套流程，避免两处复制粘贴；仅通过 ``action_label``
+    在文案上区分（"启动开发服务器" / "关闭开发服务器"）。
+
+    @author aceFelix
+    """
     from agent.core.context import ToolContext
+    from agent.tools.extensions.dev_server_tool import DevServerTool
 
     tool = DevServerTool()
     tctx = ToolContext(
@@ -142,30 +186,41 @@ async def _server_start(
 
     perm = tool.check_permissions(args, tctx)
     if perm.behavior.value == "ask":
-        ui.info(perm.message or "请求启动开发服务器")
+        ui.info(perm.message or f"请求{action_label}")
         try:
-            ans = input("确认启动? (y/n): ").strip().lower()
+            ans = input(f"确认{action_label}? (y/n): ").strip().lower()
         except EOFError:
             ans = "y"
         if ans not in ("y", "yes", "是"):
             ui.info("已取消")
             return
 
-    ui.info(f"正在启动开发服务器: {project_dir or settings.workdir} ...")
     try:
         result = await tool.call(args, tctx)
     except Exception as e:
-        ui.error(f"启动失败: {e}")
+        ui.error(f"{action_label}失败: {e}")
         return
 
     if result.is_error:
-        ui.error(f"启动失败:\n{result.data}")
+        ui.error(f"{action_label}失败:\n{result.data}")
         return
 
     ui.info(result.data)
 
 
 async def handle_server(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /server [args]。"""
-    await _server_start(ctx.ui, ctx.settings, ctx.registry, stripped)
+    """处理 /server [start|stop] [args]。
+
+    - ``/server [目录] [--port N] [--command "…"] [--wait N]`` —— 启动开发服务器，
+      自动识别 Vite / Next.js / Vue CLI / Webpack / CRA / Nuxt / Gatsby 等项目。
+    - ``/server stop [目录] [--pid N] [--port N]`` —— 关闭由 Jarvis 启动的开发服务器。
+
+    @author aceFelix
+    """
+    action, tokens = _split_server_args(stripped)
+    args = _parse_server_args(ctx.ui, tokens, action)
+    if args is None:
+        return True
+    action_label = "关闭开发服务器" if action == "stop" else "启动开发服务器"
+    await _run_dev_server(ctx.ui, ctx.settings, args, action_label=action_label)
     return True

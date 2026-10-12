@@ -83,6 +83,13 @@ class ToolSearchTool(Tool):
                 hint += f"\n可用延迟工具（共 {len(all_names)} 个）: {sample}"
                 if len(all_names) > 30:
                     hint += f" ... 等 {len(all_names) - 30} 个"
+            # 兜底提示：避免模型换个关键词反复重试同一个不存在的工具空转
+            hint += (
+                "\n\n提示：若你已换过多个关键词仍搜不到目标工具，"
+                "说明该能力在当前环境未注册（部分功能仅在桌面/服务端可用），"
+                "请改用已有工具完成，或如实告知先生该功能暂不可用，"
+                "不要继续反复搜索同一工具，也不要自行绕道拼凑实现。"
+            )
             return ToolResult.ok(hint)
 
         # 标记为已发现
