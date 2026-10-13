@@ -46,6 +46,12 @@ from agent.commands.handlers.model_commands import (
 from agent.commands.handlers.phone_commands import (
     handle_connect_phone,
 )
+from agent.commands.handlers.policy_commands import (  # W1 判断层（阶段 8）@author aceFelix
+    handle_away,
+    handle_back,
+    handle_lease,
+    handle_pending,
+)
 from agent.commands.handlers.plugin_commands import (
     handle_plugin,
     handle_plugins,
@@ -177,6 +183,11 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/init": handle_init,
     "/config": handle_config_show,
     "/update": handle_update,
+    # W1 判断层命令（阶段 8）：无人值守 + 授权租约 @author aceFelix
+    "/away": handle_away,
+    "/back": handle_back,
+    "/pending": handle_pending,
+    "/lease": handle_lease,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -207,6 +218,7 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/think ", handle_think),
     ("/config ", handle_config_show),
     ("/config", handle_config_show),
+    ("/lease ", handle_lease),  # /lease list|revoke|签发带参 @author aceFelix
 ]
 
 

@@ -1,0 +1,47 @@
+# J.A.R.V.I.S W1 判断层策略规则模板（阶段 8，policy-as-code）
+#
+# 用法：把本文件复制为 ~/.jarvis/policy.yaml（或经 settings.toml
+# [policy] path 指定位置），即刻生效（mtime 变更自动热重载，无需重启）。
+# 总开关：settings.toml [policy] enabled = false 时全部回落既有五层管线。
+#
+# 规则语义（详见 agent/core/policy/engine.py）：
+# - rules 逐条评估，多条命中取"更安全者"（DENY > ASK = DRY_RUN > ALLOW）；
+# - allow 只能放宽"需要确认"，永远放宽不了管线 DENY（路径守护/危险命令）；
+# - 未命中任何规则的调用原样回落管线结论（fail-closed，漏配不误放行）。
+#
+# match 支持的字段（可选项，全部为与条件）：
+# - tool:          工具名列表，或 fnmatch 模式串（如 "File*"）
+# - path_within:   目标路径 glob 列表（~ 自动展开；"dir/**" 含目录自身与子孙）
+# - destructive:   true = 仅命中 shell 分类为 dangerous 的 Bash/PowerShell 调用
+# - away:          true = 仅无人值守（/away 或空闲推断）状态下命中
+#
+# effect 四态：allow（免打扰放行）/ ask（强制确认）/ deny（拒绝）/
+#              dry_run（先出执行预览、确认后才真正执行，映射为带标记的 ask）
+
+rules:
+  # 只读查询类免打扰：管线默认 ASK 的读取操作直接放行
+  - name: 只读查询免打扰
+    match:
+      tool: ["FileRead", "Glob", "Grep"]
+    effect: allow
+
+  # 外发类操作先看预览：邮件发送前展示执行预览，确认后再执行
+  - name: 外发类先看预览
+    match:
+      tool: ["SendEmail"]
+    effect: dry_run
+
+  # 无人值守时破坏性命令直接拒绝（回来后在待批清单里可见）
+  - name: 无人值守禁破坏性命令
+    match:
+      tool: ["Bash"]
+      destructive: true
+      away: true
+    effect: deny
+
+  # 报告目录内的写操作免打断（也可用 /lease 命令临时签发同效租约）
+  - name: 报告目录写入放行
+    match:
+      tool: ["FileWrite", "FileEdit"]
+      path_within: ["~/reports/**"]
+    effect: allow

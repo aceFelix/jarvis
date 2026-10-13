@@ -33,6 +33,7 @@ from agent.config.settings import Settings
 from agent.core.daemon.deadline import DeadlineTracker
 from agent.core.daemon.proactive import ProactiveConfig, ProactiveEngine
 from agent.core.daemon.scheduler import Scheduler, ScheduleTask
+from agent.core.policy import get_budget  # W1 打扰预算（阶段 8）@author aceFelix
 from agent.serve import protocol
 
 # 补播窗口（分钟）已改由 settings.briefing_catchup_window_min 配置（默认 120），
@@ -101,6 +102,9 @@ class ProactiveHub:
             ),
             deadline_tracker=self._deadline_tracker,
             on_notify=self._on_notify,
+            # 打扰预算闸门：settings 已注入 init_policy 时按配置建单例，
+            # 未启用预算（notify_budget_enabled=False）时 None=直接播 @author aceFelix
+            budget=get_budget(),
         )
         self._started = False
         self._catchup_timer: threading.Timer | None = None

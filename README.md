@@ -130,6 +130,7 @@
 | 🧰 **扩展服务** | jarvis-desktop 标题栏入口：右栏面板集中管理 MCP 服务（增删改+启停）、内置工具、技能、插件与 harness 工具（市场搜索/安装/卸载/启停） | [桌面与多端](docs/guide/desktop.md) |
 | 🧠 **三层记忆** | 会话存盘 + 长期记忆 + 画像提炼，越用越懂你 | [记忆系统](docs/guide/concepts.md#记忆系统) |
 | 📱 **多端同会话** | jarvis-desktop 桌面壳 / 手机扫码 / 微信 ClawBot，三端共享同一会话 | [桌面与多端](docs/guide/desktop.md) |
+| 🧭 **管家判断层** | 策略引擎四态规则 + 授权租约免打断 + 打扰预算削废话 + /away 无人值守待批清单 | [W1 判断层](docs/architecture/16-W1判断层.md) |
 | 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |
 | 🔐 **安全底线** | 五层权限 + 四级沙箱 + 操作审计 + keyring 加密存储，危险操作硬阻断 | [核心机制](docs/guide/concepts.md#五层权限系统) |
 
@@ -153,7 +154,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
 
 > 安装路径、可选依赖组、各平台系统依赖、`--gui` 工作台入口等详见 [安装指南](docs/guide/installation.md)。
-> 想一句话理解这个项目要去哪，读 [蓝图文档](docs/BLUEPRINT.md)。
+> 想一句话理解这个项目要去哪，读 [蓝图文档](docs/blueprint/BLUEPRINT.md)。
 
 ## 平台支持
 
@@ -173,11 +174,12 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 语音对话 / 实时双工 / 音色 | [docs/guide/voice.md](docs/guide/voice.md) |
 | 桌面壳 / 主动提醒 / 手机 / 微信 / serve 协议 | [docs/guide/desktop.md](docs/guide/desktop.md) |
 | 权限 / 压缩 / 记忆 / 沙箱 / 自愈 | [docs/guide/concepts.md](docs/guide/concepts.md) |
+| 策略引擎 / 授权租约 / 打扰预算 / 无人值守 | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) |
 | 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
-| 架构设计（15 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
+| 架构设计（16 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
 | 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
-| 蓝图（愿景 · 能力模型 · 演进路线） | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) |
+| 蓝图（愿景 · 能力模型 · 演进路线） | [docs/blueprint/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
 ## 开发路线
 
@@ -188,6 +190,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 5**：贾维斯形态（主动感知 + 子代理 + 主动提醒 + jarvis-desktop 桌面壳）
 - [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
 - [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
+- [ ] **阶段 8**：W1 判断层（策略引擎 + 授权租约 + 打扰预算 + 无人值守）——开发完成待合入
 
 > 阶段 8–11（判断层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 

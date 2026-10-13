@@ -83,6 +83,9 @@ def _print_help(ui: RichCLI) -> None:
         "  /connect-phone  手机扫码连接 JARVIS（共享当前会话，手机端 PLAN 模式）\n"
         "  /connect-wechat 微信扫码连接 JARVIS（通过微信 ClawBot 对话）\n"
         "  /disconnect-wechat 断开微信 ClawBot 连接\n"
+        "  /away /back    无人值守开关（需确认的操作入待批清单，回来呈批）\n"
+        "  /pending       查看无人值守期间积压的待批请求\n"
+        "  /lease <tools> [路径] [分钟]  签发授权租约（期内免确认）；/lease list|revoke <id>\n"
     )
     if ui._console:
         ui._console.print(help_text)

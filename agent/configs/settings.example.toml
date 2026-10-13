@@ -274,6 +274,25 @@ enabled = true             # 总开关（false = 只回退对话，不回滚文�
 max_per_session = 20       # 每会话检查点保留上限（超出修剪最旧）
 timeout_seconds = 10       # 单条 git 命令超时（秒）
 
+[policy]
+# W1 判断层（阶段 8）：确定性策略引擎 + 授权租约 + 打扰预算 + 无人值守，
+# 挂在五层权限管线之后；DENY 不可放宽，未命中规则回落管线（fail-closed）。
+# 规则文件模板见 agent/configs/policy.example.yaml，复制为 ~/.jarvis/policy.yaml
+# 即刻生效（mtime 热重载，无需重启）。命令：/away /back /pending /lease。
+# @author aceFelix
+enabled = true             # 总开关（false = 全回落既有管线，权限零影响）
+path = ""                  # policy.yaml 位置；空 = ~/.jarvis/policy.yaml
+away_idle_minutes = 0      # 0 = 仅认手动 /away；>0 启用空闲推断自动 away
+
+[policy.notify_budget]
+# 打扰预算：主动播报（简报/截止日期/日历）经重要度评分与额度闸门，
+# 静默时段/低分/超额度只入库不播，削减“贾维斯话太多”。@author aceFelix
+enabled = true             # 预算闸门（false = 提醒不经预算直接播）
+daily_max = 10             # 每日主动播报上限
+quiet_hours = "23:00-07:00" # 静默时段（支持跨午夜；空串 = 不启用）
+aggregate_window_s = 300   # 同源事件聚合窗口（秒），窗口内合并成一条
+min_salience = 0.3         # 重要度门槛（来源权重×紧迫度×历史接受率，低于此值入库不播）
+
 [update]
 # 版本自更新（Phase 1）：启动时后台检查 PyPI 最新版（非阻塞、24h 节流），
 # 发现更新仅打印提示；用 /update 一键升级（pip / uv 自动识别，重启生效）。

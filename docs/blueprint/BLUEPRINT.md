@@ -443,7 +443,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ### 9.2 阶段 8–11：管家形态（W1–W4，当前主线）
 
-> 详细执行计划见 **[PLAN-butler-autonomy-upgrade.md](roadmap/PLAN-butler-autonomy-upgrade.md)**。此处只给纲领与依赖顺序。
+> 详细执行计划见 **[PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md)**。此处只给纲领与依赖顺序。
 
 **问题陈述**：横向能力已经不缺，但"真正的管家"体验卡在三处**接口**上——
 
@@ -557,7 +557,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ### 阶段 8–11（主线）
 
-- [ ] **W1**：策略四态可解释 + 租约过期即回 `ask` + 静默时段聚合 + 权限零回归
+- [x] **W1**：策略四态可解释 + 租约过期即回 `ask` + 静默时段聚合 + 权限零回归（阶段 8 开发完成，分支 `feat/stage8-policy`，见 [16-W1判断层](../architecture/16-W1判断层.md)）
 - [ ] **W2**：四类事件各产出恰好一条聚合提醒 + 常驻 CPU < 1% + 单源故障隔离
 - [ ] **W3**：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
 - [ ] **W4**：按轮挂 ≤12 工具时建响应 < 1s + 语音说"帮我查一下 XX"能异步拿到结果 + 记忆带时效与出处
@@ -596,16 +596,16 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 | 类型 | 文档 |
 |---|---|
-| **管家形态升级详细计划（W1–W4）** | [roadmap/PLAN-butler-autonomy-upgrade.md](roadmap/PLAN-butler-autonomy-upgrade.md) |
-| 实时语音待机/唤醒/计费 | [roadmap/PLAN-future-realtime-voice-upgrade.md](roadmap/PLAN-future-realtime-voice-upgrade.md) |
-| 实时语音稳定性 | [roadmap/PLAN-p1-realtime-stability.md](roadmap/PLAN-p1-realtime-stability.md) |
-| 主动提醒既有实现 | [roadmap/PLAN-p2-proactive-reminder.md](roadmap/PLAN-p2-proactive-reminder.md) |
-| 沙箱与回滚 | [roadmap/PLAN-p3-sandbox-execution.md](roadmap/PLAN-p3-sandbox-execution.md) |
-| 文件整理落地 | [plans/fileops-desktop-upgrade.md](plans/fileops-desktop-upgrade.md) |
-| 画像记忆落地 | [plans/memory-profile-phase1a.md](plans/memory-profile-phase1a.md) |
-| 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](fixlogs/realtime-talk-tools-mode-default-fix.md) |
-| 架构设计（15 篇） | [architecture/00-索引.md](architecture/00-索引.md) |
-| 全部路线图 | [roadmap/](roadmap/) |
+| **管家形态升级详细计划（W1–W4）** | [roadmap/PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md) |
+| 实时语音待机/唤醒/计费 | [roadmap/PLAN-future-realtime-voice-upgrade.md](../roadmap/PLAN-future-realtime-voice-upgrade.md) |
+| 实时语音稳定性 | [roadmap/PLAN-p1-realtime-stability.md](../roadmap/PLAN-p1-realtime-stability.md) |
+| 主动提醒既有实现 | [roadmap/PLAN-p2-proactive-reminder.md](../roadmap/PLAN-p2-proactive-reminder.md) |
+| 沙箱与回滚 | [roadmap/PLAN-p3-sandbox-execution.md](../roadmap/PLAN-p3-sandbox-execution.md) |
+| 文件整理落地 | [plans/fileops-desktop-upgrade.md](../plans/fileops-desktop-upgrade.md) |
+| 画像记忆落地 | [plans/memory-profile-phase1a.md](../plans/memory-profile-phase1a.md) |
+| 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md) |
+| 架构设计（16 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
+| 全部路线图 | [roadmap/](../roadmap/) |
 
 ---
 

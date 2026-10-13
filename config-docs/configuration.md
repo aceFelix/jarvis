@@ -130,6 +130,27 @@ enable_thinking = true
 
 ---
 
+## W1 判断层（`[policy]`，阶段 8）
+
+策略引擎 + 授权租约 + 打扰预算 + 无人值守，挂在五层权限管线之后（DENY 不可放宽，
+未命中规则回落管线）。机制与规则文件写法见 [16-W1 判断层](../docs/architecture/16-W1判断层.md)，
+模板 `agent/configs/policy.example.yaml`（复制为 `~/.jarvis/policy.yaml` 即刻生效）。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[policy] enabled` | `true` | 总开关（false = 全回落既有管线，权限零影响） |
+| `[policy] path` | `""` | policy.yaml 位置；空 = `~/.jarvis/policy.yaml` |
+| `[policy] away_idle_minutes` | `0` | 0 = 仅认手动 `/away`；>0 启用空闲推断自动 away |
+| `[policy.notify_budget] enabled` | `true` | 打扰预算闸门（false = 提醒不经预算直接播） |
+| `[policy.notify_budget] daily_max` | `10` | 每日主动播报上限 |
+| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用） |
+| `[policy.notify_budget] aggregate_window_s` | `300` | 同源事件聚合窗口（秒） |
+| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值只入库不播） |
+
+相关命令：`/away` `/back` `/pending` `/lease`（见 [命令参考](../docs/guide/commands.md#权限控制)）。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |
