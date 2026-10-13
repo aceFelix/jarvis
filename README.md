@@ -127,6 +127,7 @@
 | 🖱️ **操控电脑** | 鼠标/键盘/截屏/窗口管理 + 视觉模板定位，像人一样操作任意软件 | [GUI 自动化](docs/guide/ecosystem.md#gui-自动化) |
 | 🗓️ **主动管家** | 每日简报、定时提醒、截止日期追踪、系统监控——不用叫，它自己看着办 | [主动提醒系统](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
 | 🛎️ **管家服务** | jarvis-desktop 标题栏入口：邮箱服务（查看/修改当前邮箱 + 配置 SMTP + 发送邮件）直连后端工具（后续可扩展更多服务） | [桌面与多端](docs/guide/desktop.md) |
+| 🧰 **扩展服务** | jarvis-desktop 标题栏入口：右栏面板集中管理 MCP 服务（增删改+启停）、内置工具、技能、插件与 harness 工具（市场搜索/安装/卸载/启停） | [桌面与多端](docs/guide/desktop.md) |
 | 🧠 **三层记忆** | 会话存盘 + 长期记忆 + 画像提炼，越用越懂你 | [记忆系统](docs/guide/concepts.md#记忆系统) |
 | 📱 **多端同会话** | jarvis-desktop 桌面壳 / 手机扫码 / 微信 ClawBot，三端共享同一会话 | [桌面与多端](docs/guide/desktop.md) |
 | 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |

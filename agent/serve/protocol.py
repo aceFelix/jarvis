@@ -108,6 +108,10 @@ email.send          to?: str（空则用配置默认    {ok: true, message: str}
                     收件人）[, cc?: str,          成功；失败走 ok=false +
                     bcc?: str], subject: str,      error：邮件未启用/缺配置/
                     body: str                     认证失败等原文错误）
+extensions.exec     category: str（mcp/tools/     {ok: bool, data: <各动作
+                    skills/plugins/harness）,      结构化结果>, message?: str}
+                    action: str,                   （桌面「扩展服务」面板：
+                    ...其余动作参数                 五类扩展的清单与增删改启停）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -251,6 +255,15 @@ CMD_EMAIL_SEND = "email.send"
 CMD_EMAIL_CONFIG_GET = "email.config.get"
 CMD_EMAIL_CONFIG_SET = "email.config.set"
 
+# extensions.exec（桌面标题栏「扩展服务」，2026-10）：一条通用指令承载五类扩展能力
+# （MCP 服务 / 内置工具 / 技能 / 插件 / harness）的清单与增删改启停，避免一动作一
+# 指令把协议常量撑爆。payload = {"category": "mcp"|"tools"|"skills"|"plugins"|
+# "harness", "action": "<动作名>", ...其余参数}；result = {"ok": bool, "data": ...,
+# "message"?: str}。业务实现集中在 agent/ui/workbench/extensions_api.py，server 侧
+# 用 asyncio.to_thread 执行（插件/harness 安装含网络 IO，MCP 写本地文件）。
+# @author aceFelix
+CMD_EXTENSIONS = "extensions.exec"
+
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MESSAGE,
@@ -303,6 +316,7 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_EMAIL_SEND,
     CMD_EMAIL_CONFIG_GET,
     CMD_EMAIL_CONFIG_SET,
+    CMD_EXTENSIONS,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

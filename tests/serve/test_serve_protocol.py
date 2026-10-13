@@ -123,9 +123,12 @@ def test_desktop_commands_count():
     2026-10 管家服务「邮箱服务」改版：+email.config.get / email.config.set
     （48→50，查看/修改当前发件邮箱与 SMTP 配置，读写 settings.toml 的 [email]
     表，授权码不回传明文、留空=保持，见 agent/config/email_settings.py）。
+    2026-10 桌面扩展服务：+extensions.exec（50→51，一条通用指令承载五类扩展
+    MCP/内置工具/技能/插件/harness 的清单与增删改启停，见 ui/workbench/
+    extensions_api.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 50
+    assert len(protocol.DESKTOP_COMMANDS) == 51
 
 
 def test_all_registered_rpcs_declared():

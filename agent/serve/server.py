@@ -194,6 +194,12 @@ class DesktopBridgeServer(BridgeServer):
         # @author aceFelix
         self._register_rpc(protocol.CMD_EMAIL_CONFIG_GET, self._rpc_email_config_get)
         self._register_rpc(protocol.CMD_EMAIL_CONFIG_SET, self._rpc_email_config_set)
+        # extensions.exec（桌面「扩展服务」面板，2026-10）：一条通用指令承载五类扩展
+        # （MCP/内置工具/技能/插件/harness）的清单与增删改启停。写操作含网络 IO
+        # （插件/harness 安装），故走异步处理器 + asyncio.to_thread；手动登记进
+        # _rpc_types 满足契约自检。@author aceFelix
+        self.register_ws_handler(protocol.CMD_EXTENSIONS, self._cmd_extensions)
+        self._rpc_types.add(protocol.CMD_EXTENSIONS)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -256,6 +262,33 @@ class DesktopBridgeServer(BridgeServer):
         except Exception as e:  # noqa: BLE001 - 回执携带错误，连接不中断
             msg = protocol.build_reply(
                 protocol.CMD_EMAIL_SEND, ok=False, error=f"{type(e).__name__}: {e}"
+            )
+        await self._send_json(ws, msg)
+
+    async def _cmd_extensions(self, ws: Any, data: dict) -> None:
+        """extensions.exec 指令：桌面「扩展服务」面板的通用扩展动作入口（异步）。
+
+        payload 形如 ``{"category": ..., "action": ..., ...}``；业务实现见
+        agent/ui/workbench/extensions_api.py。插件/harness 安装含网络 IO（git 克隆/
+        远程下载），故放 asyncio.to_thread 工作线程执行，避免冻住事件循环。回执
+        result = {"ok": bool, "data": ..., "message": str}；异常（非法分类/动作）
+        走 ok=false + 错误原文。@author aceFelix
+        """
+        try:
+            payload: dict[str, Any] = {
+                "category": str(data.get("category") or ""),
+                "action": str(data.get("action") or ""),
+            }
+            # 透传其余动作参数（name/command/args/env/keyword/id 等），
+            # 排除协议信封字段（type 由 WS 层消费，category/action 已单独取）
+            for key, value in data.items():
+                if key not in ("type", "category", "action"):
+                    payload[key] = value
+            result = await asyncio.to_thread(self._api.run_extension, payload)
+            msg = protocol.build_reply(protocol.CMD_EXTENSIONS, ok=True, result=result)
+        except Exception as e:  # noqa: BLE001 - 回执携带错误，连接不中断
+            msg = protocol.build_reply(
+                protocol.CMD_EXTENSIONS, ok=False, error=f"{type(e).__name__}: {e}"
             )
         await self._send_json(ws, msg)
 

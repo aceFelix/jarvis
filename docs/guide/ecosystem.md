@@ -4,6 +4,23 @@
 
 ---
 
+## 可视化扩展管理（jarvis-desktop 扩展服务面板，2026-10）
+
+除终端斜杠命令外，桌面壳标题栏右上角「管家服务」按钮旁的 **扩展服务** 按钮提供了
+图形化管理入口：点击后右栏切换为扩展服务面板（分类入口页 → 分类详情页两级视图），
+**集中管理五类扩展能力**——**MCP 服务**（增删改 + 启停）、**内置工具**（清单 + 搜索）、
+**技能**（目录 + 已加载清单）、**插件**（市场搜索 + 安装/卸载/启停）、
+**harness 工具**（市场浏览 + 安装/卸载/启停）。
+
+- 面板动作与终端命令同源：底层复用本文档所述的 Plugin 系统、CLI-Anything harness、
+  MCP 配置与技能加载机制，不另起一套。
+- 全部走一条桌面指令 `extensions.exec`（`category` + `action`），表单直连后端 RPC、
+  不经模型；MCP 启停不改 `mcp.json`，禁用名单写入独立的 `~/.jarvis/mcp_disabled.json`。
+- 协议与实现细节见 [桌面架构 07-UI层](../architecture/07-UI层.md#扩展服务extensionsexec-单指令承载五类扩展第-51-条指令2026-10)
+  与 jarvis-desktop `docs/guide/features-panels.md`「扩展服务」小节。
+
+---
+
 ## 多 Agent 协作
 
 Jarvis 支持派生子 Agent 并行处理复杂任务，以及团队协作模式：

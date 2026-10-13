@@ -363,6 +363,21 @@ class WorkbenchAPI:
 
         return slash_bridge.build_desktop_commands(self._settings)
 
+    # ---- 扩展服务（桌面「扩展服务」面板，2026-10） ----
+
+    def run_extension(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """执行一条扩展服务动作（serve extensions.exec 的数据源）。
+
+        payload = ``{"category": ..., "action": ..., ...}``；业务实现集中在
+        ``agent.ui.workbench.extensions_api``（五类：mcp/tools/skills/plugins/
+        harness）。属同步函数，serve 侧用 ``asyncio.to_thread`` 调用（插件/harness
+        安装含网络 IO）。异常（非法分类/动作）向上抛，由 serve 转成 ok=false 回执。
+        @author aceFelix
+        """
+        from agent.ui.workbench import extensions_api
+
+        return extensions_api.run_extension(self._settings, self._engine, payload)
+
     # ---- 管家服务（2026-10） ----
 
     def send_email(self, params: dict[str, Any]) -> dict[str, Any]:

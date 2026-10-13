@@ -67,13 +67,21 @@ async def connect_mcp(engine: ChatEngine, registry: Any) -> None:
     @author aceFelix
     """
     try:
-        from agent.core.extensions.mcp_client import MCPClient, load_mcp_config
+        from agent.core.extensions.mcp_client import (
+            MCPClient,
+            load_mcp_config,
+            load_mcp_disabled,
+        )
         from agent.core.tool import register_dynamic_tools
 
         client = MCPClient()
         if not client.available:
             return
         config = load_mcp_config()
+        # 过滤桌面「扩展服务」面板标记为禁用的 server（独立状态文件，不动 mcp.json）
+        disabled = load_mcp_disabled()
+        if disabled:
+            config = {k: v for k, v in config.items() if k not in disabled}
         if not config:
             return
         engine._emitter.emit("status", f"正在连接 {len(config)} 个 MCP server...")

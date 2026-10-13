@@ -208,6 +208,41 @@ def remove_mcp_config(server_names: list[str]) -> int:
     return removed
 
 
+def mcp_disabled_path() -> Path:
+    """MCP server 禁用名单文件: ~/.jarvis/mcp_disabled.json。
+
+    与 plugins / harness 的 disabled 状态文件同思路：**不改动 mcp.json 本体**
+    （避免触碰含明文/占位 token 的配置），只在独立文件里记录被禁用的 server 名，
+    连接时跳过。@author aceFelix
+    """
+    return Path.home() / ".jarvis" / "mcp_disabled.json"
+
+
+def load_mcp_disabled() -> set[str]:
+    """读取被禁用的 MCP server 名集合（文件不存在/损坏返回空集）。"""
+    path = mcp_disabled_path()
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    names = data.get("disabled", []) if isinstance(data, dict) else []
+    if not isinstance(names, list):
+        return set()
+    return {str(n) for n in names if n}
+
+
+def save_mcp_disabled(names: set[str]) -> None:
+    """写回被禁用的 MCP server 名集合（去重排序，便于人工查看）。"""
+    path = mcp_disabled_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"disabled": sorted(names)}
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
 @dataclass
 class McpToolDef:
     """一个 MCP server 暴露的工具定义。"""
