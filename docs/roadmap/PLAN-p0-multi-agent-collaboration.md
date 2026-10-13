@@ -2,7 +2,7 @@
 
 > 优先级：🔴 P0  
 > 目标：把 Jarvis 多 Agent 协作从 ⭐⭐ 提升到 ⭐⭐⭐，让团队/队友/任务/邮箱四者真正联动，复杂任务能自动拆分、自主执行、结果汇总。
-> 参考：ClaudeCode `teammate.ts` / `teammateMailbox.ts`、`forkSubagent.ts`；OpenClaw `agent-runner.ts` / `commands-subagents-dispatch.ts`。
+> 参考：通用 Harness 的团队/队友/邮箱设计；OpenClaw `agent-runner.ts` / `commands-subagents-dispatch.ts`。
 
 ---
 
@@ -12,7 +12,7 @@
 
 1. **队友能自主领取任务**：空闲 teammate 自动查看共享 TaskList，领取 pending + 无阻塞任务并执行。
 2. **计划审批可落地**：teammate 在执行写操作前可向 leader 发送 `plan_approval_request`，leader 审批后继续。
-3. **消息协议对齐 ClaudeCode**：补齐 `permission_request`、`heartbeat`、`task_claimed`、`task_completed` 等消息类型。
+3. **消息协议对齐通用 Harness**：补齐 `permission_request`、`heartbeat`、`task_claimed`、`task_completed` 等消息类型。
 4. **Leader 自动感知状态**：每轮自动注入队友 idle、任务完成、计划审批、异常等状态更新。
 5. **团队状态可查询**：新增 `TeamStatus` 工具，leader 可随时查看团队成员/任务/邮箱概要。
 6. **生命周期更健壮**：teammate 异常退出可检测、shutdown 有超时、TaskStop 能终止后台队友。
@@ -300,5 +300,5 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; python -m pytest te
 ## 八、备注
 
 - 本方案保持 Jarvis 现有的“文件邮箱 + in-process asyncio”架构，不引入新进程模型，风险可控。
-- 参考 ClaudeCode 的 `permission_request` / `idle_notification` / `forkSubagent` 设计，但不做完整的 fork 上下文继承（超出 P0 范围）。
+- 参考通用 Harness 的 `permission_request` / `idle_notification` 协作设计，但不做完整的 fork 上下文继承（超出 P0 范围）。
 - 所有修改遵循现有代码风格：dataclass、Javadoc/行内注释、文件锁、原子写入。

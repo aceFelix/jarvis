@@ -1,9 +1,9 @@
-"""上下文压缩（Context Compaction）—— Claude Code 风格。
+"""上下文压缩（Context Compaction）。
 
 对话历史越长，token 消耗越大。本模块在对话达到阈值时，把较旧的消息
 摘要成一段结构化文本替换掉，保留最近若干条原消息不动。
 
-核心改进（ref Claude Code services/compact/）：
+核心改进：
 - 代码感知的 9 段摘要提示词（文件名、代码片段、错误修复）
 - 图片剥离后摘要（图片数据无摘要价值）
 - 压缩后自动回灌最近操作过的文件
@@ -42,7 +42,7 @@ DEFAULT_KEEP_RECENT = 6            # 保留最近 N 条原消息（含当前轮�
 # 摘要请求的输出 token 上限
 COMPACT_MAX_OUTPUT_TOKENS = 2048  # 升级到 2048，代码场景需要更多细节
 
-# ---------- Claude Code 风格的压缩提示词（代码感知）----------
+# ---------- 代码感知的压缩提示词 ----------
 
 _COMPACT_SYSTEM = (
     "你是一个对话摘要助手，专门为 AI 编程 Agent 压缩长对话历史。"
@@ -368,7 +368,7 @@ async def compact_messages(
 
 
 # ---------- 压缩后文件回灌（Post-Compact File Restoration）----------
-# 参考 Claude Code 的 createPostCompactFileAttachments:
+# 参考通用 Harness 架构的压缩后文件回灌:
 # 压缩后重新注入最近操作过的文件，让 LLM 不丢失关键文件上下文。
 
 _MAX_RESTORE_FILES = 5       # 最多回灌 5 个文件
@@ -436,7 +436,7 @@ def restore_recent_files(ctx) -> int:
 
 
 # ---------- Session Memory（会话自动记忆）----------
-# 参考 Claude Code 的 SessionMemory:
+# 参考通用 Harness 架构的会话记忆:
 # 长对话自动将关键决策、错误修复、用户偏好持久化到 .jarvis/SESSION_MEMORY.md。
 # 每次压缩时触发更新——压缩摘要已有结构化内容，直接追加到记忆文件。
 

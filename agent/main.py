@@ -206,7 +206,7 @@ async def repl(settings: Settings) -> int:
     if plan_tool_count > 0 and settings.verbose:
         ui.info(f"✓ 规划模式工具已注册（{plan_tool_count} 个）")
 
-    # LSP 集成（对标 Claude Code）
+    # LSP 集成
     lsp_tool_count = 0
     if settings.enable_lsp and settings.lsp_servers:
         try:
@@ -226,7 +226,7 @@ async def repl(settings: Settings) -> int:
     if settings.system_prompt_append:
         system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
 
-    # ToolSearch 工具注册（延迟加载机制的核心，参考 Claude Code deferred tool loading）
+    # ToolSearch 工具注册（延迟加载机制的核心）
     if settings.tools_deferred_loading:
         from agent.tools.tool_search import ToolSearchTool
         if "ToolSearch" not in registry:
@@ -547,7 +547,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     p = argparse.ArgumentParser(
         prog="jarvis",
-        description="个人电脑 AI Agent（借鉴 Claude Code 架构）",
+        description="个人电脑 AI Agent",
     )
     p.add_argument(
         "--version",

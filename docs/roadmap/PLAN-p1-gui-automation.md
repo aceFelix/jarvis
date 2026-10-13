@@ -2,7 +2,7 @@
 
 > 优先级：🟠 P1
 > 目标：把 Jarvis 的 GUI 操作能力从基础坐标点击升级到「类人交互」——支持拖拽、右键菜单、等待元素出现、多窗口协调、视觉定位（图标/按钮识别点击）以及轻量 RPA 录制回放。
-> 参考：ClaudeCode 的 `computer-use`、OpenClaw 的 `gui-tool`、Microsoft Power Automate、pyautogui + opencv 视觉定位方案。
+> 参考：通用 Harness 的 `computer-use`、OpenClaw 的 `gui-tool`、Microsoft Power Automate、pyautogui + opencv 视觉定位方案。
 
 ---
 

@@ -46,7 +46,7 @@ class Tool(abc.ABC):
     max_result_chars: int = 20_000
 
     # 是否延迟加载。True = 不随每次请求发送完整 schema，
-    # 需通过 ToolSearchTool 发现后才能调用。参考 Claude Code deferred tool loading。
+    # 需通过 ToolSearchTool 发现后才能调用。
     deferred: bool = False
 
     @abc.abstractmethod

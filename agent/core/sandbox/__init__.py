@@ -6,7 +6,7 @@
 - file_guard: 文件快照/回滚保护
 - audit: 沙箱操作审计日志
 
-设计参考 Claude Code sandbox-adapter 架构:
+沙箱设计要点:
 - 命令包装: 高风险命令自动在沙箱内执行
 - 文件系统限制: allowWrite/denyWrite 路径白名单
 - 网络隔离: 可选阻断网络访问

@@ -288,7 +288,7 @@ class AnthropicProvider(LLMProvider):
 
         try:
             async with self._client.messages.stream(**request_kwargs) as stream:
-                # 工具调用参数按 index 累积（Claude Code 风格）
+                # 工具调用参数按 index 累积
                 # 不依赖 SDK 的 get_final_message()——DeepSeek 等兼容端点
                 # 可能不正确实现 final message 聚合。
                 content_blocks: dict[int, dict[str, Any]] = {}

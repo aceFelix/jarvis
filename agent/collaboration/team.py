@@ -14,7 +14,7 @@
    │       └── {member}.json
 
 设计要点：
-- 一个会话只能领导一个团队（与 Claude Code 一致）。
+- 一个会话只能领导一个团队（与常见 Harness 团队模型一致）。
 - Leader 的 agent_id 是确定性的（team-lead@teamName），不依赖会话 ID。
 - 队友可以 in-process（asyncio）执行。
 - 团队删除时检查活跃成员，阻止误删。

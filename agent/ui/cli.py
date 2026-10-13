@@ -110,13 +110,13 @@ try:
 
         return kb
 
-    # Claude Code 风格补全样式：黑色背景 + 亮色命令名 + 可读描述 + 选中高亮
+    # 补全样式：黑色背景 + 亮色命令名 + 可读描述 + 选中高亮
     _PT_STYLE = Style.from_dict({
         # 菜单整体：透明黑底，细边框
         "completion-menu":                    "bg:#000000 border:#333333",
         # 普通项：无额外背景（继承终端黑色）
         "completion-menu.completion":         "",
-        # 选中项：深蓝灰底 + 白字（类似 Claude Code 的选中效果）
+        # 选中项：深蓝灰底 + 白字
         "completion-menu.completion.current": "bg:#1a2a3a #ffffff",
         # 命令名（completion 的主文本）：青蓝色，清晰可见
         "completion-menu.meta.completion":     "#5bc8ff",   # JARVIS 亮蓝
@@ -235,7 +235,7 @@ def _tool_voice_desc(tool_name: str) -> str:
 class _SlashCompleter(Completer):
     """斜杠命令自动补全器。
 
-    输入 '/' 时弹出全部命令及描述，类似 Claude Code 的 / 命令列表。
+    输入 '/' 时弹出全部命令及描述。
     输入 '/v' 后只匹配 voice 等前缀命中的项。
 
     子命令补全:
@@ -245,7 +245,7 @@ class _SlashCompleter(Completer):
     - /load <prefix> → 匹配已保存会话名
     - /save <prefix> → 匹配已保存会话名
 
-    显示风格（仿 Claude Code）:
+    显示风格:
       /exit          退出贾维斯  ← 命令名亮青蓝 + 描述浅灰
     选中项：深蓝灰底 + 白/浅蓝字（高对比，一眼可见）
     """

@@ -1,7 +1,5 @@
 """In-Process 队友执行引擎 —— 异步隔离的子 Agent 运行时。
 
-致敬 Claude Code 的 InProcessTeammateTask 架构。
-
 核心设计：
 1. **TeammateRunner**: 创建一个 asyncio.Task 来运行独立的 QueryLoop。
 2. **上下文隔离**: 子 agent 拥有独立的 messages 列表 + ToolRegistry + ToolContext。

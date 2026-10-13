@@ -185,7 +185,7 @@ smtp_port = 465
 # default_recipient = "your_163_email@163.com" # 默认收件人（用户未指定 to 时使用）
 
 [lsp]
-# LSP 代码智能（对标 Claude Code）
+# LSP 代码智能
 # 安装: pip install python-lsp-server（Python）| npm install -g typescript-language-server（JS/TS）
 # 未配置/server 不可用时静默跳过
 enable = true

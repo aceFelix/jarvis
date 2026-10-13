@@ -1,6 +1,6 @@
 """ToolSearch —— 延迟工具按需发现。
 
-参考 Claude Code 的 deferred tool loading 机制：
+延迟工具按需发现：
 核心工具始终携带，MCP/harness/可选工具仅发名字摘要到 system prompt，
 模型需要时调用 ToolSearch 搜索 → 返回完整 schema → 标记为"已发现" →
 下一轮迭代 _build_tool_defs() 自动包含已发现的工具。

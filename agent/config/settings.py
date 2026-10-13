@@ -240,7 +240,7 @@ class Settings:
     email_sender: str = ""
     email_default_recipient: str = ""
 
-    # LSP 集成（对标 Claude Code）
+    # LSP 集成
     # 启动时按 [lsp.servers.<name>] 配置启动语言服务器
     # .py → pylsp/pyright, .ts → typescript-language-server 等
     enable_lsp: bool = True
@@ -310,7 +310,7 @@ class Settings:
     checkpoint_max_per_session: int = 20   # 每会话检查点保留上限（超出修剪最旧）
     checkpoint_timeout_seconds: int = 10   # 单条 git 命令超时（秒）
 
-    # 工具延迟加载（参考 Claude Code deferred tool loading）
+    # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
     tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）

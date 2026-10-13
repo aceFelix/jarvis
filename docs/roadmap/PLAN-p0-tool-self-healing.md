@@ -2,7 +2,7 @@
 
 > 优先级：🔴 P0
 > 目标：把 Jarvis 工具执行稳定性从 ⭐⭐⭐ 提升到 ⭐⭐⭐⭐，让工具调用失败时能够自动分类、重试、降级或询问用户，而不是直接把错误抛给 LLM。
-> 参考：ClaudeCode 的 `command-exec` 重试、OpenClaw 的 `retryMiddleware`、LangChain 的 `RetryTool`。
+> 参考：通用 Harness 的 `command-exec` 重试、OpenClaw 的 `retryMiddleware`、LangChain 的 `RetryTool`。
 
 ---
 
@@ -302,5 +302,5 @@ python -m pytest tests/core/test_error_recovery.py -q
 ## 八、备注
 
 - 本方案保持 Jarvis 现有的 `ToolOrchestrator` 架构，只在 `_run_one()` 中包一层 `ToolRecoveryExecutor`，侵入性低。
-- 参考 ClaudeCode 的容错设计，但不实现完整的沙箱重跑（超出 P0 范围）。
+- 参考通用 Harness 的容错设计，但不实现完整的沙箱重跑（超出 P0 范围）。
 - 所有修改遵循现有代码风格：dataclass、Javadoc/行内注释、`@author aceFelix`。

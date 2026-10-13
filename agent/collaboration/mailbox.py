@@ -7,7 +7,7 @@
 4. **消息读取**: 收件人轮询读取，标记已读。
 5. **文件锁**: 保证并发安全。
 
-消息类型参考 Claude Code：
+消息类型：
 - idle_notification: 队友空闲通知（每轮自动发送）
 - permission_request: 权限请求
 - plan_approval_request: 计划审批请求

@@ -431,7 +431,7 @@ def form_input(
 ) -> dict[str, str | None] | None:
     """在终端内弹出内联表单——多个字段在同一屏输入。
 
-    类似 Claude Code 的 Ink Form，支持三种字段类型:
+    内联表单——多个字段在同一屏输入，支持三种字段类型:
     - text: 普通文本输入
     - password: 密码模式（输入显示为 *）
     - select: 选择列表（↑↓ 在列表项中移动，Tab 切换字段）

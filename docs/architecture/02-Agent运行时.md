@@ -290,7 +290,7 @@ registry.all_deferred()  # deferred=True 的延迟工具池（需 ToolSearch 发
 - `register_lsp_tool()` — LSP 代码工具（deferred）
 
 **延迟加载（deferred）**：除核心工具外的工具不随每次请求发送完整 schema，模型需通过
-`ToolSearchTool` 发现后才能调用（参考 Claude Code deferred tool loading），减少每次请求的 token 开销。
+`ToolSearchTool` 发现后才能调用（通用 Harness 架构的延迟加载思路），减少每次请求的 token 开销。
 
 **为什么可选依赖静默跳过**：用户可能只装核心包，不应该因为缺 playwright 就无法启动。
 

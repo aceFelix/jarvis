@@ -153,7 +153,7 @@ class QueryLoop:
         # /think 设置后，switch_model / _try_failover 重建 provider 时同步到新 provider，
         # 避免切换/回退后档位丢失。None 表示未覆盖（用 provider 默认）。
         self._thinking_effort_override: str | None = None
-        # 工具延迟加载开关（参考 Claude Code deferred tool loading）
+        # 工具延迟加载开关
         self._deferred_loading = deferred_loading
         # 纯聊天零工具检测开关
         self._chat_detection = chat_detection
@@ -706,7 +706,7 @@ class QueryLoop:
     def _build_tool_defs(self, ctx: ToolContext | None = None) -> list[ToolDef]:
         """把注册表里的工具转成给 LLM 的 ToolDef。
 
-        延迟加载模式（参考 Claude Code）：
+        延迟加载模式：
         - 核心工具（deferred=False）始终携带
         - 延迟工具（deferred=True）仅在被 ToolSearch 发现后才携带完整 schema
         - 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）

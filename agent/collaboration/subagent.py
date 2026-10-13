@@ -4,7 +4,7 @@
 
 核心概念:
 1. **AgentDefinition**: 子 agent 的"人格定义"——system prompt、允许的工具集、
-   模型选择。类比 ClaudeCode 的 BuiltInAgentDefinition。
+   模型选择。
 2. **SubagentRunner**: 子 agent 的执行器。创建独立的 QueryLoop + 受限
    ToolRegistry + 独立 messages 列表，跑到子 agent 不再调工具为止，
    返回最终文本回复。子 agent 的对话历史独立，不污染主对话。
@@ -26,7 +26,7 @@
 并行: 主 agent 可同时调多个 SubagentTool（orchestrator 支持并行工具执行），
       多个子 agent 同时跑，各自独立 LLM 会话。
 
-与 ClaudeCode 的区别:
+设计取舍:
 - 无 Task 框架（不做后台任务/进度跟踪/可中断），子 agent 同步阻塞执行
 - 无 sidechain transcript（子 agent 对话不落盘，仅返回最终文本）
 - 无 fork（不继承主 agent 对话上下文，每次从空白开始）
@@ -62,7 +62,7 @@ from agent.permissions.rules import RuleSet
 class AgentDefinition:
     """子 agent 的人格定义。
 
-    类比 ClaudeCode 的 BuiltInAgentDefinition。
+    描述子 agent 的 system prompt、允许工具集与模型选择。
 
     Attributes:
         agent_type: 类型标识符（explorer/researcher/coder/general）。

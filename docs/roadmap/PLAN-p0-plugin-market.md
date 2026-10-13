@@ -2,7 +2,7 @@
 
 > 优先级：🔴 P0  
 > 目标：把 Jarvis Plugin 系统从 ⭐⭐ 提升到 ⭐⭐⭐，让 Plugin 市场和 CLI-Anything harness 市场彻底独立、本地市场可搜索、命令清晰不混淆，用户能方便地搜索/安装/管理插件。
-> 参考：VS Code 扩展市场、npm registry、ClaudeCode `unified-extensions` 设计思路。
+> 参考：VS Code 扩展市场、npm registry、通用 Harness 的 `unified-extensions` 设计思路。
 
 ---
 

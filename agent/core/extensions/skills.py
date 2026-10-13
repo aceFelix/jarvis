@@ -3,7 +3,7 @@
 Skill 是"一段 Markdown 指令，按需加载进 system prompt"，让贾维斯获得
 特定领域的专业能力。比 MCP 轻——不需要起子进程、不涉及 RPC，纯文本注入。
 
-致敬 ClaudeCode 的 skills/ 机制，大幅精简:
+Skill 机制（轻量精简版）:
 - 只支持目录格式: <skill-name>/SKILL.md
 - 加载位置: ~/.jarvis/skills/（用户级）+ <workdir>/.jarvis/skills/（项目级）
 - frontmatter 只解析 name/description/when_to_use/trigger_words

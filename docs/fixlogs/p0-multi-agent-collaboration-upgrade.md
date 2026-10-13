@@ -16,7 +16,7 @@ Jarvis 多 Agent 协作在阶段五已实现基础能力：团队创建、后台
 
 按照 `docs/roadmap/jarvis-upgrade-roadmap.md` 的 P0 规划，将 Jarvis 多 Agent 协作能力从 ⭐⭐ 提升到 ⭐⭐⭐，使团队/队友/任务/邮箱四者真正联动，复杂任务能自动拆分、自主执行、结果汇总。
 
-参考：ClaudeCode `teammate.ts` / `teammateMailbox.ts` / `forkSubagent.ts`；OpenClaw `agent-runner.ts`（OpenClaw 源码中未找到直接对应的协作核心文件，主要参考 ClaudeCode 设计思想）。
+参考：通用 Harness 架构的团队协作设计思想（队友/邮箱/子代理）；OpenClaw `agent-runner.ts`（OpenClaw 源码中未找到直接对应的协作核心文件，主要参考通用 Harness 协作范式）。
 
 ## 3. 主要改动
 
@@ -100,7 +100,7 @@ Jarvis 多 Agent 协作在阶段五已实现基础能力：团队创建、后台
 
 **原因**：OpenClaw 当前版本未实现同类团队/队友模型。
 
-**解决**：以 ClaudeCode 设计思想为主，结合 Jarvis 现有架构做适配，不照搬 ClaudeCode 的 fork 上下文继承。
+**解决**：以通用 Harness 的协作范式为参考，结合 Jarvis 现有架构做适配，不实现 fork 上下文继承（子代理同步阻塞执行）。
 
 ### 4.3 字符串替换失败
 
