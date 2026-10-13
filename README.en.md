@@ -223,3 +223,34 @@ J.A.R.V.I.S. is still in **development and validation**; features are not yet fu
 </table>
 
 </div>
+
+### Jarvis Agent App Development Community
+
+<div align="center">
+
+Scan to join and exchange Agent app development experience, plugins and various AI use cases with other Agent app peers.
+
+<table>
+<tr>
+  <td align="center">WeChat group "Hello Jarvis."</td>
+  <td align="center">QQ group "Hello Jarvis." (1109055256)</td>
+</tr>
+<tr>
+  <td><img src="assets/communication/discussion-group.png" alt="WeChat group Hello Jarvis." width="150"/></td>
+  <td><img src="assets/communication/discussion-group2.jpg" alt="QQ group Hello Jarvis." width="150"/></td>
+</tr>
+</table>
+
+> The WeChat QR code is valid for 7 days; once it expires, get the latest invite from the QQ group.
+
+</div>
+
+### Buy Me a Coffee
+
+<div align="center">
+
+If J.A.R.V.I.S. has been helpful to you, feel free to buy me a coffee — your support keeps this project moving forward. 🦀🦀
+
+<img src="assets/communication/thanks-for-the-tip.png" alt="WeChat tip QR code" width="200"/>
+
+</div>
