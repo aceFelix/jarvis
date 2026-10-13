@@ -190,7 +190,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - [x] **Phase 6**: Cross-platform (Windows / macOS / Linux)
 - [x] **Phase 7**: Realtime chat UI (Arc Reactor workbench + full-duplex interrupt + desktop app)
 
-> Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
+> Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/blueprint/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
 ## Disclaimer
 

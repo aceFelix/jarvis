@@ -189,7 +189,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
 - [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
 
-> 阶段 8–11（判断层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
+> 阶段 8–11（判断层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 
 ## 反馈声明
 
