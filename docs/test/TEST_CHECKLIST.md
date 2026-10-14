@@ -837,4 +837,6 @@
 > 前置条件：`pip install "jarvis-agent[all]"` + 配置 `DASHSCOPE_API_KEY`
 >
 > 另：文档一致性（本地链接有效性）由 `scripts/check_md_links.py` 作为 CI 门禁，
-> 其 7 条 pytest 用例见 `tests/test_md_link_checker.py`，不计入本清单用例数。
+> 其 14 条 pytest 用例见 `tests/test_md_link_checker.py`（含 Linux CI 视角的平台无关判定用例，
+> 首版曾在 Linux 上误报全仓链接，复盘见
+> [md-link-checker-linux-ci-fix.md](../fixlogs/md-link-checker-linux-ci-fix.md)），不计入本清单用例数。

@@ -175,14 +175,24 @@ styles/main.css}`、`test/renderer/dispatcher.test.ts` 注释：把「与 pywebv
 
 新增 [`scripts/check_md_links.py`](../../scripts/check_md_links.py)：扫描仓内所有 md 的
 本地文件链接（含 `file:///` 绝对与相对写法），跳过外部站点/纯锚点/站点绝对路径/
-`data:` 内联资源与厂商文档快照目录，报告不存在的目标。退出码 0=无死链、1=有死链，
-可直接接入 CI 门禁；可选参数指定扫描根（也可用于核查 jarvis-desktop）。
+`data:` 内联资源、代码块与行内代码里的写法示例，以及厂商文档快照目录，报告不存在的目标。
+退出码 0=无死链、1=有死链，可直接接入 CI 门禁；可选参数指定扫描根（也可用于核查 jarvis-desktop）。
 
-配套测试 [`tests/test_md_link_checker.py`](../../tests/test_md_link_checker.py)（7 例）：
-相对链接命中/未命中、锚点片段剥离、非本地链接一律跳过、目录跳过规则、
-`file:///` 按绝对路径解析、CLI 退出码与报告输出，以及**全仓零死链门禁**用例。
+判定口径与检出路径无关：绝对链接按**仓根目录名**重定位后再判定（CI 上仓在
+`/home/runner/work/jarvis/jarvis`），落不到本仓的路径（越出仓根的相对链接、
+指向兄弟仓库的绝对路径）不判定也不误报。
 
-核查结果：`jarvis` 122 个 md / `jarvis-desktop` 13 个 md，**死链 0**。本次除了修掉退役
+配套测试 [`tests/test_md_link_checker.py`](../../tests/test_md_link_checker.py)（14 例）：
+相对链接命中/未命中、重复目标只报一次、锚点片段剥离、非本地链接一律跳过、目录跳过规则、
+绝对链接按仓根重定位（含 POSIX 检出路径用例）、仓外路径不误报、代码示例不判定、
+CLI 退出码与报告输出，以及**全仓零死链门禁**用例。
+
+> 该工具首版带有一个 Windows-only 的路径分隔符假设，在 PR 的 Linux CI 上把全仓相对链接
+> 误报为死链（本地全绿抓不到），已修复并补上跨平台用例，详见
+> [md-link-checker-linux-ci-fix.md](md-link-checker-linux-ci-fix.md)。
+
+核查结果（工具修复后）：`jarvis` 123 个 md（判定 513 条 / 跳过 29 条）、
+`jarvis-desktop` 13 个 md（判定 67 条 / 跳过 27 条），**死链 0**。本次除了修掉退役
 带来的失效链接，还顺带修正了 14 处与退役无关的既有相对路径错写（如
 `docs/blueprint/BLUEPRINT.md`、`README.en.md`、`03-LLMProvider层.md` 等，以及
 jarvis-desktop fixlog 里跨仓链接少写一层 `../`）。

@@ -1,6 +1,7 @@
 """scripts/check_md_links.py 死链扫描工具的单元测试。
 
 覆盖：本地链接判定口径（相对 / 绝对 / 外部 / 锚点 / data 资源）、跳过目录规则、
+跨平台判定（CI 检出路径与开发机不同，绝对链接按仓根目录名重定位；仓外路径不误报）、
 死链检出结果、命令行退出码，以及全仓文档零死链门禁（三栏 GUI 窗口壳退役后
 文档口径整改的回归保障）。
 
@@ -27,65 +28,149 @@ def checker():
     return module
 
 
+def _make_repo(tmp_path: Path, name: str = "jarvis") -> Path:
+    """造一个名为 name 的假仓根（含 docs/ 子目录），用于模拟不同平台的检出路径。"""
+    root = tmp_path / name
+    (root / "docs").mkdir(parents=True)
+    return root
+
+
 def test_relative_dead_link_detected(tmp_path, checker):
     """正常路径：相对链接指向存在的文件不算死链，指向不存在文件的被检出。"""
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "target.md").write_text("# 目标文档", encoding="utf-8")
-    (tmp_path / "README.md").write_text(
+    root = _make_repo(tmp_path)
+    (root / "docs" / "target.md").write_text("# 目标文档", encoding="utf-8")
+    (root / "README.md").write_text(
         "[有效](docs/target.md)\n[失效](docs/missing.md)\n", encoding="utf-8"
     )
-    assert checker.find_dead_links(tmp_path) == [("README.md", "docs/missing.md")]
+    assert checker.find_dead_links(root) == [("README.md", "docs/missing.md")]
+
+
+def test_duplicate_target_reported_once(tmp_path, checker):
+    """同一文件内重复出现的同一目标只报告一次，避免刷屏。"""
+    root = _make_repo(tmp_path)
+    (root / "a.md").write_text("[1](nope.md) [2](nope.md)\n", encoding="utf-8")
+    assert checker.find_dead_links(root) == [("a.md", "nope.md")]
 
 
 def test_anchor_fragment_stripped(tmp_path, checker):
     """链接尾部的 # 锚点片段不参与文件存在性判定。"""
-    (tmp_path / "a.md").write_text("占位", encoding="utf-8")
-    (tmp_path / "b.md").write_text("[章节](a.md#某节)", encoding="utf-8")
-    assert checker.find_dead_links(tmp_path) == []
+    root = _make_repo(tmp_path)
+    (root / "docs" / "a.md").write_text("占位", encoding="utf-8")
+    (root / "docs" / "b.md").write_text("[章节](a.md#某节)", encoding="utf-8")
+    assert checker.find_dead_links(root) == []
 
 
 def test_non_local_links_ignored(tmp_path, checker):
     """外部站点 / 邮件 / 纯锚点 / 站点绝对路径 / data 内联资源一律跳过。"""
-    (tmp_path / "README.md").write_text(
+    root = _make_repo(tmp_path)
+    (root / "README.md").write_text(
         "[外](https://example.com/x.md) [外2](http://example.com/x.md) "
         "[邮](mailto:a@b.com) [锚](#sec) [站](/docs/x.md) "
         "![图](data:image/png;base64,AAAA)\n",
         encoding="utf-8",
     )
-    assert checker.find_dead_links(tmp_path) == []
+    assert checker.find_dead_links(root) == []
+
+
+def test_links_in_code_samples_not_judged(tmp_path, checker):
+    """行内代码与围栏代码块里的 `[x](y)` 只是写法示例，不参与死链判定。"""
+    root = _make_repo(tmp_path)
+    (root / "a.md").write_text(
+        "行内：`[示例](nope.md)`\n\n"
+        "```\n围栏：[示例](nope2.md)\n```\n\n"
+        "[真链接](also-nope.md)\n",
+        encoding="utf-8",
+    )
+    assert checker.find_dead_links(root) == [("a.md", "also-nope.md")]
 
 
 def test_skip_dirs_excluded(tmp_path, checker):
     """产物目录与厂商文档快照目录内的死链不报告（避免外部抓取件误报）。"""
+    root = _make_repo(tmp_path)
     for sub in ("build", ".venv", "dashscope-docs"):
-        d = tmp_path / sub
+        d = root / sub
         d.mkdir()
         (d / "x.md").write_text("[失效](nope.md)", encoding="utf-8")
-    assert checker.find_dead_links(tmp_path) == []
+    assert checker.find_dead_links(root) == []
     # 同名目录之外的文件仍会被扫描，证明跳过规则是按路径段生效的
-    (tmp_path / "notes.md").write_text("[失效](nope.md)", encoding="utf-8")
-    assert checker.find_dead_links(tmp_path) == [("notes.md", "nope.md")]
+    (root / "notes.md").write_text("[失效](nope.md)", encoding="utf-8")
+    assert checker.find_dead_links(root) == [("notes.md", "nope.md")]
 
 
-def test_file_url_treated_as_absolute(tmp_path, checker):
-    """file:/// 前缀按绝对路径解析，不与 md 所在目录拼接。"""
-    md = tmp_path / "docs" / "a.md"
-    md.parent.mkdir()
-    md.write_text("[绝对](file:///C:/other/x.md)", encoding="utf-8")
-    pairs = checker.local_link_targets(md)
-    assert len(pairs) == 1
-    resolved = str(pairs[0][1])
-    assert resolved.replace("\\", "/").endswith("C:/other/x.md")
-    assert not resolved.startswith(str(md.parent))
+def test_repo_relative_candidates_posix_checkout(checker):
+    """纯函数口径：POSIX 绝对路径按仓根名切出仓内相对路径（不含任何分隔符残留）。
+
+    CI 检出路径 /home/runner/work/jarvis/jarvis 里 `jarvis` 出现两次，故有两个候选，
+    由调用方按「任一存在即有效」裁决。
+    """
+    path = "/home/runner/work/jarvis/jarvis/docs/guide/desktop.md"
+    assert checker.repo_relative_candidates(path, "jarvis") == [
+        "jarvis/docs/guide/desktop.md",
+        "docs/guide/desktop.md",
+    ]
+
+
+def test_absolute_file_url_relocated_by_repo_root(tmp_path, checker):
+    """`file:///` 绝对链接按仓根目录名重定位后判定：换机器、换检出路径结论不变。"""
+    root = _make_repo(tmp_path)
+    (root / "docs" / "target.md").write_text("占位", encoding="utf-8")
+    (root / "a.md").write_text(
+        "[有效](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/target.md)\n"
+        "[失效](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/gone.md)\n",
+        encoding="utf-8",
+    )
+    assert checker.find_dead_links(root) == [
+        ("a.md", "file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/gone.md")
+    ]
+
+
+def test_absolute_link_with_multiple_root_name_segments(tmp_path, checker):
+    """同名层级取不到时不误报：任一重定位候选存在即算有效。"""
+    root = _make_repo(tmp_path)
+    (root / "docs" / "x.md").write_text("占位", encoding="utf-8")
+    (root / "a.md").write_text("[链接](file:///home/ci/jarvis/jarvis/docs/x.md)",
+                               encoding="utf-8")
+    assert checker.find_dead_links(root) == []
+
+
+def test_foreign_absolute_link_not_judged(tmp_path, checker):
+    """指向兄弟仓库的绝对链接不判定（本仓检不出对方文件，判死即误报）。"""
+    root = _make_repo(tmp_path)
+    (root / "a.md").write_text(
+        "[桌面壳](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S"
+        "/jarvis-desktop/src/main/index.ts)\n",
+        encoding="utf-8",
+    )
+    assert checker.find_dead_links(root) == []
+    assert checker.link_candidates(root / "a.md", "file:///e:/x/jarvis-desktop/y.ts", root) == []
+
+
+def test_relative_link_escaping_repo_not_judged(tmp_path, checker):
+    """越出仓根的相对链接不判定（同上：兄弟仓库文件不在本仓检出范围内）。"""
+    root = _make_repo(tmp_path)
+    (root / "docs" / "a.md").write_text("[兄弟仓](../../../jarvis-desktop/src/main/index.ts)\n",
+                                        encoding="utf-8")
+    assert checker.find_dead_links(root) == []
+
+
+def test_local_link_targets_pairs(tmp_path, checker):
+    """local_link_targets 返回 (原文, 待判定路径) 对，且只含需判定的本地链接。"""
+    root = _make_repo(tmp_path)
+    md = root / "docs" / "a.md"
+    md.write_text("[内](b.md) [外](https://x.com/b.md)", encoding="utf-8")
+    pairs = checker.local_link_targets(md, root)
+    assert [t for t, _ in pairs] == ["b.md"]
+    assert pairs[0][1] == md.parent / "b.md"
 
 
 def test_main_exit_code_and_report(tmp_path, checker, capsys):
     """CLI 入口：有死链返回 1 并逐条打印，无死链返回 0。"""
-    (tmp_path / "ok.md").write_text("[自](ok.md)", encoding="utf-8")
-    assert checker.main(["check_md_links.py", str(tmp_path)]) == 0
+    root = _make_repo(tmp_path)
+    (root / "ok.md").write_text("[自](ok.md)", encoding="utf-8")
+    assert checker.main(["check_md_links.py", str(root)]) == 0
 
-    (tmp_path / "bad.md").write_text("[失效](gone.md)", encoding="utf-8")
-    assert checker.main(["check_md_links.py", str(tmp_path)]) == 1
+    (root / "bad.md").write_text("[失效](gone.md)", encoding="utf-8")
+    assert checker.main(["check_md_links.py", str(root)]) == 1
     out = capsys.readouterr().out
     assert "dead links: 1" in out
     assert "gone.md" in out
