@@ -106,13 +106,30 @@ away 拒绝文案同步加了“请勿重试或改用其他工具绕过”的模
   目录的配置/状态文件是双向污染（测试结果不可信 + 污染用户环境），
   必须在根 conftest 兜底封死。
 
+## 同期发现四：/diff 在非 git 目录崩掉整个 REPL（同族问题，2026-10 实测）
+
+用户 workdir 不是 git 仓库，`/diff` 时 git 把 usage 文本（内含
+`--break-rewrites[=<n>[/<m>]]`）写进 stderr，`_show_diff` 原样透传进
+`ui.warn` → Rich 把 `[/...]` 当闭合标签抛 MarkupError；更糟的是错误处理本身
+（`ui.error(f"/diff 执行失败: {e}")`）二次踩同一坑，异常直接逃出处理链，
+REPL 整局崩溃。
+
+- 修复：`RichCLI.warn/error` 接入面统一 `escape()`（全库审计过：两方法
+  无任何故意传 Rich 标记的调用点；`info` 有 collab_commands 四处故意标记，
+  暂不动并在 docstring 标注差异）。补 3 例回归：git usage 方括号、
+  异常消息含闭合标记、普通文案不受影响。
+- 教训：**只有带样式的拼接口子需要标记，动态内容一律转义**——安全策略
+  应设在接入面（warn/error 这种专门印外部文本的方法），不能只修某个
+  触发点；否则下一个 `{e}` 拼接处照样炸。`[<m>]` 这类未开标签 Rich 只
+  吞不报，**`[/...]` 开头的才硬崩**，测试样本要取后者。
+
 ## 涉及文件
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/ui/cli.py` | `ask_user` escape+去尾冒号；`SLASH_COMMANDS` 补登 W1 四命令；思考面板纯空白增量不渲染 |
+| `agent/ui/cli.py` | `ask_user` escape+去尾冒号；`SLASH_COMMANDS` 补登 W1 四命令；思考面板纯空白增量不渲染；`warn/error` 接入面 escape |
 | `agent/core/policy/__init__.py` | away 拒绝文案加防重试/防绕过引导 |
-| `tests/ui/test_cli_ask_markup.py` | 新增回归测试（含真实签名守卫） |
+| `tests/ui/test_cli_ask_markup.py` | 新增回归测试（含真实签名守卫、warn/error 标记安全 3 例） |
 | `tests/ui/test_thinking_panel.py` | 新增空白增量守卫 2 例 |
 | `tests/conftest.py` | **新建**：全局 autouse 隔离 policy 单例到 tmp |
 | `tests/test_p23_proactive.py` | 模块级导入时隔离 away 状态 |

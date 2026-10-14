@@ -946,16 +946,23 @@ class RichCLI(UIProtocol):
             print(f"[info] {text}")
 
     def warn(self, text: str) -> None:
+        """黄字警告。text 是外部动态文本（子命令 stderr、异常消息等），
+        必须先 escape 再拼标记——否则 `[=<n>[/<m>]]` 这类内容会被 Rich
+        当标记解析直接抛 MarkupError（同 ask_user 的方括号吞字问题，
+        /diff 非 git 目录崩溃案，2026-10）。
+        @author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"⚠️  {text}", style="yellow")
+            self._console.print(f"⚠️  {escape(text)}", style="yellow")
         else:
             print(f"[warn] {text}")
 
     def error(self, text: str) -> None:
+        """红字错误。同 warn：text 含异常/子进程输出等不可控内容，
+        先 escape 防止 Rich 标记解析崩溃。@author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"❌ {text}", style="bold red")
+            self._console.print(f"❌ {escape(text)}", style="bold red")
         else:
             print(f"[error] {text}", file=sys.stderr)
 
