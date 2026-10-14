@@ -133,7 +133,8 @@ enable_thinking = true
 ## W1 运行时层（`[policy]`，阶段 8）
 
 授权租约 + 打扰预算 + 无人值守，挂在五层权限管线之后（DENY 不可放宽，
-无租约且非 away 时零介入）。声明式免确认直接写 `permissions.yaml` 规则
+away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零介入）。
+声明式免确认直接写 `permissions.yaml` 规则
 （带 spec 的 allow 可放宽工具 ASK，见 [04-权限系统](../docs/architecture/04-权限系统.md)）；
 机制详见 [16-W1 运行时层](../docs/architecture/16-W1判断层.md)。
 

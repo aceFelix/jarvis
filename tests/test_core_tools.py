@@ -174,6 +174,9 @@ class TestBashPermissions:
         r = BashTool().check_permissions({"command": "git commit -m x"}, ctx)
         assert r.behavior == PermissionBehavior.ALLOW
         assert "沙箱" in (r.reason or "")
+        # reason 携跨层协议前缀：/away 时 W1 闸门据此升级待批
+        from agent.permissions.modes import SANDBOX_AUTO_ALLOW_PREFIX
+        assert (r.reason or "").startswith(SANDBOX_AUTO_ALLOW_PREFIX)
 
     def test_sandbox_medium_without_auto_allow_asks(self) -> None:
         settings = SimpleNamespace(sandbox_enabled=True, sandbox_auto_allow_medium=False)

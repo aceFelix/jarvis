@@ -8,8 +8,11 @@
 
 合并次序（自上而下，先严者胜）：
 1. 管线结论（含 DENY，任何层不可放宽）；
-2. 租约只放宽 ASK，且放宽不了路径守护软提醒（workdir 外写入）；
-3. away 时仍为 ASK 的调用 → 入待批清单 + 本次拒绝（回来呈批）。
+2. 沙箱自动放行压制：away 时，带 SANDBOX_AUTO_ALLOW_PREFIX 标记的
+   ALLOW 升级回 ASK（中风险自动放行是在场委托而非无人授权，避免
+   "mv 做了、FileEdit 被拦"的半完成状态；同意的租约仍可放宽它）；
+3. 租约只放宽 ASK，且放宽不了路径守护软提醒（workdir 外写入）；
+4. away 时仍为 ASK 的调用 → 入待批清单 + 本次拒绝（回来呈批）。
 
 配置注入：宿主启动时调 `init_policy(settings)`；未注入时用安全缺省
 （away 仅认手动标志、预算用默认参数）。租约/away/budget 均为零配置
@@ -32,6 +35,7 @@ from agent.core.policy.state import (
     get_policy_state,
 )
 from agent.core.result import PermissionBehavior, PermissionResult
+from agent.permissions.modes import SANDBOX_AUTO_ALLOW_PREFIX
 
 __all__ = [
     "BudgetConfig", "Lease", "LeaseStore", "NotifyAction", "NotifyBudget",
@@ -88,6 +92,15 @@ def policy_gate(tool: Any, args: dict[str, Any], ctx: Any, base: PermissionResul
     away, away_note = state.is_away(int(_cfg("away_idle_minutes", 0) or 0))
 
     result = base
+
+    # ⓪ 沙箱自动放行压制：away 时把"沙箱替用户批的中风险 ALLOW"升级
+    #    回 ASK，落入末尾统一的 away 待批分流。只认工具特判的协议前缀，
+    #    模式/规则/租约给的其他 ALLOW 不受影响（零介入原则不变）。
+    if (away and result.behavior == PermissionBehavior.ALLOW
+            and (result.reason or "").startswith(SANDBOX_AUTO_ALLOW_PREFIX)):
+        result = PermissionResult.ask(
+            f"无人值守，沙箱自动放行已升级待批（原结论：{result.reason}）"
+        )
 
     # ① 授权租约：只放宽 ASK，且放宽不了路径守护软提醒（与管线 allow
     #    规则同一保守口径：跨边界写入应保持人工确认）

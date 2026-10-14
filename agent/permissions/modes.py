@@ -41,3 +41,11 @@ AUTO_ALLOW_EDIT_TOOLS = frozenset({"FileEdit", "FileWrite", "NotebookEdit"})
 PLAN_ALLOWED_TOOLS = frozenset(
     {"FileRead", "Glob", "Grep", "WebFetch", "WebSearch", "ListMcpResources", "ReadMcpResource"}
 )
+
+# 沙箱自动放行的 ALLOW reason 前缀（机器可读标记，跨层协议）：
+# BashTool 沙箱感知特判签发时用它，W1 闸门（core/policy）据此在
+# /away 时把这类放行升级回 ASK 走待批——中风险自动放行是"在场时
+# 不弹窗"的委托，不是"无人时也可自主执行"的授权，否则会出现
+# "mv 重命名做了、后续 FileEdit 被拦"的半完成状态（2026-10 实测发现）。
+SANDBOX_AUTO_ALLOW_PREFIX = "沙箱自动放行:"
+

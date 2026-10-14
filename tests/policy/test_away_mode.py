@@ -1,8 +1,9 @@
 """无人值守 + 运行时闸门单测 —— away 状态 / 待批清单 / policy_gate 合并（阶段 8 验收④）。
 
 覆盖：/away /back 手动切换、空闲推断、away 时 ASK 入待批清单转 DENY、
-ALLOW/DENY 不受 away 影响、闸门零介入（无租约无 away 时结论原样回落、
-对象同一）、租约只放宽 ASK 且放宽不了路径守护软提醒。
+ALLOW/DENY 不受 away 影响、沙箱自动放行在 away 时被压制升级待批、
+闸门零介入（无租约无 away 时结论原样回落、对象同一）、租约只放宽
+ASK 且放宽不了路径守护软提醒。
 
 声明式规则合并（原策略引擎）已并入五层管线，测于
 tests/test_permissions_relax.py。
@@ -178,3 +179,47 @@ def test_gate_away_pipeline_deny_not_recorded(gate_ok):
     assert out.behavior == PermissionBehavior.DENY
     assert "危险命令" in (out.reason or "")
     assert get_pending_approvals().list() == []
+
+
+# ---- 沙箱自动放行压制（2026-10 实测发现的半完成问题）----
+
+def _sandbox_allow() -> PermissionResult:
+    """造一个 Bash 工具特判风格的沙箱自动放行 ALLOW（携协议前缀）。"""
+    from agent.permissions.modes import SANDBOX_AUTO_ALLOW_PREFIX
+    return PermissionResult.allow(f"{SANDBOX_AUTO_ALLOW_PREFIX} 沙箱已开启，中等风险命令在沙箱内执行")
+
+
+def test_gate_away_suppresses_sandbox_auto_allow(gate_ok):
+    """away 时沙箱自动放行 ALLOW 升级回 ASK → 入待批清单并本次拒绝。"""
+    from agent.core.policy import get_pending_approvals, get_policy_state
+    get_policy_state().set_away(True, source="manual")
+    out = policy_gate(_Tool("Bash"), {"command": "mv a b"}, _Ctx(), _sandbox_allow())
+    assert out.behavior == PermissionBehavior.DENY
+    assert "升级待批" in (out.reason or "")
+    pending = get_pending_approvals().list()
+    assert len(pending) == 1 and pending[0]["tool"] == "Bash"
+
+
+def test_gate_sandbox_auto_allow_ok_when_present(gate_ok):
+    """在场（非 away）时沙箱自动放行不受影响，零介入透传。"""
+    base = _sandbox_allow()
+    assert policy_gate(_Tool("Bash"), {"command": "mv a b"}, _Ctx(), base) is base
+
+
+def test_gate_lease_can_relax_suppressed_sandbox_ask(gate_ok):
+    """升级后的 ASK 标普通管线 ASK，用户签了 Bash 租约仍可放宽
+    （预先授权 = 主人同意无人时继续跑沙箱中风险命令）。"""
+    from agent.core.policy import get_lease_store, get_policy_state
+    get_policy_state().set_away(True, source="manual")
+    get_lease_store().grant(["Bash"], None, ttl_minutes=60)
+    out = policy_gate(_Tool("Bash"), {"command": "mv a b"}, _Ctx(), _sandbox_allow())
+    assert out.behavior == PermissionBehavior.ALLOW
+
+
+def test_gate_away_other_allow_untouched(gate_ok):
+    """只认协议前缀：模式/规则/租约给的其他 ALLOW 在 away 时照常通过。"""
+    from agent.core.policy import get_policy_state
+    get_policy_state().set_away(True, source="manual")
+    for reason in ("只读命令自动放行", "规则命中: Bash(git *)", "接受编辑模式自动放行"):
+        base = PermissionResult.allow(reason)
+        assert policy_gate(_Tool("Bash"), {"command": "ls"}, _Ctx(), base) is base

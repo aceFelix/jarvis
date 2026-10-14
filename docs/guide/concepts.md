@@ -19,9 +19,9 @@ Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
 切换权限模式：`/mode yolo`
 
 五层管线之后还有一道 **W1 运行时层闸门**（阶段 8）：授权租约（`/lease`
-限时免打断）、打扰预算（主动播报限流聚合）、无人值守（`/away` 时 ASK
-入待批清单）。DENY 永不可放宽，无租约且非 away 时零介入，权限零回归。
-详见 [W1 运行时层](../architecture/16-W1判断层.md)。
+限时免打断）、打扰预算（主动播报限流聚合）、无人值守（`/away` 时 ASK 与
+沙箱中风险自动放行均入待批清单）。DENY 永不可放宽，无租约且非 away
+时零介入，权限零回归。详见 [W1 运行时层](../architecture/16-W1判断层.md)。
 
 声明式免确认直接写在 `permissions.yaml`（查找顺序：`<workdir>/configs/`
 → 包内默认 `configs/`，也可用 settings.toml 的 `permissions_file`
@@ -61,7 +61,7 @@ max_cpu_seconds = 60         # 最大 CPU 时间（秒）
 max_processes = 10           # 最大子进程数（防 fork bomb）
 timeout = 120                # 命令总超时（秒）
 block_network = false        # 是否阻断网络
-auto_allow_medium = true     # 沙箱开启时自动放行中等风险
+auto_allow_medium = true     # 沙箱开启时自动放行中等风险（/away 时升级待批）
 audit = true                 # 记录审计日志
 max_snapshots = 20           # 文件快照最大保留数
 excluded_commands = []       # 不走沙箱的命令（如 ["docker", "wsl"]）
