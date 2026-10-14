@@ -109,3 +109,22 @@
   先问一句"其他入口是否同样"往往能快速定位层次。
 - 语音收尾不完整（`voice_ai_text` 不调 `finishAssistant`、语音路径无 `assistant_done`）
   是本次暴露但未修的独立问题，已记录待办，避免与本次根因修复混为一谈。
+
+## 8. 后续（2026-10-14）：终端已补齐提醒能力
+
+本次只做了「止血」——把不存在的能力从提示词里藏起来，终端因此变成“真的不会提醒”。
+先生随后再次复现（同样一句“明天中午 12 点有一场面试，提醒我”），并提出把提醒能力
+真正下放到终端，故已由 `CliReminderHost` 在 REPL / 语音装配时挂载 schedule 四件套。
+
+对本复盘口径的影响：
+
+- `_schedule_section(registry)` 的**条件注入机制本身不变**，也不需修改提示词逻辑：
+  终端 registry 现在含 `ScheduleReminder`，「# 日程提醒」段在终端会**自动恢复注入**。
+- 「终端不注册提醒工具、如实说明暂不支持」的描述已过期，相关文档均已修订：
+  `docs/guide/desktop.md`、`USER_GUIDE.md`、`docs/test/TEST_CHECKLIST.md`（T-SP-001/002）。
+- 本次验证结论仍成立的部分：`ToolSearch` 未命中兜底提示（防绕道手搓 schtasks/VBS）
+  保留不动——它防的是“模型编造能力”，与终端有无提醒工具无关。
+- 仍刻意不下的：`AddDeadline` / `ListDeadlines` / `CompleteDeadline`（依赖 ProactiveEngine
+  每日检查，终端只接工具会是半截能力）。
+
+完整修复过程与取舍见 [agent-loop-stall-fix.md](agent-loop-stall-fix.md)。

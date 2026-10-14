@@ -79,6 +79,11 @@ from agent.core.tool_pairing import (
     REASON_TRUNCATED,
     make_placeholder_results,
 )
+# 工具 schema 下发决策（延迟加载分组 + 纯聊天零工具）已迁到
+# agent/core/tool_dispatch.py；此处保留旧方法名作为薄委托，既有调用点、
+# 测试与文档引用路径不变。
+# @author aceFelix
+from agent.core.tool_dispatch import build_tool_defs, is_chat_only
 
 
 @dataclass
@@ -642,15 +647,28 @@ class QueryLoop:
 
         tool_defs = self._build_tool_defs(ctx)
 
+        # Ctrl+C 打断检查点（2026-10-14）：语音模式的 SIGINT 处理器刻意**只置标志不抛
+        # 异常**（在主线程 raise 会撕裂 asyncio.run，导致整个进程退出），由
+        # _poll_interrupt 线程把 stop_event 转成 ctx.abort_event。但本函数此前只有
+        # 「流自然结束」才返回，而 abort_event 只在 run() 的下一轮循环顶部被检查——
+        # 深度思考模型一轮流式可跑数十秒、事件源源不断，用户按 Ctrl+C 完全无反应。
+        # 故此处逐个事件检查 abort：置位即抛 CancelledError，交由 run() 既有的
+        # except 分支收口（不入历史，避免残缺 tool_use 悬空污染会话）。
+        # finally 显式 aclose 异步生成器，中断时及时释放底层 HTTP 连接。
+        # 详见 docs/fixlogs/agent-loop-stall-fix.md。
+        # @author aceFelix
+        stream = self._provider.stream(
+            model=self._model,
+            system=self._system,
+            messages=msgs,
+            tools=tool_defs,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+        )
         try:
-            async for event in self._provider.stream(
-                model=self._model,
-                system=self._system,
-                messages=msgs,
-                tools=tool_defs,
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
-            ):
+            async for event in stream:
+                if ctx.abort_event.is_set():
+                    raise asyncio.CancelledError
                 last_event = event
                 if isinstance(event, ThinkingDelta):
                     # 深度思考：reasoning_content 先于 content 到达
@@ -689,6 +707,15 @@ class QueryLoop:
             if content_blocks:
                 msgs.append(Message(role="assistant", content=content_blocks))
             raise
+        finally:
+            # 正常耗尽时 aclose 是空操作；被打断/异常退出时确保生成器及早关闭。
+            # 关闭本身失败不能外抛：否则会掩盖正文里真正的 ProviderError / 用户的
+            # CancelledError（CancelledError 继承 BaseException，需单独子句）。
+            # @author aceFelix
+            try:
+                await stream.aclose()  # type: ignore[attr-defined]
+            except (asyncio.CancelledError, Exception):
+                pass
 
         _flush_thinking()
         _flush_text()
@@ -739,116 +766,20 @@ class QueryLoop:
     def _build_tool_defs(self, ctx: ToolContext | None = None) -> list[ToolDef]:
         """把注册表里的工具转成给 LLM 的 ToolDef。
 
-        延迟加载模式：
-        - 核心工具（deferred=False）始终携带
-        - 延迟工具（deferred=True）仅在被 ToolSearch 发现后才携带完整 schema
-        - 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）
+        实现已迁至 `agent/core/tool_dispatch.py`（延迟加载分组 + 纯聊天零工具）。
+        此处保留方法作为薄委托：既有调用点、测试与文档引用路径均不变。
+        策略细节与历史教训见 tool_dispatch 模块 docstring。
         """
-        # 延迟加载关闭 → 回退到全量发送
-        if not self._deferred_loading:
-            defs: list[ToolDef] = []
-            for tool in self._registry.all():
-                defs.append(ToolDef(
-                    name=tool.name,
-                    description=tool.description,
-                    input_schema=tool.input_schema,
-                ))
-            return defs
-
-        # 纯聊天检测：首轮 + 短消息 + 无动作意图 → 0 工具
-        if self._chat_detection and ctx is not None and self._is_chat_only(ctx):
-            return []
-
-        # 分组发送：核心工具 + 已发现的延迟工具
-        discovered: set[str] = set()
-        if ctx is not None:
-            discovered = ctx.extra.get("discovered_tools", set())
-
-        defs = []
-        for tool in self._registry.all():
-            if not tool.deferred:
-                # 核心工具: 始终携带
-                defs.append(ToolDef(
-                    name=tool.name,
-                    description=tool.description,
-                    input_schema=tool.input_schema,
-                ))
-            elif tool.name in discovered:
-                # 已发现的延迟工具: 携带完整 schema
-                defs.append(ToolDef(
-                    name=tool.name,
-                    description=tool.description,
-                    input_schema=tool.input_schema,
-                ))
-            # 未发现的延迟工具: 不发送
-        return defs
+        return build_tool_defs(
+            self._registry,
+            ctx,
+            deferred_loading=self._deferred_loading,
+            chat_detection=self._chat_detection,
+        )
 
     def _is_chat_only(self, ctx: ToolContext) -> bool:
-        """纯聊天检测：保守策略，宁可多发不可漏发。
-
-        条件（全部满足才返回 True）：
-        - 用户消息 <= 20 字
-        - 不含动作关键词
-        - 对话历史中无工具调用记录
-
-        注意：判定为纯聊天会直接不发送任何工具 schema，若误判则模型无法调工具，
-        所以关键词表宁全勿缺（尤其工作区/环境指代类问句）。@author aceFelix
-        """
-        # 取最后一条 user 消息
-        last_user_text = ""
-        has_tool_use = False
-        for msg in reversed(ctx.messages):
-            if msg.role == "user" and not last_user_text:
-                for block in msg.content:
-                    if hasattr(block, "text"):
-                        last_user_text = block.text
-                        break
-            if msg.role == "assistant":
-                if msg.get_tool_uses():
-                    has_tool_use = True
-                    break
-
-        if has_tool_use:
-            return False
-
-        text = last_user_text.strip()
-        if len(text) > 20:
-            return False
-
-        # 动作关键词（中英文）：含任一则认为有工具意图
-        # 分两类: 动作词 (do keywords) + 信息查询词 (ask keywords)
-        # 策略: 保守，宁可多发不可漏发
-        action_keywords = (
-            # 动作词 — 明确要求执行操作
-            "帮我", "查", "搜", "打开", "写", "创建", "运行", "执行", "安装",
-            "删除", "修改", "编辑", "发送", "截图", "点击", "输入", "下载",
-            "上传", "连接", "启动", "停止", "关闭", "设置", "配置",
-            "help", "search", "open", "write", "create", "run", "exec",
-            "install", "delete", "edit", "send", "screenshot", "click",
-            "download", "upload", "connect", "start", "stop", "close",
-            "文件", "命令", "终端", "浏览器", "网页", "邮件", "日程", "提醒",
-            # 信息查询词 — 短问句可能需工具获取实时数据
-            "几点", "几号", "多少", "天气", "温度", "湿度", "时间", "日期",
-            "星期", "今天", "明天", "昨天", "今年", "版本", "日历",
-            "how", "what", "when", "who", "where", "which", "why",
-            "time", "date", "today", "weather", "version", "calendar",
-            # 工作区/代码库词 —— 「当前目录是一个什么项目」这类问句必须能调工具。
-            # 2026-09-30 桌面端复盘：这类句子被误判为纯聊天→本轮 0 工具→模型仍凭习惯
-            # 吐文本态 DSML 调用→被兜底按 valid_names 全量过滤→表现为「思考完就停止」。
-            # 注意：关键词统一小写，比较走 text_lower。
-            "目录", "项目", "仓库", "工程", "代码", "结构", "路径", "分支",
-            "提交", "依赖", "日志", "报错", "文件夹", "数据库", "接口",
-            "git", "repo", "project", "directory", "folder", "codebase",
-            "commit", "branch", "readme", "build", "deploy",
-            # 环境指代词 —— 短问句指向当前环境，往往需要读现实数据而非背书
-            "当前", "现在", "这个", "这里", "这是", "本地", "机器", "我的",
-        )
-        text_lower = text.lower()
-        for kw in action_keywords:
-            if kw in text_lower:
-                return False
-
-        return True
+        """纯聊天检测（实现已迁至 tool_dispatch.is_chat_only，此处保留旧入口）。"""
+        return is_chat_only(ctx)
 
 
 # 多 Agent 团队邮箱自动同步（Phase 1+）已迁到 agent/core/team_notify.py，

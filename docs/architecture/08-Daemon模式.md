@@ -8,6 +8,8 @@
 > 桌面入口已指向 `jarvis --gui` 三栏工作台。
 >
 > ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` / `holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
+>
+> ✅ **终端接线（2026-10-14）**：新增 [`core/daemon/cli_reminder.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) 的 `CliReminderHost`，`main.py` 装配 REPL（含 `/voice` 语音）时启动 Scheduler 后台线程并挂载 schedule 四件套，到期经 `RichCLI.notify_reminder()` 在终端上屏 `⏰` 提醒。只接**对话内定时提醒**，不接简报/截止日期/TTS，详见 [`docs/fixlogs/agent-loop-stall-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/agent-loop-stall-fix.md)。
 
 ## 一、现存核心文件
 
@@ -18,7 +20,8 @@
 | [hotkey_native.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/hotkey_native.py) | Windows 原生 RegisterHotKey 热键监听 | ✅ 保留（待工作台接线） |
 | [platform_utils.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/platform_utils.py) | 平台/依赖探测辅助 | ✅ 在用 |
 | [voice/voice_state.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/voice/voice_state.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（由语音包持有） |
-| [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配） |
+| [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配；2026-10 终端 CliReminderHost 装配） |
+| [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配） |
 | [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期已接，日历源传 None 未接） |
 | [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
 | [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | 💤 休眠 |
@@ -93,7 +96,7 @@ python -m agent.daemon.autostart status             # 查看状态
 
 | 服务 | 能力 | 配置节 | 状态 |
 |---|---|---|---|
-| Scheduler | 定时/周期/一次性任务，与日程工具联动 | — | ✅ serve 宿主 ProactiveHub 装配 |
+| Scheduler | 定时/周期/一次性任务，与日程工具联动 | — | ✅ serve 宿主 ProactiveHub + 终端 CliReminderHost 装配 |
 | ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` | ✅ 简报/截止已接；日历源传 None 未接 |
 | DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` | ✅ serve 宿主 ProactiveHub 装配 |
 | CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` | 💤 休眠（二期） |

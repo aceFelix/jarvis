@@ -116,10 +116,18 @@ Agent 工具：
 | `CompleteDeadline` | 标记截止日期完成 |
 | `AcknowledgeReminder` | 确认提醒（停止升级重复通知） |
 
-> 以上提醒/截止日期类工具**仅桌面壳 / serve 宿主**经 `registry_hook` 注册。
-> 终端 CLI（REPL）不注册这些工具，系统提示中的「# 日程提醒」段也会随之**不注入**
-> （条件化），避免模型追着不存在的工具反复搜索空转。详见
-> [schedule-prompt-conditional-fix.md](../fixlogs/schedule-prompt-conditional-fix.md)。
+> **注册范围说明（2026-10-14 更新）**：日程提醒四件套（`ScheduleReminder` / `ListSchedule` /
+> `CancelSchedule` / `AcknowledgeReminder`）现已**三端可用**——桌面壳 / serve 由 `ProactiveHub`
+> 装配，终端 CLI（REPL、`/voice`）由 [`CliReminderHost`](../../agent/core/daemon/cli_reminder.py)
+> 在装配 REPL 时启动 Scheduler 后台线程并挂载。系统提示的「# 日程提醒」段按 registry 是否含
+> `ScheduleReminder` **条件注入**，三端注册后均会自动恢复注入。
+> 截止日期三工具（`AddDeadline` / `ListDeadlines` / `CompleteDeadline`）**仍仅桌面壳 / serve
+> 注册**：它们只做条目增删改，真正到期提醒依赖 ProactiveEngine 每日检查，终端接线会是“半截
+> 能力”，故刻意不下放。终端提醒也**不做 TTS 播报**（仅文本上屏）。
+> 终端提醒仅在 jarvis 进程存活期间触发（任务持久化在 `~/.jarvis/schedule.json`，重启后未到期
+> 的仍会按时触发）。背景与取舍见
+> [schedule-prompt-conditional-fix.md](../fixlogs/schedule-prompt-conditional-fix.md) 与
+> [agent-loop-stall-fix.md](../fixlogs/agent-loop-stall-fix.md)。
 
 ## 系统资源监控（休眠态）
 

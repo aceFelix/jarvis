@@ -52,9 +52,6 @@ if _HAS_RICH:
 
 # prompt_toolkit（可选，用于 Tab 补全和 / 命令列表）
 try:
-    from prompt_toolkit.completion import Completer, Completion, CompleteEvent
-    from prompt_toolkit.document import Document
-    from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
@@ -131,374 +128,17 @@ except ImportError:
     _HAS_PT = False
     _PT_STYLE = None
 
-    # 无 prompt_toolkit 时提供哑元类，让 _SlashCompleter 能声明
-    class Completer:
-        pass
-    class Completion:  # type: ignore[no-redef]
-        pass
-    class CompleteEvent:  # type: ignore[no-redef]
-        pass
 
-
-# ---- 斜杠命令注册表 ----
-
-#: 全部可用命令 (name, description) 列表。main.py / daemon.py 的 REPL 循环按此列表补全。
-SLASH_COMMANDS = [
-    ("/exit",       "退出贾维斯"),
-    ("/quit",       "退出贾维斯"),
-    ("/q",          "退出贾维斯（/exit 简写）"),
-    ("/help",       "查看所有命令帮助"),
-    ("/h",          "查看帮助（/help 简写）"),
-    ("/mode <m>",   "切换权限模式 (default/plan/accept_edits/yolo)"),
-    ("/away",        "进入无人值守（确认类操作拒绝并入待批清单）"),
-    ("/back",        "结束 away（播报待批清单简报并清空）"),
-    ("/pending",     "查看无人值守待批清单"),
-    ("/lease",       "授权租约（/lease 列表 | revoke <id> | <工具名> [路径] [分钟] 签发）"),
-    ("/model <前缀>","前缀匹配切换模型（支持模糊输入）"),
-    ("/models",     "交互式选择或添加模型"),
-    ("/reset",      "清空对话历史，重新开始"),
-    ("/clear",      "清空对话历史（/reset 别名）"),
-    ("/compact",    "手动压缩上下文（摘要旧消息节省 token）"),
-    ("/context",    "查看上下文窗口使用情况（按角色统计）"),
-    ("/cost",       "显示本会话 token 用量与成本估算（含缓存命中率）"),
-    ("/c",          "显示成本统计（/cost 简写）"),
-    ("/doctor",     "系统诊断（环境/配置/日志/自愈统计）"),
-    ("/update",     "检查并升级 jarvis 到最新版本（重启生效）"),
-    ("/config show","查看当前生效的完整配置（LLM/MCP/自定义模型等）"),
-    ("/init",       "交互式首次配置引导（选厂商→输Key→测试连接）"),
-    ("/rewind [n]", "回退最近 n 条消息（默认 1，可连带回滚工作区文件）"),
-    ("/diff [path]","显示 git diff（工作区改动）"),
-    ("/save [name]","保存当前会话"),
-    ("/load <前缀>","前缀匹配加载会话（支持模糊输入）"),
-    ("/loads",      "列出并交互选择已保存会话"),
-    ("/sessions",   "列出已保存会话（/loads 别名）"),
-    ("/memory",     "画像记忆（add/del/clear/file 管理长期记忆）"),
-    ("/skills",     "列出已加载的技能包"),
-    ("/agents",     "查看多 Agent 团队状态与成员"),
-    ("/tasks",      "查看共享任务列表进度"),
-    ("/plan",       "切换规划模式（进入/退出只读规划）"),
-    ("/think",      "开关或调节深度思考强度（/think on|off|low|medium|high）"),
-    ("/mcp",        "查看 MCP server 连接状态与工具"),
-    ("/tools",      "列出可用工具列表"),
-    ("/image <path>", "添加本地图片到待发送列表（下条消息附带）"),
-    ("/img <path>",   "添加本地图片（/image 别名）"),
-    ("/paste",        "添加剪贴板图片到待发送列表（同 Ctrl+V，下条消息附带）"),
-    ("/p",            "添加剪贴板图片（/paste 别名）"),
-    ("/say <text>", "用 TTS 语音朗读一段文字"),
-    ("/listen",     "录音并识别成文字（麦克风→STT→文本）"),
-    ("/mic",        "录音并识别文字（/listen 别名）"),
-    ("/voice",      "进入语音对话模式（连续听→想→说循环）"),
-    ("/talk",       "进入实时双工语音对话（全双工，说话即可打断）"),
-    ("/tts-voice <前缀>", "选择 / 切换 / 添加 TTS 音色（DashScope）"),
-    ("/connect-phone", "手机扫码连接 JARVIS（共享当前会话）"),
-    ("/connect-wechat", "微信扫码连接 JARVIS（通过 ClawBot 在微信中对话）"),
-    ("/disconnect-wechat", "断开微信 ClawBot 连接"),
-    ("/plugin",                 "列出已安装插件（Plugin 系统）"),
-    ("/plugin install <名称>",  "安装 Plugin 系统的插件"),
-    ("/plugin uninstall <名称>","卸载 Plugin 系统的插件"),
-    ("/plugin search <关键词>", "搜索 Plugin 系统市场"),
-    ("/plugin info <名称>",     "查看 Plugin 插件详情"),
-    ("/plugin update",          "检查 Plugin 插件更新"),
-    ("/plugin enable <名称>",   "启用被禁用的插件（通用）"),
-    ("/plugin disable <名称>",  "禁用插件，不卸载（通用）"),
-    ("/plugin create <名称>",   "创建新插件脚手架（--type harness|plugin）"),
-    ("/plugin validate <路径>", "校验 plugin.json / SKILL.md（通用）"),
-    ("/cli_anything",           "列出已安装 CLI-Anything harness"),
-    ("/cli_anything list",      "列出已安装 CLI-Anything harness"),
-    ("/cli_anything market",    "列出市场可用 harness"),
-    ("/cli_anything install <id>",  "安装指定 harness"),
-    ("/cli_anything uninstall <id>","卸载指定 harness"),
-    ("/harnesses",     "列出已安装 CLI-Anything harness（别名）"),
-    ("/server [目录] [--port N]", "启动开发服务器（Vite/Next 等）"),
-    ("/server stop [--pid N|--port N]", "关闭由 Jarvis 启动的开发服务器"),
-]
-
-# 工具名 → 语音播报描述（方言/中文，适合 TTS 朗读）
-_TOOL_VOICE_DESC: dict[str, str] = {
-    "Bash": "正在执行命令",
-    "Glob": "正在搜索文件",
-    "Grep": "正在搜索代码",
-    "Read": "正在读取文件",
-    "Edit": "正在编辑文件",
-    "Write": "正在写入文件",
-    "ScreenShot": "正在截图",
-    "CameraShot": "正在拍照",
-    "WebFetch": "正在访问网页",
-    "WebSearch": "正在搜索网络",
-    "TodoWrite": "正在整理计划",
-    "Subagent": "正在派生子代理协助",
-    "ListCameras": "正在检测摄像头",
-    "VisionWatch": "正在开启视觉监控",
-}
-
-
-def _tool_voice_desc(tool_name: str) -> str:
-    """工具名的中文语音描述。未知工具返回默认短语。"""
-    return _TOOL_VOICE_DESC.get(tool_name, "正在处理")
-
-
-class _SlashCompleter(Completer):
-    """斜杠命令自动补全器。
-
-    输入 '/' 时弹出全部命令及描述。
-    输入 '/v' 后只匹配 voice 等前缀命中的项。
-
-    子命令补全:
-    - /mode <prefix> → 匹配权限模式 (default/plan/accept_edits/yolo)
-    - /think <prefix> → 匹配思考强度档位 (on/off/low/medium/high)
-    - /model <prefix> → 匹配模型名（内置 + 自定义）
-    - /load <prefix> → 匹配已保存会话名
-    - /save <prefix> → 匹配已保存会话名
-
-    显示风格:
-      /exit          退出贾维斯  ← 命令名亮青蓝 + 描述浅灰
-    选中项：深蓝灰底 + 白/浅蓝字（高对比，一眼可见）
-    """
-
-    def get_completions(
-        self,
-        document: Document,
-        complete_event: CompleteEvent,
-    ) -> list[Completion]:
-        text_before_cursor = document.text_before_cursor.lstrip()
-        if not text_before_cursor.startswith("/"):
-            return []
-
-        text_lower = text_before_cursor.lower()
-
-        # ---- /mode <prefix> 子命令补全 ----
-        if text_lower.startswith("/mode ") or text_before_cursor.startswith("/mode "):
-            return self._complete_modes(text_before_cursor)
-
-        # ---- /think <prefix> 参数补全（思考强度档位）----
-        if text_lower.startswith("/think ") or text_before_cursor.startswith("/think "):
-            return self._complete_thinking(text_before_cursor)
-
-        # ---- /model <prefix> 子命令补全 ----
-        if text_lower.startswith("/model ") or text_before_cursor.startswith("/model "):
-            return self._complete_models(text_before_cursor)
-
-        # ---- /tts-voice <prefix> 子命令补全 ----
-        if text_lower.startswith("/tts-voice ") or text_before_cursor.startswith("/tts-voice "):
-            return self._complete_tts_voices(text_before_cursor)
-
-        # ---- /load <prefix> 子命令补全 ----
-        if text_lower.startswith("/load ") or text_before_cursor.startswith("/load "):
-            return self._complete_sessions(text_before_cursor, prefix_cmd="/load ")
-
-        # ---- /save <prefix> 子命令补全 ----
-        if text_lower.startswith("/save ") or text_before_cursor.startswith("/save "):
-            return self._complete_sessions(text_before_cursor, prefix_cmd="/save ")
-
-        # ---- 默认：斜杠命令补全 + 技能补全 ----
-        word = text_lower
-        results: list[Completion] = []
-        for cmd_name, desc in SLASH_COMMANDS:
-            if cmd_name.lower().startswith(word):
-                display_text = f"{cmd_name:<16}  {desc}"
-                results.append(
-                    Completion(
-                        text=cmd_name,
-                        start_position=-len(word),
-                        display=FormattedText([
-                            ("#5bc8ff", f"{cmd_name:<16}"),
-                            ("#aaaaaa", f"  {desc}"),
-                        ]),
-                    )
-                )
-
-        # 技能名补全（每个 skill 也作为 /<skill-name> 使用）
-        try:
-            from agent.core.extensions.skills import load_skills
-            import os
-            workdir = os.getcwd()
-            for skill in load_skills(workdir):
-                skill_cmd = f"/{skill.name}"
-                if skill_cmd.lower().startswith(word):
-                    desc = skill.description or "技能包"
-                    results.append(
-                        Completion(
-                            text=skill_cmd,
-                            start_position=-len(word),
-                            display=FormattedText([
-                                ("#5bc8ff", f"{skill_cmd:<16}"),
-                                ("#aaaaaa", f"  {desc}"),
-                            ]),
-                        )
-                    )
-        except Exception:
-            pass
-
-        return results
-
-    @staticmethod
-    def _complete_modes(text: str) -> list[Completion]:
-        """补全 /mode <prefix> 的权限模式名。"""
-        # 4 种权限模式及描述
-        all_modes: list[tuple[str, str]] = [
-            ("default",      "默认：写操作需确认，危险命令拒绝"),
-            ("plan",         "规划：只读规划，拒绝所有写操作"),
-            ("accept_edits", "接受编辑：文件编辑自动放行，其他需确认"),
-            ("yolo",         "全自动：自动放行所有操作（危险命令除外）"),
-        ]
-
-        prefix = text[len("/mode "):].lower()
-        matches = [(n, d) for n, d in all_modes if n.lower().startswith(prefix)]
-
-        results: list[Completion] = []
-        for name, desc in matches:
-            start_pos = -len(prefix) if prefix else 0
-            results.append(
-                Completion(
-                    text=name,
-                    start_position=start_pos,
-                    display=FormattedText([
-                        ("#5bc8ff", f"{name:<16}"),
-                        ("#888888", f"  {desc}"),
-                    ]),
-                )
-            )
-        return results
-
-    @staticmethod
-    def _complete_thinking(text: str) -> list[Completion]:
-        """补全 /think <prefix> 的思考强度档位（与终端模糊前缀匹配同口径）。"""
-        # 5 档取值及描述（off/on + 三档强度，后端按厂商 THINKING_CONFIGS 翻译）
-        all_efforts: list[tuple[str, str]] = [
-            ("on",     "开启：用厂商默认强度"),
-            ("off",    "关闭深度思考"),
-            ("low",    "低强度（1/2/3 速记三档）"),
-            ("medium", "中强度"),
-            ("high",   "高强度"),
-        ]
-
-        prefix = text[len("/think "):].strip().lower()
-        matches = [(n, d) for n, d in all_efforts if n.startswith(prefix)]
-
-        results: list[Completion] = []
-        for name, desc in matches:
-            start_pos = -len(prefix) if prefix else 0
-            results.append(
-                Completion(
-                    text=name,
-                    start_position=start_pos,
-                    display=FormattedText([
-                        ("#5bc8ff", f"{name:<16}"),
-                        ("#888888", f"  {desc}"),
-                    ]),
-                )
-            )
-        return results
-
-    @staticmethod
-    def _complete_models(text: str) -> list[Completion]:
-        """补全 /model <prefix> 的模型名。"""
-        import os
-        import sys
-
-        # 提取 /model 后的参数部分
-        prefix = text[len("/model "):].lower()
-
-        # 加载模型列表（懒加载，避免循环导入）
-        all_models: list[tuple[str, str]] = []  # [(name, desc), ...]
-        try:
-            from agent.config.settings import load_settings
-            settings = load_settings()
-            for name, desc in settings.models.items():
-                all_models.append((name, desc))
-            for name, cfg in settings.custom_models.items():
-                if isinstance(cfg, dict):
-                    mtype = cfg.get("model_type", "multimodal")
-                    tag = "纯文本" if mtype == "text" else "多模态"
-                    all_models.append((name, f"[{tag}] {cfg.get('name', name)}"))
-        except Exception:
-            pass
-
-        # 前缀过滤
-        matches = [(n, d) for n, d in all_models if n.lower().startswith(prefix)]
-
-        results: list[Completion] = []
-        for name, desc in matches:
-            start_pos = -len(prefix) if prefix else 0
-            results.append(
-                Completion(
-                    text=name,
-                    start_position=start_pos,
-                    display=FormattedText([
-                        ("#5bc8ff", f"{name:<24}"),
-                        ("#888888", f"  {desc}"),
-                    ]),
-                )
-            )
-        return results
-
-    @staticmethod
-    def _complete_tts_voices(text: str) -> list[Completion]:
-        """补全 /tts-voice <prefix> 的 TTS 音色名（内置 + 自定义）。"""
-        prefix = text[len("/tts-voice "):].lower()
-
-        all_voices: list[tuple[str, str]] = []  # [(name, desc), ...]
-        try:
-            from agent.config.settings import load_settings
-            from agent.voice.tts_voices import all_tts_voices
-            settings = load_settings()
-            for name, cfg in all_tts_voices(settings).items():
-                desc = cfg.get("description", "")
-                all_voices.append((name, desc))
-                # 自定义音色 voice_id 与 name 不同时也收录，便于按 ID 补全
-                if cfg.get("voice_id") and cfg["voice_id"] != name:
-                    all_voices.append((cfg["voice_id"], desc))
-        except Exception:
-            pass
-
-        matches = [(n, d) for n, d in all_voices if n.lower().startswith(prefix)]
-
-        results: list[Completion] = []
-        for name, desc in matches:
-            start_pos = -len(prefix) if prefix else 0
-            results.append(
-                Completion(
-                    text=name,
-                    start_position=start_pos,
-                    display=FormattedText([
-                        ("#5bc8ff", f"{name:<24}"),
-                        ("#888888", f"  {desc}"),
-                    ]),
-                )
-            )
-        return results
-
-    @staticmethod
-    def _complete_sessions(text: str, prefix_cmd: str) -> list[Completion]:
-        """补全 /load <prefix> 或 /save <prefix> 的会话名。"""
-        prefix = text[len(prefix_cmd):].lower()
-
-        all_sessions: list[tuple[str, str]] = []  # [(name, desc), ...]
-        try:
-            from agent.core.memory.store import list_sessions
-            for s in list_sessions():
-                desc = f"{s.message_count} 条消息 | {s.workdir or '(无)'}"
-                all_sessions.append((s.name, desc))
-        except Exception:
-            pass
-
-        matches = [(n, d) for n, d in all_sessions if n.lower().startswith(prefix)]
-
-        results: list[Completion] = []
-        for name, desc in matches:
-            start_pos = -len(prefix) if prefix else 0
-            results.append(
-                Completion(
-                    text=name,
-                    start_position=start_pos,
-                    display=FormattedText([
-                        ("#5bc8ff", f"{name:<24}"),
-                        ("#888888", f"  {desc}"),
-                    ]),
-                )
-            )
-        return results
-
+# ---- 斜杠命令注册表与补全器（已迁至 agent/ui/slash_completer.py）----
+# RichCLI 自身职责是渲染与交互循环，命令清单/候选补全属于另一件事；拆出后
+# 此处以别名重新导入，既有调用点、`from agent.ui.cli import SLASH_COMMANDS`
+# 与测试/文档引用路径全部不变。
+# @author aceFelix
+from agent.ui.slash_completer import (  # noqa: F401
+    SLASH_COMMANDS,
+    SlashCompleter as _SlashCompleter,
+    tool_voice_desc as _tool_voice_desc,
+)
 
 # Ctrl+V 贴图回调：由 main.repl() 启动时注入（读剪贴板图片加入待发送列表）。
 # 放在模块级供 _make_pt_bindings 的按键回调调用，避免 ui 层反向依赖 core 层。
@@ -944,6 +584,33 @@ class RichCLI(UIProtocol):
             self._console.print(text, style="dim")
         else:
             print(f"[info] {text}")
+
+    def notify_reminder(self, text: str) -> None:
+        """从后台线程（Scheduler 到期回调）安全播报一条定时提醒。
+
+        与 info()/warn() 的关键区别：本方法极可能在 prompt_toolkit 正持有
+        屏幕时被调用——直接 print 会把输入行顶掉、文字叠在提示符上。因此
+        打印后调用 app.invalidate()，让 prompt_toolkit 把提示符重绘到输出
+        下方；无 PT 会话（非交互 / 管道）时退化为普通打印。
+
+        绝不抛异常：调用方是调度器后台线程，那里一次 UI 故障不能拖停后续
+        所有提醒。宿主 CliReminderHost 另有兜底。
+
+        @author aceFelix
+        """
+        try:
+            self._end_assistant_line()
+            if self._console:
+                # 前置换行：确保提醒另起一行，不与正在输入的行共用行底
+                self._console.print(f"\n⏰ {escape(text)}", style="bold cyan")
+            else:
+                print(f"\n[提醒] {text}")
+            session = getattr(self, "_pt_session", None)
+            app = getattr(session, "app", None) if session is not None else None
+            if app is not None:
+                app.invalidate()
+        except Exception:
+            pass
 
     def warn(self, text: str) -> None:
         """黄字警告。text 是外部动态文本（子命令 stderr、异常消息等），

@@ -7,6 +7,7 @@ Agent 运行时是 J.A.R.V.I.S 的"大脑"，负责驱动整个对话循环、�
 | 组件 | 文件 | 职责 |
 |---|---|---|
 | **QueryLoop** | [query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py) | Agent 主循环：用户输入→LLM流→工具调用→回灌→再调 |
+| **工具 schema 下发决策** | [tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py) | 延迟加载分组 + 纯聊天零工具（纯函数，2026-10 从 query_loop.py 拆出；QueryLoop 保留薄委托） |
 | **ToolOrchestrator** | [orchestrator.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/orchestrator.py) | 工具编排：权限校验、并发分组、执行、结果收集 |
 | **Tool 协议** | [tool.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool.py) | Tool 基类、ToolRegistry、PermissionMatcher |
 | **Message** | [message.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/message.py) | 消息/内容块数据结构 |
@@ -170,7 +171,12 @@ async for event in self._provider.stream(...):
 ### 防护机制
 
 - **max_iterations**（默认 25）：防止无限循环
-- **abort_event**：用户 Ctrl+C 中断（优雅退出本轮并重置事件）
+- **abort_event**：用户 Ctrl+C 中断（优雅退出本轮并重置事件）。`_stream_once()` **逐个
+  流式事件**检查该标志，置位即抛 `CancelledError` 并 `aclose()` 关闭流；否则长思考流
+  要跑完一轮才轮到下一轮循环顶部的检查，而语音模式 SIGINT 只置标志不抛异常（见
+  [06-语音系统](06-语音系统.md)），Ctrl+C 会形同失效。被中断的残缺轮不入历史，
+  以免半截 `tool_use` 悬空（详见
+  [fixlogs/agent-loop-stall-fix](../fixlogs/agent-loop-stall-fix.md)）
 - **空回复保护**：空 assistant 消息不加入历史，避免污染后续请求
 - **单轮失败不炸主循环**：错误回灌给模型让它自我修正
 - **网络重试**：网络错误每轮自动重试 1 次
@@ -291,6 +297,15 @@ registry.all_deferred()  # deferred=True 的延迟工具池（需 ToolSearch 发
 
 **延迟加载（deferred）**：除核心工具外的工具不随每次请求发送完整 schema，模型需通过
 `ToolSearchTool` 发现后才能调用（通用 Harness 架构的延迟加载思路），减少每次请求的 token 开销。
+
+分组与抑制策略集中在
+[`tool_dispatch.build_tool_defs()`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py)：
+纯聊天（短问候且无动作意图关键词、历史里无 `tool_use`）本轮 0 工具下发；判定取保守策略
+——“宁可多发不可漏发”，误判为纯聊天会让模型发的文本态工具调用被全量过滤，表现为
+“思考完就停止”（见
+[`docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)）。
+关键词表与上限（`ACTION_KEYWORDS` / `CHAT_ONLY_MAX_CHARS`）均为模块级常量，便于按案例调整；
+回归测试：`tests/test_tool_dispatch.py`。
 
 **为什么可选依赖静默跳过**：用户可能只装核心包，不应该因为缺 playwright 就无法启动。
 

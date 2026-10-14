@@ -440,10 +440,24 @@
 ### 17.6 日程提醒提示词条件化（2026-10）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
-| T-SP-001 | 终端不注入提醒段 | 终端 REPL 说"提醒我明天上午开会" | system prompt 不含「# 日程提醒」；Jarvis 不反复 ToolSearch 搜 ScheduleReminder，而是如实说明终端暂不支持 |
-| T-SP-002 | 桌面注入提醒段 | 桌面壳启动后查看（或问"我有什么提醒"） | 含「# 日程提醒」，ScheduleReminder/ListSchedule/CancelSchedule 可用 |
+| T-SP-001 | 未注册时不注入提醒段 | 临时构造不含 `ScheduleReminder` 的 registry 调 `build_system_prompt` | system prompt 不含「# 日程提醒」，模型不会追着不存在的工具空转 |
+| T-SP-002 | 已注册时注入提醒段 | 桌面壳 / serve / **终端 REPL** 启动后问"我有什么提醒" | 含「# 日程提醒」，ScheduleReminder/ListSchedule/CancelSchedule/AcknowledgeReminder 可用 |
 | T-SP-003 | ToolSearch 未命中兜底 | 调 ToolSearch 搜不存在的工具 | 返回含"该能力可能未注册…不要继续反复搜索"兜底提示 |
 | T-SP-004 | 自动化回归 | `pytest tests/core/test_system_prompt.py tests/test_core_tools.py -q` | 全绿（含 TestScheduleSectionConditional、test_no_match_hints_against_retry） |
+
+> 口径变更（2026-10-14）：终端 REPL / 语音此前不注册提醒工具，T-SP-001 曾以「终端如实说明
+> 暂不支持」为通过标准。现终端由 `CliReminderHost` 装配，**终端走 T-SP-002**，T-SP-001 退化
+> 为纯单元口径（用空 registry 验证条件注入本身）。详见
+> [agent-loop-stall-fix.md](../fixlogs/agent-loop-stall-fix.md)。
+
+### 17.7 终端提醒宿主与流式中断（2026-10-14）
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-SP-005 | 终端安排提醒 | `jarvis` 里说"明天中午12点提醒我有一场面试" | 一次 `ScheduleReminder` 调用即完成，不反复 ToolSearch、不用 schtasks/VBS 手搓定时任务 |
+| T-SP-006 | 到点在终端播报 | 设一个 1 分钟后的提醒，等待触发（此时可正在输入下一句） | 终端出现 `⏰` 提醒行，且输入提示符重绘到提醒下方，不顶乱正在输入的行 |
+| T-SP-007 | 长思考流中 Ctrl+C | 触发一段长时间思考后按 Ctrl+C | 一轮内即停止（不必等本轮流结束），已输出内容换行收尾，残缺的 tool_use 不写入历史 |
+| T-SP-008 | 提醒仅进程存活期 | 设提醒后退出 jarvis，再重启 | 未到期任务重启后仍会按时触发；错过超 1 小时的一次性任务不轰炸（直接标 fired） |
+| T-SP-009 | 自动化回归 | `pytest tests/test_cli_reminder.py tests/test_agent_loop_guard.py -q` | 全绿（宿主注册/幂等/UI 异常吞掉 + 流式事件级中断守卫） |
 
 ---
 

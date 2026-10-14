@@ -206,6 +206,26 @@ async def repl(settings: Settings) -> int:
     if plan_tool_count > 0 and settings.verbose:
         ui.info(f"✓ 规划模式工具已注册（{plan_tool_count} 个）")
 
+    # 定时提醒宿主：把桌面已有的 ScheduleReminder 能力对齐到 CLI/语音端。
+    # 此前这批工具只在 agent/serve/app.py 里注册，纯 CLI 说「提醒我」时
+    # ToolSearch 根本找不到工具，模型会转去手搜 Register-ScheduledTask 绕道
+    # 实现，思考撞穿 max_tokens 后空转（详 docs/fixlogs/agent-loop-stall-fix.md）。
+    # 局限：仅在进程存活期间触发，CLI 关闭后不会提醒（常驻提醒请用桌面版）。
+    # @author aceFelix
+    from agent.core.daemon.cli_reminder import CliReminderHost
+
+    reminder_host = CliReminderHost(
+        notify=getattr(ui, "notify_reminder", None) or ui.info
+    )
+    try:
+        reminder_host.start()
+        reminder_tool_count = reminder_host.register_tools(registry)
+        if reminder_tool_count > 0 and settings.verbose:
+            ui.info(f"✓ 日程提醒工具已注册（{reminder_tool_count} 个）")
+    except Exception as e:
+        if settings.verbose:
+            ui.warn(f"日程提醒初始化失败（本轮不提供定时提醒）: {e}")
+
     # LSP 集成
     lsp_tool_count = 0
     if settings.enable_lsp and settings.lsp_servers:
@@ -518,6 +538,12 @@ async def repl(settings: Settings) -> int:
     _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
                session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated,
                settings=settings)
+
+    # 先收提醒调度线程再告别：避免 goodbye 之后还有后台播报插进来
+    try:
+        reminder_host.stop()
+    except Exception:
+        pass
 
     ui.goodbye()
     # 清理 MCP 连接（静默处理 anyio cancel scope 错误）

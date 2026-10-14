@@ -22,7 +22,7 @@ from agent.core.policy.loop_detect import (
     check_tool_loop,
 )
 from agent.core.message import Message
-from agent.llm.base import Stop, TextDelta, ToolCall, ToolCallEnd, Usage
+from agent.llm.base import Stop, TextDelta, ThinkingDelta, ToolCall, ToolCallEnd, Usage
 
 from tests._query_loop_fakes import (
     FakeOrchestrator,
@@ -213,3 +213,87 @@ async def test_orchestrator_escalates_repetitive_allow_to_ask():
     res = await orch.execute_calls([tu], ctx)
     assert "权限拒绝" in res[0].content
     assert ui.questions and "原地打转" in ui.questions[0]
+
+
+# ---------- Ctrl+C 流式打断 ----------
+
+class _AbortingProvider:
+    """流式吐出若干思考增量，中途自行置 abort 标志，模拟用户按 Ctrl+C。
+
+    语音模式的 SIGINT 处理器只置标志、不抛异常，_poll_interrupt 线程把
+    stop_event 转成 ctx.abort_event；本桩用于验证 query_loop 能在流式过程
+    中看到这个标志并立即收口。
+
+    @author aceFelix
+    """
+
+    default_model = "fake-model"  # QueryLoop 未显式传 model 时的兜底来源
+
+    def __init__(self, n_events: int, abort_after: int) -> None:
+        self.n_events = n_events
+        self.abort_after = abort_after
+        self.abort_event = None  # 测试注入 ctx.abort_event
+        self.stream_calls = 0
+        self.consumed = 0
+        self.closed = False
+
+    async def stream(self, *, model, system, messages, tools,
+                     max_tokens=4096, temperature=None):
+        """逐个产出思考增量；到达指定序号后置 abort，关闭时记 closed。"""
+        self.stream_calls += 1
+        try:
+            for i in range(self.n_events):
+                self.consumed += 1
+                yield ThinkingDelta(text=f"思考{i}")
+                if i + 1 == self.abort_after:
+                    self.abort_event.set()
+        finally:
+            self.closed = True
+
+    def set_thinking_enabled(self, enabled: bool) -> None:
+        pass
+
+    def is_thinking_enabled(self) -> bool:
+        return False
+
+
+@pytest.mark.asyncio
+async def test_abort_cuts_stream_mid_thinking(registry):
+    """思考流中途置 abort → 当轮立即终止，不再消费后续事件。
+
+    修复前：_stream_once 只在流自然结束后返回，abort_event 要到下一轮
+    循环顶部才被检查，而深度思考一轮流式可跑数十秒——Ctrl+C 形同失效。
+    """
+    prov = _AbortingProvider(n_events=50, abort_after=2)
+    ctx, _messages = make_ctx()
+    prov.abort_event = ctx.abort_event
+    loop = make_loop(prov, FakeOrchestrator(), registry)
+
+    stats = await loop.run("明天中午提醒我面试", ctx)
+
+    assert stats.stopped_reason == "aborted"
+    # 第 3 个事件到达时才发现标志已置位，其余 47 个事件不再消费
+    assert prov.stream_calls == 1
+    assert prov.consumed == 3
+    # 异步生成器被显式 aclose，底层连接不残留
+    assert prov.closed is True
+
+
+@pytest.mark.asyncio
+async def test_abort_leaves_no_dangling_assistant_turn(registry):
+    """被打断的残缺轮不得入历史，abort_event 需复位以便下一轮正常运行。
+
+    残缺 assistant 轮可能带半截 tool_use，一旦入历史会让该会话后续所有
+    请求被 API 拒收（悬空 tool_use）。
+    """
+    prov = _AbortingProvider(n_events=20, abort_after=1)
+    ctx, messages = make_ctx()
+    prov.abort_event = ctx.abort_event
+    loop = make_loop(prov, FakeOrchestrator(), registry)
+
+    stats = await loop.run("说点什么", ctx)
+
+    assert stats.stopped_reason == "aborted"
+    assert not any(m.role == "assistant" for m in messages)
+    # run() 已重绑新的 abort_event，残留标志不会跳过后续轮次
+    assert not ctx.abort_event.is_set()
