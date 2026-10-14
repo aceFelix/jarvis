@@ -18,6 +18,7 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
+from agent.core.policy import policy_gate
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.tool import Tool, ToolRegistry
 from agent.core.tool_pairing import REASON_ORPHAN, make_placeholder_result
@@ -82,8 +83,11 @@ class ToolOrchestrator:
                     ctx.ui.warn(f"模型调用了未知工具: {tu.name}")
                 continue
 
-            # 权限校验
+            # 权限校验：五层管线结论后再过 W1 运行时层闸门
+            # （授权租约→away 分流；DENY 不可放宽，fail-closed）
+            # @author aceFelix
             perm = self._checker.check(tool, tu.input, ctx)
+            perm = policy_gate(tool, tu.input, ctx, perm)
             decision = await self._resolve_permission(perm, tool, tu, ctx)
             if decision.behavior == PermissionBehavior.DENY:
                 reason = decision.reason or "权限拒绝"

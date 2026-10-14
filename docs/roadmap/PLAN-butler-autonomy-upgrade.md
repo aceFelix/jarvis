@@ -1,6 +1,8 @@
 # 管家形态升级计划（阶段 8–11）：从被动执行器到主动且可信的代理
 
-> 状态：**待评审**（本文档只做设计、排依赖、切片，不代表已开工）。
+> 状态：**W1（阶段 8）已开发完成**（分支 `feat/stage8-policy`，落地复盘见
+> [16-W1判断层](../architecture/16-W1判断层.md)），W2–W4 仍为设计待评审（本文档只做
+> 设计、排依赖、切片，不代表已开工）。
 > 定位：既有的 P1/P2/P3 清单是"能力愿望单"，本文档回答一个更前置的问题——
 > **已有的零件（调度器/感知器/记忆/审计/沙箱）之间缺哪几个接口，才能让"主动陪伴"和"无人值守"真的成立。**
 >
@@ -42,7 +44,7 @@
 ```
    感知层 W2（事件）            判断层 W1（闸门）             兑现层 W3（行动）
  ┌─────────────────┐        ┌──────────────────┐        ┌──────────────────┐
- │ 时钟（已有）      │        │ 策略引擎          │        │ 任务脊柱          │
+ │ 时钟（已有）      │        │ 规则放宽          │        │ 任务脊柱          │
  │ 摄像头（已有）    │──事件──▶│ 授权租约          │──放行──▶│ （目标/步骤/条件） │
  │ 前台窗口  新增    │        │ 打扰预算/重要度    │        │ 副作用账本 + 撤销  │
  │ 文件·仓库  新增   │        │ 无人值守模式       │        │ /undo 与事后简报   │
@@ -59,6 +61,18 @@
 
 ## 2. W1 · 判断层：确定性策略引擎 + 打扰预算（前置闸门）
 
+> ✅ 本节已于阶段 8 落地（`agent/core/policy/`）：授权租约、打扰预算五步
+> 闸门、/away 无人值守待批清单全部实现并有单测。
+> **2026-10 降级合并修订**：初版实现的策略引擎（engine.py + policy.yaml
+> 四态规则）在人工实测复盘后认定为与五层管线平行重复的过度设计，已删除
+> ——本节 ① 的声明式能力（allow 放宽 ASK + path_within 路径作用域）改进
+> 了管线本身（`permissions/checker.py` + `permissions.yaml`），而不是另套
+> 一层；dry_run 随引擎删除退出本期（工具层真拦截归 W3.2 副作用账本）。
+> 与设计的其余差异：away 视觉事件源（人脸离开）留给 W2；待批重放执行
+> 留给 W3。**2026-10 实测补丁**：/away 会压制沙箱中风险自动放行（升级
+> 待批），避免"mv 重命名做了、后续 FileEdit 被拦"的半完成状态。实现
+> 口径详见 [16-W1运行时层](../architecture/16-W1判断层.md)。
+
 ### 2.1 现状与问题
 
 - 高风险操作的确认目前由 **instructions 引导模型自行判断**（`realtime_talk.default_instructions()` 与
@@ -69,6 +83,11 @@
 ### 2.2 设计
 
 **① 策略表（policy-as-code）** — 新增 `agent/core/policy/engine.py`，规则源 `~/.jarvis/policy.yaml`：
+
+> ⚠️ 降级合并修订：本小节按原设计落地后已回退。复盘结论：用户不会为了
+> 免确认再学一套平行规则 DSL，且其能力permissions.yaml 可以表达——正确做
+> 法是优化五层管线。下列设计意图由 `permissions.yaml` 带 spec 的 allow
+> 规则 + 路径归一匹配承接（effect 对应 allow/ask/deny，dry_run 归 W3.2）。
 
 ```yaml
 rules:
@@ -86,9 +105,9 @@ rules:
     effect: deny
 ```
 
-- 与既有五层管线的关系：策略引擎**不改动既有语义**，作为规则来源接入同一套合并语义
-  （`DENY > ASK > ALLOW`），默认值仍 fail-closed。
-- 效果取值：`allow` / `ask` / `deny` / `dry_run`（dry_run 是新增语义，见 W3.2）。
+- 与既有五层管线的关系（已按降级合并修正）：不再新增平行规则源，而是
+  补齐管线缺失的放宽语义：带 spec 的 allow 规则命中可放宽工具默认/特判
+  ASK（旧 `_stricter` 只收紧，allow 永远压不过 ASK），默认值仍 fail-closed。
 
 **② 授权租约（lease）** — `agent/core/policy/lease.py`，落盘 `~/.jarvis/leases.json`：
 
@@ -120,14 +139,14 @@ rules:
 
 | 文件 | 改动 |
 |---|---|
-| `agent/core/policy/engine.py`（新增） | 策略匹配 + 效果判定，接入既有权限合并语义 |
+| ~~`agent/core/policy/engine.py`~~（已删除） | 降级合并：声明式规则改进管线 `agent/permissions/checker.py`（`_relax_by_rule` + `path_match.py`） |
 | `agent/core/policy/lease.py`（新增） | 租约签发/校验/过期/撤销 |
 | `agent/core/policy/budget.py`（新增） | 打扰预算 + 重要度评分 + 聚合/静默 |
 | `agent/core/daemon/proactive.py` | `on_notify` 前插入 budget 过滤；away mode 分流 |
-| `agent/permissions/*` | 规则来源扩展（不改合并语义） |
+| `agent/permissions/*` | 规则放宽语义升级（带 spec allow 可放宽 ASK）+ 路径归一匹配 |
 | `agent/ui/workbench/engine.py` | 待批清单面板 + 租约管理 |
-| `agent/config/settings.py` + `configs/permissions.yaml` | `[policy]` / `[proactive.notify_budget]` 配置项 |
-| `tests/core/test_policy_engine.py`（新增） | allow/ask/deny/dry_run 四态 × 租约命中/过期 |
+| `agent/config/settings.py` + `configs/permissions.yaml` | `[policy]` 配置项（运行时层字段）与放宽规则示例注释 |
+| `tests/test_permissions_relax.py`（新增） | allow 放宽/保守红线/路径 glob 回归 |
 
 ### 2.4 验收
 
@@ -138,7 +157,8 @@ rules:
 
 ### 2.5 风险
 
-规则漏配导致误放行 → 策略引擎默认 fail-closed，未命中任何规则时回落到既有管线结论。
+规则漏配导致误放行 → 管线默认 fail-closed（未命中任何 allow 就问用户），
+且保守红线不放开：DENY 永不可放宽、裸工具名 allow 不能放宽工具特判 ASK。
 
 ---
 
@@ -307,7 +327,7 @@ class PerceptEvent:
 
 | 阶段 | 内容 | 规模 | 新增依赖 | 依赖前置 |
 |---|---|---|---|---|
-| **W1** 判断层 | 策略引擎 + 租约 + 打扰预算 + away mode | M | 无 | — |
+| **W1** 判断层 | 管线规则放宽（降级合并）+ 租约 + 打扰预算 + away mode | M | 无 | — |
 | **W2** 感知层 | 事件总线 + 4 个新事件源 | M | 无（IMAP 用标准库 `imaplib`） | W1 |
 | **W3** 兑现层 | 任务脊柱 + 副作用账本 + `/undo` | L | 无 | W1、W2（条件等待需要事件） |
 | **W4** 体验补齐 | tool-RAG + 手口分离 + 结构化记忆 | M | 无 | W3（异步回报复用任务脊柱） |
@@ -324,7 +344,7 @@ class PerceptEvent:
 
 ## 7. 里程碑验收总表
 
-- [ ] W1：策略四态可解释 + 租约过期即回 `ask` + 静默时段聚合 + 权限零回归
+- [ ] W1：放宽判定确定可解释 + 租约过期即回 `ask` + 静默时段聚合 + 权限零回归
 - [ ] W2：四类事件各产出恰好一条聚合提醒 + 常驻 CPU < 1% + 单源故障隔离
 - [ ] W3：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
 - [ ] W4：按轮挂 ≤12 工具时建响应 < 1s + 语音说"帮我查一下 XX"能异步拿到结果 + 记忆带时效与出处
@@ -339,7 +359,7 @@ class PerceptEvent:
 | 2 | 是否允许常驻后台事件源默认开启？ | 隐私与体验的权衡；建议"安装后首次询问 + 逐源开关" |
 | 3 | 邮件集成方式：IMAP 只读轮询/IDLE，还是走既有邮件工具的 API 通道？ | 决定 W2 的实现复杂度与权限提示频率 |
 | 4 | 重要度评分是否引入本地小模型？ | 纯规则省资源但笨；小模型更准但增依赖与常驻占用 |
-| 5 | W1 效果语义 `dry_run` 是否同时用于工具层（而不只是通知层）？ | 影响与既有五层权限管线的耦合面 |
+| 5 | ~~W1 效果语义 `dry_run` 是否同时用于工具层（而不只是通知层）？~~ 已定：随策略引擎降级合并退出 W1，工具层真拦截与副作用账本归 W3.2 | 影响与既有五层权限管线的耦合面 |
 
 ---
 

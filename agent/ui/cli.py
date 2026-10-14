@@ -20,6 +20,7 @@ from agent.core.context import UIProtocol
 try:
     from rich.console import Console, ConsoleDimensions
     from rich.live import Live
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.prompt import Prompt
     from rich.text import Text
@@ -149,6 +150,10 @@ SLASH_COMMANDS = [
     ("/help",       "查看所有命令帮助"),
     ("/h",          "查看帮助（/help 简写）"),
     ("/mode <m>",   "切换权限模式 (default/plan/accept_edits/yolo)"),
+    ("/away",        "进入无人值守（确认类操作拒绝并入待批清单）"),
+    ("/back",        "结束 away（播报待批清单简报并清空）"),
+    ("/pending",     "查看无人值守待批清单"),
+    ("/lease",       "授权租约（/lease 列表 | revoke <id> | <工具名> [路径] [分钟] 签发）"),
     ("/model <前缀>","前缀匹配切换模型（支持模糊输入）"),
     ("/models",     "交互式选择或添加模型"),
     ("/reset",      "清空对话历史，重新开始"),
@@ -572,10 +577,21 @@ class RichCLI(UIProtocol):
         每次 update 都会把整帧内容追加输出——思考流每秒十几次刷新，
         屏幕瞬间被重复递增的面板刷满。因此非交互终端降级为静态模式：
         只累积缓冲，思考结束时一次性打印面板。
+
+        防空面板（2026-10-14 二次修复）：模型思考块开头常先流式吐纯换行
+        增量。首版修复只延迟了面板启动，但 Live 帧显示的是缓冲**开头**——
+        一旦可见文字到达，面板从此固定在「前导空白 + 开头 800 字」，后续
+        增量只增长不可见的尾部（vertical_overflow=ellipsis 截断），终端最
+        低位窗口够不到新内容，12fps 自动刷新仍把近似的空面板刷满屏幕。
+        根治在 _thinking_panel：去前导空白 + 无界缓冲改显式尾部窗口（永远
+        显示最新一段思考），面板高度有界，Live 原地擦回不再产生空帧。
         """
         self._thinking_buf += text
 
         if not self._thinking_started:
+            # 纯空白增量不启动：继续静默累积，等第一段可见文本到达再开面板
+            if not self._thinking_buf.strip():
+                return
             self._thinking_started = True
             if self._console and _HAS_RICH and self._console.is_terminal:
                 self._thinking_live = Live(
@@ -592,12 +608,32 @@ class RichCLI(UIProtocol):
         else:
             # 流式更新：新文本到了，刷新 Live 面板（静态模式下无 Live，仅累积）
             if self._thinking_live is not None:
-                self._thinking_live.update(self._thinking_panel())
+                self._thinking_live.update(self._thinking_panel(windowed=True))
 
-    def _thinking_panel(self) -> Panel:
-        """生成当前思考内容的 Rich Panel。"""
-        display = self._thinking_buf
+    # Live 帧面板的最大可视行数：思考流是无限长的，必须做尾部滚动窗口，
+    # 否则面板随缓冲增长超出终端高度，ellipsis 截断后终端永远显示开头段
+    # （开头段常年是前导换行→空面板刷屏），且 Live 也无法原地擦回。
+    _THINKING_MAX_LINES = 12
+
+    def _thinking_panel(self, windowed: bool = False) -> Panel:
+        """生成当前思考内容的 Rich Panel。
+
+        Args:
+            windowed: True=Live 帧专用，额外做尾部滚动窗口（面板高度有界，
+                永远显示最新一段思考）；False=静态模式终帧，打印完整思考
+                内容（一次性输出，无刷屏风险，供事后回看）。
+        """
+        # 去掉前导空白：思考块开头几乎总是纯换行，留着会把可见文字顶出
+        # 终端可视区，渲染出一框空白（2026-10-14 空面板刷屏的真实根因）
+        display = self._thinking_buf.lstrip("\n")
+        if windowed:
+            # 显式尾部窗口：只保留最后 _THINKING_MAX_LINES 行，面板高度有界，
+            # Live 每次刷新都能看到最新文字在原地滚动
+            lines = display.split("\n")
+            if len(lines) > self._THINKING_MAX_LINES:
+                display = "...（前略）\n" + "\n".join(lines[-self._THINKING_MAX_LINES:])
         if len(display) > 1200:
+            # 行数少但单行超长的兜底，防止一行巨长文本撑爆面板
             display = display[:800] + "\n... [思考继续] ...\n" + display[-250:]
         return Panel(
             Text(display, style="dim #6a7a8a"),
@@ -615,6 +651,8 @@ class RichCLI(UIProtocol):
         静态模式（非交互终端）：此刻才一次性打印面板，避免流式刷屏。
         """
         if not self._thinking_started:
+            # 未启动（整段都是空白增量）：兜底清空缓冲，不输出任何面板
+            self._thinking_buf = ""
             return
         self._thinking_started = False
 
@@ -908,24 +946,46 @@ class RichCLI(UIProtocol):
             print(f"[info] {text}")
 
     def warn(self, text: str) -> None:
+        """黄字警告。text 是外部动态文本（子命令 stderr、异常消息等），
+        必须先 escape 再拼标记——否则 `[=<n>[/<m>]]` 这类内容会被 Rich
+        当标记解析直接抛 MarkupError（同 ask_user 的方括号吞字问题，
+        /diff 非 git 目录崩溃案，2026-10）。
+        @author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"⚠️  {text}", style="yellow")
+            self._console.print(f"⚠️  {escape(text)}", style="yellow")
         else:
             print(f"[warn] {text}")
 
     def error(self, text: str) -> None:
+        """红字错误。同 warn：text 含异常/子进程输出等不可控内容，
+        先 escape 防止 Rich 标记解析崩溃。@author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"❌ {text}", style="bold red")
+            self._console.print(f"❌ {escape(text)}", style="bold red")
         else:
             print(f"[error] {text}", file=sys.stderr)
 
     def ask_user(self, prompt: str) -> str:
-        """阻塞式询问。"""
+        """阻塞式询问。
+
+        prompt 是外部动态文本（工具参数 JSON、权限 reason 等），必须先经
+        markup.escape 转义再拼进 Rich 标记——否则 Rich 会把 [y]/[a] 这类
+        方括号内容当作样式标签整体吞掉，导致确认提示行的按键名丢失；
+        JSON 数组的方括号同样会被误解析。
+
+        双冒号消除：Prompt.ask 渲染时会自动追加 ": " 后缀（且旧版/新版
+        rich 的 prompt_suffix 参数签名不兼容，不能显式传），故先去掉
+        prompt 自带的结尾 ": "，由默认后缀补回，任意 rich 版本显示一致。
+        @author aceFelix
+        """
         self._end_assistant_line()
         if self._console:
-            return Prompt.ask("[bold magenta]❓ " + prompt + "[/bold magenta]", console=self._console)
+            text = prompt[:-2] if prompt.endswith(": ") else prompt
+            return Prompt.ask(
+                "[bold magenta]❓ " + escape(text) + "[/bold magenta]",
+                console=self._console,
+            )
         return input(prompt + " ")
 
     # ---- RealtimeTalkUI 扩展实现 ----

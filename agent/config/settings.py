@@ -310,6 +310,18 @@ class Settings:
     checkpoint_max_per_session: int = 20   # 每会话检查点保留上限（超出修剪最旧）
     checkpoint_timeout_seconds: int = 10   # 单条 git 命令超时（秒）
 
+    # W1 运行时层（阶段 8，见 core/policy/）：授权租约 + 打扰预算 +
+    # 无人值守。挂在五层管线之后；声明式规则已并入管线 permissions.yaml。
+    # 旧字段 policy_enabled/policy_path 已随策略引擎废弃删除，旧配置残留
+    # 对应键静默忽略（白名单映射）。
+    # @author aceFelix
+    away_idle_minutes: int = 0             # 0=仅认手动 /away；>0 启用空闲推断自动 away
+    notify_budget_enabled: bool = True     # 打扰预算闸门（关闭=提醒不经预算直接播）
+    notify_daily_max: int = 10             # 每日主动播报上限
+    notify_quiet_hours: str = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）
+    notify_aggregate_window_s: int = 300   # 同源事件聚合窗口（秒）
+    notify_min_salience: float = 0.3       # 重要度门槛（低于此值只入库不播）
+
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
@@ -811,6 +823,27 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in checkpoint_table:
                 updates[field] = checkpoint_table[sub_key]
+    # [policy] 表 → W1 运行时层字段；嵌套 [policy.notify_budget] → 打扰预算
+    # enabled/path 两键已废弃（策略引擎并入管线），不再映射即静默忽略
+    # @author aceFelix
+    policy_table = data.get("policy", {})
+    if isinstance(policy_table, dict):
+        for sub_key, field in (
+            ("away_idle_minutes", "away_idle_minutes"),
+        ):
+            if sub_key in policy_table:
+                updates[field] = policy_table[sub_key]
+        budget_table = policy_table.get("notify_budget", {})
+        if isinstance(budget_table, dict):
+            for sub_key, field in (
+                ("enabled", "notify_budget_enabled"),
+                ("daily_max", "notify_daily_max"),
+                ("quiet_hours", "notify_quiet_hours"),
+                ("aggregate_window_s", "notify_aggregate_window_s"),
+                ("min_salience", "notify_min_salience"),
+            ):
+                if sub_key in budget_table:
+                    updates[field] = budget_table[sub_key]
     # [tools] 表 → 工具延迟加载字段
     tools_table = data.get("tools", {})
     if isinstance(tools_table, dict):

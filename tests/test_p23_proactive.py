@@ -4,6 +4,18 @@ from agent.core.daemon.scheduler import Scheduler, ScheduleTask
 from agent.core.daemon.deadline import DeadlineTracker
 from agent.core.daemon.proactive import ProactiveEngine, ProactiveConfig
 
+# 隔离真实用户状态：_dispatch_notify 会读 ~/.jarvis/policy_state.json 的 away
+# 标志（无人值守暂缓播报），用户正在 /away 时跑测试会误判为功能失败。
+# 把状态单例钉到临时文件，保证脚本结果与用户机器状态无关。
+# @author aceFelix
+import tempfile
+from pathlib import Path
+
+from agent.core.policy import state as _state_mod
+
+_tmp_state_path = Path(tempfile.mkdtemp()) / "policy_state.json"
+_state_mod._state_singleton = _state_mod.PolicyStateStore(_tmp_state_path)
+
 print("=" * 50)
 print("P2-3 主动提醒系统 - 集成验证")
 print("=" * 50)

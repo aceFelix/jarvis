@@ -682,6 +682,12 @@ def main(argv: list[str] | None = None) -> int:
         if _last:
             settings = settings.with_overrides(workdir=_last)
 
+    # W1 判断层启动接线：最终 settings 快照注入 policy 模块（CLI 与 serve
+    # 都经 main() 进入，daemon 子进程同样受益）；未注入时 policy_gate
+    # 用安全缺省，行为全回落既有管线。@author aceFelix
+    from agent.core.policy import init_policy
+    init_policy(settings)
+
     # 切到工作目录（不存在则自动创建）
     try:
         os.makedirs(settings.workdir, exist_ok=True)

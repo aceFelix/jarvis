@@ -30,7 +30,6 @@ from typing import Any, Callable
 from agent.core.daemon.scheduler import Scheduler, ScheduleTask
 from agent.core.daemon.deadline import DeadlineTracker
 
-
 # ---------------------------------------------------------------------------
 # 配置数据类
 # ---------------------------------------------------------------------------
@@ -100,6 +99,7 @@ class ProactiveEngine:
         calendar_source: Any | None = None,
         monitor: Any | None = None,
         on_notify: Callable[[str], None],
+        budget: Any | None = None,
     ) -> None:
         """
         Args:
@@ -109,6 +109,10 @@ class ProactiveEngine:
             calendar_source: CalendarSource 实例（可选）。
             monitor: SystemMonitor 实例（可选，用于简报中的系统状态）。
             on_notify: 通知回调。接收组装好的文本，由 daemon 负责播报。
+            budget: W1 打扰预算（NotifyBudget，可选）。传入后所有播报
+                统一过闸：静默时段/低重要度只入库，窗口内同源聚合，
+                超日预算丢弃；away 期间一律暂缓（不对空房间说话）。
+                @author aceFelix
         """
         self._scheduler = scheduler
         self._config = config
@@ -116,6 +120,7 @@ class ProactiveEngine:
         self._calendar_source = calendar_source
         self._monitor = monitor
         self._on_notify = on_notify
+        self._budget = budget
         self._started = False
         # 注册的任务 ID（stop 时取消）
         self._task_ids: list[str] = []
@@ -274,14 +279,62 @@ class ProactiveEngine:
         """判断任务是否是 ProactiveEngine 注册的（用于 daemon 分发）。"""
         return task.note in (_BRIEFING_NOTE, _DEADLINE_NOTE, _CALENDAR_NOTE, _PROFILE_MAINT_NOTE)
 
+    # ---- 通知出口（W1 预算闸门）----
+
+    def _dispatch_notify(self, source: str, text: str, *, dedup_key: str = "",
+                         urgency: float = 0.6) -> bool:
+        """所有主动播报的唯一出口：先过打扰预算，再走 on_notify。
+
+        返回是否真正播报。未播 reasons（静默/聚合/预算外/away）由预算模块
+        给解释文本，落 daemon 日志可审计；积压在静默时段结束后聚合一条。
+        未注入 budget 时保持旧行为直接播报（向后兼容）。
+        @author aceFelix
+        """
+        import logging
+
+        logger = logging.getLogger("jarvis.proactive")
+        # away 分流：人不在，播报全部暂缓入库（TTS 不对空房间说话）
+        try:
+            from agent.core.policy import get_policy_state
+
+            away, _ = get_policy_state().is_away()
+        except Exception:
+            away = False
+        if self._budget is not None:
+            try:
+                if away:
+                    action = self._budget.gate(text, source, dedup_key=dedup_key,
+                                               urgency=urgency)
+                    # 再入库一份带 away 标记的：gate 可能已聚合/冲刷，保守起见
+                    # away 时直接降级为 queue 语义（不入 pending 也不丢信息）
+                    if action.kind == "emit":
+                        from agent.core.policy.budget import NotifyAction
+
+                        action = NotifyAction("queue", text, "无人值守，暂缓入库")
+                else:
+                    action = self._budget.gate(text, source, dedup_key=dedup_key,
+                                               urgency=urgency)
+                if not action.should_emit:
+                    logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
+                    return False
+                self._on_notify(action.text)
+                return True
+            except Exception as e:
+                logger.warning("打扰预算异常，降级直接播报: %s", e)
+        elif away:
+            logger.info("无人值守，跳过播报[%s]", source)
+            return False
+        self._on_notify(text)
+        return True
+
     # ---- 每日简报 ----
 
     def _fire_briefing(self) -> None:
-        """生成并播报每日简报。"""
+        """生成并播报每日简报（经打扰预算闸门）。"""
         try:
             briefing = self._build_briefing()
             if briefing:
-                self._on_notify(briefing)
+                self._dispatch_notify("briefing", briefing, urgency=0.9)
         except Exception:
             pass  # 简报生成失败不影响 daemon
 
@@ -377,21 +430,21 @@ class ProactiveEngine:
     # ---- 截止日期检查 ----
 
     def _fire_deadline_check(self) -> None:
-        """检查截止日期并播报提醒。"""
+        """检查截止日期并播报提醒（经打扰预算闸门）。"""
         if not self._deadline_tracker:
             return
         try:
             messages = self._deadline_tracker.check_today()
             if messages:
                 text = "📋 截止日期提醒：\n" + "\n".join(messages)
-                self._on_notify(text)
+                self._dispatch_notify("deadline", text, urgency=0.8)
         except Exception:
             pass
 
     # ---- 日历检查 ----
 
     def _fire_calendar_check(self) -> None:
-        """检查即将到来的日历事件并提前提醒。"""
+        """检查即将到来的日历事件并提前提醒（经打扰预算闸门）。"""
         if not self._calendar_source:
             return
         try:
@@ -400,7 +453,7 @@ class ProactiveEngine:
             )
             if upcoming:
                 text = "📆 日程提醒：\n" + "\n".join(f"  • {ev}" for ev in upcoming)
-                self._on_notify(text)
+                self._dispatch_notify("calendar", text, urgency=0.85)
         except Exception:
             pass
 

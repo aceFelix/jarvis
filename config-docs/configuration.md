@@ -130,6 +130,30 @@ enable_thinking = true
 
 ---
 
+## W1 运行时层（`[policy]`，阶段 8）
+
+授权租约 + 打扰预算 + 无人值守，挂在五层权限管线之后（DENY 不可放宽，
+away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零介入）。
+声明式免确认直接写 `permissions.yaml` 规则
+（带 spec 的 allow 可放宽工具 ASK，见 [04-权限系统](../docs/architecture/04-权限系统.md)）；
+机制详见 [16-W1 运行时层](../docs/architecture/16-W1判断层.md)。
+
+> 旧字段 `[policy] enabled` / `[policy] path`（策略引擎总开关与
+> `policy.yaml` 位置）已随 2026-10 降级合并删除，残留键静默忽略。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[policy] away_idle_minutes` | `0` | 0 = 仅认手动 `/away`；>0 启用空闲推断自动 away |
+| `[policy.notify_budget] enabled` | `true` | 打扰预算闸门（false = 提醒不经预算直接播） |
+| `[policy.notify_budget] daily_max` | `10` | 每日主动播报上限 |
+| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用） |
+| `[policy.notify_budget] aggregate_window_s` | `300` | 同源事件聚合窗口（秒） |
+| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值只入库不播） |
+
+相关命令：`/away` `/back` `/pending` `/lease`（见 [命令参考](../docs/guide/commands.md#权限控制)）。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |

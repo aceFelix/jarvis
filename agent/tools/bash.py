@@ -23,6 +23,7 @@ from agent.core.sandbox.audit import SandboxAuditor
 from agent.core.sandbox.executor import SandboxConfig, SandboxExecutor
 from agent.core.sandbox.risk_scorer import RiskLevel, RiskScorer
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
+from agent.permissions.modes import SANDBOX_AUTO_ALLOW_PREFIX
 from agent.permissions.shell_classifier import get_command_head
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,11 @@ class BashTool(Tool):
         auto_allow_medium = getattr(settings, "sandbox_auto_allow_medium", True) if settings else True
 
         if sandbox_enabled and auto_allow_medium and risk == RiskLevel.MEDIUM:
-            return PermissionResult.allow(f"沙箱已开启，中等风险命令自动放行（在沙箱内执行）")
+            # reason 前缀是跨层协议标记：/away 时 W1 闸门据此把这类
+            # 自动放行升级回 ASK 走待批（详见 permissions/modes.py）
+            return PermissionResult.allow(
+                f"{SANDBOX_AUTO_ALLOW_PREFIX} 沙箱已开启，中等风险命令在沙箱内执行"
+            )
 
         # unknown 一律 ASK（fail-closed）
         return PermissionResult.ask(f"需要确认命令: {cmd}")
