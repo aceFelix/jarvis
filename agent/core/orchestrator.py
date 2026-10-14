@@ -19,6 +19,7 @@ from agent.core.context import ToolContext
 from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
 from agent.core.policy import policy_gate
+from agent.core.policy.loop_detect import check_tool_loop
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.tool import Tool, ToolRegistry
 from agent.core.tool_pairing import REASON_ORPHAN, make_placeholder_result
@@ -88,6 +89,12 @@ class ToolOrchestrator:
             # @author aceFelix
             perm = self._checker.check(tool, tu.input, ctx)
             perm = policy_gate(tool, tu.input, ctx, perm)
+            # 空转循环检测：每次调用都记录签名（ASK/DENY 也记，保持窗口连续），
+            # 但只把 ALLOW 强制升级 ASK 拦刹车（ASK 自有人工环节，DENY 不动）。
+            # @author aceFelix
+            loop_msg = check_tool_loop(tool.name, tu.input)
+            if loop_msg and perm.behavior == PermissionBehavior.ALLOW:
+                perm = PermissionResult.ask(loop_msg)
             decision = await self._resolve_permission(perm, tool, tu, ctx)
             if decision.behavior == PermissionBehavior.DENY:
                 reason = decision.reason or "权限拒绝"

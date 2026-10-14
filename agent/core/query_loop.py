@@ -352,6 +352,19 @@ class QueryLoop:
             # 图片淘汰（仅活跃窗口，不影响冻结区）
             layered.evict_old_images()
 
+        # ── 截断续写熔断（2026-10-14 贪吃蛇空转案）──
+        # 新一轮任务开头复位空转检测窗口（只统计本轮调用序列，不跨轮误报）
+        from agent.core.policy.loop_detect import get_loop_detector
+        get_loop_detector().reset()
+
+        # 思考型模型在 max_tokens 预算内写不完「长思考 + 工具调用 JSON」时，
+        # 每轮都被截断 → 续写指令又诱导它用散文继续写代码 → 反复空转直至
+        # 烧满迭代。连续续写封顶 _MAX_CONTINUATIONS 次仍凑不出完整响应就
+        # 停下来向用户汇报，把决定权交还人。详见 docs/fixlogs/agent-loop-stall-fix.md。
+        # @author aceFelix
+        _MAX_CONTINUATIONS = 2
+        cont_streak = 0
+
         for iteration in range(self._max_iterations):
             if ctx.abort_event.is_set():
                 stats.stopped_reason = "aborted"
@@ -434,6 +447,18 @@ class QueryLoop:
             # 无正文无工具调用），见 docs/fixlogs/serve-mcp-truncation-fix.md。
             # @author aceFelix
             if isinstance(stop_event, Stop) and stop_event.reason in ("length", "max_tokens"):
+                cont_streak += 1
+                if cont_streak > _MAX_CONTINUATIONS:
+                    # 熔断：不再回灌续写指令，终止本轮，让用户决定是否
+                    # 提高 max_tokens / 换非思考模式 / 重述任务后继续。
+                    stats.stopped_reason = "truncation_fuse"
+                    if ctx.ui:
+                        ctx.ui.warn(
+                            f"输出连续 {cont_streak} 次被截断（思考占满了 max_tokens 预算），"
+                            "已熔断停止，避免无意义空转。"
+                            "建议：/config 提高 max_tokens（当前可能仅 4096）或简述任务后重试"
+                        )
+                    break
                 # 截断轮若已含 tool_use，必须补占位结果后再续写：provider 侧的
                 # JSON 容错会让残缺工具调用照样产出（anthropic_provider 对
                 # input_json 截断会补 } 或退化为 {"_raw": ...}），而这里不执行
@@ -447,7 +472,11 @@ class QueryLoop:
                         make_placeholder_results(truncated_uses, reason=REASON_TRUNCATED)
                     )
                 continuation.append(TextContent(
-                    text="[输出被截断，请从中断处继续，不要重复已输出的内容]"
+                    text=(
+                        "[输出被截断，请从中断处继续，不要重复已输出的内容。"
+                        "注意：成品（代码/文档）必须通过工具调用（如 FileWrite）交付，"
+                        "禁止在思考或正文里用散文继续写代码片段]"
+                    )
                 ))
                 if ctx.ui:
                     ctx.ui.warn("⚠ 输出被截断（max_tokens），自动续写...")
@@ -456,10 +485,14 @@ class QueryLoop:
 
             tool_uses = assistant_msg.get_tool_uses()
             if not tool_uses:
-                # 模型输出纯文本，本轮结束
+                # 模型输出纯文本，本轮结束（完整轮次 → 复位续写计数，
+                # 熔断只惩罚「连续」截断，不惩罚零星截断）
+                cont_streak = 0
                 stats.stopped_reason = stop_event.reason if isinstance(stop_event, Stop) else "stop"
                 break
 
+            # 正常推进（本轮产出了工具调用）→ 复位截断计数
+            cont_streak = 0
             # 执行工具
             stats.tool_calls += len(tool_uses)
             # 工具执行期退出（中断/异常）必须给这批 tool_use 留下配对结果：

@@ -744,7 +744,18 @@ def build_system_prompt(
             base,
             memory_section(workdir),
             _profile_section(settings),
-            f"# 会话记忆\n\n{session_mem}" if session_mem else "",
+            # 会话记忆标题内嵌使用守则：记忆是历史快照不是事实——防止
+            # agent 拿记忆里的旧断言（如“用户有一个 X 项目”）当必须核实的
+            # 悬案，反复全盘检索空转（2026-10-14 贪吃蛇案）。
+            # @author aceFelix
+            (
+                "# 会话记忆（历史快照，仅作线索）\n\n"
+                "以下内容为过往对话的摘要，其中提到的文件/项目/任务状态均未重新核实："
+                "1. 不要为了验证记忆里的断言而反复检索文件系统；"
+                "2. 用户当前指令与记忆冲突时，一律以当前指令为准；"
+                "3. 确实需要核实最多尝试一两次，找不到就直接按新任务从头做。\n\n"
+                f"{session_mem}"
+            ) if session_mem else "",
             skills_section(workdir),
             _env_section(workdir),
             _platform_section(),

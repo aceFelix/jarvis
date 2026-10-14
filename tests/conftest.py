@@ -33,6 +33,11 @@ def _isolate_policy_singletons(tmp_path):
     gate._settings = None
     gate._budget_singleton = None
 
+    # 空转检测器同为进程级单例：不复位会让旧套件的重复签名跨用例累积，
+    # 第三条同型调用被误升级 ASK（2026-10-14 全量跑 2 例回归的根因）
+    from agent.core.policy.loop_detect import get_loop_detector
+    get_loop_detector().reset()
+
     # 预建到 tmp：get_x(None) 复用现有单例，不预建会回退真实 ~/.jarvis 路径
     lease_mod.get_lease_store(tmp_path / "leases.json")
     state_mod.get_policy_state(tmp_path / "policy_state.json")
@@ -45,3 +50,4 @@ def _isolate_policy_singletons(tmp_path):
     state_mod._pending_singleton = None
     gate._settings = None
     gate._budget_singleton = None
+    get_loop_detector().reset()
