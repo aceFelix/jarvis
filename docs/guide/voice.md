@@ -65,7 +65,9 @@ Jarvis 提供两套独立的语音系统：
   若确要在实时语音里用工具，精选 10~20 个常用工具子集（勿一次性注册全量）并实机验证。
   高风险操作先语音确认再执行
 - **纯终端 UI**：转录文字流实时显示（2026-09 起不再弹出 pywebview 独立窗口）
-- **图形化实时聊天**：由三栏工作台（`--gui` 中栏实时模式）与 jarvis-desktop 桌面应用（真全双工）承担
+- **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
+  工作台 `--gui` 已于 2026-10 退役，见
+  [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）
 - 退出方式：ESC 键或说"退下"
 
 > **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，

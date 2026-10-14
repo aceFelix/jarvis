@@ -130,8 +130,9 @@ async def _realtime_talk(ui, settings) -> None:
 
     2026-09 调整（aceFelix）：下线 pywebview 独立窗口路径，/talk 一律
     直接在终端内运行全双工对话（引擎不变，UI 为 RichCLI 转录文字流）；
-    图形化实时聊天由工作台（--gui 中栏实时模式）与 jarvis-desktop
-    桌面应用承担，realtime_window 独立窗口包已作为孤儿代码删除。
+    图形化实时聊天由 jarvis-desktop 桌面应用承担（曾由三栏工作台窗口
+    的中栏实时模式承担，该窗口壳已于 2026-10 退役删除），
+    realtime_window 独立窗口包已作为孤儿代码删除。
 
     实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
     如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，

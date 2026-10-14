@@ -13,7 +13,7 @@
 ## 0. 问题陈述
 
 横向能力已经不缺：100+ 工具、双模语音、三层记忆、五层权限、沙箱、多端同会话、桌面壳都已落地
-（见 [BLUEPRINT.md](../BLUEPRINT.md) 的现状自评与能力模型）。但"真正的管家"体验仍然不成立，卡在三处**接口**上：
+（见 [BLUEPRINT.md](../blueprint/BLUEPRINT.md) 的现状自评与能力模型）。但"真正的管家"体验仍然不成立，卡在三处**接口**上：
 
 | # | 现象 | 根因 |
 |---|---|---|
@@ -394,7 +394,7 @@ class PerceptEvent:
 
 ## 10. 关联现状文档
 
-- 蓝图（北极星 · 能力模型 · 演进路线）：[BLUEPRINT.md](../BLUEPRINT.md)
+- 蓝图（北极星 · 能力模型 · 演进路线）：[BLUEPRINT.md](../blueprint/BLUEPRINT.md)
 - 主动提醒既有实现：[PLAN-p2-proactive-reminder.md](PLAN-p2-proactive-reminder.md)
 - 沙箱与回滚：[PLAN-p3-sandbox-execution.md](PLAN-p3-sandbox-execution.md)
 - 实时语音待机/唤醒/计费：[PLAN-future-realtime-voice-upgrade.md](PLAN-future-realtime-voice-upgrade.md)

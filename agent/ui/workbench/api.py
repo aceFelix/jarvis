@@ -26,7 +26,11 @@ from agent.ui.workbench.engine import ChatEngine
 
 
 class WorkbenchAPI:
-    """pywebview js_api 对象：前端调用入口集合。
+    """工作台指令 / 事件门面：前端可调方法的集合。
+
+    调用方是 ``agent/serve`` 的 WebSocket 分发器（桌面壳 jarvis-desktop
+    即走该路径）。原 pywebview 三栏窗口壳已于 2026-10 退役，本类随之不再
+    承担 js_api 角色，也删掉了只有窗口才需要的自绘标题栏控制方法。
 
     @author aceFelix
     """
@@ -42,29 +46,6 @@ class WorkbenchAPI:
         self._command_queue = command_queue
         self._engine = engine
         self._settings = settings
-        self._window: Any = None  # 窗口句柄（供自绘标题栏控制按钮使用）
-
-    def set_window(self, window: Any) -> None:
-        """由 app.py 在建窗后注入窗口句柄。"""
-        self._window = window
-
-    # ---- 窗口控制（无边框窗口自绘标题栏） ----
-
-    def window_minimize(self) -> None:
-        """最小化到任务栏（不做托盘）。"""
-        try:
-            if self._window is not None:
-                self._window.minimize()
-        except Exception:
-            pass
-
-    def window_close(self) -> None:
-        """关闭窗口（进程退出，引擎/守卫在 app.py 的 finally 里收尾）。"""
-        try:
-            if self._window is not None:
-                self._window.destroy()
-        except Exception:
-            pass
 
     # ---- 事件 ----
 

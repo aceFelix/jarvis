@@ -55,7 +55,8 @@ async def _serve_main(settings: Settings) -> None:
 
     @author aceFelix
     """
-    # 装配：与 workbench app.run_workbench 同一套零件，仅宿主从 pywebview 换成 WS；
+    # 装配：与已退役的 pywebview 三栏窗口壳共用同一套 workbench 零件
+    # （ChatEngine + WorkbenchAPI + MetricsCollector），仅宿主换成 WS；
     # 额外接 ProactiveHub（主动播报中枢，复活 59f746a 休眠的主动感知套件）
     event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
     command_queue: queue.Queue[dict[str, Any]] = queue.Queue()

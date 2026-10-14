@@ -8,7 +8,7 @@
 
 ```
 agent/
-├── main.py            # 入口（REPL / --gui 工作台 / --doctor 分发）
+├── main.py            # 入口（REPL / --serve / --doctor 分发）
 ├── bootstrap.py       # 装配工厂（provider / checker / recovery / context 构建）
 ├── doctor.py          # 依赖健康检查（--doctor：Python 包 / 系统级依赖 / 配置）
 ├── model_manager.py   # 模型切换与管理（/model /models 逻辑）
@@ -82,14 +82,19 @@ agent/
 │   ├── model_picker.py # 交互式模型选择器
 │   ├── session_picker.py # 交互式会话选择器
 │   ├── terminal_picker.py # 交互式终端选择器
-│   └── workbench/     # 三栏 GUI 工作台（--gui/--talk，桌面图标宿主）
-│       ├── app.py     # run_workbench() 入口（守卫→队列→装配→建窗）
+│   └── workbench/     # 工作台引擎层（serve 与 jarvis-desktop 共用）
 │       ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
-│       ├── api.py     # WorkbenchAPI（pywebview js_api）
+│       ├── api.py     # WorkbenchAPI（桌面指令 / 事件门面）
 │       ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
 │       ├── metrics.py # CPU/内存/磁盘采集（2 秒推事件）
-│       ├── single_instance.py # 单实例守卫（端口 47812 + 锁文件心跳）
-│       └── assets/    # HTML/JS/CSS（透明反应炉波纹 + 气泡）
+│       ├── model_admin.py / model_switch.py # 模型管理与热切换
+│       ├── slash_bridge.py # 斜杠命令透传与补全目录
+│       ├── extensions_api.py # 五类扩展统一管理
+│       ├── checkpoint_ops.py # 消息级回溯与文件回滚
+│       └── project_switch.py / remote_bridge.py / mcp_runtime.py /
+│           render.py / voice_adapter.py # 引擎协作件
+│       （原 pywebview 窗口壳 app/single_instance/win32_icon/window_geometry
+│        与 assets/ 已于 2026-10 退役删除，见 docs/fixlogs/workbench-gui-retired.md）
 ├── voice/             # 语音引擎
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
 │   ├── stt/           # STT 识别包（单一后端 QwenASR）
@@ -120,18 +125,13 @@ agent/
 │   ├── ilink.py       # iLink API 客户端（扫码登录/长轮询/发消息）
 │   ├── server.py      # WeChatBridge（消息循环 + 单例管理 + 24h 重连）
 │   └── ui.py          # WeChatUI（UIProtocol 实现，收集回复文本）
-├── daemon/            # 常驻模式
-│   ├── daemon.py      # 守护进程（后台分离/托盘/热键/主动服务）
-│   ├── tray.py        # 系统托盘
+├── daemon/            # 桌面入口辅助（原常驻 daemon 模式已下线）
 │   ├── hotkey.py      # 全局热键（跨平台）
 │   ├── hotkey_native.py # Windows 原生 RegisterHotKey（更快响应）
-│   ├── sessions.py    # 语音会话管理（stop_event 中断）
-│   ├── realtime.py    # 实时聊天会话管理
-│   ├── autostart.py   # 开机自启/桌面快捷方式
-│   ├── terminal_spawner.py # 终端窗口生成（warm 预启动）
-│   ├── voice_state.py # 语音互斥锁与开关状态
-│   ├── notifications.py # 系统通知
-│   └── platform_utils.py # 跨平台工具
+│   └── platform_utils.py # 跨平台与可选依赖探测
+│   （daemon.py / tray.py / sessions.py / realtime.py / terminal_spawner.py /
+│    voice_state.py / notifications.py 已随 2026-08 托盘模式下线；
+│    autostart.py 随三栏 GUI 于 2026-10 退役。主动感知服务在 agent/core/daemon/）
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
 │   ├── settings.py    # Settings 数据类 + TOML 加载 + 字段映射
 │   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
