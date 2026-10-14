@@ -259,8 +259,9 @@ class TestCheckerDefaultMode:
     def test_rule_allow_matches(self, tmp_path: Path) -> None:
         """allow 规则命中 → ALLOW。
 
-        注意：工具特判与 allow 规则同为 ALLOW 时，_stricter 取先到的工具结果
-        （reason 显示工具特判文案），故额外用白盒 _match_rules 确认规则本身命中。
+        注意：工具特判与 allow 规则同为 ALLOW 时，合并取先到的工具结果
+        （reason 显示工具特判文案），故额外用白盒 _match_rules 确认规则本身命中
+        （降级合并后返回 PermissionRule，用 rule.value/pattern 断言）。
         """
         rules = RuleSet([PermissionRule("Bash(git *)", RuleValue.ALLOW, RuleSource.USER)])
         checker = PermissionChecker(rules=rules, mode=PermissionMode.DEFAULT)
@@ -272,10 +273,10 @@ class TestCheckerDefaultMode:
         result = checker.check(tool, {"command": "git status"}, _ctx(tmp_path))
         assert result.behavior == PermissionBehavior.ALLOW
         # 白盒：直接验证规则匹配结果
-        rule_result = checker._match_rules(tool, {"command": "git status"})
-        assert rule_result is not None
-        assert rule_result.behavior == PermissionBehavior.ALLOW
-        assert "规则命中" in (rule_result.reason or "")
+        rule_hit = checker._match_rules(tool, {"command": "git status"}, str(tmp_path))
+        assert rule_hit is not None
+        assert rule_hit.value == RuleValue.ALLOW
+        assert rule_hit.pattern == "Bash(git *)"
 
     def test_rule_deny_wins_same_priority(self, tmp_path: Path) -> None:
         """同优先级 deny > allow（更安全者胜出）。"""
@@ -318,10 +319,10 @@ class TestCheckerDefaultMode:
         tool = _FakeTool(name="Read", perm=PermissionResult.allow("readonly tool"))
         result = checker.check(tool, {"file_path": "src/main.py"}, _ctx(tmp_path))
         assert result.behavior == PermissionBehavior.ALLOW
-        # 白盒确认 fnmatch 规则确实命中
-        rule_result = checker._match_rules(tool, {"file_path": "src/main.py"})
-        assert rule_result is not None
-        assert "规则命中" in (rule_result.reason or "")
+        # 白盒确认 fnmatch 规则确实命中（降级合并后返回 PermissionRule）
+        rule_hit = checker._match_rules(tool, {"file_path": "src/main.py"}, str(tmp_path))
+        assert rule_hit is not None
+        assert rule_hit.pattern == "Read(src/**)"
         # 工具特判 ASK + 规则未命中 → 默认 ASK
         tool2 = _FakeTool(name="Read")
         result2 = checker.check(tool2, {"file_path": "/etc/passwd"}, _ctx(tmp_path))

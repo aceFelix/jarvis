@@ -1,8 +1,9 @@
-"""W1 判断层命令 —— /away /back /lease /pending（阶段 8）。
+"""W1 运行时层命令 —— /away /back /lease /pending（阶段 8）。
 
 暴露 core/policy 的运行时能力给 REPL：
 - /away /back：手动切换无人值守（ASK 请求入待批清单，回来呈批）；
-- /lease：签发/查看/撤销授权租约（有限期有限范围免打断授权）；
+- /lease：签发/查看/撤销授权租约（有限期有限范围免打断授权；
+  声明式免确认请用 permissions.yaml 规则，租约只管"临时"）；
 - /pending：查看 away 期间积压的待批请求。
 
 命令只操作跨进程落盘的状态文件（~/.jarvis/*.json），CLI 与 serve
@@ -129,6 +130,6 @@ def handle_lease(ctx: "CommandContext", stripped: str) -> bool:
     ui.info(
         f"已签发租约 [{lease.id}]：{','.join(tools)} @ {scope}，"
         f"有效期 {ttl_minutes} 分钟（至 {lease.expires_at}）。"
-        "命中租约的确认请求将直接放行；DENY 级拦截不受租约影响"
+        "命中租约的确认请求将直接放行；路径软提醒与 DENY 级拦截不受租约影响"
     )
     return True

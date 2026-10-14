@@ -310,11 +310,11 @@ class Settings:
     checkpoint_max_per_session: int = 20   # 每会话检查点保留上限（超出修剪最旧）
     checkpoint_timeout_seconds: int = 10   # 单条 git 命令超时（秒）
 
-    # W1 判断层（阶段 8，见 core/policy/）：确定性策略引擎 + 授权租约 +
-    # 打扰预算 + 无人值守。挂在五层管线之后，DENY 不可放宽，fail-closed。
+    # W1 运行时层（阶段 8，见 core/policy/）：授权租约 + 打扰预算 +
+    # 无人值守。挂在五层管线之后；声明式规则已并入管线 permissions.yaml。
+    # 旧字段 policy_enabled/policy_path 已随策略引擎废弃删除，旧配置残留
+    # 对应键静默忽略（白名单映射）。
     # @author aceFelix
-    policy_enabled: bool = True            # 总开关（关闭全回落既有管线，权限零影响）
-    policy_path: str = ""                  # policy.yaml 位置；空=~/.jarvis/policy.yaml
     away_idle_minutes: int = 0             # 0=仅认手动 /away；>0 启用空闲推断自动 away
     notify_budget_enabled: bool = True     # 打扰预算闸门（关闭=提醒不经预算直接播）
     notify_daily_max: int = 10             # 每日主动播报上限
@@ -823,13 +823,12 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         ):
             if sub_key in checkpoint_table:
                 updates[field] = checkpoint_table[sub_key]
-    # [policy] 表 → W1 判断层字段；嵌套 [policy.notify_budget] → 打扰预算
+    # [policy] 表 → W1 运行时层字段；嵌套 [policy.notify_budget] → 打扰预算
+    # enabled/path 两键已废弃（策略引擎并入管线），不再映射即静默忽略
     # @author aceFelix
     policy_table = data.get("policy", {})
     if isinstance(policy_table, dict):
         for sub_key, field in (
-            ("enabled", "policy_enabled"),
-            ("path", "policy_path"),
             ("away_idle_minutes", "away_idle_minutes"),
         ):
             if sub_key in policy_table:

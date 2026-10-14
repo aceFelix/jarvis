@@ -275,13 +275,12 @@ max_per_session = 20       # 每会话检查点保留上限（超出修剪最旧
 timeout_seconds = 10       # 单条 git 命令超时（秒）
 
 [policy]
-# W1 判断层（阶段 8）：确定性策略引擎 + 授权租约 + 打扰预算 + 无人值守，
-# 挂在五层权限管线之后；DENY 不可放宽，未命中规则回落管线（fail-closed）。
-# 规则文件模板见 agent/configs/policy.example.yaml，复制为 ~/.jarvis/policy.yaml
-# 即刻生效（mtime 热重载，无需重启）。命令：/away /back /pending /lease。
+# W1 运行时层（阶段 8）：授权租约 + 打扰预算 + 无人值守，挂在五层权限
+# 管线之后。声明式规则已并入管线本身（permissions.yaml 带 spec 的 allow
+# 规则可免确认放行，含路径 glob 作用域）。
+# 租约/away 零配置：不敲 /lease、不 /away 时完全不介入。
+# 命令：/away /back /pending /lease。旧 keys enabled/path 已废弃（静默忽略）。
 # @author aceFelix
-enabled = true             # 总开关（false = 全回落既有管线，权限零影响）
-path = ""                  # policy.yaml 位置；空 = ~/.jarvis/policy.yaml
 away_idle_minutes = 0      # 0 = 仅认手动 /away；>0 启用空闲推断自动 away
 
 [policy.notify_budget]

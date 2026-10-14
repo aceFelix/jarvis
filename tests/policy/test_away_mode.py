@@ -1,8 +1,11 @@
-"""无人值守 + 判断层闸门单测 —— away 状态 / 待批清单 / policy_gate 合并（阶段 8 验收①④）。
+"""无人值守 + 运行时闸门单测 —— away 状态 / 待批清单 / policy_gate 合并（阶段 8 验收④）。
 
 覆盖：/away /back 手动切换、空闲推断、away 时 ASK 入待批清单转 DENY、
-ALLOW/DENY 不受 away 影响、闸门对管线的零回归（policy_enabled=False 或
-未命中规则时结论原样回落）、租约只放宽管线原生 ASK。
+ALLOW/DENY 不受 away 影响、闸门零介入（无租约无 away 时结论原样回落、
+对象同一）、租约只放宽 ASK 且放宽不了路径守护软提醒。
+
+声明式规则合并（原策略引擎）已并入五层管线，测于
+tests/test_permissions_relax.py。
 
 @author aceFelix
 """
@@ -14,7 +17,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from agent.core.policy import PolicyEffect, policy_gate
+from agent.core.policy import policy_gate
 from agent.core.policy.state import PendingApprovalStore, PolicyStateStore
 from agent.core.result import PermissionBehavior, PermissionResult
 
@@ -36,9 +39,7 @@ class _Ctx:
 class _Settings:
     """settings 桩：init_policy 注入用，字段与 Settings 的 W1 域同名。"""
 
-    def __init__(self, policy_paths, **over) -> None:
-        self.policy_enabled = over.get("policy_enabled", True)
-        self.policy_path = str(policy_paths["policy_yaml"])
+    def __init__(self, **over) -> None:
         self.away_idle_minutes = over.get("away_idle_minutes", 0)
         self.notify_budget_enabled = over.get("notify_budget_enabled", True)
         self.notify_daily_max = 10
@@ -49,10 +50,9 @@ class _Settings:
 
 @pytest.fixture()
 def gate_ok(policy_paths):
-    """初始化闸门依赖：注入 settings 桩 + 建好空的 policy.yaml。"""
+    """初始化闸门依赖：注入 settings 桩（租约/状态单例已由 policy_paths 隔离）。"""
     from agent.core.policy import init_policy
-    policy_paths["policy_yaml"].write_text("rules: []\n", encoding="utf-8")
-    init_policy(_Settings(policy_paths))
+    init_policy(_Settings())
     return policy_paths
 
 
@@ -109,38 +109,24 @@ def test_pending_cap_50(policy_paths):
     assert len(items) == 50 and items[0]["args"] == "5"
 
 
-# ---- policy_gate（统一闸门）----
+# ---- policy_gate（运行时闸门）----
 
-def test_gate_zero_regression_when_disabled(gate_ok):
-    """policy_enabled=False：结论原样回落管线（对象同一，零影响）。"""
-    from agent.core.policy import init_policy
-    init_policy(_Settings(gate_ok, policy_enabled=False))
+def test_gate_zero_intervention(gate_ok):
+    """无租约、非 away：结论原样回落管线（对象同一，零介入）。
+
+    新闸门没有总开关概念：租约/away 均为零配置运行时状态，
+    不存在生效租约且未 /away 时，任何 base 都透传。
+    """
     base = PermissionResult.ask("管线默认")
     assert policy_gate(_Tool("FileWrite"), {}, _Ctx(), base) is base
-
-
-def test_gate_no_rules_falls_back(gate_ok):
-    """无规则命中：原样回落管线结论。"""
-    base = PermissionResult.ask("管线默认")
-    out = policy_gate(_Tool("FileWrite"), {"file_path": "x.md"}, _Ctx(), base)
-    assert out is base
-
-
-def test_gate_allow_relaxes_native_ask(gate_ok):
-    """策略 allow 放宽管线原生 ASK。"""
-    gate_ok["policy_yaml"].write_text(
-        "rules:\n  - name: 只读免打扰\n    match: {tool: [FileRead]}\n    effect: allow\n",
-        encoding="utf-8")
-    out = policy_gate(_Tool("FileRead"), {}, _Ctx(), PermissionResult.ask("默认询问"))
-    assert out.behavior == PermissionBehavior.ALLOW
-    assert "只读免打扰" in (out.reason or "")
+    base2 = PermissionResult.allow("管线放行")
+    assert policy_gate(_Tool("FileWrite"), {}, _Ctx(), base2) is base2
 
 
 def test_gate_never_relaxes_pipeline_deny(gate_ok):
-    """管线 DENY 压过一切：即使策略配了 allow 也不放宽。"""
-    gate_ok["policy_yaml"].write_text(
-        "rules:\n  - name: 全放行\n    match: {tool: [Bash]}\n    effect: allow\n",
-        encoding="utf-8")
+    """管线 DENY 压过一切：即使签了同工具租约也不放宽。"""
+    from agent.core.policy import get_lease_store
+    get_lease_store().grant(["Bash"], None, ttl_minutes=60)
     base = PermissionResult.deny("危险命令")
     out = policy_gate(_Tool("Bash"), {"command": "rm -rf /"}, _Ctx(), base)
     assert out.behavior == PermissionBehavior.DENY
@@ -161,14 +147,12 @@ def test_gate_lease_relaxes_native_ask(gate_ok):
     assert out2.behavior == PermissionBehavior.ASK
 
 
-def test_gate_lease_cannot_beat_policy_ask(gate_ok):
-    """策略显式 ask 收紧时，租约不放宽（policy_escalated 挡住租约通道）。"""
+def test_gate_lease_cannot_relax_path_guard_ask(gate_ok):
+    """路径守护软提醒（写工作目录外）不被租约放宽——跨边界保持人工确认。"""
     from agent.core.policy import get_lease_store
-    gate_ok["policy_yaml"].write_text(
-        "rules:\n  - name: 外发必确认\n    match: {tool: [SendEmail]}\n    effect: ask\n",
-        encoding="utf-8")
-    get_lease_store().grant(["SendEmail"], None, ttl_minutes=60)
-    out = policy_gate(_Tool("SendEmail"), {"to": "x@y.z"}, _Ctx(), PermissionResult.allow("模式放行"))
+    get_lease_store().grant(["FileWrite"], None, ttl_minutes=60)
+    base = PermissionResult.ask("路径提醒: 目标在工作目录之外")
+    out = policy_gate(_Tool("FileWrite"), {"file_path": "D:/elsewhere/a.md"}, _Ctx(), base)
     assert out.behavior == PermissionBehavior.ASK
 
 
@@ -186,14 +170,11 @@ def test_gate_away_denies_ask_and_records_pending(gate_ok):
     assert out2.behavior == PermissionBehavior.ALLOW
 
 
-def test_gate_away_policy_deny_not_double_recorded(gate_ok):
-    """策略直接 deny 的调用不进待批清单（不是被 away 拦的确认请求）。"""
+def test_gate_away_pipeline_deny_not_recorded(gate_ok):
+    """管线直接 DENY 的调用不进待批清单（不是被 away 拦的确认请求）。"""
     from agent.core.policy import get_pending_approvals, get_policy_state
-    gate_ok["policy_yaml"].write_text(
-        "rules:\n  - name: 无人值守禁破坏\n    match: {tool: [Bash], destructive: true, away: true}\n    effect: deny\n",
-        encoding="utf-8")
     get_policy_state().set_away(True, source="manual")
-    out = policy_gate(_Tool("Bash"), {"command": "rm -rf x"}, _Ctx(), PermissionResult.ask())
+    out = policy_gate(_Tool("Bash"), {"command": "rm -rf x"}, _Ctx(), PermissionResult.deny("危险命令"))
     assert out.behavior == PermissionBehavior.DENY
-    assert "无人值守禁破坏" in (out.reason or "")
+    assert "危险命令" in (out.reason or "")
     assert get_pending_approvals().list() == []

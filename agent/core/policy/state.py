@@ -32,6 +32,19 @@ def _atomic_write(path: Path, payload: Any) -> None:
     os.replace(tmp, path)
 
 
+def brief_args(args: dict[str, Any], limit: int = 120) -> str:
+    """工具入参摘要（待批清单/日志展示用），超长截断。
+
+    原在 policy/engine.py，策略引擎并入五层管线后迁到这里。
+    @author aceFelix
+    """
+    try:
+        s = json.dumps(args, ensure_ascii=False)
+    except (TypeError, ValueError):
+        s = str(args)
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
 class PolicyStateStore:
     """away 状态 + 最近活动时间。
 

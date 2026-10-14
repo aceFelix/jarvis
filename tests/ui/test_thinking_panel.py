@@ -116,3 +116,79 @@ class TestThinkingEndOnToolCall:
         ui.assistant_text("正文")
         ui._end_assistant_line()
         assert "正文" in buf.getvalue()
+
+
+class TestWhitespaceOnlyThinking:
+    """纯空白增量不渲染空面板（2026-10-14 防空面板刷屏）。
+
+    模型思考块开头常先流式吐纯换行；修复前收到任何增量立即建面板，
+    Live 自动刷新会把空面板反复输出刷屏（用户实测 away 拒绝后连刷
+    十几个空白「💭 思考过程」面板）。
+    """
+
+    def test_whitespace_only_no_panel_static(self) -> None:
+        """整段都是空白增量：静态模式不打印任何面板，缓冲兜底清空。"""
+        ui, buf = _make_cli(terminal=False)
+        ui.assistant_thinking("\n")
+        ui.assistant_thinking("  ")
+        ui._end_thinking()
+        assert "思考过程" not in buf.getvalue()
+        assert ui._thinking_started is False
+        assert ui._thinking_buf == ""
+
+    def test_live_not_started_until_visible_text(self) -> None:
+        """交互终端：纯空白阶段不建 Live，可见文本到达才启动。"""
+        ui, _buf = _make_cli(terminal=True)
+        ui.assistant_thinking("\n\n")
+        assert ui._thinking_live is None
+        assert ui._thinking_started is False
+
+        ui.assistant_thinking("真正的内容")
+        assert ui._thinking_live is not None
+        assert ui._thinking_started is True
+        ui._end_thinking()
+
+
+class TestThinkingPanelWindow:
+    """面板尾部滚动窗口（2026-10-14 二次修复：空面板刷屏真实根因）。
+
+    首版修复只延迟启动，但 Live 帧显示缓冲开头：思考块开头的纯换行
+    把可见文字顶出可视区，ellipsis 截后终端永远停在一框空白，12fps
+    自动刷新依旧空面板刷屏（用户重启后实测复现）。修复：去前导空白
+    + Live 帧显式尾部窗口（面板高度有界、永远显示最新一段）。
+    """
+
+    @staticmethod
+    def _panel_text(panel) -> str:
+        """取 Panel 内部 Text 渲染面的纯文本（面板标题不参与断言）。"""
+        return panel.renderable.plain
+
+    def test_leading_newlines_stripped(self) -> None:
+        """前导换行被剔除：面板首行必须是可见文字，不再顶出一框空白。"""
+        ui, _buf = _make_cli(terminal=False)
+        ui._thinking_buf = "\n\n\n第一段思考"
+        ui._thinking_started = True
+        text = self._panel_text(ui._thinking_panel())
+        assert text.startswith("第一段思考")
+
+    def test_windowed_shows_latest_lines(self) -> None:
+        """Live 帧窗口：超过 12 行只留最新段，头部用（前略）标记。"""
+        ui, _buf = _make_cli(terminal=False)
+        ui._thinking_buf = "\n".join(f"行{i}" for i in range(40))
+        text = self._panel_text(ui._thinking_panel(windowed=True))
+        assert "行39" in text  # 最新内容可见
+        assert "行0" not in text  # 旧内容滚出窗口
+        assert "（前略）" in text
+        # 面板高度有界：12 行正文 + 1 行前略标记
+        assert len(text.split("\n")) == 13
+
+    def test_static_final_frame_keeps_full_content(self) -> None:
+        """静态模式终帧不窗口化：完整思考内容供事后回看。"""
+        ui, _buf = _make_cli(terminal=False)
+        for i in range(50):
+            ui.assistant_thinking(f"思考片段{i}\n")
+        ui._end_thinking()
+        output = buf.getvalue() if (buf := ui._console.file) else ""
+        assert "思考片段0" in output
+        assert "思考片段49" in output
+        assert "（前略）" not in output

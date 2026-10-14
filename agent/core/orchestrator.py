@@ -83,8 +83,8 @@ class ToolOrchestrator:
                     ctx.ui.warn(f"模型调用了未知工具: {tu.name}")
                 continue
 
-            # 权限校验：五层管线结论后再过 W1 判断层闸门
-            # （策略规则→授权租约→away 分流；DENY 不可放宽，fail-closed）
+            # 权限校验：五层管线结论后再过 W1 运行时层闸门
+            # （授权租约→away 分流；DENY 不可放宽，fail-closed）
             # @author aceFelix
             perm = self._checker.check(tool, tu.input, ctx)
             perm = policy_gate(tool, tu.input, ctx, perm)

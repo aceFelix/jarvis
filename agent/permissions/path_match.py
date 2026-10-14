@@ -1,8 +1,11 @@
-"""路径/命令匹配公共工具 —— 策略引擎与授权租约共用。
+"""路径 glob 匹配公共工具 —— 权限规则与授权租约共用。
 
 提供家目录展开、平台对齐的大小写归一、glob 匹配。大小写语义随平台
 文件系统对齐（Windows 不敏感→归一；POSIX 敏感→保留原样），与
 core/checkpoint.py::_workdir_key 同一口径，避免跨平台 CI 翻车。
+
+原为 core/policy/patterns.py（策略引擎与租约共用）；策略引擎并入
+五层管线后迁到 permissions/ 供管线规则与租约共同使用。
 
 @author aceFelix
 """
@@ -12,9 +15,6 @@ from __future__ import annotations
 import fnmatch
 import os
 from pathlib import Path
-
-# Bash/PowerShell 类工具名（destructive 判定仅对这两类生效）
-SHELL_TOOLS = ("Bash", "PowerShell")
 
 
 def norm_case(path: str) -> str:

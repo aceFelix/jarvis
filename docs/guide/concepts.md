@@ -18,10 +18,17 @@ Jarvis 拥有多层安全防护，确保 AI 不会越权操作你的电脑：
 
 切换权限模式：`/mode yolo`
 
-五层管线之后还有一道 **W1 判断层闸门**（阶段 8）：策略引擎（policy.yaml 四态
-allow/ask/deny/dry_run，热重载）、授权租约（`/lease` 限时免打断）、打扰预算
-（主动播报限流聚合）、无人值守（`/away` 时 ASK 入待批清单）。DENY 永不可放宽，
-未命中规则原样回落管线，权限零回归。详见 [W1 判断层](../architecture/16-W1判断层.md)。
+五层管线之后还有一道 **W1 运行时层闸门**（阶段 8）：授权租约（`/lease`
+限时免打断）、打扰预算（主动播报限流聚合）、无人值守（`/away` 时 ASK
+入待批清单）。DENY 永不可放宽，无租约且非 away 时零介入，权限零回归。
+详见 [W1 运行时层](../architecture/16-W1判断层.md)。
+
+声明式免确认直接写在 `permissions.yaml`（查找顺序：`<workdir>/configs/`
+→ 包内默认 `configs/`，也可用 settings.toml 的 `permissions_file`
+指定）：带 spec 的 allow 规则（如 `Bash(git *)`、
+`FileWrite(~/reports/**)`）命中可放宽工具默认/特判 ASK（2026-10 降级
+合并，原策略引擎能力并入管线）；裸工具名 allow 无明确范围不能放宽，
+DENY（危险命令/敏感目录拦截）永远生效。
 
 ## 安全沙箱执行（P3-8）
 

@@ -110,3 +110,13 @@ def test_back_without_away_reports_empty(policy_paths):
     ctx = _Ctx()
     assert handle_back(ctx, "/back") is True
     assert "没有待批的请求" in ctx.ui.messages[-1]
+
+
+def test_w1_commands_registered_in_slash_completion():
+    """W1 四命令必须登记进 REPL 补全表 SLASH_COMMANDS——阶段 8 首版只注册
+    了路由与帮助文本漏了补全，用户打 /l 弹不出 /lease（实测反馈），
+    用此断言防再犯。@author aceFelix"""
+    from agent.ui.cli import SLASH_COMMANDS
+
+    names = {n.split()[0] for n, _ in SLASH_COMMANDS}
+    assert {"/away", "/back", "/pending", "/lease"} <= names

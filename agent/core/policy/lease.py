@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from agent.core.policy.patterns import path_matches
+from agent.permissions.path_match import path_matches
 
 _DEFAULT_PATH = Path.home() / ".jarvis" / "leases.json"
 _DEFAULT_TTL_MIN = 120  # 缺省 2 小时：租约是"短时间免打断"，不是永久规则

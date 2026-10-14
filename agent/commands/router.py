@@ -46,7 +46,7 @@ from agent.commands.handlers.model_commands import (
 from agent.commands.handlers.phone_commands import (
     handle_connect_phone,
 )
-from agent.commands.handlers.policy_commands import (  # W1 判断层（阶段 8）@author aceFelix
+from agent.commands.handlers.policy_commands import (  # W1 运行时层（阶段 8）@author aceFelix
     handle_away,
     handle_back,
     handle_lease,
@@ -183,7 +183,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/init": handle_init,
     "/config": handle_config_show,
     "/update": handle_update,
-    # W1 判断层命令（阶段 8）：无人值守 + 授权租约 @author aceFelix
+    # W1 运行时层命令（阶段 8）：无人值守 + 授权租约 @author aceFelix
     "/away": handle_away,
     "/back": handle_back,
     "/pending": handle_pending,
