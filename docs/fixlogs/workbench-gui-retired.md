@@ -198,7 +198,7 @@ CI 只检出被跟踪的文件，目标写在 `.gitignore` 排除的本地目录
 > ——指向 `.gitignore` 排除目录的链接在本地存在、在 CI 不存在，见
 > [md-link-checker-untracked-link-fix.md](md-link-checker-untracked-link-fix.md)。
 
-核查结果（两类问题修复后）：`jarvis` 124 个 md（判定 516 条 / 跳过 30 条）、
+核查结果（两类问题修复后）：`jarvis` 125 个 md（判定 518 条 / 跳过 30 条）、
 `jarvis-desktop` 14 个 md（判定 66 条 / 跳过 28 条），**死链 0 / 未入库链接 0**。本次除了修掉退役
 带来的失效链接，还顺带修正了 14 处与退役无关的既有相对路径错写（如
 `docs/blueprint/BLUEPRINT.md`、`README.en.md`、`03-LLMProvider层.md` 等，以及
@@ -208,4 +208,7 @@ jarvis-desktop fixlog 里跨仓链接少写一层 `../`）。
 
 - 计划文档：[docs/plans/workbench-gui.md](../plans/workbench-gui.md)（已标记完结）
 - 窗口壳单实例历史：[workbench-single-instance-release-fix.md](workbench-single-instance-release-fix.md)
+- 退役后桌面链路的并发缺陷：[query-lock-cancel-leak-fix.md](query-lock-cancel-leak-fix.md)
+  （全量高负载下 `test_engine_abort_current_reply` 偶发失败，根因是三通道共用的
+  `threading.Lock` 在等锁窗口被取消时既不归还也不收尾）
 - 桌面入口移交历史：[docs/guide/desktop.md](../guide/desktop.md)

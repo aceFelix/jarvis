@@ -805,6 +805,15 @@
 | T-357 | 回滚失败原子性 | mock restore 失败后触发撤回 | `rewound` 回 `{ok:false,…}`，前端气泡**不裁**、聊天流弹错，后端消息也不截断 |
 | T-358 | /load 后跨重启撤回 | 对话几轮→退出→`/load` 旧会话（桌面：重开选历史会话）→撤回 | `extra.checkpoint_id` 随会话 JSON 持久化，检查点按 workdir 指纹定位仍可命中，文件回滚成功 |
 
+### 36.3 三通道 query 锁的取消语义（2026-10，等锁窗口）
+
+> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/ui/test_serve_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/query-lock-cancel-leak-fix.md)。
+
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-363 | 取消落在等锁窗口的收尾与归还 | 用 `_SlowLock`（acquire 前睡 0.3s）放大窗口，发 `send` 后立即 `reply.abort` | 本轮仍发 `assistant_done` + `info『已停止回复』`；底层锁被自动归还（可再次 acquire）；`query_loop.run` 一次未跑；`_send_task` 置空；后续指令照常消费 |
+| T-364 | 原语等锁语义 | `pytest tests/test_query_lock.py` | 空闲锁返回 `True` 且确实持有；被取消时抛 `CancelledError` 且线程池事后取得的锁被归还；占用期间等待者进不来，释放后依次拿到并归还、锁可复用 |
+
 ---
 
 ## 快速冒烟测试（每次改动必跑）
@@ -830,7 +839,7 @@
 
 ---
 
-> **总计：348 项测试用例（编号已去重），覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358、2026-10 开发服务器关闭能力新增 T-DS-001–T-DS-006、2026-10 三栏 GUI 退役新增 T-359–T-362；2026-10 同时废除工作台窗口类用例与开机自启类用例，并消除原 16 节内的重复编号）
+> **总计：350 项测试用例（编号已去重），覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358、2026-10 开发服务器关闭能力新增 T-DS-001–T-DS-006、2026-10 三栏 GUI 退役新增 T-359–T-362、2026-10 query 锁取消语义新增 T-363–T-364；2026-10 同时废除工作台窗口类用例与开机自启类用例，并消除原 16 节内的重复编号）
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >
@@ -843,3 +852,7 @@
 > 也含「链接目标必须已入 git」的入库门禁（曾漏过指向 `.gitignore` 排除目录的链接，
 > 复盘见 [md-link-checker-untracked-link-fix.md](../fixlogs/md-link-checker-untracked-link-fix.md)），
 > 以上不计入本清单用例数。
+>
+> 另：全量 `pytest` 当前为 2564 passed（桌面引擎 / 手机桥接 / 微信三通道的 query 锁
+> 取消语义修复后由 2560 → 2564：新增 `tests/test_query_lock.py` 3 例与
+> `tests/ui/test_serve_stdin_abort.py` 1 例），同样不计入本清单用例数。

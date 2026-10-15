@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import threading
 import time
 
 import pytest
@@ -199,3 +200,102 @@ def test_abort_without_active_reply_returns_false():
     settings = Settings()
     engine = ChatEngine(settings, queue.Queue(), queue.Queue())
     assert engine.abort_current_reply() is False
+
+
+def test_abort_during_lock_wait_returns_lock_and_closes_turn(monkeypatch):
+    """取消落在「等 query 锁」窗口时的收尾与归还。
+
+    _handle_send 先把当前任务登记为 _send_task、再 await run_in_executor(acquire)。
+    高负载下线程池排队会拉长这个等待窗口，reply.abort 的取消正好落在窗口内时，
+    如果 acquire 不在 try/finally 里：线程池随后仍会拿到锁却无人归还（三通道后续
+    query 永久卡死），本轮也不发 assistant_done（前端气泡悬着）。既有用例的偶发
+    失败就是这条路径，故用慢 acquire 锁把它变成确定性复现。
+    """
+    settings = Settings()
+    settings.enable_mcp = False  # 启动预热不真连用户 MCP server（hermetic）
+    event_queue: queue.Queue = queue.Queue()
+    command_queue: queue.Queue = queue.Queue()
+    engine = ChatEngine(settings, event_queue, command_queue)
+
+    class _SlowLock:
+        """acquire 前睡一段，放大「已登记 _send_task、尚未拿到锁」的竞态窗口。"""
+
+        def __init__(self) -> None:
+            self._inner = threading.Lock()
+
+        def acquire(self, block: bool = True, timeout: float = -1) -> bool:
+            time.sleep(0.3)
+            return self._inner.acquire(block, timeout)
+
+        def release(self) -> None:
+            self._inner.release()
+
+    class _NeverRunLoop:
+        """拿到锁才会跑；本用例要求在拿到锁之前被取消，故只统计调用次数。"""
+
+        calls = 0
+
+        async def run(self, text, ctx, images=None):
+            _NeverRunLoop.calls += 1
+            await asyncio.sleep(60)
+
+    _NeverRunLoop.calls = 0
+    engine._query_lock = _SlowLock()
+    # 预置会话状态跳过重型装配（与既有引擎测试同法）
+    engine._session_ready = True
+    engine._query_loop = _NeverRunLoop()
+    engine._ctx = object()
+    engine._messages = []
+    monkeypatch.setattr(engine, "_after_turn", lambda: None)
+
+    engine.start()
+    try:
+        command_queue.put_nowait({"cmd": "send", "text": "等锁时被停止"})
+        # 等本轮登记好任务句柄（尚未拿到锁）
+        for _ in range(200):
+            if engine._send_task is not None:
+                break
+            time.sleep(0.02)
+        assert engine._send_task is not None
+
+        assert engine.abort_current_reply() is True
+
+        # 本轮必须收尾：assistant_done（前端气泡不能悬着）+ 已停止回复
+        events = []
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                events.append(event_queue.get(timeout=0.05))
+            except queue.Empty:
+                pass
+            types = [e["type"] for e in events]
+            if "assistant_done" in types and any(
+                e["type"] == "info" and e["payload"] == "已停止回复" for e in events
+            ):
+                break
+        types = [e["type"] for e in events]
+        assert "assistant_done" in types, f"取消落在等锁窗口时本轮未收尾：{types}"
+        assert any(
+            e["type"] == "info" and e["payload"] == "已停止回复" for e in events
+        ), f"未下发停止回执：{types}"
+
+        # 锁必须已归还：拿锁的线程池任务不能把锁带走
+        assert engine._query_lock._inner.acquire(timeout=2) is True, "query 锁被永久占用"
+        engine._query_lock._inner.release()
+        assert _NeverRunLoop.calls == 0, "取消后不应真的开跑一轮"
+        assert engine._send_task is None
+
+        # 指令循环存活：后续指令仍被消费（新会话会发 session_new）
+        command_queue.put_nowait({"cmd": "new_session"})
+        got = False
+        for _ in range(100):
+            try:
+                e = event_queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if e["type"] == "session_new":
+                got = True
+                break
+        assert got, "等锁期间被取消后指令循环不再消费后续指令"
+    finally:
+        engine.stop()
