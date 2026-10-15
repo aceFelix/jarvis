@@ -182,17 +182,24 @@ styles/main.css}`、`test/renderer/dispatcher.test.ts` 注释：把「与 pywebv
 `/home/runner/work/jarvis/jarvis`），落不到本仓的路径（越出仓根的相对链接、
 指向兄弟仓库的绝对路径）不判定也不误报。
 
-配套测试 [`tests/test_md_link_checker.py`](../../tests/test_md_link_checker.py)（14 例）：
+除“文件是否存在”外还校“是否已入 git”（`tracked_paths()` / `find_untracked_links()`）：
+CI 只检出被跟踪的文件，目标写在 `.gitignore` 排除的本地目录里时，本机永远扫不出问题，
+上 CI 即变死链。无 git 环境（如从 sdist 跑测试）该类判定整体跳过、不误报。
+
+配套测试 [`tests/test_md_link_checker.py`](../../tests/test_md_link_checker.py)（17 例）：
 相对链接命中/未命中、重复目标只报一次、锚点片段剥离、非本地链接一律跳过、目录跳过规则、
 绝对链接按仓根重定位（含 POSIX 检出路径用例）、仓外路径不误报、代码示例不判定、
-CLI 退出码与报告输出，以及**全仓零死链门禁**用例。
+未入库链接检出（含无 git 环境跳过）、CLI 退出码与报告输出，以及**全仓零死链门禁**与
+**全仓链接全部入库**两道门禁用例。
 
-> 该工具首版带有一个 Windows-only 的路径分隔符假设，在 PR 的 Linux CI 上把全仓相对链接
-> 误报为死链（本地全绿抓不到），已修复并补上跨平台用例，详见
-> [md-link-checker-linux-ci-fix.md](md-link-checker-linux-ci-fix.md)。
+> 该工具曾出过两类问题，均已修复并各自复盘：首版带 Windows-only 的路径分隔符假设，
+> 在 PR 的 Linux CI 上把全仓相对链接**误报**为死链（本地全绿抓不到），见
+> [md-link-checker-linux-ci-fix.md](md-link-checker-linux-ci-fix.md)；随后又暴露出**漏报**
+> ——指向 `.gitignore` 排除目录的链接在本地存在、在 CI 不存在，见
+> [md-link-checker-untracked-link-fix.md](md-link-checker-untracked-link-fix.md)。
 
-核查结果（工具修复后）：`jarvis` 123 个 md（判定 513 条 / 跳过 29 条）、
-`jarvis-desktop` 13 个 md（判定 67 条 / 跳过 27 条），**死链 0**。本次除了修掉退役
+核查结果（两类问题修复后）：`jarvis` 124 个 md（判定 516 条 / 跳过 30 条）、
+`jarvis-desktop` 14 个 md（判定 66 条 / 跳过 28 条），**死链 0 / 未入库链接 0**。本次除了修掉退役
 带来的失效链接，还顺带修正了 14 处与退役无关的既有相对路径错写（如
 `docs/blueprint/BLUEPRINT.md`、`README.en.md`、`03-LLMProvider层.md` 等，以及
 jarvis-desktop fixlog 里跨仓链接少写一层 `../`）。

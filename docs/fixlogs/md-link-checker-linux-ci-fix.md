@@ -18,9 +18,10 @@
 
 - 影响面：只影响门禁工具自身的判定结果，不影响 jarvis 运行时行为；
 - 复现条件：非 Windows 环境（Linux CI）跑 `pytest tests/`；
-- 失败的两条用例中可确认的一条是 `tests/test_md_link_checker.py::test_repo_docs_have_zero_dead_links`
-  （那一长串元组就是它的断言 diff）；另一条按同因定位为依赖相对链接判定的
-  `test_relative_dead_link_detected`（CI 日志节选未显示用例名）。
+- 失败共 2 条用例，日志节选只完整展示了其中一条的断言 diff（那一长串元组来自
+  `tests/test_md_link_checker.py::test_repo_docs_have_zero_dead_links`）；另一条的用例名
+  未出现在节选中，本篇不做推断——它随本修复一并消失，本复盘只认定「同一处
+  `replace("/", "\\")`」为两条的共同成因，依据是误报形态而非用例名。
 
 ## 二、排查过程
 
@@ -88,7 +89,15 @@ GitHub 不会把它渲染成链接，提取前先行剔除（`link_targets()`）
 | 全量回归 | `uv run pytest -q` | 2557 passed, 3 warnings |
 | 全仓扫描（jarvis） | `uv run python scripts/check_md_links.py` | 123 md / 判定 513 / 跳过 29 / **死链 0** |
 | 全仓扫描（jarvis-desktop） | `uv run python scripts/check_md_links.py ..\jarvis-desktop` | 13 md / 判定 67 / 跳过 27 / **死链 0** |
-| CI 复验 | PR #1 checks | 推送本修复后由四个 Python 矩阵复验 |
+| CI 复验（实测） | PR #1 四个 Python 矩阵复跑 `pytest tests/` | 误报全部消失：失败面从 `2 failed` 收敛为 `1 failed`（长串元组不再出现），证明本修复到位 |
+
+> 上述数字为本修复提交 `0fe99c7` 时的实测值。CI 剩下的那 1 条失败是**另一类成因**——
+> 链接目标在开发机存在、但被 `.gitignore` 排除，CI 检出后确实不存在，与本篇的平台假设
+> 无关，已单独修复并复盘：
+> [md-link-checker-untracked-link-fix.md](md-link-checker-untracked-link-fix.md)。
+> 该复盘同时把工具用例数推到 17 例、全量推到 2560 passed，并让链接统计变为
+> 124 md / 判定 516 / 跳过 30（`../publish/PUBLISH.md` 由待判定链接变为纯锚点，
+> 新增复盘文档自身又带 4 条参与判定的链接）。
 
 新增用例中直接针对本 bug 的四条：
 
@@ -119,6 +128,9 @@ GitHub 不会把它渲染成链接，提取前先行剔除（`link_targets()`）
 1. 本地全绿 + CI 全红时，优先怀疑**环境假设**而不是代码逻辑，按固定清单过一遍：
    路径分隔符、文件名大小写、文本编码（GBK/UTF-8）、换行符、时区、
    文件是否存在于 git 索引（CI 只检出被跟踪的文件）。
+   > 这条清单里前三项本次都查了，唯独**最后一项只对绝对链接做了比对**，于是
+   > CI 又红了一轮。“本地绿、CI 红”除了平台假设，还有“本地看文件系统、
+   > CI 看 git 索引”这第二类成因；清单不落地成可执行门禁就还会复发（见前置复盘）。
 2. **单向兼容的归一化是陷阱**。`replace("/", "\\")` 在 Windows 上永远不报错，
    因此永远不会被本地测试抓到。凡是"把 A 平台的写法转成 B 平台的写法"的语句，
    要么双向都成立，要么就不该存在。

@@ -1,6 +1,6 @@
 # 开发者指南
 
-> [← 返回 README](../../README.md) · [总体架构](../architecture/01-总体架构.md) · [发布流程](../publish/PUBLISH.md)
+> [← 返回 README](../../README.md) · [总体架构](../architecture/01-总体架构.md) · [发布流程](#自动发布流程)
 
 ---
 
@@ -232,7 +232,8 @@ git push github v2.1.1
 
 > 配置完成后，每次推送 `v*` tag 即可全自动发布。无需本地装 twine、无需手动 `npm publish`、无需管理 API token 轮换。
 
-更多发布细节见 [docs/publish/PUBLISH.md](../publish/PUBLISH.md)。
+更多发布细节见本地 `docs/publish/PUBLISH.md`（该目录被 `.gitignore` 排除，
+仅存在于维护者本机，不随仓库分发，故此处不给链接）。
 
 ## 安装态验收（回归测试台）
 

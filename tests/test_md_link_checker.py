@@ -2,8 +2,9 @@
 
 覆盖：本地链接判定口径（相对 / 绝对 / 外部 / 锚点 / data 资源）、跳过目录规则、
 跨平台判定（CI 检出路径与开发机不同，绝对链接按仓根目录名重定位；仓外路径不误报）、
-死链检出结果、命令行退出码，以及全仓文档零死链门禁（三栏 GUI 窗口壳退役后
-文档口径整改的回归保障）。
+代码示例不判定、未入库链接检出（CI 只检出被跟踪的文件）、
+死链检出结果、命令行退出码，以及全仓文档零死链 + 链接全部入库两道门禁
+（三栏 GUI 窗口壳退役后文档口径整改的回归保障）。
 
 @author aceFelix
 """
@@ -163,8 +164,35 @@ def test_local_link_targets_pairs(tmp_path, checker):
     assert pairs[0][1] == md.parent / "b.md"
 
 
-def test_main_exit_code_and_report(tmp_path, checker, capsys):
+def test_untracked_link_detected(tmp_path, checker, monkeypatch):
+    """本机存在但未被 git 跟踪的链接被检出：CI 只检出跟踪文件，这类链接上 CI 必缺。
+
+    这正是「本地全绿、CI 报死链」的第二类成因（目标写在 .gitignore 排除的本地目录里），
+    单靠文件存在性检查永远抓不到。
+    """
+    root = _make_repo(tmp_path)
+    (root / "docs" / "local-only.md").write_text("本地专属", encoding="utf-8")
+    (root / "docs" / "tracked.md").write_text("已入库", encoding="utf-8")
+    (root / "a.md").write_text("[未入库](docs/local-only.md) [已入库](docs/tracked.md)",
+                               encoding="utf-8")
+    # 模拟 git 索引：只跟踪 docs/tracked.md（docs 为其祖先目录）
+    monkeypatch.setattr(checker, "tracked_paths", lambda r: ({"docs/tracked.md"}, {"docs"}))
+    assert checker.find_untracked_links(root) == [("a.md", "docs/local-only.md")]
+
+
+def test_untracked_check_skipped_without_git(tmp_path, checker, monkeypatch):
+    """无 git 环境（源码分发件、非仓根）时该类判定整体跳过，不误报。"""
+    root = _make_repo(tmp_path)
+    (root / "docs" / "x.md").write_text("占位", encoding="utf-8")
+    (root / "a.md").write_text("[链接](docs/x.md)", encoding="utf-8")
+    monkeypatch.setattr(checker, "tracked_paths", lambda r: None)
+    assert checker.find_untracked_links(root) == []
+
+
+def test_main_exit_code_and_report(tmp_path, checker, capsys, monkeypatch):
     """CLI 入口：有死链返回 1 并逐条打印，无死链返回 0。"""
+    # 固定为“无 git 环境”，使退出码只由死链决定（不依赖临时目录上方是否有仓）
+    monkeypatch.setattr(checker, "tracked_paths", lambda r: None)
     root = _make_repo(tmp_path)
     (root / "ok.md").write_text("[自](ok.md)", encoding="utf-8")
     assert checker.main(["check_md_links.py", str(root)]) == 0
@@ -180,3 +208,14 @@ def test_repo_docs_have_zero_dead_links(checker):
     """全仓文档零死链门禁：文档口径整改后不得遗留指向不存在文件的本地链接。"""
     dead = checker.find_dead_links(REPO_ROOT)
     assert dead == [], f"存在失效链接：{dead}"
+
+
+def test_repo_docs_links_are_all_git_tracked(checker):
+    """全仓文档链接入库门禁：链接目标必须存在于 git 索引，否则 CI 检出后必缺。
+
+    无 git 环境（如从 sdist 跑测试）时 tracked_paths 返回 None，本用例自动跳过。
+    """
+    if checker.tracked_paths(REPO_ROOT) is None:
+        pytest.skip("当前不在 git 仓库内，无法校验链接目标的入库状态")
+    untracked = checker.find_untracked_links(REPO_ROOT)
+    assert untracked == [], f"链接目标未入 git（CI 上不存在）：{untracked}"

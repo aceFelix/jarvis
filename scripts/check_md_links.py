@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -108,13 +109,75 @@ def find_dead_links(root: Path) -> list[tuple[str, str]]:
     dead: list[tuple[str, str]] = []
     for md in iter_md_files(root):
         rel_md = str(md.relative_to(root))
-        grouped: dict[str, list[Path]] = {}
-        for target, candidate in local_link_targets(md, root):
-            grouped.setdefault(target, []).append(candidate)
-        for target, candidates in grouped.items():
+        for target, candidates in _grouped_targets(md, root).items():
             if not any(_exists(p) for p in candidates):
                 dead.append((rel_md, target))
     return dead
+
+
+def tracked_paths(root: Path) -> tuple[set[str], set[str]] | None:
+    """返回 (git 已跟踪文件集, 其全部祖先目录集)，路径均为仓根相对的正斜杠形式。
+
+    CI 只检出被跟踪的文件，因此“本机存在但未入库”的链接在 CI 上必然缺失。
+    无 git 环境（源码分发件、非仓根）返回 None，调用方据此跳过该类判定。
+    """
+    try:
+        proc = subprocess.run(["git", "ls-files", "-z"], cwd=root,
+                              capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    files = {p.decode("utf-8", "ignore") for p in proc.stdout.split(b"\0") if p}
+    dirs: set[str] = {"."}  # 仓根自身恒存在（允许链接指回仓根）
+    for rel in files:
+        parts = rel.split("/")
+        dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    return files, dirs
+
+
+def _repo_relative(cand: Path, root: Path) -> str | None:
+    """把待判定路径转为仓根相对的 POSIX 路径（与 git ls-files 口径对齐）；仓外返回 None。"""
+    try:
+        return cand.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def find_untracked_links(root: Path) -> list[tuple[str, str]]:
+    """返回“本机存在但未被 git 跟踪”的链接（目录链接看其下是否有已跟踪文件）。
+
+    典型成因：目标写在 .gitignore 排除的本地目录里（如发布手册），本地扫不出问题，
+    一上 CI 就变成死链。无 git 环境时返回空列表。
+    """
+    root = Path(root).resolve()
+    tracked = tracked_paths(root)
+    if tracked is None:
+        return []
+    files, dirs = tracked
+    out: list[tuple[str, str]] = []
+    for md in iter_md_files(root):
+        rel_md = str(md.relative_to(root))
+        for target, candidates in _grouped_targets(md, root).items():
+            # 只关心“存在但不在索引里”的；真不存在的由 find_dead_links 负责
+            if not any(_exists(p) for p in candidates):
+                continue
+            for cand in candidates:
+                rel = _repo_relative(cand, root)
+                if rel is None:
+                    continue  # 候选落在仓外（如同名层级的绝对链接），换下一个
+                if rel not in files and rel not in dirs:
+                    out.append((rel_md, target))
+                break
+    return out
+
+
+def _grouped_targets(md: Path, root: Path) -> dict[str, list[Path]]:
+    """按链接目标原文分组，保证同一目标只判定/报告一次。"""
+    grouped: dict[str, list[Path]] = {}
+    for target, candidate in local_link_targets(md, root):
+        grouped.setdefault(target, []).append(candidate)
+    return grouped
 
 
 def count_links(files: list[Path], root: Path) -> tuple[int, int]:
@@ -130,18 +193,22 @@ def count_links(files: list[Path], root: Path) -> tuple[int, int]:
 
 
 def main(argv: list[str]) -> int:
-    """命令行入口：打印扫描结果，有死链时返回 1。"""
+    """命令行入口：打印扫描结果，有死链或未入库链接时返回 1。"""
     root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
     root = Path(root).resolve()
     files = iter_md_files(root)
     judged, skipped = count_links(files, root)
     dead = find_dead_links(root)
+    untracked = find_untracked_links(root)
     print(f"scanned md files: {len(files)}")
     print(f"local links judged: {judged} | skipped (外链/纯锚点/仓外): {skipped}")
     print(f"dead links: {len(dead)}")
     for f, t in dead:
         print(f"- {f}\n    -> {t}")
-    return 1 if dead else 0
+    print(f"untracked links (本机存在但未入 git，CI 检出后必缺): {len(untracked)}")
+    for f, t in untracked:
+        print(f"- {f}\n    -> {t}")
+    return 1 if (dead or untracked) else 0
 
 
 if __name__ == "__main__":
