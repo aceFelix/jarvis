@@ -79,13 +79,15 @@ CI 检出后不存在——这不是误报，是一条**真死链**，而工具�
 
 ## 五、验证结果
 
+CI 侧本轮只改动 jarvis 仓（门禁工具与文档），jarvis-desktop 侧为纯文档修正且不跑链接门禁。
+
 | 验证项 | 命令 | 结果 |
 |---|---|---|
 | 工具用例（14 → 17 例） | `uv run pytest tests/test_md_link_checker.py -q` | 17 passed |
 | 全量回归 | `uv run pytest -q --tb=line` | 2560 passed, 3 warnings in 67.47s |
 | 全仓扫描（jarvis） | `uv run python scripts/check_md_links.py` | 124 md / 判定 516 / 跳过 30 / **死链 0 / 未入库 0** |
 | 全仓扫描（jarvis-desktop） | `uv run python scripts/check_md_links.py ..\jarvis-desktop` | 14 md（含 desktop 侧本篇同类复盘）/ 判定 66 / 跳过 28 / **死链 0 / 未入库 0** |
-| CI 复验 | PR #1 四个 Python 矩阵 | 待本修复推送后复验；本地已按 CI 的判定基准（git 索引）对齐 |
+| CI 复验（实测） | PR #1 五个 check（`head_sha` = `8e4e01e`） | **全部 success**：Python 3.11 / 3.12 / 3.13 / 3.14 四个矩阵跑完 `pytest tests/`（约 44–51s）+ Scan for secrets，失败面由 `1 failed` 归零 |
 
 链接统计相比第一篇（123 md / 判定 513 / 跳过 29 → 124 md / 判定 516 / 跳过 30）变化的原因
 是真实的：`../publish/PUBLISH.md` 改成了纯锚点，从"需判定"移入"跳过"（−1）；本篇及另两文档
