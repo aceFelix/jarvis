@@ -19,6 +19,7 @@ import time
 from typing import Any, Callable
 
 from agent.core.context import ToolContext
+from agent.utils.query_lock import acquire_lock_cancellable
 from agent.wechat.ilink import ILinkClient
 from agent.wechat.ui import WeChatUI
 
@@ -281,10 +282,15 @@ class WeChatBridge:
         return ui.get_reply()
 
     async def _exec_query(self, text: str, ctx: ToolContext) -> None:
-        """加锁执行 query_loop.run，结束后通知桌面收尾本轮 AI 气泡。"""
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._query_lock.acquire)
+        """加锁执行 query_loop.run，结束后通知桌面收尾本轮 AI 气泡。
+
+        等锁期间可被取消（桌面 reply.abort）：线程池事后拿到的锁由
+        acquire_lock_cancellable 归还，finally 仍照常收尾与落盘。
+        @author aceFelix
+        """
+        locked = False
         try:
+            locked = await acquire_lock_cancellable(self._query_lock)
             # 拿到锁、即将开跑：登记当前任务供桌面 reply.abort 取消（任意来源）。
             # @author aceFelix
             if self._on_query_begin is not None:
@@ -294,7 +300,8 @@ class WeChatBridge:
                     pass
             await self._query_loop.run(text, ctx)
         finally:
-            self._query_lock.release()
+            if locked:
+                self._query_lock.release()
             # 本轮结束：让桌面把累积的 assistant_text 定稿成一条气泡（否则下一条
             # 微信消息的回复会续写同一气泡）。WeChatUI.end_turn 内部对终端宿主判空。
             # @author aceFelix

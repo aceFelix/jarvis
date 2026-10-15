@@ -153,14 +153,14 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
 
-> 安装路径、可选依赖组、各平台系统依赖、`--gui` 工作台入口等详见 [安装指南](docs/guide/installation.md)。
+> 安装路径、可选依赖组、各平台系统依赖、`--serve` 后端入口等详见 [安装指南](docs/guide/installation.md)。
 > 想一句话理解这个项目要去哪，读 [蓝图文档](docs/blueprint/BLUEPRINT.md)。
 
 ## 平台支持
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| 全部功能（对话/语音/工作台/桌面壳/GUI 操控/自启） | ✅ **全功能实机验证** | ✅ 代码适配 | ✅ 代码适配 |
+| 全部功能（对话/语音/GUI 操控/serve 后端/jarvis-desktop 桌面壳） | ✅ **全功能实机验证** | ✅ 代码适配 | ✅ 代码适配 |
 
 > ⚠️ 本项目在 Windows 上完成全部开发与实机验证，macOS / Linux 仅代码层适配、未完整实机测试，建议优先 Windows。逐项差异见 [安装指南](docs/guide/installation.md#平台系统依赖)。
 

@@ -7,7 +7,7 @@
 ## 从 PyPI 安装（推荐）
 
 ```bash
-# 一键安装全功能（语音 + GUI + daemon + MCP + 浏览器 + 摄像头/视觉 + 实时聊天窗口）
+# 一键安装全功能（语音 + GUI 操控 + daemon + MCP + 浏览器 + 摄像头/视觉 + 微信接入）
 pip install "jarvis-agent[all]"
 
 # 仅安装核心对话功能
@@ -101,15 +101,17 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 | `camera` | 摄像头拍照 | `pip install "jarvis-agent[camera]"` |
 | `vision` | 实时视觉监控 + OCR | `pip install "jarvis-agent[vision]"` |
 | `voice` | 语音对话 `/voice` + 实时双工 `/talk`（STT+TTS+全双工） | `pip install "jarvis-agent[voice]"` |
-| `daemon` | 桌面入口/热键/开机自启 | `pip install "jarvis-agent[daemon]"` |
-| `realtime_ui` | 三栏工作台窗口（方舟反应炉动画，`--gui`/`--talk`） | `pip install "jarvis-agent[realtime_ui]"` |
+| `daemon` | 主动感知（日历源 / 系统资源监控）与全局热键 | `pip install "jarvis-agent[daemon]"` |
+| `wechat` | 微信 ClawBot 接入 | `pip install "jarvis-agent[wechat]"` |
 | `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
+
+> 原 `realtime_ui`（pywebview 三栏工作台窗口）已于 2026-10 随 `--gui` / `--talk`
+> 一并退役，图形化桌面由独立仓库 **jarvis-desktop** 提供（见
+> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）。
 
 ## 平台系统依赖
 
 **Windows**: 无需额外系统依赖，直接 `pip install` 即可。
-
-> 三栏工作台窗口需要 Edge WebView2 Runtime（Win10/11 通常已预装），如未安装请从 [Microsoft 官网](https://developer.microsoft.com/microsoft-edge/webview2/) 下载。
 
 **macOS**:
 

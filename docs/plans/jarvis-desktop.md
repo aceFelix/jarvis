@@ -1,8 +1,14 @@
 # jarvis-desktop 立项 — Electron 桌面壳 + jarvis serve 后端 API
 
-> 状态：✅ 一期已落地（2026-09）｜Part A（jarvis `--serve` 模式）+ Part B（jarvis-desktop Electron 壳全量）已完成，两仓库待用户实机走查通过后分别提交推送。
+> 状态：✅ 一期已落地（2026-09）｜Part A（jarvis `--serve` 模式）+ Part B（jarvis-desktop Electron 壳全量）已完成，
+> 两仓库均已实机走查通过并发布（jarvis v2.2.2 / jarvis-desktop v0.1.7）。
 > 前置：三栏 GUI 工作台（`--gui`，pywebview）已落地并稳定；参照 `deepseek-harness`（dsh，Agent 框架）与 `dsh-desktop`（社区 Electron 桌面壳）的**上下游分离**模式。
 > 目标：为 jarvis 增加一个**独立仓库**的桌面应用扩展 jarvis-desktop —— 壳不重写 Agent 运行时，只管桌面宿主能力；UI 用 React 全新实现，但沿用 J.A.R.V.I.S 视觉语言（深蓝玻璃拟态 + 方舟反应炉）。
+>
+> ❌ **后续变更（2026-10-14）**：本文「现有 pywebview 工作台保留不动、与 jarvis-desktop
+> 并存」的假设已作废——三栏工作台窗口壳已退役删除，图形化桌面唯一入口为
+> jarvis-desktop（见 [`docs/fixlogs/workbench-gui-retired.md`](../fixlogs/workbench-gui-retired.md)）。
+> 其余内容为历史立项快照，保留供技术复盘，不再更新。
 
 ---
 
