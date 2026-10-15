@@ -14,7 +14,8 @@
 - **操作电脑** — 控制鼠标键盘、截屏看屏幕、管理窗口
 - **上网** — 打开浏览器、搜索信息、操作网页
 - **听和说** — 语音对话、实时双工聊天、朗读文字
-- **桌面入口** — 双击桌面图标直接打开三栏 GUI 工作台（透明背景 + 方舟反应炉波纹），热键召唤待接线
+- **桌面入口** — 图形化桌面由独立仓库 **jarvis-desktop** 提供（三栏布局 · 三主题皮肤 ·
+  自带开机自启）；本仓库只供终端 REPL 与 `--serve` 后端（原三栏 pywebview 工作台已于 2026-10 退役）
 - **团队协作** — 派生子 Agent 并行处理复杂任务
 - **控制外部软件** — 通过 CLI-Anything 操作 Blender、WPS、OBS 等
 
@@ -57,14 +58,15 @@ jarvis --init
 
 ```bash
 jarvis              # 进入 REPL 对话
-jarvis --gui        # 启动三栏 GUI 工作台（桌面图标同款入口，--talk 等价）
 jarvis --serve      # 启动 headless API 服务（不渲染本地 UI，供 jarvis-desktop 等外部前端接入）
 jarvis --quick      # 快速启动（跳过动画和可选初始化）
 ```
 
-> `--serve` 与 `--gui`/`--talk` 互斥：它不开窗口，而是把对话引擎以 WebSocket API 形式绑定在
+> `--serve` 不开窗口，而是把对话引擎以 WebSocket API 形式绑定在
 > `127.0.0.1` 随机端口（token 认证），就绪后向 stdout 打印单行握手 JSON，供 Electron 桌面壳
 > jarvis-desktop 逐行解析后拉起 UI。`websockets` 已为核心依赖，随安装自动就绪（2026-09 起）。
+> 图形化桌面一律走 jarvis-desktop：本仓库的三栏 pywebview 工作台（`--gui` / `--talk`）已于
+> 2026-10 退役，详见[桌面入口](#桌面入口jarvis-desktop-桌面应用)。
 
 ---
 
@@ -91,7 +93,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | **用 yolo 模式** | 信任我时切到 `/mode yolo`，省去反复确认 |
 | **图片输入** | `Ctrl+V` 或 `/paste` 粘贴截图让我看，比文字描述更直观 |
 | **语音交互** | 手忙时 `/voice` 直接说，不用打字 |
-| **桌面图标** | 双击图标直接开三栏工作台，不用敲命令 |
+| **桌面入口** | 装 jarvis-desktop 后双击图标即可对话，不用敲命令 |
 | **会话恢复** | 每轮对话自动保存；历史会话用 `/load`（或桌面左栏）恢复，启动不再自动带出上次会话 |
 
 ### 中断与退出
@@ -209,7 +211,7 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 
 - **全双工**：你说话的同时我能听到，不用等我说完
 - **随时打断**：说"闭嘴"等中断词（需把 `[voice].barge_in` 设为 `true`，默认关）或按 `ESC`
-- **纯终端运行**：直接在终端内对话并实时显示转录文字流（2026-09 起不再弹独立窗口；图形化实时聊天用工作台 `--gui` 或 jarvis-desktop）
+- **纯终端运行**：直接在终端内对话并实时显示转录文字流（2026-09 起不再弹独立窗口；图形化实时聊天用 jarvis-desktop）
 - **退出**：说"退下"或按 `ESC`
 
 ### 语音配置建议
@@ -263,38 +265,38 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
 
 ## 桌面入口（jarvis-desktop 桌面应用）
 
-桌面入口已由 **jarvis-desktop**（Electron 桌面应用，独立仓库）接管：
-连接 `jarvis --serve` 后端，提供会话管理 / 流式对话 / 实时语音（`/talk`）/ 半双工语音（`/voice`）等完整桌面体验。
-原桌面快捷方式（双击打开 pywebview 三栏工作台窗口）已于 2026-09 下线，
-与桌面应用功能冲突；存量桌面 JARVIS.lnk 可直接手动删除。
+桌面入口由 **jarvis-desktop**（Electron 桌面应用，独立仓库）唯一承担：
+连接 `jarvis --serve` 后端，提供会话管理 / 流式对话 / 实时语音（`/talk`）/ 半双工语音（`/voice`）等完整桌面体验，开机自启也由该应用自身提供。
 
-本仓库内仍保留两个终端入口：
+本仓库只保留终端入口：
 - `jarvis`：REPL 终端对话；
-- `jarvis --gui`：三栏 GUI 工作台窗口（透明背景铺满工作区；左栏模式/面板
-  切换、中栏文本对话、右栏系统指标；单实例驻留，点 X 关闭）。
-  中栏降噪：思考内容在回复结束后收起成一行标题（标题带字数，点开可看全文）；
-  本轮连续的工具调用聚合为一条「工具调用 ×N」框（全部完成自动收起，有失败仍
-  收起但标题标红计数）。
+- `jarvis --serve`：headless 后端（供桌面壳 / 手机 PWA / 微信接入）。
 
-> 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线，由三栏 GUI 工作台取代（一期已落地）。
+> 📌 **三栏 GUI 工作台已退役（2026-10-14）**：`jarvis --gui` / `--talk` 下线，
+> pywebview 窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py`
+> 与 `assets/`）已从仓库删除——两套前端重复建设，图形化统一交给 jarvis-desktop。
+> 两个参数仍能被识别，执行时只打印下线提示与旧自启项的清理路径。
+> 注意：`agent/ui/workbench/` 目录本身**没有退役**，它是 `--serve` 与桌面壳共用的引擎层；
+> 判断依据与影响面见 [workbench-gui-retired](docs/fixlogs/workbench-gui-retired.md)。
+
+> 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线。
 > 定时提醒/每日简报等主动服务已于 2026-09 重新接线：通过 **jarvis-desktop 桌面应用**（连 `jarvis --serve` 后端）播报——每日简报、对话内“提醒我”、截止日期提醒到期时会在聊天区上屏并弹系统通知。因 serve 进程随桌面壳启停，主动服务仅在桌面壳（或手动 `--serve`）运行期间生效。
 > **2026-10-14 补充**：终端 `jarvis`（REPL）与 `/voice` 语音对话现已同样能记/查/取消定时提醒（对话里说“明天中午 12 点提醒我面试”即可），到点会在终端上屏 `⏰` 提醒行；仅 jarvis 进程存活期间触发，不做 TTS 播报，截止日期类仍仅桌面可用。
 > 终端文本对话仍可用 `jarvis`（REPL），REPL 内语音对话用 `/voice`。
 
-### 开机自启
+### 开机自启（已退役）
 
-```bash
-python -m agent.daemon.autostart install    # 安装
-python -m agent.daemon.autostart status     # 查看状态
-```
+开机自启原来由 `python -m agent.daemon.autostart install` 写入，本质是让系统
+开机拉起 `jarvis --gui` 窗口；随三栏 GUI 退役，该模块已于 2026-10 删除。
+需要开机启动请直接在 **jarvis-desktop** 的设置内开启。
 
-### 跨平台行为
+旧版残留需手动清理（执行 `jarvis --gui` 也会打印同一份指引）：
 
-| 平台 | 行为 |
-|------|------|
-| Windows | 静默启动（无终端窗口），直接打开三栏工作台 |
-| macOS | LaunchAgent 登录时启动三栏工作台 |
-| Linux | 不支持自动安装（提示手动 systemd user unit） |
+| 平台 | 残留位置 |
+|---|---|
+| Windows | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\JARVIS.lnk`、`~/.jarvis/start_workbench.vbs`、`~/.jarvis/jarvis_window.ico` |
+| macOS | `~/Library/LaunchAgents/` 下 JARVIS 的 `.plist` |
+| Linux | 从未支持 |
 
 ---
 
@@ -325,9 +327,9 @@ python -m agent.daemon.autostart status     # 查看状态
 /models              # 交互式选择（↑↓ + Enter，按厂商分组）
 ```
 
-三种入口（REPL `/model`、`/models` 选择、工作台 / 桌面壳左栏点选模型）都是**立即生效**：
+三种入口（REPL `/model`、`/models` 选择、jarvis-desktop 桌面壳左栏点选模型）都是**立即生效**：
 切换会写回 `~/.jarvis/models.toml` 的 `last_model`（下次启动自动恢复），**并**就地热切换
-运行中的引擎（保留会话上下文，无需重启进程）——工作台 / 桌面壳里选完即用，模型列表的
+运行中的引擎（保留会话上下文，无需重启进程）——桌面壳里选完即用，模型列表的
 「· 当前」标记也跟着移到新模型。TTS 音色不同：仍是「下次语音会话生效」。
 
 ### 添加自定义模型
@@ -517,7 +519,8 @@ compact_refreeze_growth = 1.25 # 防抖：冻结后总量增长不足此倍数�
 compact_max_output_tokens = 2048  # 压缩摘要的输出 token 上限
 tool_result_keep_recent = 4   # 工具结果折叠时保留最近 N 条完整输出
 
-# 桌面入口与主动播报（热键召唤三栏工作台，待接线；简报/截止日期由 serve 宿主的 ProactiveHub 消费，经 jarvis-desktop 播报）
+# 全局热键与主动播报（热键能力保留待接线，原为三栏工作台预留、窗口壳已于 2026-10 退役；
+# 简报/截止日期由 serve 宿主的 ProactiveHub 消费，经 jarvis-desktop 播报）
 [daemon]
 hotkey = "ctrl+shift+j"
 briefing_enabled = true        # 每日简报开关（仅 --serve / 桌面壳运行期间生效）
@@ -558,8 +561,6 @@ jarvis [选项]
   --debug                调试模式（打印异常栈）
   --no-boot              跳过启动动画
   --quick                快速启动（跳过可选初始化）
-  --gui                  启动三栏 GUI 工作台（桌面图标入口）
-  --talk                 与 --gui 等价（兼容旧快捷方式）
   --version              显示版本
 ```
 
@@ -679,7 +680,7 @@ jarvis [选项]
    - 拍照给我看 → 摄像头工具直接识别
 
 4. **桌面入口 + 主动服务**
-   - 双击桌面图标打开工作台，文本/语音对话都在里面
+   - 图形化对话用 jarvis-desktop（文本 / 语音 / 实时双工都在里面），终端里 `jarvis` 直接用
    - "每天早上8点给我发简报"
    - "下周五之前提醒我交报告"
    - 我会主动服务，不用你时刻想着我

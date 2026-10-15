@@ -10,8 +10,9 @@
 # 启动后输入（REPL 内纯终端全双工对话，2026-09 起不再弹独立窗口）
 /talk
 
-# 或 CLI 直接启动（打开三栏工作台，窗口内左栏切换实时模式；--gui 等价）
-jarvis --talk
+# 或先 `jarvis` 进 REPL 再输 `/talk`（同上）。
+# 注：`jarvis --talk` / `--gui`（三栏 pywebview 工作台）已于 2026-10 退役，
+# 执行只打印下线说明；桌面图形化的实时双工由 jarvis-desktop 承担。
 ```
 
 > 需要 DashScope API Key（`DASHSCOPE_API_KEY` 环境变量或 `dashscope_api_key` 配置项）。

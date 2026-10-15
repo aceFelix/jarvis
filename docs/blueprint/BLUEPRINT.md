@@ -101,7 +101,7 @@ J.A.R.V.I.S 目前已经是一个**功能完整的 Windows 个人智能体**：1
 |---|---|---|
 | 实时语音 Function Calling | "已接入 ToolRegistry 全部工具" | 工具 schema 数与服务端建响应延迟近似线性（≈12ms/个）：294 个 → 3.45s，被响应救援与 server_vad 尾音重检掐死，表现为"半天不回复"。**默认只注册 2 个内置工具**，全量工具正解是"口手分离"（阶段 11） |
 
-> 复盘详见 [realtime-talk-tools-mode-default-fix.md](fixlogs/realtime-talk-tools-mode-default-fix.md)。
+> 复盘详见 [realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md)。
 
 ---
 
@@ -280,7 +280,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 去重 | 参考 `dupeGuru` 的思路（内容指纹 + 模糊匹配），不自研算法 |
 | 整理 | 按规则归档（类型/日期/项目）+ 保持可撤销（走副作用账本） |
 | 现状 | ⭐ 已有原生文件工具（读写/移动/回收站）；缺规则化整理闭环 |
-| 落点 | 落地文档：[plans/fileops-desktop-upgrade.md](plans/fileops-desktop-upgrade.md) |
+| 落点 | 落地文档：[plans/fileops-desktop-upgrade.md](../plans/fileops-desktop-upgrade.md) |
 
 ### 6.4 杀毒
 
@@ -439,7 +439,8 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 - [x] **阶段 4**：记忆与生态（会话持久化 / 长期记忆 / MCP / 上下文压缩 / Skill）
 - [x] **阶段 5**：贾维斯形态（主动感知 + 子代理 + 主动提醒 + jarvis-desktop 桌面壳）
 - [x] **阶段 6**：跨平台适配（Windows / macOS / Linux）
-- [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
+- [x] **阶段 7**：实时聊天 UI（全双工打断 + 桌面应用；原方舟反应炉 pywebview 工作台
+  窗口壳已于 2026-10 退役，图形化 UI 统一由 jarvis-desktop 承担）
 
 ### 9.2 阶段 8–11：管家形态（W1–W4，当前主线）
 

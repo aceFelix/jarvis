@@ -1,4 +1,13 @@
-# JARVIS 三栏 GUI 工作台 — 开发计划（已评审定稿）
+# JARVIS 三栏 GUI 工作台 — 开发计划（已完结并退役）
+
+> ❌ **完结与退役（2026-10-14）**：本文描述的工作台已于 2026-08-30 一期落地并在
+> 2026-09 二期接入桌面项目工作区，后整体退役——pywebview 窗口壳
+> （`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` 与
+> `assets/`）、开机自启（`agent/daemon/autostart.py`）与 `realtime_ui` 可选依赖均已删除，
+> `jarvis --gui` / `--talk` 仅保留退役提示。图形化桌面唯一入口为独立仓库
+> **jarvis-desktop**；`agent/ui/workbench/` 引擎层现役（serve 与桌面壳共用）。
+> 退役判断依据与影响面见 [`docs/fixlogs/workbench-gui-retired.md`](../fixlogs/workbench-gui-retired.md)。
+> 以下内容为历史开发计划快照，保留供技术复盘，不再更新。
 
 > 状态：✅ 定稿（2026-08-30，用户评审拍板；删除阶段 `59f746a` 落地后起草）｜**一期已落地（2026-08-30）**
 > 前置：无窗口常驻托盘架构已下线，桌面入口暂指向 `jarvis --talk` 独立窗口（一期已改指向 `--gui` 工作台）。

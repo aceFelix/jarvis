@@ -37,6 +37,7 @@ from urllib.parse import urlparse, parse_qs
 
 from agent.bridge.ui import BridgeUI
 from agent.core.context import ToolContext
+from agent.utils.query_lock import acquire_lock_cancellable
 
 # websockets 是可选依赖（与 voice/realtime_talk.py 一致），缺失时在 start() 报错
 try:
@@ -585,10 +586,12 @@ class BridgeServer:
             )
             return await asyncio.wrap_future(future)
 
-        # 在主线程 loop 中执行：获取 threading.Lock 串行化
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._query_lock.acquire)
+        # 在主线程 loop 中执行：获取 threading.Lock 串行化（取消安全：reply.abort 的
+        # 取消若落在等锁窗口，事后被线程池拿到的锁由 acquire_lock_cancellable 归还，
+        # 而 finally 照常走收尾，不会把三通道 query 锁卡死）。@author aceFelix
+        locked = False
         try:
+            locked = await acquire_lock_cancellable(self._query_lock)
             # 拿到锁、即将开跑：登记当前任务供桌面 reply.abort 取消（任意来源）。
             # @author aceFelix
             if self.on_query_begin is not None:
@@ -598,7 +601,8 @@ class BridgeServer:
                     pass
             return await self._query_loop.run(text, ctx, images=images)
         finally:
-            self._query_lock.release()
+            if locked:
+                self._query_lock.release()
             # 本轮结束落盘：桌面注入的 engine._after_turn 把共享 messages 增量存到
             # 电脑会话历史。此 finally 跑在引擎 loop（上方已调度到 main_loop），
             # _after_turn 内的 create_task 因此落在正确的 loop 上。@author aceFelix
