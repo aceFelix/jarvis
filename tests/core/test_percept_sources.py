@@ -323,20 +323,35 @@ def test_default_settings_registers_sources_all_disabled():
     """默认配置（出厂口径）：源都登记，但一个都不启用。"""
     bus = PerceptBus(BusConfig(), log_path=None)
     status = register_sources(bus, Settings())
-    assert status == {"window": False, "file": False, "vcs": False, "mail": False}
+    assert status == {"window": False, "file": False, "vcs": False, "mail": False,
+                      "vision": False}
     st = bus.stats()["sources"]
     assert st["window"]["enabled"] is False and st["file"]["enabled"] is False
     assert st["vcs"]["enabled"] is False and st["mail"]["enabled"] is False
+    assert st["vision"]["enabled"] is False
     # 一个源都没开 → 总线不该起轮询线程（空载 CPU 增量为 0 的依据）
     assert bus.start() is False and bus.running is False
 
 
+def test_master_switch_off_disables_every_source():
+    """总开关关时逐源“各自开着”也必须不算开（第 4 步接线时补上的漏采口子）。"""
+    settings = Settings(
+        percept_enabled=False,
+        percept_window_enabled=True, percept_vcs_enabled=True,
+        percept_mail_enabled=True, percept_vision_enabled=True,
+    )
+    bus = PerceptBus(BusConfig(), log_path=None)
+    assert all(v is False for v in register_sources(bus, settings).values())
+    assert bus.start() is False                     # 宿主一句 start 也不会开采
+
+
 def test_register_is_idempotent_and_takes_new_params():
     bus = PerceptBus(BusConfig(), log_path=None)
-    settings = Settings(percept_window_enabled=True, percept_window_interval_s=9)
+    settings = Settings(percept_enabled=True, percept_window_enabled=True,
+                        percept_window_interval_s=9)
     register_sources(bus, settings)
     register_sources(bus, settings)          # 同名替换，不产生幽灵源
-    assert sorted(bus.source_names()) == ["file", "mail", "vcs", "window"]
+    assert sorted(bus.source_names()) == ["file", "mail", "vcs", "vision", "window"]
     assert bus.stats()["sources"]["window"]["interval_s"] == 9.0
     assert bus.stats()["sources"]["window"]["enabled"] is True
 
@@ -371,7 +386,8 @@ def test_percept_absent_table_keeps_everything_off():
     s = _apply_toml(Settings(), {"monitor": {"enabled": True}})
     assert s.percept_enabled is False and s.percept_window_enabled is False
     assert s.percept_file_watch_dirs == [] and s.percept_vcs_repos == []
-    assert s.percept_mail_watch_senders == []
+    assert s.percept_mail_watch_senders == [] and s.percept_vision_enabled is False
+    assert s.percept_vision_fps == 2                 # 视觉默认低帧率（常驻成本口径）
 
 
 def test_watch_dirs_list_is_copied_not_aliased():

@@ -126,6 +126,58 @@ Agent 工具：
 > [schedule-prompt-conditional-fix.md](../fixlogs/schedule-prompt-conditional-fix.md) 与
 > [agent-loop-stall-fix.md](../fixlogs/agent-loop-stall-fix.md)。
 
+## 感知源（阶段 9 · W2，已接线）
+
+“主动”不再只能看时钟：前台窗口、白名单目录、登记仓库、邮箱来信、摄像头在场
+都会变成事件进**统一事件总线**，再经打扰预算（`[policy.notify_budget]`）裁决后
+作为一条 `贾维斯观察` 提醒推给桌面壳（气泡 + 系统通知，开关开时并行 TTS 朗读）。
+机制与参数口径见 [17-W2 感知层](../architecture/17-W2感知层.md)，
+字段逐项说明见 [配置参考](../../config-docs/configuration.md#w2-感知层percept阶段-9)。
+
+> 🔒 **隐私先说清**：总开关与逐源开关**全部默认关**，没显式打开的源一个字节都不采；
+> 事件只写本地 `~/.jarvis/percept/events.jsonl`（`log_events = false` 可完全不落盘），
+> 不随对话上传。前台窗口源额外带三层防护：标题剥凭据片段 + 截断 40 字 + 密码类应用零事件。
+
+开启方式（改完**重启桌面壳 / `--serve`** 才生效：逐源开关与采样间隔在启动时快照；
+面板上运行时开关属第 5 步）：
+
+```toml
+[percept]
+enabled = true                 # 总开关：关着时不起轮询线程、不采任何源
+window_enabled = true          # 前台窗口源（默认只记“切到哪个应用”；停留超时提醒需设 window_linger_minutes）
+
+file_enabled = true            # 目录堆积提醒
+file_watch_dirs = ["E:/Downloads", "~/Desktop"]
+
+vcs_enabled = true             # 仓库提醒（只跑 git status / stash list，不动工作区）
+vcs_repos = ["E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis"]
+
+mail_enabled = true            # 重要来信提醒（凭据配在 [email] 的 imap_*）
+mail_watch_senders = ["boss@", "zhangsan@"]   # 白名单：非空则只报命中的人
+
+vision_enabled = false         # 摄像头在场判定（需 pip install "jarvis-agent[vision]"）
+vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，代价：关闭期间不报“回来了”）
+```
+
+能观察到什么（逐源）：
+
+| 源 | 会说什么 | 不会说什么 |
+|---|---|---|
+| `window` | 切到另一个应用（进程名变了才说）；在同一应用连续停留超 `window_linger_minutes` | 同一应用内换标签页/换窗口标题 |
+| `file` | 白名单目录新增文件；新增达 `file_grow_threshold` 聚合成一条“堆积” | 删除与修改（那是用户自己的动作） |
+| `vcs` | 未提交项刚跨过阈值、有未推送提交、落后远端、stash 攒够 | 同一状态反复碎嘴（只在“刚跨线”那一档说一次） |
+| `mail` | 白名单命中的人来信（只取信封头，不拉正文、不把邮件标成已读） | 陈年未读（首次开启只建基线不回放） |
+| `vision` | 对着摄像头比手势（赞/踩/开掌…） | 人脸进/出画面只改在场状态，**不播报** |
+
+> 👀 **在场推断（away）**：开 `vision_enabled` 后，人脸离开画面→进入无人值守（播报
+> 只入库不喊人），人脸回来→解除。摄像头可能因开了 `vision_auto_stop_minutes` 的空闲
+> 自动关闭、或被视觉工具停掉而“听不见回来”，因此视觉推断的 away 带 **30 分钟有效期**，
+> 到期自动不再压制提醒；手动 `/away` 不被摄像头取消也不过期。
+
+> ⚠️ 本期未开的源：`calendar_enabled` / `system_enabled` / `schedule_enabled` 三个开关是
+> **收编位占位**，背后的日历源与系统监控仍是休眠件，开了也不会采（避免“面板有开关、
+> 背后没人采”的假可用）；用户自己设的定时提醒也不走感知总线（必须准点响）。
+
 ## 系统资源监控（休眠态）
 
 监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，

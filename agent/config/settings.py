@@ -371,7 +371,13 @@ class Settings:
     percept_calendar_enabled: bool = False
     percept_system_enabled: bool = False
     percept_schedule_enabled: bool = False
+    # 视觉在场源（唯一会碰摄像头的源，默认关）：在场事实与手势进总线
     percept_vision_enabled: bool = False
+    percept_vision_camera_index: int = 0
+    percept_vision_fps: int = 2          # 低帧率：常驻 CPU 成本按帧率线性增长
+    percept_vision_gesture_enabled: bool = True
+    percept_vision_auto_stop_minutes: int = 0   # >0 空闲自动关摄像头（代价：关闭期间检测不到回来）
+    percept_vision_interval_s: int = 5          # 总线排空本源的节拍（秒）
 
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。

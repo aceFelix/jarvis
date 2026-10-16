@@ -1,9 +1,9 @@
 """无人值守 + 运行时闸门单测 —— away 状态 / 待批清单 / policy_gate 合并（阶段 8 验收④）。
 
-覆盖：/away /back 手动切换、空闲推断、away 时 ASK 入待批清单转 DENY、
-ALLOW/DENY 不受 away 影响、沙箱自动放行在 away 时被压制升级待批、
-闸门零介入（无租约无 away 时结论原样回落、对象同一）、租约只放宽
-ASK 且放宽不了路径守护软提醒。
+覆盖：/away /back 手动切换、空闲推断、**视觉在场推断（阶段 9 W2 补上）**、
+away 时 ASK 入待批清单转 DENY、ALLOW/DENY 不受 away 影响、沙箱自动放行在
+away 时被压制升级待批、闸门零介入（无租约无 away 时结论原样回落、对象同一）、
+租约只放宽 ASK 且放宽不了路径守护软提醒。
 
 声明式规则合并（原策略引擎）已并入五层管线，测于
 tests/test_permissions_relax.py。
@@ -19,7 +19,11 @@ from datetime import datetime, timedelta
 import pytest
 
 from agent.core.policy import policy_gate
-from agent.core.policy.state import PendingApprovalStore, PolicyStateStore
+from agent.core.policy.state import (
+    VISION_AWAY_TTL_MIN,
+    PendingApprovalStore,
+    PolicyStateStore,
+)
 from agent.core.result import PermissionBehavior, PermissionResult
 
 
@@ -87,6 +91,69 @@ def test_back_refreshes_activity(policy_paths):
     s._path.write_text(json.dumps({"last_activity": past}), encoding="utf-8")
     s.set_away(False, source="manual")
     assert s.is_away(10)[0] is False
+
+
+# ---- 视觉在场推断（W2 第 4 步补上阶段 8 递延的那一项）----
+
+def test_vision_presence_away_lifecycle(policy_paths):
+    """人脸离开 → away（依据文本能分辨来源）；回来 → 解除。"""
+    s = PolicyStateStore(policy_paths["state"])
+    assert s.set_presence_away(True) is True
+    away, note = s.is_away(0)
+    assert away is True and note.startswith("视觉")
+    assert s.set_presence_away(False) is True
+    assert s.is_away(0) == (False, "")
+
+
+def test_manual_away_not_overridden_by_camera(policy_paths):
+    """用户明确 /away 后，摄像头不得替他取消（也不得改写过来源）。"""
+    s = PolicyStateStore(policy_paths["state"])
+    s.set_away(True, source="manual")
+    assert s.set_presence_away(False) is False
+    away, note = s.is_away(0)
+    assert away is True and "手动" in note
+    data = json.loads(s._path.read_text(encoding="utf-8"))
+    assert data["away"]["source"] == "manual"
+
+
+def test_presence_away_is_idempotent(policy_paths):
+    """状态与来源都没变时不写盘（免摄像头在边界抖时反复落盘）。"""
+    s = PolicyStateStore(policy_paths["state"])
+    assert s.set_presence_away(True) is True
+    before = s._path.read_text(encoding="utf-8")
+    assert s.set_presence_away(True) is False
+    assert s._path.read_text(encoding="utf-8") == before   # since 没被刷新
+
+
+def test_vision_away_expires(policy_paths):
+    """视觉 away 超 TTL 后不再压制播报（摄像头可能已关，检测不到回来）。"""
+    s = PolicyStateStore(policy_paths["state"])
+    s.set_presence_away(True)
+    assert s.is_away(0)[0] is True
+    data = json.loads(s._path.read_text(encoding="utf-8"))
+    stale = (datetime.now() - timedelta(minutes=VISION_AWAY_TTL_MIN + 5)).isoformat(
+        timespec="seconds")
+    data["away"]["since"] = stale
+    s._path.write_text(json.dumps(data), encoding="utf-8")
+    s._mtime = -1.0                                  # 绕过 mtime 缓存重读
+    assert s.is_away(0) == (False, "")
+    # 手动 /away 不适用到期：用户说的“不在”不因时间流逝而失效
+    s.set_away(True, source="manual")
+    data = json.loads(s._path.read_text(encoding="utf-8"))
+    data["away"]["since"] = stale
+    s._path.write_text(json.dumps(data), encoding="utf-8")
+    s._mtime = -1.0
+    assert s.is_away(0)[0] is True
+
+
+def test_unknown_away_source_is_not_trusted(policy_paths):
+    """不在采信名单里的 active（手改文件/旧数据）不算 away，保持原有保守口径。"""
+    s = PolicyStateStore(policy_paths["state"])
+    s._path.write_text(json.dumps(
+        {"away": {"active": True, "since": datetime.now().isoformat(timespec="seconds"),
+                  "source": "某个新来源"}}), encoding="utf-8")
+    s._mtime = -1.0
+    assert s.is_away(0) == (False, "")
 
 
 # ---- PendingApprovalStore（待批清单）----

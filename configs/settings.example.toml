@@ -303,7 +303,15 @@ vcs_min_interval_s = 60    # 总线对 vcs 源的同源投递最小间隔
 mail_enabled = false       # IMAP IDLE 只读，只取信封头不拉正文（凭据配在 [email] 的 imap_*）
 mail_min_interval_s = 0    # 0 = 靠 IDLE 推送，不额外节流
 mail_watch_senders = []    # 发件人白名单（子串、不分大小写），如 ["boss@", "妈妈"]；非空=只报命中的人
-calendar_enabled = false   # 以下四个为既有能力收编（进总线后统一过 W1 闸门）
+calendar_enabled = false   # 以下三个为既有能力收编位（本体未装配，开了也不会采；vision 已接）
 system_enabled = false
 schedule_enabled = false
+
+# 视觉在场源（第 4 步已接）：唯一会碰摄像头的源，默认关；需 pip install "jarvis-agent[vision]"
+# 人脸进/出画面 = 在场事实（只记账不播报，但用来推断 away）；手势 = 高先验事件（可比赞/踩）
 vision_enabled = false
+vision_camera_index = 0    # 摄像头索引（0=前置）
+vision_fps = 2             # 帧率：常驻成本按它线性增长，在场判断 2fps 已够
+vision_gesture_enabled = true       # false = 只做在场检测，不跑手势识别（更省 CPU）
+vision_auto_stop_minutes = 0        # >0 空闲自动关摄像头（更省隐私，代价：关闭期间检测不到“回来了”）
+vision_interval_s = 5               # 总线排空本源的节拍（秒）

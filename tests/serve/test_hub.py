@@ -10,8 +10,8 @@
   简报超 200 字截断、markdown 清洗、语音依赖缺失静默降级、停机打断
 - server 侧 proactive.ack RPC：hub 缺失/参数缺失报错、正常路径返回
 
-持久化隔离手法与 tests/daemon/test_scheduler.py 一致：monkeypatch
-_schedule_file / _deadlines_file 重定向到 tmp_path，不污染真实 ~/.jarvis。
+持久化隔离手法（与 tests/daemon/test_scheduler.py 一致）已上提到
+`tests/serve/conftest.py` 的 autouse 夹具（感知总线也要落盘隔离），本文件直接受益。
 
 @author aceFelix
 """
@@ -26,8 +26,6 @@ from datetime import datetime, timedelta
 
 import pytest
 
-import agent.core.daemon.deadline as deadline_mod
-import agent.core.daemon.scheduler as scheduler_mod
 import agent.serve.hub as hub_mod
 from agent.serve import protocol
 from agent.serve.hub import ProactiveHub
@@ -105,17 +103,6 @@ def _wait_instance(fake_tts, timeout: float = 2.0) -> _FakeTTS:
             return fake_tts.instances[0]
         time.sleep(0.02)
     raise AssertionError("未等到 TTS 朗读实例")
-
-
-@pytest.fixture(autouse=True)
-def isolate_persistence(tmp_path, monkeypatch):
-    """把 Scheduler / DeadlineTracker 的持久化文件重定向到 tmp_path。"""
-    monkeypatch.setattr(
-        scheduler_mod, "_schedule_file", lambda: tmp_path / "schedule.json"
-    )
-    monkeypatch.setattr(
-        deadline_mod, "_deadlines_file", lambda: tmp_path / "deadlines.json"
-    )
 
 
 @pytest.fixture

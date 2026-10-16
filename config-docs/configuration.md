@@ -163,8 +163,10 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 
 > 🔒 **隐私口径（已拍板的决策 2）**：总开关与逐源开关**全部默认关**，未显式打开的
 > 源一个字节都不采；事件只本地落盘（`~/.jarvis/percept/events.jsonl`），不随对话上传。
-> ⚠️ **当前状态**：总线与四个源已落地并有单测，但**宿主接线（serve 侧订阅总线）尚未
-> 完成**（W2 第 4 步）——现在打开配置不会有任何播报。
+> ✅ **当前状态（W2 第 4 步已接线）**：serve 宿主 `ProactiveHub` 启动时装配总线，
+> 感知事件与简报/截止日期走**同一个打扰预算闸门**；改完配置**需重启桌面壳/`--serve`**
+> 才生效（逐源开关与采样间隔在启动时快照）；逐源开关的桌面面板属第 5 步，现在需手改本文件。
+> ⚠️ 仅 `--serve` / 桌面壳运行期间采集（终端 REPL 不装总线）。
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
@@ -181,7 +183,15 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `file_interval_s` / `file_max_entries` / `file_grow_threshold` / `file_ignore_suffixes` / `file_min_interval_s` | `30` / `2000` / `5` / `[]` / `0` | 文件源参数 |
 | `vcs_enabled` / `vcs_repos` / `vcs_interval_s` / `vcs_min_interval_s` | `false` / `[]` / `120` / `60` | 仓库源（登记制，只跑 `git status`/`stash list` 两条只读命令） |
 | `mail_enabled` / `mail_min_interval_s` / `mail_watch_senders` | `false` / `0` / `[]` | 邮件源（IMAP 只读 IDLE）；白名单非空 = 只报命中的人 |
-| `calendar_enabled` / `system_enabled` / `schedule_enabled` / `vision_enabled` | `false` | 既有能力收编位（W2 第 4 步接线） |
+| `vision_enabled` / `vision_camera_index` / `vision_fps` | `false` / `0` / `2` | 视觉在场源（**唯一会碰摄像头的源**，需 `pip install "jarvis-agent[vision]"`） |
+| `vision_gesture_enabled` / `vision_auto_stop_minutes` / `vision_interval_s` | `true` / `0` / `5` | 是否跑手势识别；`0` = 不自动关摄像头，`>0` 空闲自动关（代价：关闭期间检测不到“回来了”）；总线排空节拍 |
+| `calendar_enabled` / `system_enabled` / `schedule_enabled` | `false` | 既有能力收编位（本体未装配，开了也不会采，理由见架构文档第七节） |
+
+> 👀 **视觉源与 away**：打开 `vision_enabled` 后，人脸离开画面会触发无人值守（away），
+> 回来时由人脸重新出现解除；而摄像头一旦不再工作（开了 `vision_auto_stop_minutes`、
+> 被视觉工具停止、启动失败）就再也等不到“回来”，所以视觉推断的 away 有
+> **30 分钟有效期**（`agent/core/policy/state.py` 的 `VISION_AWAY_TTL_MIN`），到期自动不再
+> 压制播报。手动 `/away` 不被摄像头取消也不过期（优先级：手动 > 视觉 > 空闲推断）。
 
 邮箱收件凭据配在 `[email]` 表（见下方“邮件”节），需同时开 `[percept] mail_enabled`。
 

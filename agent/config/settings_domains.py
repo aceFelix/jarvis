@@ -201,6 +201,11 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("system_enabled", "percept_system_enabled"),
         ("schedule_enabled", "percept_schedule_enabled"),
         ("vision_enabled", "percept_vision_enabled"),
+        ("vision_camera_index", "percept_vision_camera_index"),
+        ("vision_fps", "percept_vision_fps"),
+        ("vision_gesture_enabled", "percept_vision_gesture_enabled"),
+        ("vision_auto_stop_minutes", "percept_vision_auto_stop_minutes"),
+        ("vision_interval_s", "percept_vision_interval_s"),
     )),
     ("tools", (  # 工具延迟加载
         ("deferred_loading", "tools_deferred_loading"),

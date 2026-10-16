@@ -442,6 +442,7 @@ def test_factory_passes_vcs_and_mail_params(tmp_path):
     repo = tmp_path / "jarvis"
     repo.mkdir()
     settings = Settings(
+        percept_enabled=True,
         percept_vcs_enabled=True,
         percept_vcs_repos=[str(repo)],
         percept_vcs_interval_s=90,
