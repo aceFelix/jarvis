@@ -243,6 +243,56 @@ def test_email_config_set_blank_password_keeps_original(monkeypatch):
     assert server._settings.email_sender == "me@163.com"
 
 
+def test_email_config_get_hides_imap_password_and_reports_readiness():
+    """阶段 9 收件字段：imap_password 同样是 secret，就绪位按 host+账号+凭据判定。"""
+    server = _make_server()
+    server._settings.email_imap_host = "imap.163.com"
+    server._settings.email_imap_user = "me@163.com"
+    server._settings.email_imap_password = "imap-secret"
+    result = server._rpc_email_config_get({})
+    assert "imap_password" not in result
+    assert result["imap_host"] == "imap.163.com"
+    assert result["imap_port"] == 993
+    assert result["has_imap_password"] is True
+    assert result["imap_ready"] is True
+
+    # 只配了 host：凭据缺失 → 未就绪（面板据此提示“还差授权码”）
+    server._settings.email_imap_password = ""
+    server._settings.email_smtp_password = ""
+    server._settings.email_smtp_user = ""
+    got = server._rpc_email_config_get({})
+    assert got["has_imap_password"] is False and got["imap_ready"] is False
+
+
+def test_email_config_imap_ready_falls_back_to_smtp_credentials():
+    """163/QQ 就是一个授权码两边用：imap 账号/凭据留空时回退 SMTP，就绪位跟着算。"""
+    server = _make_server()
+    server._settings.email_imap_host = "imap.163.com"
+    server._settings.email_smtp_user = "me@163.com"
+    server._settings.email_smtp_password = "same-code"
+    result = server._rpc_email_config_get({})
+    assert result["has_imap_password"] is True
+    assert result["imap_ready"] is True
+    assert "smtp_password" not in result and "imap_password" not in result
+
+
+def test_email_config_set_imap_password_semantics(monkeypatch):
+    """写侧同样守 secret 口径：留空=保持原值，非空才落盘；imap_port 要过区间校验。"""
+    calls: list = []
+    monkeypatch.setattr(
+        server_mod, "save_email_config", lambda patch: calls.append(patch) or True
+    )
+    server = _make_server()
+    server._settings.email_imap_password = "original-imap"
+    result = server._rpc_email_config_set({"imap_password": "", "imap_host": "imap.qq.com"})
+    assert calls[-1] == {"imap_host": "imap.qq.com"}      # 空授权码不写补丁
+    assert server._settings.email_imap_password == "original-imap"
+    assert server._settings.email_imap_host == "imap.qq.com"
+    assert "imap_password" not in result
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"imap_port": 70000})
+
+
 def test_email_config_set_validation(monkeypatch):
     """端口超范围 / 类型不符 → ValueError；无有效字段（全空补丁）→ ValueError。"""
     monkeypatch.setattr(server_mod, "save_email_config", lambda patch: True)

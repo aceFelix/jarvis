@@ -174,6 +174,14 @@ smtp_port = 465
 # smtp_password = "your_authorization_code" # 邮箱授权码
 # sender = "your_163_email@163.com"         # 发件人显示地址（默认与 smtp_user 相同）
 # default_recipient = "your_163_email@163.com" # 默认收件人（用户未指定 to 时使用）
+# 收件（W2 mail 事件源，需同时开 [percept].mail_enabled）：IMAP 只读，
+# 只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，永不拉正文；长连接 IDLE，断线自动降级为轮询。
+# imap_password 留空则复用 smtp_password（163/QQ 两边同一个授权码）。
+# imap_host = "imap.163.com"
+# imap_port = 993                           # 993=SSL；143 走 STARTTLS
+# imap_user = "your_163_email@163.com"      # 留空则用 smtp_user
+# imap_password = "your_authorization_code"
+# imap_mailbox = "INBOX"                    # 只监这一个文件夹，不改邮件状态
 
 [lsp]
 # LSP 代码智能
@@ -285,14 +293,16 @@ file_interval_s = 30
 file_max_entries = 2000    # 单目录快照条目上限（超出只记 truncated）
 file_grow_threshold = 5    # 新增达此数才聚合为一条「目录堆积」提醒
 file_ignore_suffixes = []  # 额外忽略后缀（如 [".blend1"]）
+file_min_interval_s = 0    # 总线对 file 源的同源投递最小间隔（0=只靠去重窗口）
 
-# 仓库/CI 与邮件源（阶段 9 后续切片）、既有源收编
+# 仓库源与邮件源（已实现；CI 构建结果本期未做，理由见 docs/architecture/17-W2感知层.md §6.4）
 vcs_enabled = false
 vcs_repos = []             # 登记的仓库路径（如 ["E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis"]）
 vcs_interval_s = 120
 vcs_min_interval_s = 60    # 总线对 vcs 源的同源投递最小间隔
-mail_enabled = false       # IMAP IDLE 只读，只取信封头不拉正文
+mail_enabled = false       # IMAP IDLE 只读，只取信封头不拉正文（凭据配在 [email] 的 imap_*）
 mail_min_interval_s = 0    # 0 = 靠 IDLE 推送，不额外节流
+mail_watch_senders = []    # 发件人白名单（子串、不分大小写），如 ["boss@", "妈妈"]；非空=只报命中的人
 calendar_enabled = false   # 以下四个为既有能力收编（进总线后统一过 W1 闸门）
 system_enabled = false
 schedule_enabled = false

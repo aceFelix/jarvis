@@ -323,9 +323,12 @@ def test_default_settings_registers_sources_all_disabled():
     """默认配置（出厂口径）：源都登记，但一个都不启用。"""
     bus = PerceptBus(BusConfig(), log_path=None)
     status = register_sources(bus, Settings())
-    assert status == {"window": False, "file": False}
+    assert status == {"window": False, "file": False, "vcs": False, "mail": False}
     st = bus.stats()["sources"]
     assert st["window"]["enabled"] is False and st["file"]["enabled"] is False
+    assert st["vcs"]["enabled"] is False and st["mail"]["enabled"] is False
+    # 一个源都没开 → 总线不该起轮询线程（空载 CPU 增量为 0 的依据）
+    assert bus.start() is False and bus.running is False
 
 
 def test_register_is_idempotent_and_takes_new_params():
@@ -333,7 +336,7 @@ def test_register_is_idempotent_and_takes_new_params():
     settings = Settings(percept_window_enabled=True, percept_window_interval_s=9)
     register_sources(bus, settings)
     register_sources(bus, settings)          # 同名替换，不产生幽灵源
-    assert sorted(bus.source_names()) == ["file", "window"]
+    assert sorted(bus.source_names()) == ["file", "mail", "vcs", "window"]
     assert bus.stats()["sources"]["window"]["interval_s"] == 9.0
     assert bus.stats()["sources"]["window"]["enabled"] is True
 
@@ -344,9 +347,11 @@ def test_percept_toml_table_maps_to_settings():
             "enabled": True,
             "window_enabled": True,
             "file_watch_dirs": ["E:/Downloads"],
+            "file_min_interval_s": 45,
             "dedup_window_s": 60,
             "min_salience": 0.2,
             "log_events": False,
+            "mail_watch_senders": ["boss@", "妈妈"],
             "已废弃键": 1,
         }
     }
@@ -356,6 +361,9 @@ def test_percept_toml_table_maps_to_settings():
     assert s.percept_dedup_window_s == 60 and s.percept_min_salience == 0.2
     assert s.percept_log_events is False
     assert s.percept_file_enabled is False   # 未出现的键保持默认（全关）
+    # 第 3 步新增的两个字段也要能被解析（总线节流与邮件白名单）
+    assert s.percept_file_min_interval_s == 45
+    assert s.percept_mail_watch_senders == ["boss@", "妈妈"]
 
 
 def test_percept_absent_table_keeps_everything_off():
@@ -363,6 +371,7 @@ def test_percept_absent_table_keeps_everything_off():
     s = _apply_toml(Settings(), {"monitor": {"enabled": True}})
     assert s.percept_enabled is False and s.percept_window_enabled is False
     assert s.percept_file_watch_dirs == [] and s.percept_vcs_repos == []
+    assert s.percept_mail_watch_senders == []
 
 
 def test_watch_dirs_list_is_copied_not_aliased():

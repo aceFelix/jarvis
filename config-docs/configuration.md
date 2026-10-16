@@ -154,6 +154,39 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 
 ---
 
+## W2 感知层（`[percept]`，阶段 9）
+
+统一事件总线 + 逐源采集：把“时钟驱动”扩成“工作现场驱动”。总线只裁**事件层
+噪声**（去重窗口 / 同源节流 / 地板分 / 连败自动停用），“该不该现在打扰”仍由
+上面的 `[policy.notify_budget]` 决定。机制详见
+[17-W2 感知层](../docs/architecture/17-W2感知层.md)。
+
+> 🔒 **隐私口径（已拍板的决策 2）**：总开关与逐源开关**全部默认关**，未显式打开的
+> 源一个字节都不采；事件只本地落盘（`~/.jarvis/percept/events.jsonl`），不随对话上传。
+> ⚠️ **当前状态**：总线与四个源已落地并有单测，但**宿主接线（serve 侧订阅总线）尚未
+> 完成**（W2 第 4 步）——现在打开配置不会有任何播报。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[percept] enabled` | `false` | 感知层总开关（关 = 不起轮询线程、不采任何源） |
+| `[percept] dedup_window_s` | `300` | 同一件事的去重窗口（秒） |
+| `[percept] min_salience` | `0.0` | 总线地板分（0 = 不裁，重要度裁决交给 W1） |
+| `[percept] history_max` | `200` | 内存环形历史条数（留痕文件上限 = 此值×10 行） |
+| `[percept] log_events` | `true` | 本地留痕；`false` = 完全不碰磁盘 |
+| `[percept] auto_disable_after_errors` | `3` | 单源连续失败达此数自动停用（0 = 只隔离不罢工） |
+| `window_enabled` / `window_interval_s` | `false` / `5` | 前台窗口源（唯一有明显隐私属性的源） |
+| `window_title_max_chars` / `window_title_full_enabled` | `40` / `false` | 标题截断长度；开后者才保留完整标题（仍剥凭据片段） |
+| `window_exclude_apps` / `window_linger_minutes` | `[]` / `0` | 排除应用（留空则用内置敏感名单）；停留提醒阈值 |
+| `file_enabled` / `file_watch_dirs` | `false` / `[]` | 文件守望源（**只订阅白名单目录**，空列表 = 开了也不采） |
+| `file_interval_s` / `file_max_entries` / `file_grow_threshold` / `file_ignore_suffixes` / `file_min_interval_s` | `30` / `2000` / `5` / `[]` / `0` | 文件源参数 |
+| `vcs_enabled` / `vcs_repos` / `vcs_interval_s` / `vcs_min_interval_s` | `false` / `[]` / `120` / `60` | 仓库源（登记制，只跑 `git status`/`stash list` 两条只读命令） |
+| `mail_enabled` / `mail_min_interval_s` / `mail_watch_senders` | `false` / `0` / `[]` | 邮件源（IMAP 只读 IDLE）；白名单非空 = 只报命中的人 |
+| `calendar_enabled` / `system_enabled` / `schedule_enabled` / `vision_enabled` | `false` | 既有能力收编位（W2 第 4 步接线） |
+
+邮箱收件凭据配在 `[email]` 表（见下方“邮件”节），需同时开 `[percept] mail_enabled`。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |
@@ -232,6 +265,14 @@ email_smtp_user = "your@163.com"
 email_smtp_password = "授权码"    # 不是登录密码！
 email_sender = "your@163.com"
 email_default_recipient = "target@qq.com"
+# 收件（W2 mail 事件源，需同时开 [percept].mail_enabled）：IMAP 只读，
+# 只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，永不拉正文、不把邮件标成已读。
+# imap_user / imap_password 留空则复用 SMTP 同一套（163/QQ 两边同一个授权码）。
+email_imap_host = "imap.163.com"
+email_imap_port = 993            # 993 = SSL；143 走 STARTTLS
+email_imap_user = "your@163.com"
+email_imap_password = "授权码"
+email_imap_mailbox = "INBOX"
 ```
 
 ---

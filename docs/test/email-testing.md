@@ -276,3 +276,16 @@ await tool.call({
     "attachments": ["/path/to/file.txt"],
 }, ctx)
 ```
+
+## 相关：收件（阶段 9 W2 感知层，2026-10-16）
+
+本文只覆盖**发件**（`SendEmailTool` 走 SMTP）。同一张 `[email]` 表上另有一套
+`imap_*` 字段，属于**只读收件**能力（`mail` 事件源，标准库 `imaplib`，零新增依赖），
+不在本文范围：
+
+- 设计与隐私约束（readonly + `BODY.PEEK[HEADER.FIELDS …]` + 已报键落盘）见
+  [17-W2 感知层](../architecture/17-W2感知层.md) §6.5；
+- 测试见 `tests/core/test_percept_sources_vcs_mail.py`（假 IMAP 连接，不联网、
+  不碰真实邮箱）与 `tests/serve/test_serve_protocol.py` 的 `imap_*` 读写用例；
+- ⚠️ 当前状态：采集器与单测已就绪，宿主接线（serve 侧订阅总线）属 W2 第 4 步，
+  因此配好 `imap_*` 后暂不会有任何播报（人工验证需等接线完成）。

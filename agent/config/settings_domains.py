@@ -104,7 +104,7 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("market_url", "harness_market_url"),
         ("market_local", "harness_market_local"),
     )),
-    ("email", (  # 邮件发送（SMTP）；读写口径单一真源见 config/email_settings.py
+    ("email", (  # 邮件：SMTP 发件 + IMAP 收件（W2 mail 源）；读写口径单一真源见 config/email_settings.py
         ("enabled", "email_enabled"),
         ("smtp_host", "email_smtp_host"),
         ("smtp_port", "email_smtp_port"),
@@ -112,6 +112,11 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("smtp_password", "email_smtp_password"),
         ("sender", "email_sender"),
         ("default_recipient", "email_default_recipient"),
+        ("imap_host", "email_imap_host"),
+        ("imap_port", "email_imap_port"),
+        ("imap_user", "email_imap_user"),
+        ("imap_password", "email_imap_password"),
+        ("imap_mailbox", "email_imap_mailbox"),
     )),
     ("lsp", (("enable", "enable_lsp"),)),  # 嵌套 servers 见 DICT_CHILDREN
     ("daemon", (  # 常驻模式热键 + P2-3 每日简报 + 二期主动播报 TTS 总开关
@@ -184,12 +189,14 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("file_max_entries", "percept_file_max_entries"),
         ("file_grow_threshold", "percept_file_grow_threshold"),
         ("file_ignore_suffixes", "percept_file_ignore_suffixes"),
+        ("file_min_interval_s", "percept_file_min_interval_s"),
         ("vcs_enabled", "percept_vcs_enabled"),
         ("vcs_repos", "percept_vcs_repos"),
         ("vcs_interval_s", "percept_vcs_interval_s"),
         ("vcs_min_interval_s", "percept_vcs_min_interval_s"),
         ("mail_enabled", "percept_mail_enabled"),
         ("mail_min_interval_s", "percept_mail_min_interval_s"),
+        ("mail_watch_senders", "percept_mail_watch_senders"),
         ("calendar_enabled", "percept_calendar_enabled"),
         ("system_enabled", "percept_system_enabled"),
         ("schedule_enabled", "percept_schedule_enabled"),
@@ -242,6 +249,7 @@ LIST_FIELDS: frozenset[str] = frozenset({
     "percept_file_watch_dirs",
     "percept_file_ignore_suffixes",
     "percept_vcs_repos",
+    "percept_mail_watch_senders",
 })
 
 

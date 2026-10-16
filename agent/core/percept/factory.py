@@ -1,4 +1,4 @@
-"""按配置装配感知源 —— 宿主的唯一接线点（W2 第 2 步）。
+"""按配置装配感知源 —— 宿主的唯一接线点（W2 第 2、3 步）。
 
 宿主（serve 的 ProactiveHub、CLI、以后的桌面面板）只需要一句
 ``register_sources(bus, settings)``，不必知道有几个源、各要什么参数。
@@ -29,14 +29,20 @@ from agent.core.percept.event import (
     SOURCE_WINDOW,
 )
 from agent.core.percept.source_file import FileSource
+from agent.core.percept.source_mail import MailSource
+from agent.core.percept.source_vcs import VcsSource
 from agent.core.percept.source_window import DEFAULT_EXCLUDE_APPS, WindowSource
+
+#: 邮件源的队列排空节拍（秒）。IDLE 信号到了之后由采集线程即时入队，
+#: 总线最多隔这么久把事件投出去；它不是轮询间隔（轮询间隔是 MailSource.poll_interval_s）。
+MAIL_DRAIN_INTERVAL_S = 30
 
 
 def build_sources(settings: Any) -> list[tuple[Any, bool]]:
     """按 Settings 构造源实例，返回 ``[(source, enabled), ...]``。
 
-    只构造**本期已实现**的源；未实现的源（vcs/mail 与收编的既有源）即便配置
-    里打开了也不会凭空出现，避免"面板有个开关、背后没人采"的假可用。
+    只构造**已实现**的源；收编类源（schedule/calendar/system/vision）在第 4 步
+    接线后才出现，避免"面板有个开关、背后没人采"的假可用。
     """
     out: list[tuple[Any, bool]] = []
     if settings is None:
@@ -63,6 +69,33 @@ def build_sources(settings: Any) -> list[tuple[Any, bool]]:
         ),
         bool(getattr(settings, "percept_file_enabled", False)),
     ))
+
+    out.append((
+        VcsSource(
+            repos=getattr(settings, "percept_vcs_repos", ()) or (),
+            interval_s=int(getattr(settings, "percept_vcs_interval_s", 120) or 120),
+        ),
+        bool(getattr(settings, "percept_vcs_enabled", False)),
+    ))
+
+    # IMAP 凭据回退口径：imap_user/imap_password 留空时沿用 SMTP 同一套（163/QQ
+    # 就是一个授权码两边用）；没配齐时 MailSource.configured() 为 False，
+    # 线程压根不起——这是"开了但没配齐"的标准处理（见本模块顶部）。
+    out.append((
+        MailSource(
+            host=str(getattr(settings, "email_imap_host", "") or ""),
+            port=int(getattr(settings, "email_imap_port", 993) or 993),
+            user=str(getattr(settings, "email_imap_user", "")
+                     or getattr(settings, "email_smtp_user", "") or ""),
+            password=str(getattr(settings, "email_imap_password", "")
+                         or getattr(settings, "email_smtp_password", "") or ""),
+            mailbox=str(getattr(settings, "email_imap_mailbox", "INBOX") or "INBOX"),
+            # 发件人白名单：非空则只报命中的人（源侧第一道过滤，见 source_mail）
+            watch_senders=getattr(settings, "percept_mail_watch_senders", ()) or (),
+            interval_s=MAIL_DRAIN_INTERVAL_S,   # 排空节拍固定，真正影响延迟的是 IDLE/轮询
+        ),
+        bool(getattr(settings, "percept_mail_enabled", False)),
+    ))
     return out
 
 
@@ -79,8 +112,8 @@ def register_sources(bus: PerceptBus, settings: Any) -> dict[str, bool]:
     return status
 
 
-#: 本期已实现的源名（vcs/mail 尚未落地，面板据此显示"敬请期待"而不是开关）
-IMPLEMENTED_SOURCES: tuple[str, ...] = (SOURCE_WINDOW, SOURCE_FILE)
+#: 本期已实现的源名（收编类源在第 4 步接线，面板据此区分"已可用"与"待接入"）
+IMPLEMENTED_SOURCES: tuple[str, ...] = (SOURCE_WINDOW, SOURCE_FILE, SOURCE_VCS, SOURCE_MAIL)
 
-#: 后续切片会补齐的源名（用于文档与面板占位，避免误以为已可用）
-PENDING_SOURCES: tuple[str, ...] = (SOURCE_VCS, SOURCE_MAIL)
+#: 待后续切片接线的源名（用于文档与面板占位，避免误以为已可用）
+PENDING_SOURCES: tuple[str, ...] = ()

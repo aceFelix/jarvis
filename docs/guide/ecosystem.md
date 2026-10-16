@@ -269,6 +269,12 @@ smtp_user = "your_163_email@163.com"
 smtp_password = "your_authorization_code"   # 163 邮箱授权码，不是登录密码
 sender = "your_163_email@163.com"
 default_recipient = "13985465782@136.com"   # 用户未指定收件人时的默认地址
+# 收件（阶段 9 W2 感知层的 mail 事件源，需同时开 [percept].mail_enabled）
+imap_host = "imap.163.com"
+imap_port = 993                              # 993 = SSL；143 走 STARTTLS
+imap_user = "your_163_email@163.com"         # 留空则复用 smtp_user
+imap_password = "your_authorization_code"   # 留空则复用 smtp_password
+imap_mailbox = "INBOX"
 ```
 
 ### 使用
@@ -283,6 +289,14 @@ default_recipient = "13985465782@136.com"   # 用户未指定收件人时的默�
 Jarvis 会调用 `SendEmail`，并在发送前询问确认。支持指定收件人、抄送、密送和本地附件。
 
 > **桌面壳免手改配置**：jarvis-desktop 标题栏「管家服务」→「邮箱服务」→「邮箱配置」标签可直接查看/修改当前邮箱（SMTP 服务器、端口、账号、授权码、发件人、默认收件人、启用开关），读写的就是上面这份 `[email]` 表——**授权码不回显明文，留空即保持原值**；另有「发送邮件」标签可直接发信（表单点「发送」即确认，不走模型）。详见桌面壳 `docs/guide/features-panels.md`。
+
+> **只读收件（阶段 9）**：`imap_*` 五个字段给感知层的 `mail` 事件源用：IMAP **只读**
+> 长连接（IDLE，断线自动降级为定时轮询），只取发件人/主题/时间/Message-ID 四个
+> 信封头，**永不拉正文、不把邮件标成已读**，已提醒过的信件记在
+> `~/.jarvis/percept/mail_seen.json` 不会重播。字段说明见
+> [配置参考](../../config-docs/configuration.md#w2-感知层percept阶段-9)。
+> ⚠️ 本期（W2 第 3 步）采集器与单测已就绪，但宿主尚未接总线（第 4 步），
+> 因此配好也不会播报。
 
 ## 开发服务器
 

@@ -170,11 +170,14 @@ rules:
 
 ## 3. W2 · 感知层：统一事件总线
 
-> 🔄 **进度（2026-10，分支 `feat/stage9-percept`）**：总线骨架与两个源已落地
-> （`agent/core/percept/{event,bus,factory,source_window,source_file,__init__}.py`，
-> 单测 35 + 30 例；`[percept]` 配置已落 Settings 与 example.toml），架构说明见
-> [17-W2感知层](../architecture/17-W2感知层.md)。仓库/CI、邮件两个源与既有源
-> 收编尚未开发；宿主接线（serve 侧订阅总线）在第 4 步，在此之前总线能单测、不能体感。
+> 🔄 **进度（2026-10-16，分支 `feat/stage9-percept`）**：总线 + 四个源已落地
+> （`agent/core/percept/{event,bus,factory,source_window,source_file,source_vcs,source_mail,__init__}.py`，
+> 单测 35 + 30 + 30 + 10 例；`[percept]` 与 `[email].imap_*` 配置已落 Settings、
+> `settings_domains.py` 声明式映射与 example.toml），架构说明见
+> [17-W2感知层](../architecture/17-W2感知层.md)。
+> 尚待开发：既有源收编（第 4 步：`proactive.py`/`serve/hub.py` 订阅总线、
+> `vision_watcher.py` 接总线并补 away 人脸判定）与 `percept.*` RPC + 桌面面板（第 5 步）。
+> **在宿主接线之前总线仍是“能单测、不能体感”**——用户实测需等第 4 步完成。
 
 ### 3.1 设计
 
@@ -192,8 +195,8 @@ class PerceptEvent:
 |---|---|---|
 | 前台窗口 `window` | Windows `GetForegroundWindow` + 进程名/标题 | 5s 采样；标题正则脱敏；应用排除名单 |
 | 文件守望 `file` | **自建目录快照**（白名单目录 walk + mtime/size 差分落 `~/.jarvis/percept/file_state.json`） | 只订阅白名单目录；inotify/轮询自适应 |
-| 仓库/CI `vcs` | `git status` 差分 + 构建/CI 结果尾行 | 最小间隔 60s；仅订阅登记过的仓库 |
-| 邮件 `mail` | IMAP 只读 IDLE 长连接，断线自动降级为定时轮询（决策 3） | 只取信封头（发件人/主题/时间），不拉正文 |
+| 仓库 `vcs` | `git status`/`git stash list` 只读差分（✅ 已实现） | 最小间隔 60s；仅订阅登记过的仓库；只在“刚跨过提醒线”那一档发一次 |
+| 邮件 `mail` | IMAP 只读 IDLE 长连接，断线自动降级为定时轮询（✅ 已实现，决策 3） | 只取信封头（发件人/主题/时间/Message-ID），不拉正文、不置已读；已报键落盘去重 |
 | 日历 `calendar` | 已有 `CalendarSource` 升级为事件源 | 每 30 分钟 |
 | 系统 `system` | 已有 `SystemMonitor` | 沿用 600s 冷却 |
 
@@ -201,6 +204,11 @@ class PerceptEvent:
 > `core/memory/file_state.py` 的目录快照"，但 `file_state.py` 实际是**单文件 mtime
 > 冲突缓存**（挂在 `ToolContext.extra` 上、进程内、随会话结束消失，用于拒绝基于
 > 过时内容的编辑），**没有目录扫描能力**。file 源必须自带快照实现，不能复用。
+
+> ⚠️ **第 3 步范围修正**（2026-10-16 实现 vcs 源时核实）：`vcs` 行原列“构建/CI 结果
+> 尾行”**本期未做**，且已写进代码与架构文档：它要么依赖外部 `gh` CLI 与 GitHub
+> 凭据（违背决策 1“只本机采集、不引入外部账号授权”），要么由 jarvis 自己跑构建
+> （属 W3 兑现层的主动执行）。本期 vcs 只做本机 git 可得到的四种事实，不假装已接 CI。
 
 - **Scheduler 降级为事件源之一**：`schedule.fired` 也进总线，交由 W1 统一决定播报与否。
 - 成本控制硬约束：**本地规则/阈值先判，不每次调 LLM**；只有通过 salience 门槛的事件才进
@@ -214,13 +222,14 @@ class PerceptEvent:
 |---|---|
 | `agent/core/percept/event.py`（新增） | `PerceptEvent` 数据契约 + 源名常量 + payload 指纹/截断 |
 | `agent/core/percept/bus.py`（新增） | 事件模型 + 订阅/分发 + 去重 + 节流 + 两层故障隔离 + 留痕/导出 |
-| `agent/core/percept/source_window.py` 等（新增，一源一文件） | 各采集器 |
-| `agent/core/daemon/proactive.py` | 改为订阅总线（保留既有四源，行为不变） |
-| `agent/core/daemon/vision_watcher.py` | 事件接入总线（统一出口） |
-| `agent/config/settings.py` + `configs/settings.example.toml` | `[percept.*]` 开关与白名单（**逐源默认关**，决策 2）；`[email].imap_*` 收信字段（决策 3） |
-| `agent/config/settings_domains.py`（新增） | 拆分副作用：`_apply_toml` 里 20+ 个同构“表→字段”循环改为声明式映射（settings.py 因加 `[percept]` 突破 800 行上限，顺手拆回 633 行） |
-| `agent/serve/protocol.py` + `serve/server.py` | `percept.*` 状态查询/逐源开关 RPC（桌面面板依赖，安全范式同 `email.config.*`：密钥不回明文） |
-| `tests/core/test_percept_bus.py`（新增） | 去重/节流/静默/降级 |
+| `agent/core/percept/source_window.py` 等（新增，一源一文件） | 各采集器：`source_window.py`、`source_file.py`、`source_vcs.py`、`source_mail.py` 均已落地 |
+| `agent/core/daemon/proactive.py` | 改为订阅总线（保留既有四源，行为不变）——第 4 步 |
+| `agent/core/daemon/vision_watcher.py` | 事件接入总线（统一出口）——第 4 步 |
+| `agent/config/settings.py` + `configs/settings.example.toml` | `[percept.*]` 开关与白名单（**逐源默认关**，决策 2）；`[email].imap_*` 收信字段（决策 3，已落） |
+| `agent/config/settings_domains.py`（新增） | 拆分副作用：`_apply_toml` 里 20+ 个同构“表→字段”循环改为声明式映射（settings.py 因加 `[percept]` 突破 800 行上限，拆回 644 行） |
+| `agent/config/email_settings.py` | `EMAIL_FIELDS` 新增五个 `imap_*` 协议键（收件配置可与发件同一张面板管理；`imap_password` 与 `smtp_password` 同为 secret：读不回明文、写留空=保持原值） |
+| `agent/serve/protocol.py` + `serve/server.py` | `percept.*` 状态查询/逐源开关 RPC（桌面面板依赖，安全范式同 `email.config.*`：密钥不回明文）——第 5 步 |
+| `tests/core/test_percept_bus.py`、`test_percept_sources.py`、`test_percept_sources_vcs_mail.py`、`test_percept_init.py`（新增） | 总线裁决 / 窗口与文件 / 仓库与邮件 / 配置注入与单例装配 |
 
 ### 3.3 验收
 

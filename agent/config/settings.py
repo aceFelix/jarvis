@@ -240,6 +240,15 @@ class Settings:
     email_smtp_password: str = ""
     email_sender: str = ""
     email_default_recipient: str = ""
+    # 邮件**收件**（W2 mail 事件源，决策 3：IMAP IDLE 长连接 + 断线降级轮询）。
+    # 只读取信封头（FROM/SUBJECT/DATE），永不拉正文；imap_password 留空时
+    # 源回退到 smtp_password（163/QQ 等厂商两边用同一个授权码，不强制用户录两遍）。
+    # @author aceFelix
+    email_imap_host: str = ""
+    email_imap_port: int = 993
+    email_imap_user: str = ""
+    email_imap_password: str = ""
+    email_imap_mailbox: str = "INBOX"
 
     # LSP 集成
     # 启动时按 [lsp.servers.<name>] 配置启动语言服务器
@@ -349,14 +358,16 @@ class Settings:
     percept_file_max_entries: int = 2000   # 单目录快照条目上限（超出截断并记 truncated）
     percept_file_grow_threshold: int = 5   # 新增文件达此数才聚合提醒（避免一个个刷）
     percept_file_ignore_suffixes: list = field(default_factory=list)  # 额外忽略后缀
+    percept_file_min_interval_s: int = 0   # 文件源同源投递最小间隔（0=不额外节流）
 
-    # 仓库/CI 与邮件源（第 3 步）、既有源收编（第 4 步）
+    # 仓库与邮件源（第 3 步）、既有源收编（第 4 步）
     percept_vcs_enabled: bool = False
     percept_vcs_repos: list = field(default_factory=list)
     percept_vcs_interval_s: int = 120
     percept_vcs_min_interval_s: int = 60   # 同源投递最小间隔（总线节流）
     percept_mail_enabled: bool = False
     percept_mail_min_interval_s: int = 0   # 0=靠 IDLE 事件驱动，不额外节流
+    percept_mail_watch_senders: list = field(default_factory=list)  # 发件人白名单（空=全报）
     percept_calendar_enabled: bool = False
     percept_system_enabled: bool = False
     percept_schedule_enabled: bool = False
