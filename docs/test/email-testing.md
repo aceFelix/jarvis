@@ -287,5 +287,12 @@ await tool.call({
   [17-W2 感知层](../architecture/17-W2感知层.md) §6.5；
 - 测试见 `tests/core/test_percept_sources_vcs_mail.py`（假 IMAP 连接，不联网、
   不碰真实邮箱）与 `tests/serve/test_serve_protocol.py` 的 `imap_*` 读写用例；
-- ⚠️ 当前状态：采集器与单测已就绪，宿主接线（serve 侧订阅总线）属 W2 第 4 步，
-  因此配好 `imap_*` 后暂不会有任何播报（人工验证需等接线完成）。
+- ✅ 当前状态：宿主接线（serve 侧订阅总线）已于 W2 第 4 步完成，逐源开关与
+  名单也能走 `percept.config.set`（第 5 步）。自动化用例全用假 IMAP，**尚未
+  跑过真邮箱**；人工验证清单：
+  1. 配好 `[email]` 的 `imap_host/imap_user/imap_password`（留空则回退 SMTP 同名值）；
+  2. 开 `[percept]` 的 `enabled` 与 `mail_enabled`，重启桌面壳 / `--serve`；
+  3. 用另一个邮箱发一封信，预期：只弹一条「贾维斯观察」，不弹第二条；
+  4. 查 `~/.jarvis/percept/events.jsonl` 与 `mail_seen.json`，预期：只有信封头，
+     无正文、无凭据；到邮箱后台确认该信**仍是未读**（`BODY.PEEK` 不置已读）；
+  5. 填 `mail_watch_senders` 后重复步骤 3，预期：名单外的人来信不弹。

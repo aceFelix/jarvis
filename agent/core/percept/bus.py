@@ -206,6 +206,27 @@ class PerceptBus:
             rt = self._sources.get(name)
             return bool(rt and rt.enabled)
 
+    def source_detail(self, name: str) -> dict[str, Any]:
+        """源实例自己报的运行细节（鸭子型 `state()`，没这个方法就返回空 dict）。
+
+        总线账本（events/errors/last_error）只到“投递了多少”，而“为什么一个
+        字节都没采到”这类环境原因（没装依赖/摄像头不可用/白名单空）只有源
+        自己知道。面板要能说清后者，故开这一个只读口子：取不到状态时给空
+        dict，绝不抛（面板不能因为一个源的细节而白屏）。
+
+        @author aceFelix
+        """
+        with self._lock:
+            rt = self._sources.get(name)
+            getter = getattr(rt.source, "state", None) if rt else None
+        if not callable(getter):
+            return {}
+        try:
+            detail = getter()
+        except Exception:  # noqa: BLE001 - 源自报状态失败不影响总线其他部分
+            return {}
+        return detail if isinstance(detail, dict) else {}
+
     def set_source_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         """开/关某个源，返回新的源状态（桌面逐源开关的落地入口）。
 

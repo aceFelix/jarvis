@@ -138,8 +138,8 @@ Agent 工具：
 > 事件只写本地 `~/.jarvis/percept/events.jsonl`（`log_events = false` 可完全不落盘），
 > 不随对话上传。前台窗口源额外带三层防护：标题剥凭据片段 + 截断 40 字 + 密码类应用零事件。
 
-开启方式（改完**重启桌面壳 / `--serve`** 才生效：逐源开关与采样间隔在启动时快照；
-面板上运行时开关属第 5 步）：
+开启方式（当前只能改本文件 + **重启桌面壳 / `--serve`**：逐源开关与采样间隔在
+启动时快照；面板上运行时开关见下方“面板接线进度”）：
 
 ```toml
 [percept]
@@ -177,6 +177,23 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 > ⚠️ 本期未开的源：`calendar_enabled` / `system_enabled` / `schedule_enabled` 三个开关是
 > **收编位占位**，背后的日历源与系统监控仍是休眠件，开了也不会采（避免“面板有开关、
 > 背后没人采”的假可用）；用户自己设的定时提醒也不走感知总线（必须准点响）。
+
+### 感知源面板接线进度（第 5 步后端已就绪）
+
+桌面面板依赖的两条 WS 指令已上协议（契约见
+[protocol.py](../../agent/serve/protocol.py) 的指令表，实现见
+[`agent/serve/rpc_percept.py`](../../agent/serve/rpc_percept.py)）：
+
+| 指令 | 用途 | 回执要点 |
+|---|---|---|
+| `percept.status.get` | 在采什么（逐源开关/总线计数/源自报的不可用原因）+ 采到了什么（最近事件 + 留痕文件路径） | 无宿主或未装配时统计段回空值，不报错 |
+| `percept.config.set` | 改逐源开关与名单（守望目录 / 登记仓库 / 发件人白名单 / 排除应用） | 先落 `settings.toml` 再改运行时，然后由宿主**重装配总线**（当场生效，不必重启）；`hot_applied=false` 意味着还没重装配 |
+
+> 🧷 **诚实口径**：指令与热重装配已完成并有单测，但 jarvis-desktop 侧的「感知源」
+> 面板 UI 尚未上线（双仓改动，需同步 `contracts.ts`）。在那之前，用户仍靠上面的
+> TOML 片段 + 重启开启；面板一上线，改开关就不必重启了。
+> 面板可改字段只放**开关与名单**（真源 [`percept_settings.py`](../../agent/config/percept_settings.py)）：
+> `dedup_window_s`/`min_salience`/`vision_fps` 这类极客参数与未装配的收编位开关一律不进。
 
 ## 系统资源监控（休眠态）
 

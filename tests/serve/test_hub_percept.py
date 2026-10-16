@@ -84,7 +84,11 @@ def _drain(eq: queue.Queue) -> list[dict]:
 # ---- 装配与停机 ----
 
 def test_master_switch_off_skips_assembly():
-    """总开关关：不建总线实例、不注册源（面板据此显示"未启用"而不是"坏了"）。"""
+    """总开关关：不登记源、不订阅、不起线程（面板据此显"未启用"而不是"坏了"）。
+
+    仅注入配置快照（`init_percept`）：`source_enabled_map()` / `default_log_path()`
+    必须拿到当前配置而不是上次会话的陈旧快照；hub 侧 `percept_bus` 仍为 None。
+    """
     hub, eq = _hub(_settings(percept_enabled=False))
     hub._engine._budget = _StubBudget()
     hub.start()
@@ -158,6 +162,61 @@ def test_assembly_failure_does_not_break_serve(monkeypatch):
         assert hub.scheduler is not None            # 主动感知三件套照常工作
     finally:
         hub.stop()
+
+
+# ---- 热重装配（W2 第 5 步：面板改完开关不必重启桌面壳）----
+
+def test_hot_update_reassembles_with_new_flags():
+    """改完逐源开关后热重装配：新开关如实生效，而且换的是一台新总线。"""
+    hub, _eq = _hub(_settings())
+    hub._engine._budget = _StubBudget()
+    hub.start()
+    try:
+        old_bus = hub.percept_bus
+        hub._settings.percept_vcs_enabled = True      # 模拟 percept.config.set 已改运行时
+        status = hub.hot_update_percept()
+        assert status["vcs"] is True
+        assert hub.percept_bus is not old_bus
+        assert hub.percept_bus.is_source_enabled("vcs") is True
+        assert old_bus.running is False               # 旧总线已停，不会两套轮询
+    finally:
+        hub.stop()
+
+
+def test_hot_update_drops_assembly_when_master_off():
+    """关掉总开关后重装配：总线引用与启用表都清空（不给面板留陈旧的"在采"）。"""
+    hub, _eq = _hub(_settings(percept_window_enabled=True))
+    hub._engine._budget = _StubBudget()
+    hub.start()
+    try:
+        assert hub.percept_status["window"] is True
+        hub._settings.percept_enabled = False
+        status = hub.hot_update_percept()
+        assert status == {}
+        assert hub.percept_bus is None
+        assert hub.percept_status == {}
+    finally:
+        hub.stop()
+
+
+def test_hot_update_releases_old_sources(hub_percept):
+    """重装配会 close 旧源——“面板上关掉视觉就立即断摄像头”这条承诺的落点。"""
+    hub, _eq, _budget = hub_percept
+    closed: list[str] = []
+
+    class _Spy:
+        name = "window"
+        interval_s = 0.0
+
+        def collect(self):
+            return []
+
+        def close(self):
+            closed.append(self.name)
+
+    hub.percept_bus.register_source(_Spy(), enabled=True)
+    hub.hot_update_percept()
+    assert closed == ["window"]
 
 
 # ---- 事件投递路径 ----

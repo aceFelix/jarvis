@@ -13,19 +13,18 @@ W2（阶段 9）加了 IMAP **收件**配置（mail 事件源只需读信封头�
 - 写：`email.config.set` 中授权码**留空 = 保持原值**（与 ModelEditPayload.api_key 同口径）。
 
 字段映射真源：`EMAIL_FIELDS`（协议键 → settings.toml [email] 字段 + Settings 属性 + 类型）。
-落盘为「单节多字段」外科式写 ~/.jarvis/settings.toml（保留注释与其他字段/节）。
+落盘走 `agent/config/toml_writer.py` 的通用「单节多字段」外科式写入（与桌面设置
+面板、W2 感知面板共用一份实现，保留注释与其他字段/节）。
 
 @author aceFelix
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-SETTINGS_PATH = Path.home() / ".jarvis" / "settings.toml"
+from agent.config.toml_writer import bool_literal, save_section, str_literal
 
 
 @dataclass(frozen=True)
@@ -149,64 +148,22 @@ def apply_email_config(settings: Any, patch: dict[str, Any]) -> None:
 
 
 def _toml_literal(field: EmailField, value: Any) -> str:
-    """配置值转 TOML 字面量（字符串做转义，避免授权码含引号/反斜杠时写坏文件）。"""
+    """配置值转 TOML 字面量（字符串转义由 toml_writer.str_literal 统一承担）。"""
     if field.kind == "bool":
-        return "true" if value else "false"
+        return bool_literal(bool(value))
     if field.kind == "int":
         return str(int(value))
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return str_literal(str(value))
 
 
 def save_email_config(patch: dict[str, Any]) -> bool:
     """外科式落盘多个邮箱配置项到 ~/.jarvis/settings.toml 的 [email] 表。
 
-    - 节存在：逐字段替换已有行；节内缺失的字段插在节头后（保持注释与其他字段）；
-    - 节不存在：文件末尾追加 [email] 节；文件不存在则创建最小文件。
-    返回 True 表示成功；IO 失败返回 False（调用方回执报错，不改运行时）。
+    实现委派给 toml_writer.save_section（节存在则逐字段替换/补插，节缺失则追加，
+    文件不存在则创建最小文件）。返回 True 表示成功；IO 失败返回 False（调用方
+    据此回执报错，不改运行时）。
     """
-    if not patch:
-        return True
-    lines = {FIELD_BY_KEY[k].field: _toml_literal(FIELD_BY_KEY[k], v) for k, v in patch.items()}
-    try:
-        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not SETTINGS_PATH.exists():
-            body = "\n".join(f"{f} = {v}" for f, v in lines.items())
-            SETTINGS_PATH.write_text(f"[email]\n{body}\n", encoding="utf-8")
-            return True
-
-        content = SETTINGS_PATH.read_text(encoding="utf-8")
-        content = _upsert_section(content, "email", lines)
-        SETTINGS_PATH.write_text(content, encoding="utf-8")
-        return True
-    except OSError:
-        return False
-
-
-def _upsert_section(content: str, section: str, lines: dict[str, str]) -> str:
-    """在 TOML 文本中就地更新指定节的多个字段（节缺失则追加到末尾）。"""
-    # 节头匹配不用 \s*$（\s 会吞换行导致后续切片偏移），只容忍行内空白
-    section_match = re.search(rf"^\[{re.escape(section)}\][ \t]*$", content, re.MULTILINE)
-    if not section_match:
-        body = "\n".join(f"{f} = {v}" for f, v in lines.items())
-        return content.rstrip() + f"\n\n[{section}]\n{body}\n"
-
-    head_end = section_match.end() + 1  # 跳过节头后的换行
-    rest = content[head_end:]
-    nxt = re.search(r"^\[", rest, re.MULTILINE)
-    sec_end = head_end + (nxt.start() if nxt else len(rest))
-    section_text = content[head_end:sec_end]
-
-    # 先替换已有字段，再收集缺失字段插到节头后
-    missing: list[str] = []
-    for field, literal in lines.items():
-        if re.search(rf"^{re.escape(field)}\s*=", section_text, re.MULTILINE):
-            section_text = re.sub(
-                rf"^{re.escape(field)}\s*=.*$", f"{field} = {literal}", section_text, flags=re.MULTILINE
-            )
-        else:
-            missing.append(f"{field} = {literal}")
-    if missing:
-        section_text = "\n".join(missing) + "\n" + section_text
-
-    return content[:head_end] + section_text + content[sec_end:]
+    lines = {
+        FIELD_BY_KEY[k].field: _toml_literal(FIELD_BY_KEY[k], v) for k, v in patch.items()
+    }
+    return save_section("email", lines)

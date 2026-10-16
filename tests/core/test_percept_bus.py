@@ -456,3 +456,50 @@ def test_publish_result_is_named_tuple_like():
     """PublishResult 的 emitted 属性是播报适配器的判据，语义要稳。"""
     assert PublishResult("emit", "x").emitted is True
     assert PublishResult("dedup", "x").emitted is False
+
+
+# ---------------------------------------------------------------------------
+# 源实例自报细节（W2 第 5 步：面板要能说清“为什么一个字节都没采”）
+# ---------------------------------------------------------------------------
+
+
+class _StatefulSource:
+    """带 state() 的源桩（模拟视觉源那种“环境级不可用”的自报）。"""
+
+    name = "vision"
+    interval_s = 5.0
+
+    def __init__(self, state=None, boom=False) -> None:
+        self._state = state if state is not None else {"unavailable": "缺少视觉依赖"}
+        self._boom = boom
+
+    def collect(self):
+        return []
+
+    def state(self):
+        if self._boom:
+            raise RuntimeError("源自报状态炸了")
+        return self._state
+
+
+def test_source_detail_passes_through_instance_state(tmp_path):
+    """总线只转手，不加戏：源自报什么就返回什么。"""
+    bus = make_bus(tmp_path)
+    bus.register_source(_StatefulSource(), enabled=False)
+    assert bus.source_detail("vision") == {"unavailable": "缺少视觉依赖"}
+
+
+def test_source_detail_empty_for_unknown_or_stateless(tmp_path):
+    """未登记的源、没有 state() 的源都返回空 dict（面板不能因此白屏）。"""
+    bus = make_bus(tmp_path)
+    assert bus.source_detail("nope") == {}
+    bus.register_source(PollSource("vcs", lambda: None, interval_s=60))
+    assert bus.source_detail("vcs") == {}
+
+
+def test_source_detail_swallows_source_exceptions(tmp_path):
+    """源自报状态报错也不能外溢：返回空 dict，不影响其他源。"""
+    bus = make_bus(tmp_path)
+    bus.register_source(_StatefulSource(boom=True))
+    assert bus.source_detail("vision") == {}
+

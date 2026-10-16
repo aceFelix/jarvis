@@ -172,17 +172,22 @@ rules:
 
 ## 3. W2 · 感知层：统一事件总线
 
-> 🔄 **进度（2026-10-16，分支 `feat/stage9-percept`）**：总线 + 五个源 + **宿主接线**已落地
+> 🔄 **进度（2026-10-16，分支 `feat/stage9-percept`）**：总线 + 五个源 + 宿主接线
+> + **`percept.*` RPC（后端）**已落地
 > （`agent/core/percept/{event,bus,factory,source_window,source_file,source_vcs,source_mail,
-> source_vision,__init__}.py`，单测 35 + 30 + 30 + 10 + 17 + 13 例 + W1 在场推断 5 例；
-> `[percept]` 与 `[email].imap_*` 配置已落 Settings、`settings_domains.py` 声明式映射与
-> example.toml），架构说明见 [17-W2感知层](../architecture/17-W2感知层.md)。
+> source_vision,status,__init__}.py`，单测 38 + 30 + 30 + 10 + 17 + 16 + 8 + 16 + 12 例
+> + W1 在场推断 5 例 + `toml_writer` 9 例；`[percept]` 与 `[email].imap_*` 配置已落
+> Settings、`settings_domains.py` 声明式映射与 example.toml），架构说明见
+> [17-W2感知层](../architecture/17-W2感知层.md)。
 > ✅ **第 4 步已接上**：serve `ProactiveHub` 装配总线并订阅，感知事件经
 > `ProactiveEngine.gate_notify`（从 `_dispatch_notify` 拆出的同一个闸门）投
 > `proactive_notify(kind=percept)`；人脸离开/回来同时驱动 W1 的 away 推断。
-> **现在可用 `[percept]` 配置实测（需重启 `--serve`/桌面壳）**。
-> 尚待开发：`percept.*` RPC + 桌面「感知源」面板 + 首次启动询问（第 5 步）；
-> `schedule`/`calendar`/`system` 三个收编位本期不动（理由见架构文档第七节）。
+> ✅ **第 5 步后端已接上**：`percept.status.get`（在采什么 / 采到了什么）与
+> `percept.config.set`（逐源开关 + 名单）两条 RPC 已上协议；面板改完开关由宿主
+> **重装配总线即时生效**，不再需要重启桌面壳。
+> 尚待开发：jarvis-desktop「感知源」面板 UI + 首次启动询问（双仓改动，
+> `contracts.ts` 需同步新增两条指令）；`schedule`/`calendar`/`system` 三个收编位
+> 本期不动（理由见架构文档第七节）。
 
 ### 3.1 设计
 
@@ -232,14 +237,19 @@ class PerceptEvent:
 | `agent/core/percept/bus.py`（新增） | 事件模型 + 订阅/分发 + 去重 + 节流 + 两层故障隔离 + 留痕/导出 |
 | `agent/core/percept/source_window.py` 等（新增，一源一文件） | 各采集器：`source_window.py`、`source_file.py`、`source_vcs.py`、`source_mail.py`、`source_vision.py` 均已落地 |
 | `agent/core/daemon/proactive.py` | ✅ 已从 `_dispatch_notify` 拆出 `gate_notify`（W1 闸门唯一实现），感知事件与简报走同一个闸；既有四源行为不变 |
-| `agent/serve/hub.py` | ✅ W2 接线点：`_start_percept`/`_stop_percept`/`_on_percept_event`/`_apply_presence` |
+| `agent/core/percept/status.py`（新增） | ✅ `build_status`：配置 + 总线统计 + 源自报 + 最近事件的一份面板快照（中文标签与源说明的真源） |
+| `agent/config/percept_settings.py`（新增） | ✅ 面板可改的 `[percept]` 白名单（开关 bool / 名单 list / 分钟 int）+ 校验 + 落盘 + 运行时生效；极客参数与未装配开关一律不进 |
+| `agent/config/toml_writer.py`（新增） | ✅ “单节多字段外科式写入 + 字面量转义”从 `desktop_settings` / `email_settings` 两份同构实现抽成唯一实现（第三个域落地时不再抄第三遍） |
+| `agent/serve/rpc_email.py` / `rpc_extensions.py`（新增） | ✅ 结构治理：`server.py` 已过 800 行上限（808），按「一族指令一个混入」拆出 email.* 与 extensions.exec，行为与回执口径不变 |
+| `agent/serve/rpc_percept.py`（新增） | ✅ `PerceptRpcMixin`：两条感知指令的处理器（先落盘 → 运行时 → 重装配 → 回读） |
+| `agent/serve/protocol.py` + `serve/server.py` | ✅ `percept.status.get` / `percept.config.set` 上协议（`DESKTOP_COMMANDS` 51→53），安全范式同 `email.config.*` |
+| `agent/serve/hub.py` | ✅ W2 接线点：`_start_percept`/`_stop_percept`/`_on_percept_event`/`_apply_presence`；+ `hot_update_percept()`（停旧总线→按新配置重装配） |
 | `agent/core/daemon/vision_watcher.py` | ✅ 事件接入总线（新增 `set_event_handler` 供感知源改接回调），不再休眠 |
 | `agent/config/settings.py` + `configs/settings.example.toml` | `[percept.*]` 开关与白名单（**逐源默认关**，决策 2）；`[email].imap_*` 收信字段（决策 3，已落） |
 | `agent/config/settings_domains.py`（新增） | 拆分副作用：`_apply_toml` 里 20+ 个同构“表→字段”循环改为声明式映射（settings.py 因加 `[percept]` 突破 800 行上限，拆回 644 行） |
-| `agent/config/email_settings.py` | `EMAIL_FIELDS` 新增五个 `imap_*` 协议键（收件配置可与发件同一张面板管理；`imap_password` 与 `smtp_password` 同为 secret：读不回明文、写留空=保持原值） |
-| `agent/serve/protocol.py` + `serve/server.py` | `percept.*` 状态查询/逐源开关 RPC（桌面面板依赖，安全范式同 `email.config.*`：密钥不回明文）——第 5 步 |
+| `agent/config/email_settings.py` | `EMAIL_FIELDS` 新增五个 `imap_*` 协议键（收件配置可与发件同一张面板管理；`imap_password` 与 `smtp_password` 同为 secret：读不回明文、写留空=保持原值）；落盘改为委派 `toml_writer.save_section` |
 | `agent/core/policy/state.py` | ✅ `set_presence_away`（手动优先、幂等）+ `is_away` 采信视觉推断并带 30 分钟有效期（`VISION_AWAY_TTL_MIN`） |
-| `tests/core/test_percept_bus.py`、`test_percept_sources.py`、`test_percept_sources_vcs_mail.py`、`test_percept_sources_vision.py`、`test_percept_init.py`、`tests/serve/test_hub_percept.py`（新增） | 总线裁决 / 窗口与文件 / 仓库与邮件 / 视觉在场 / 配置注入与单例装配 / 宿主接线 |
+| `tests/core/test_percept_bus.py`、`test_percept_sources.py`、`test_percept_sources_vcs_mail.py`、`test_percept_sources_vision.py`、`test_percept_init.py`、`test_percept_status.py`、`tests/config/test_percept_settings.py`、`test_toml_writer.py`、`tests/serve/test_hub_percept.py`、`test_serve_percept_rpc.py`（新增） | 总线裁决 / 窗口与文件 / 仓库与邮件 / 视觉在场 / 配置注入与单例装配 / 面板状态快照 / 感知配置白名单 / 落盘工具 / 宿主接线与热重装配 / 感知 RPC |
 
 ### 3.3 验收
 

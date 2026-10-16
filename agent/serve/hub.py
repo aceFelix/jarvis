@@ -214,6 +214,23 @@ class ProactiveHub:
         """确认提醒任务（桌面壳 proactive.ack 指令入口，停止升级重发）。"""
         return self._scheduler.acknowledge(task_id)
 
+    def hot_update_percept(self) -> dict[str, bool]:
+        """桌面 `percept.config.set` 改完配置后：停旧总线 → 按新配置重装配。
+
+        为什么要重装配：逐源开关是 `register_sources` 造实例时的快照（采样间隔、
+        摄像头参数也一样），只改运行时 Settings 不会让新升的源真的开始采。
+        先停后起有一个硬收益：旧资源会被真正释放（IMAP 登出、摄像头关闭），
+        于是“在面板上关掉视觉就立即断摄像头”这条隐私承诺能兑现。
+
+        Returns:
+            重装配后的逐源启用表（总开关关时为空表）。
+
+        @author aceFelix
+        """
+        self._stop_percept()
+        self._start_percept()
+        return dict(self._percept_status)
+
     # ---- 到期/通知回调（复刻老 NotificationMixin 语义，通道换成事件流） ----
 
     def _on_fire(self, task: ScheduleTask) -> None:
@@ -257,19 +274,23 @@ class ProactiveHub:
     def _start_percept(self) -> None:
         """装配感知总线：注入配置 → 登记源 → 订阅 → 起轮询线程。
 
-        总开关 `percept_enabled` 关着时直接返回（不注册也不订阅）：既然后续
-        一切入口都以总线为中枢，装配与否就应当与配置一致，否则面板上会出现
-        “没装配”与“装配了但全关”两种无法区分的状态。本路径全程不得抛异常：
-        感知是增强能力，装配失败只能降级为“不感知”，不能拖垮 serve 启动。
+        总开关 `percept_enabled` 关着时只注入配置快照、不登记也不订阅：面板与
+        CLI 读 `source_enabled_map()` / `default_log_path()` 时必须拿到当前配置，
+        而不是上一次会话的陈旧快照；“没开”与“没装配”的区分交给状态里的
+        `enabled` 字段，不靠“装配与否”这个模糊信号。
+
+        本路径全程不得抛异常：感知是增强能力，装配失败只能降级为“不感知”，
+        不能拖垮 serve 启动。
 
         @author aceFelix
         """
-        if not getattr(self._settings, "percept_enabled", False):
-            return
         try:
             from agent.core.percept import init_percept, register_sources
 
             bus = init_percept(self._settings)
+            if not getattr(self._settings, "percept_enabled", False):
+                logger.info("感知层总开关关闭，本次不装配总线（仅注入配置快照）")
+                return
             self._percept_status = register_sources(bus, self._settings)
             self._bus_unsub = bus.subscribe(self._on_percept_event)
             self._bus = bus
@@ -283,6 +304,7 @@ class ProactiveHub:
             logger.warning("感知总线装配失败，本次不启用感知: %s", e)
             self._bus = None
             self._bus_unsub = None
+            self._percept_status = {}
 
     def _stop_percept(self) -> None:
         """退订并释放感知源（幂等；没装配过就是空操作）。
@@ -295,6 +317,7 @@ class ProactiveHub:
         """
         unsub = self._bus_unsub
         self._bus_unsub = None
+        self._percept_status = {}   # 拆完就是“没装配”，不给面板留陈旧的启用表
         if callable(unsub):
             try:
                 unsub()
