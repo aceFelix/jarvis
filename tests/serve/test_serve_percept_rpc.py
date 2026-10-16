@@ -1,8 +1,9 @@
 """percept.* 桌面 RPC（W2 第 5 步）—— 感知源面板的两条指令。
 
 覆盖：注册与声明齐备（双仓契约）、无宿主时的降级读数、状态快照透传总线统计、
-写侧的白名单校验（未知键报错 / 空补丁报错）、**先落盘后生效**（落盘失败不动
-运行时也不重装配）、重装配抛异常只降级不吞掉已写入的配置、列表端到端规范化。
+状态/写侧回执附带的 `config` 可编辑配置段、写侧的白名单校验（未知键报错 /
+空补丁报错）、**先落盘后生效**（落盘失败不动运行时也不重装配）、重装配抛异常只
+降级不吞掉已写入的配置、列表端到端规范化。
 
 配置落盘由 tests/serve/conftest.py 重定向到 tmp_path/settings.toml，绝不写真实
 用户配置。
@@ -114,6 +115,35 @@ def test_status_get_reports_config_enabled_even_when_not_assembled():
     result = server._rpc_percept_status_get({})
     item = next(s for s in result["sources"] if s["name"] == "file")
     assert item["enabled"] is True and item["registered"] is False
+
+
+def test_status_get_carries_editable_config_segment():
+    """状态里必须带 `config` 段：逐源 enabled 只是 AND 后的结论，面板的名单与
+    阈值编辑表单要靠原始配置值回填（否则一打开就是空框，用户会重复粘贴）。"""
+    settings = Settings(
+        percept_enabled=True,
+        percept_file_watch_dirs=["E:/Downloads"],
+        percept_window_linger_minutes=25,
+    )
+    server, _eq, _cq = make_desktop_server(settings)
+    config = server._rpc_percept_status_get({})["config"]
+    assert config["enabled"] is True
+    assert config["file_watch_dirs"] == ["E:/Downloads"]
+    assert config["window_linger_minutes"] == 25
+    assert config["log_events"] is True          # 出厂缺省（没配过也不误显成已关）
+    assert config["vcs_repos"] == []
+
+
+def test_config_set_result_carries_updated_config_segment(tmp_path):
+    """写侧回读同样带 `config` 段，面板一次调用就能把表单与状态一起刷新。"""
+    server, _eq, _cq = make_desktop_server()
+    result = server._rpc_percept_config_set({
+        "vcs_repos": [" E:/repo/a ", "E:/repo/a"],
+        "vision_auto_stop_minutes": 10,
+    })
+    assert result["config"]["vcs_repos"] == ["E:/repo/a"]
+    assert result["config"]["vision_auto_stop_minutes"] == 10
+    assert (tmp_path / "settings.toml").exists()
 
 
 # ---- percept.config.set：校验 ----

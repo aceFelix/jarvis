@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from agent.config.percept_settings import (
     apply_percept_config,
+    read_percept_config,
     save_percept_config,
     validate_percept_config,
 )
@@ -57,7 +58,23 @@ class PerceptRpcMixin:
         limit = data.get("event_limit")
         if isinstance(limit, int) and limit > 0:
             kwargs["event_limit"] = limit
-        return build_status(self._settings, bus, **kwargs)
+        return self._percept_snapshot(bus, **kwargs)
+
+    def _percept_snapshot(self, bus: Any, **kwargs: Any) -> dict[str, Any]:
+        """状态快照 + `config` 段（面板可编辑的 `[percept]` 原始值）。
+
+        为什么在这里拼而不是写进 :func:`build_status`：core/percept 刻意不反向
+        依赖配置读侧（见 status.py 模块头的分层说明），而 serve 正是两个域相遇的
+        那一层。面板必须一次调用就拿全「在采什么」与「当初是怎么配的」——逐源
+        enabled 只是 AND 后的结论，名单与阈值（file_watch_dirs / vcs_repos /
+        mail_watch_senders / window_exclude_apps / 两个分钟数）只能从配置段取，
+        否则编辑表单无从回填。
+
+        @author aceFelix
+        """
+        status = build_status(self._settings, bus, **kwargs)
+        status["config"] = read_percept_config(self._settings)
+        return status
 
     def _rpc_percept_config_set(self, data: dict) -> dict:
         """percept.config.set：改感知配置（校验 → 落盘 → 运行时 → 重装配 → 回读）。
@@ -81,7 +98,7 @@ class PerceptRpcMixin:
         apply_percept_config(self._settings, patch)
         hot_applied = self._rewire_percept()
         bus = getattr(self._hub, "percept_bus", None) if self._hub is not None else None
-        status = build_status(self._settings, bus, hub_enabled=self._hub is not None)
+        status = self._percept_snapshot(bus, hub_enabled=self._hub is not None)
         status["hot_applied"] = hot_applied
         status["applied"] = patch
         return status

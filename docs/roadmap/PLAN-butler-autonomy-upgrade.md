@@ -172,21 +172,25 @@ rules:
 
 ## 3. W2 · 感知层：统一事件总线
 
-> 🔄 **进度（2026-10-16，分支 `feat/stage9-percept`）**：总线 + 五个源 + 宿主接线
-> + **`percept.*` RPC（后端）**已落地
+> 🔄 **进度（2026-10-16，后端分支 `feat/stage9-percept` / 桌面分支
+> `feat/stage9-percept-panel`）**：总线 + 五个源 + 宿主接线 + **`percept.*` RPC**
+> + **桌面「感知源」面板 UI** 已落地
 > （`agent/core/percept/{event,bus,factory,source_window,source_file,source_vcs,source_mail,
-> source_vision,status,__init__}.py`，单测 38 + 30 + 30 + 10 + 17 + 16 + 8 + 16 + 12 例
-> + W1 在场推断 5 例 + `toml_writer` 9 例；`[percept]` 与 `[email].imap_*` 配置已落
-> Settings、`settings_domains.py` 声明式映射与 example.toml），架构说明见
+> source_vision,status,__init__}.py`，单测 38 + 30 + 30 + 10 + 17 + 16 + 8 + 16 + 14 例
+> + W1 在场推断 5 例 + `toml_writer` 9 例 + 桌面侧 31 例；`[percept]` 与 `[email].imap_*`
+> 配置已落 Settings、`settings_domains.py` 声明式映射与 example.toml），架构说明见
 > [17-W2感知层](../architecture/17-W2感知层.md)。
 > ✅ **第 4 步已接上**：serve `ProactiveHub` 装配总线并订阅，感知事件经
 > `ProactiveEngine.gate_notify`（从 `_dispatch_notify` 拆出的同一个闸门）投
 > `proactive_notify(kind=percept)`；人脸离开/回来同时驱动 W1 的 away 推断。
-> ✅ **第 5 步后端已接上**：`percept.status.get`（在采什么 / 采到了什么）与
+> ✅ **第 5 步已接上**：`percept.status.get`（在采什么 / 采到了什么 + `config` 段）与
 > `percept.config.set`（逐源开关 + 名单）两条 RPC 已上协议；面板改完开关由宿主
 > **重装配总线即时生效**，不再需要重启桌面壳。
-> 尚待开发：jarvis-desktop「感知源」面板 UI + 首次启动询问（双仓改动，
-> `contracts.ts` 需同步新增两条指令）；`schedule`/`calendar`/`system` 三个收编位
+> ✅ **第 6 步已接上**：jarvis-desktop 「管家服务 → 感知源」面板已接入（逐源开关/
+> 采集名单/最近事件三区），双仓契约（`contracts.ts` 两条 `Cmd` +
+> `percept-contracts.ts`）已同步。
+> 尚待开发：**首次启动询问**（当前面板只能由用户主动打开，还没做到“第一次跑就
+> 征求同意”）；`schedule`/`calendar`/`system` 三个收编位
 > 本期不动（理由见架构文档第七节）。
 
 ### 3.1 设计
@@ -250,6 +254,7 @@ class PerceptEvent:
 | `agent/config/email_settings.py` | `EMAIL_FIELDS` 新增五个 `imap_*` 协议键（收件配置可与发件同一张面板管理；`imap_password` 与 `smtp_password` 同为 secret：读不回明文、写留空=保持原值）；落盘改为委派 `toml_writer.save_section` |
 | `agent/core/policy/state.py` | ✅ `set_presence_away`（手动优先、幂等）+ `is_away` 采信视觉推断并带 30 分钟有效期（`VISION_AWAY_TTL_MIN`） |
 | `tests/core/test_percept_bus.py`、`test_percept_sources.py`、`test_percept_sources_vcs_mail.py`、`test_percept_sources_vision.py`、`test_percept_init.py`、`test_percept_status.py`、`tests/config/test_percept_settings.py`、`test_toml_writer.py`、`tests/serve/test_hub_percept.py`、`test_serve_percept_rpc.py`（新增） | 总线裁决 / 窗口与文件 / 仓库与邮件 / 视觉在场 / 配置注入与单例装配 / 面板状态快照 / 感知配置白名单 / 落盘工具 / 宿主接线与热重装配 / 感知 RPC |
+| 兄弟仓 `jarvis-desktop/src/shared/percept-contracts.ts`、`stores/perceptActions.ts`、`components/PerceptSource{Panel,List}.tsx`、`PerceptScopeForm.tsx`、`PerceptEventList.tsx`（均新增） | ✅ 第 6 步桌面面板：契约镜像 + 动作工厂（与 `extensionActions` 同范式注入 `backendStore`）+ 逐源开关/采集名单/最近事件三区；`butlerStore` 加 `'percept'`、`ButlerPanel` 改用 `SERVICE_VIEWS` 映射表；文案拆到 `i18n-butler.ts`（`i18n.ts` 因越 800 行上限按业务域先拆后接新）；测试 `test/renderer/percept.test.tsx`（31 例） |
 
 ### 3.3 验收
 
