@@ -664,11 +664,21 @@ class DesktopBridgeServer(
         broadcast 在无在线客户端时会被丢弃，桌面壳的首屏七路刷新（含设置面板
         settings.get 回填）将永不触发；改为按连接推送，同时覆盖断线重连场景。
 
+        同一个时机也用来投递感知层的**首次引导**（W2 第 7 步）：道理与 init
+        完全一样——启动期投会被丢。宿主没接线或已经问过都是空操作，失败不得
+        影响连接。
+
         @author aceFelix
         """
         await self._send_json(
             ws, {"event": protocol.EVT_INIT, "data": self._api.get_state()}
         )
+        drain = getattr(self._hub, "drain_percept_ask", None)
+        if callable(drain):
+            try:
+                drain()
+            except Exception:  # noqa: BLE001 - 引导投递失败不能阻断连接
+                pass
 
     # ---- 事件泵 ----
 

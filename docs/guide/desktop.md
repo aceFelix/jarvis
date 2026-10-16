@@ -137,6 +137,10 @@ Agent 工具：
 > 🔒 **隐私先说清**：总开关与逐源开关**全部默认关**，没显式打开的源一个字节都不采；
 > 事件只写本地 `~/.jarvis/percept/events.jsonl`（`log_events = false` 可完全不落盘），
 > 不随对话上传。前台窗口源额外带三层防护：标题剥凭据片段 + 截断 40 字 + 密码类应用零事件。
+>
+> 第一次连上桌面壳时，若你**从未做过选择**（无记录 + 总开关未开 + TOML 里没写过
+> `[percept]`），会收到一条 🔍 开头的引导气泡并点亮「管家服务」按钮上的提示点；
+> 它只出现一次（问过与否记在 `~/.jarvis/percept/consent.json`），且不打开任何采集。
 
 开启方式（两条路）：桌面壳「**管家服务 → 感知源**」面板逐个拨开关（改完落盘 +
 当场重装配总线，**不必重启**），或直接改本文件的 `[percept]` 表后**重启桌面壳 /
@@ -179,7 +183,7 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 > **收编位占位**，背后的日历源与系统监控仍是休眠件，开了也不会采（避免“面板有开关、
 > 背后没人采”的假可用）；用户自己设的定时提醒也不走感知总线（必须准点响）。
 
-### 感知源面板接线进度（第 5 步：后端与桌面 UI 均已落地）
+### 感知源面板接线进度（第 5、6、7 步：后端、桌面 UI 与首次引导均已落地）
 
 桌面面板依赖的两条 WS 指令已上协议（契约见
 [protocol.py](../../agent/serve/protocol.py) 的指令表，实现见
@@ -193,8 +197,11 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 > 🧷 **口径**：两条指令与热重装配已有单测（`tests/serve/test_serve_percept_rpc.py`），
 > 桌面壳侧「感知源」面板已接入兄弟仓 `jarvis-desktop/`（入口：管家服务面板的服务
 > 清单；实现 `src/renderer/src/components/PerceptSourcePanel.tsx` 系列，契约镜像
-> `src/shared/percept-contracts.ts`，面板口径见该仓 `docs/architecture.md`）。仍待做的是：
-> **首次启动时的询问引导**（当前面板只能由用户主动打开，不会第一次跑就征求同意）。
+> `src/shared/percept-contracts.ts`，面板口径见该仓 `docs/architecture.md`）。
+> **首次启动询问（第 7 步）也已接入**：后端 `core/percept/consent.py` 记“问过没”，
+> `ProactiveHub` 只在从未表态时装 pending 槽，桌面壳连上 WS 的首帧才投递
+> （`proactive_notify` 的 `kind=percept_ask`，不走 TTS），壳侧据此点亮「管家服务」
+> 按钮提示点、进面板即清；面板上拨一次总开关就等于表过态（记 `choice=on/off`）。
 > 面板可改字段只放**开关与名单**（真源 [`percept_settings.py`](../../agent/config/percept_settings.py)）：
 > `dedup_window_s`/`min_salience`/`vision_fps` 这类极客参数与未装配的收编位开关一律不进。
 

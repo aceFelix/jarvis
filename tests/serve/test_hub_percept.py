@@ -18,11 +18,16 @@ import queue
 import pytest
 
 import agent.core.percept as percept_mod
+import agent.core.percept.consent as consent_mod
 from agent.config.settings import Settings
 from agent.core.percept.event import PerceptEvent
 from agent.core.policy import get_policy_state
 from agent.core.policy.budget import NotifyAction
+from agent.serve import protocol
 from agent.serve.hub import (
+    PERCEPT_ASK_KIND,
+    PERCEPT_ASK_TEXT,
+    PERCEPT_ASK_TITLE,
     PERCEPT_NOTIFY_KIND,
     PERCEPT_SILENT_KINDS,
     ProactiveHub,
@@ -321,3 +326,97 @@ def test_camera_cannot_cancel_manual_away(hub_percept):
 def test_silent_kinds_table_covers_presence_signals():
     """在场类 kind 全在静默表里：新增在场事件时这条断言会提醒同步更新。"""
     assert {"face_appear", "face_disappear", "watch_stopped"} <= PERCEPT_SILENT_KINDS
+
+
+# ---- 首次启动引导（W2 第 7 步：该问一次，但只在有人听得到的时候问）----
+
+def _closed_hub():
+    """总开关关着的 hub（正是该被引导的场景），预算桩与队列就位。"""
+    hub, eq = _hub(_settings(percept_enabled=False))
+    budget = _StubBudget()
+    hub._engine._budget = budget
+    return hub, eq, budget
+
+
+def test_first_run_arms_ask_but_does_not_emit_yet():
+    """从没做过选择的人：start 后槽里有引导，但**此刻还不投**。
+
+    启动期没有在线 WS 客户端，事件泵广播会被直接丢掉，而“只问一次”的记录
+    已经写了——那就变成一次也没问到。投递时机交给 serve 的连接首帧。
+    """
+    hub, eq, _budget = _closed_hub()
+    hub.start()
+    try:
+        assert hub._percept_ask is not None
+        assert _drain(eq) == []
+    finally:
+        hub.stop()
+
+
+def test_drain_emits_once_bypasses_budget_and_records_asked():
+    """drain：投一条 kind=percept_ask 的事件、不过预算闸门、只投一次并落记录。"""
+    hub, eq, budget = _closed_hub()
+    hub.start()
+    try:
+        assert hub.drain_percept_ask() is True
+        items = _drain(eq)
+        assert len(items) == 1
+        assert items[0]["type"] == protocol.EVT_PROACTIVE_NOTIFY
+        payload = items[0]["payload"]
+        assert payload["kind"] == PERCEPT_ASK_KIND
+        assert payload["title"] == PERCEPT_ASK_TITLE
+        assert payload["text"] == PERCEPT_ASK_TEXT
+        assert payload["task_id"] == ""
+        # 一次性引导不走打扰预算（被静默时段/日额度压掉就永久丢了）也不走 TTS
+        assert budget.calls == []
+        assert hub.drain_percept_ask() is False
+        assert _drain(eq) == []
+        assert consent_mod.read_consent()["asked_at"]
+    finally:
+        hub.stop()
+
+
+def test_master_on_user_is_not_asked(hub_percept):
+    """总开关开着的人已经在用了，不该被科普一遍。"""
+    hub, _eq, _budget = hub_percept
+    assert hub._percept_ask is None
+    assert hub.drain_percept_ask() is False
+
+
+def test_already_asked_is_not_asked_again():
+    """问过就翻篇：下次启动不再装（“只出现一次”的落点在记录文件）。"""
+    consent_mod.mark_asked()
+    hub, eq, _budget = _closed_hub()
+    hub.start()
+    try:
+        assert hub._percept_ask is None
+        assert _drain(eq) == []
+    finally:
+        hub.stop()
+
+
+def test_toml_configured_user_is_not_asked(tmp_path):
+    """手改过 `[percept]`（哪怕全关）也算做过选择，不再弹引导。"""
+    (tmp_path / "settings.toml").write_text(
+        "[percept]\nenabled = false\n", encoding="utf-8"
+    )
+    hub, _eq, _budget = _closed_hub()
+    hub.start()
+    try:
+        assert hub._percept_ask is None
+    finally:
+        hub.stop()
+
+
+def test_stop_clears_unsent_ask_and_next_start_rearms():
+    """未投递的引导不跨会话堆积：拆完槽空，下次 start 重新判（仍未问过则再装）。"""
+    hub, _eq, _budget = _closed_hub()
+    hub.start()
+    try:
+        assert hub._percept_ask is not None
+        hub._stop_percept()
+        assert hub._percept_ask is None
+        hub._start_percept()
+        assert hub._percept_ask is not None
+    finally:
+        hub.stop()

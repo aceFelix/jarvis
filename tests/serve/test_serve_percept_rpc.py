@@ -3,7 +3,7 @@
 覆盖：注册与声明齐备（双仓契约）、无宿主时的降级读数、状态快照透传总线统计、
 状态/写侧回执附带的 `config` 可编辑配置段、写侧的白名单校验（未知键报错 /
 空补丁报错）、**先落盘后生效**（落盘失败不动运行时也不重装配）、重装配抛异常只
-降级不吞掉已写入的配置、列表端到端规范化。
+降级不吞掉已写入的配置、列表端到端规范化、总开关表态写进询问记录（第 7 步）。
 
 配置落盘由 tests/serve/conftest.py 重定向到 tmp_path/settings.toml，绝不写真实
 用户配置。
@@ -17,6 +17,7 @@ import tomllib
 
 import pytest
 
+import agent.core.percept.consent as consent_mod
 from agent.config.settings import Settings
 from agent.core.percept import PerceptBus, PollSource
 from agent.core.percept.bus import BusConfig
@@ -239,3 +240,34 @@ def test_config_set_rewire_failure_still_persists(monkeypatch):
     assert hub.hot_calls == 1
     assert result["hot_applied"] is False
     assert server._settings.percept_mail_enabled is True
+
+
+# ---- 总开关表态落进询问记录（W2 第 7 步的首次引导据此不再出现）----
+
+def test_config_set_records_master_choice():
+    """拨总开关 = 对感知层表态，写进 consent（on/off 两档都记）。"""
+    server, _eq, _cq = make_desktop_server(Settings(percept_enabled=False))
+    server._rpc_percept_config_set({"enabled": True})
+    assert consent_mod.read_consent()["choice"] == "on"
+    # 明天关掉也算表过态：不会因为“现在又关了”就重新弹一次引导
+    server._rpc_percept_config_set({"enabled": False})
+    assert consent_mod.read_consent()["choice"] == "off"
+
+
+def test_config_set_without_enabled_records_no_choice():
+    """只改名单/逐源开关不写表态（用户没对总开关做过选择）。"""
+    server, _eq, _cq = make_desktop_server()
+    server._rpc_percept_config_set({"window_enabled": True})
+    assert consent_mod.read_consent() is None
+
+
+def test_choice_record_failure_does_not_break_save(monkeypatch):
+    """表态留档失败不影响本次保存（配置已落盘已生效，记账只是附带）。"""
+    server, _eq, _cq = make_desktop_server()
+    monkeypatch.setattr(
+        consent_mod, "record_choice",
+        lambda choice: (_ for _ in ()).throw(OSError("磁盘只读")),
+    )
+    result = server._rpc_percept_config_set({"enabled": True})
+    assert result["enabled"] is True
+    assert server._settings.percept_enabled is True

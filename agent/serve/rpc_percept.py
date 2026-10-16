@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from agent.config.percept_settings import (
@@ -32,6 +33,8 @@ from agent.core.percept.status import build_status
 
 if TYPE_CHECKING:  # 仅为 IDE/类型检查声明宿主属性，运行期不引入循环导入
     from agent.config.settings import Settings
+
+logger = logging.getLogger("jarvis.serve.rpc_percept")
 
 
 class PerceptRpcMixin:
@@ -97,11 +100,31 @@ class PerceptRpcMixin:
             raise RuntimeError("settings.toml 落盘失败，请检查磁盘写权限")
         apply_percept_config(self._settings, patch)
         hot_applied = self._rewire_percept()
+        if "enabled" in patch:
+            # 总开关拨到哪一档就是用户对感知层的表态（W2 第 7 步的首次引导
+            # 据此不再出现）；记账失败不能反过来说“配置没保存”
+            self._record_percept_choice(bool(patch["enabled"]))
         bus = getattr(self._hub, "percept_bus", None) if self._hub is not None else None
         status = self._percept_snapshot(bus, hub_enabled=self._hub is not None)
         status["hot_applied"] = hot_applied
         status["applied"] = patch
         return status
+
+    def _record_percept_choice(self, enabled: bool) -> None:
+        """把面板上的总开关表态落进询问记录（consent），两条路共用一份真源。
+
+        为什么需要：否则“已经在用感知层”与“还没被问过”只能从运行时开关推断，
+        而开关随时能被改回 off；表态落盘后，即使明天关掉总开关也不会再弹
+        一次引导。异常一律吃掉：这只是留档，不影响配置已落盘已生效的事实。
+
+        @author aceFelix
+        """
+        try:
+            from agent.core.percept.consent import record_choice
+
+            record_choice("on" if enabled else "off")
+        except Exception as e:  # noqa: BLE001 - 留档失败不影响本次保存
+            logger.warning("感知表态记录失败: %s", e)
 
     def _rewire_percept(self) -> bool:
         """请宿主重装配感知总线；没宿主或装配报错都返回 False（配置已经落盘）。

@@ -74,6 +74,21 @@ PERCEPT_SILENT_KINDS: frozenset[str] = frozenset(
     {"face_appear", "face_disappear", "watch_stopped"}
 )
 
+#: 首次启动引导的 kind（W2 第 7 步）。与感知事件不同：它是**一次性说明**，
+#: 不过打扰预算（被静默时段/日额度压掉就永久丢了，而不是“晚点再说”），
+#: 也不做 TTS 朗读（开机的整段文字用听的很干扰），但依旧上屏 + 系统通知，
+#: 因为“默认全关”不等于“用户知道自己可以开”。
+PERCEPT_ASK_KIND = "percept_ask"
+PERCEPT_ASK_TITLE = "贾维斯的观察能力"
+PERCEPT_ASK_TEXT = (
+    "我可以看你工作的现场：前台切到哪个应用、白名单目录里堆了多少文件、\n"
+    "登记仓库有没有未提交、邮箱有没有重要来信、摄像头前你在不在场。\n"
+    "这些能力出厂全部关闭，没打开的源一个字节都不采；采到的事件也只写本机\n"
+    "~/.jarvis/percept/events.jsonl，不随对话上传。\n"
+    "想试试：标题栏「管家服务」→「感知源」，拨总开关与想开的源（改完当场生效，\n"
+    "不必重启）。不想用：什么都不用做，我会一直保持关闭。这条提示只出现一次。"
+)
+
 
 class ProactiveHub:
     """主动播报中枢：Scheduler + ProactiveEngine 的 serve 宿主装配体。
@@ -133,6 +148,10 @@ class ProactiveHub:
         self._bus: Any = None
         self._bus_unsub: Callable[[], None] | None = None
         self._percept_status: dict[str, bool] = {}
+        # 待投递的首次引导（None = 不需要问或已经问过）：绝不在启动时直接投
+        # 进队列——那时无在线客户端，事件泵会把它丢掉（同 init 事件改按连接首推的
+        # 原因）。由 serve 在每条连接建立时 drain_percept_ask() 取出。
+        self._percept_ask: dict[str, str] | None = None
 
     # ---- 对外只读访问（registry_hook 注册提醒/截止日期工具用） ----
 
@@ -254,8 +273,14 @@ class ProactiveHub:
         kind = "deadline" if message.startswith(_DEADLINE_PREFIX) else "briefing"
         self._emit(kind=kind, title="贾维斯主动提醒", text=message)
 
-    def _emit(self, *, kind: str, title: str, text: str, task_id: str = "") -> None:
-        """投递 proactive_notify 事件进 serve 事件队列（线程安全），并并行触发 TTS 朗读通道。"""
+    def _emit(
+        self, *, kind: str, title: str, text: str, task_id: str = "", speak: bool = True
+    ) -> None:
+        """投递 proactive_notify 事件进 serve 事件队列（线程安全）。
+
+        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人；
+        事件通道不受这个开关影响（气泡与系统通知照旧）。
+        """
         self._event_queue.put_nowait(
             {
                 "type": protocol.EVT_PROACTIVE_NOTIFY,
@@ -267,7 +292,8 @@ class ProactiveHub:
                 },
             }
         )
-        self._spawn_tts(kind, text)
+        if speak:
+            self._spawn_tts(kind, text)
 
     # ---- W2 感知层接线（阶段 9 第 4 步：总线 → 同一个 W1 闸门 → 事件流） ----
 
@@ -288,6 +314,9 @@ class ProactiveHub:
             from agent.core.percept import init_percept, register_sources
 
             bus = init_percept(self._settings)
+            # 先判“要不要问一次”再处理装配：总开关关着时正是引导该出现的
+            # 时候（开着他就已经做过选择了）
+            self._arm_percept_ask()
             if not getattr(self._settings, "percept_enabled", False):
                 logger.info("感知层总开关关闭，本次不装配总线（仅注入配置快照）")
                 return
@@ -318,6 +347,7 @@ class ProactiveHub:
         unsub = self._bus_unsub
         self._bus_unsub = None
         self._percept_status = {}   # 拆完就是“没装配”，不给面板留陈旧的启用表
+        self._percept_ask = None    # 未投递的引导不跨会话堆积（下次 start 会重新判）
         if callable(unsub):
             try:
                 unsub()
@@ -332,6 +362,59 @@ class ProactiveHub:
             bus.shutdown_sources()
         except Exception as e:
             logger.warning("感知总线停机异常: %s", e)
+
+    def _arm_percept_ask(self) -> None:
+        """按判据决定是否装一条“待投递的首次引导”（不在此刻投递）。
+
+        判据全在 `percept/consent.py`：没问过、总开关没开、也没在手改的
+        `settings.toml` 里写过 `[percept]`——三者同时成立才装。本方法不得抛出：
+        引导只是“告诉用户有这个东西”，读不到记录/解析不了配置都不能拖垮感知装配。
+
+        @author aceFelix
+        """
+        if self._percept_ask is not None:
+            return
+        try:
+            from agent.core.percept.consent import needs_ask
+
+            if needs_ask(self._settings):
+                self._percept_ask = {
+                    "kind": PERCEPT_ASK_KIND,
+                    "title": PERCEPT_ASK_TITLE,
+                    "text": PERCEPT_ASK_TEXT,
+                }
+        except Exception as e:  # noqa: BLE001 - 引导能力异常不影响主流程
+            logger.warning("感知首次引导判定失败，本次不问: %s", e)
+
+    def drain_percept_ask(self) -> bool:
+        """取出待投递的首次引导、投递并记账（serve 在客户端连上后调）。
+
+        为什么不在启动时投：事件泵广播给“当前在线客户端”，serve 刚起来时桌面壳
+        还没连上 WS，那条引导会被直接丢掉而且记录已写——“只问一次”就变成了“一次
+        也没问到”。因此只有真投递出去了才 mark_asked。
+
+        调用方是 WS 事件循环（单线程串行跑 `_on_client_connected`），所以这里不
+        加锁也不会并发重发；重连场景由记录文件兑现“只问一次”。
+
+        @author aceFelix
+        """
+        pending = self._percept_ask
+        if pending is None:
+            return False
+        self._percept_ask = None
+        self._emit(
+            kind=pending["kind"],
+            title=pending["title"],
+            text=pending["text"],
+            speak=False,
+        )
+        try:
+            from agent.core.percept.consent import mark_asked
+
+            mark_asked(master_enabled=bool(getattr(self._settings, "percept_enabled", False)))
+        except Exception as e:  # noqa: BLE001 - 落盘失败最差下次多问一次
+            logger.warning("感知询问记录写入失败，本次仍按已询问处理: %s", e)
+        return True
 
     def _on_percept_event(self, event: Any) -> None:
         """总线投递来的一条感知事件：先做状态迁移，再决定要不要打扰。
