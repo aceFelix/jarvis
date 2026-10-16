@@ -170,10 +170,11 @@ rules:
 
 ## 3. W2 · 感知层：统一事件总线
 
-> 🔄 **进度（2026-10，分支 `feat/stage9-percept`）**：总线骨架已落地
-> （`agent/core/percept/{event,bus,__init__}.py` + `tests/core/test_percept_bus.py`
-> 35 例），架构说明见 [17-W2感知层](../architecture/17-W2感知层.md)。
-> 四个新事件源与既有源收编尚未开发。
+> 🔄 **进度（2026-10，分支 `feat/stage9-percept`）**：总线骨架与两个源已落地
+> （`agent/core/percept/{event,bus,factory,source_window,source_file,__init__}.py`，
+> 单测 35 + 30 例；`[percept]` 配置已落 Settings 与 example.toml），架构说明见
+> [17-W2感知层](../architecture/17-W2感知层.md)。仓库/CI、邮件两个源与既有源
+> 收编尚未开发；宿主接线（serve 侧订阅总线）在第 4 步，在此之前总线能单测、不能体感。
 
 ### 3.1 设计
 
@@ -217,6 +218,7 @@ class PerceptEvent:
 | `agent/core/daemon/proactive.py` | 改为订阅总线（保留既有四源，行为不变） |
 | `agent/core/daemon/vision_watcher.py` | 事件接入总线（统一出口） |
 | `agent/config/settings.py` + `configs/settings.example.toml` | `[percept.*]` 开关与白名单（**逐源默认关**，决策 2）；`[email].imap_*` 收信字段（决策 3） |
+| `agent/config/settings_domains.py`（新增） | 拆分副作用：`_apply_toml` 里 20+ 个同构“表→字段”循环改为声明式映射（settings.py 因加 `[percept]` 突破 800 行上限，顺手拆回 633 行） |
 | `agent/serve/protocol.py` + `serve/server.py` | `percept.*` 状态查询/逐源开关 RPC（桌面面板依赖，安全范式同 `email.config.*`：密钥不回明文） |
 | `tests/core/test_percept_bus.py`（新增） | 去重/节流/静默/降级 |
 

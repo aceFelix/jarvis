@@ -338,11 +338,14 @@ class PerceptBus:
                 rt.last_run = mono
             snapshot = [(rt.name, rt.source) for rt in due]
         for name, source in snapshot:
-            self._collect_one(name, source)
+            self._collect_one(name, source, mono)
         return len(snapshot)
 
-    def _collect_one(self, name: str, source: Any) -> None:
+    def _collect_one(self, name: str, source: Any, now: float | None = None) -> None:
         """采集单源并逐条投递；异常按源隔离，连续失败自动停用。
+
+        `now` 直接沿用 ``tick()`` 算到点用的同一个 monotonic 值，使去重/节流
+        与调度共用一个时基（否则注入时间驱动测试时，投递窗口仍在走真实时钟）。
 
         自动停用是**故障隔离**的硬要求：源里的 pywin32/imaplib 一旦持续抛错，
         不能让它每秒重试把 CPU 烧满，也不能让它拖坏其他源。停用后面板上仍可
@@ -379,7 +382,7 @@ class PerceptBus:
             if rt is not None:
                 rt.consecutive_errors = 0
         for ev in events:
-            self.publish(ev)
+            self.publish(ev, now=now)
 
     # ---- 生命周期 ----
 

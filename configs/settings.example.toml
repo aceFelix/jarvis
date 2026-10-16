@@ -255,3 +255,45 @@ auto_allow_medium = true   # 沙箱开启时自动放行中等风险命令
 audit = true               # 记录沙箱审计日志（~/.jarvis/sandbox_audit.jsonl）
 max_snapshots = 20         # 文件快照最大保留数
 excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
+
+[percept]
+# W2 感知层（阶段 9）：统一事件总线 + 逐源采集（代码见 agent/core/percept/）。
+# 隐私口径：总开关与逐源开关**全部默认关**，未显式打开的源一个字节都不采；
+# 事件只本地落盘（~/.jarvis/percept/events.jsonl），不随对话上传，
+# 采了什么可用 bus.export() 一键导出自查。
+# 总线只裁事件噪声（去重/节流/故障隔离）；"该不该现在打扰"仍由
+# [policy.notify_budget] 决定（两道闸门分工，见 docs/architecture/17-W2感知层.md）。
+enabled = false            # 感知层总开关（关=不起轮询线程、不采任何源）
+dedup_window_s = 300       # 同一件事的去重窗口（秒）
+min_salience = 0.0         # 总线地板分（0=不裁，重要度裁决交给 W1）
+history_max = 200          # 内存环形历史条数（留痕文件上限=此值×10 行）
+log_events = true          # 本地留痕；false = 完全不碰磁盘
+auto_disable_after_errors = 3   # 单源连续失败达此数自动停用（0=只隔离不罢工）
+
+# 前台窗口源：唯一有明显隐私属性的源，默认只留「进程名 + 标题前 40 字」
+window_enabled = false
+window_interval_s = 5      # 采样间隔（秒）
+window_title_max_chars = 40   # 0 = 只报应用名、丢弃标题
+window_title_full_enabled = false   # true = 显式同意保留完整标题（仍剥凭据片段）
+window_exclude_apps = []   # 留空则用内置敏感应用名单（密码/凭据管理类）；填写则整体覆盖
+window_linger_minutes = 0  # >0 才发「在同一应用待太久」提醒
+
+# 文件守望源：只订阅白名单目录（空列表 = 开了也不采）
+file_enabled = false
+file_watch_dirs = []       # 如 ["E:/Downloads", "~/Desktop"]；自动跳过 .git/node_modules 等机器目录
+file_interval_s = 30
+file_max_entries = 2000    # 单目录快照条目上限（超出只记 truncated）
+file_grow_threshold = 5    # 新增达此数才聚合为一条「目录堆积」提醒
+file_ignore_suffixes = []  # 额外忽略后缀（如 [".blend1"]）
+
+# 仓库/CI 与邮件源（阶段 9 后续切片）、既有源收编
+vcs_enabled = false
+vcs_repos = []             # 登记的仓库路径（如 ["E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis"]）
+vcs_interval_s = 120
+vcs_min_interval_s = 60    # 总线对 vcs 源的同源投递最小间隔
+mail_enabled = false       # IMAP IDLE 只读，只取信封头不拉正文
+mail_min_interval_s = 0    # 0 = 靠 IDLE 推送，不额外节流
+calendar_enabled = false   # 以下四个为既有能力收编（进总线后统一过 W1 闸门）
+system_enabled = false
+schedule_enabled = false
+vision_enabled = false

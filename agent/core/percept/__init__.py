@@ -50,7 +50,8 @@ __all__ = [
     "PollSource", "PublishResult", "SOURCE_CALENDAR", "SOURCE_FILE",
     "SOURCE_MAIL", "SOURCE_SCHEDULE", "SOURCE_SYSTEM", "SOURCE_VCS",
     "SOURCE_VISION", "SOURCE_WINDOW",
-    "get_bus", "init_percept", "shutdown_percept", "source_enabled_map",
+    "build_sources", "get_bus", "init_percept", "register_sources",
+    "shutdown_percept", "source_enabled_map",
 ]
 
 #: 源名 → Settings 里的逐源开关字段名（桌面面板与 TOML 都按此对齐）。
@@ -120,10 +121,19 @@ def build_config() -> BusConfig:
 
 
 def default_log_path() -> Path | None:
-    """事件留痕文件路径；``percept_log_events=False`` 时返回 None=完全不留痕。"""
+    """事件留痕文件路径；``percept_log_events=False`` 时返回 None=完全不留痕。
+
+    目录单一真源用 `core/memory/store.py` 的 `user_jarvis_dir()`（全仓 ~./.jarvis
+    路径都经它），而不是在这里再写一遍字面量。
+    """
     if not _cfg("percept_log_events", True):
         return None
-    root = Path(str(_cfg("jarvis_home", str(Path.home() / ".jarvis"))))
+    try:
+        from agent.core.memory.store import user_jarvis_dir
+
+        root = user_jarvis_dir()
+    except Exception:  # pragma: no cover - 只防循环导入/记忆模块意外，不阻断感知
+        root = Path.home() / ".jarvis"
     return root / "percept" / "events.jsonl"
 
 
@@ -154,3 +164,17 @@ def shutdown_percept() -> None:
         return
     bus.stop()
     bus.shutdown_sources()
+
+
+def build_sources(settings: Any) -> list[tuple[Any, bool]]:
+    """按 Settings 构造已实现的感知源（转发 factory，避免宿主多处 import）。"""
+    from agent.core.percept.factory import build_sources as _build
+
+    return _build(settings)
+
+
+def register_sources(bus: PerceptBus, settings: Any) -> dict[str, bool]:
+    """登记全部源并返回逐源启用状态（宿主唯一接线入口，见 factory 说明）。"""
+    from agent.core.percept.factory import register_sources as _register
+
+    return _register(bus, settings)
