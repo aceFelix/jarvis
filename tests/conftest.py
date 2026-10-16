@@ -6,7 +6,8 @@
 待批清单——测试必须与用户机器状态无关。
 
 tests/policy/conftest.py 的 policy_paths 夹具仍供该目录做细粒度定制；
-本 autouse 夹具兜底全部套件。
+本 autouse 夹具兜底全部套件。阶段 9（W2 感知层）的总线单例同样在本
+夹具里复位，避免跨用例共享订阅方/去重键/轮询线程。
 
 @author aceFelix
 """
@@ -26,6 +27,7 @@ def _isolate_policy_singletons(tmp_path):
     """
     from agent.core.policy import lease as lease_mod, state as state_mod
     gate = importlib.import_module("agent.core.policy")
+    percept = importlib.import_module("agent.core.percept")
 
     lease_mod._store_singleton = None
     state_mod._state_singleton = None
@@ -43,6 +45,11 @@ def _isolate_policy_singletons(tmp_path):
     state_mod.get_policy_state(tmp_path / "policy_state.json")
     state_mod.get_pending_approvals(tmp_path / "pending_approvals.json")
 
+    # W2 感知层同为进程级单例：不复位则跨用例共享总线（订阅方、去重键、
+    # 轮询线程相互污染），且不注入 settings 会把事件写进用户真实 ~/.jarvis
+    percept._settings = None
+    percept._bus_singleton = None
+
     yield
 
     lease_mod._store_singleton = None
@@ -51,3 +58,9 @@ def _isolate_policy_singletons(tmp_path):
     gate._settings = None
     gate._budget_singleton = None
     get_loop_detector().reset()
+    bus = percept._bus_singleton
+    percept._settings = None
+    percept._bus_singleton = None
+    if bus is not None:  # 用例遗留的轮询线程必须停干净，否则跨用例串味
+        bus.stop()
+        bus.shutdown_sources()
