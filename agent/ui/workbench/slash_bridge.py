@@ -38,6 +38,8 @@ from typing import Any
 
 from rich.console import Console
 
+from agent.utils.query_lock import acquire_lock_cancellable
+
 # 注：agent.commands.router 会拉起全部 handlers（进而 import agent.ui.cli），
 # 放模块顶层 import 有循环依赖风险（engine 导入本模块时 ui 包尚未初始化完），
 # 故 CommandContext / dispatch_command 均在各函数内惰性导入。
@@ -310,13 +312,16 @@ async def run_slash(engine: Any, text: str) -> None:
                 # finally 必发 assistant_done，前端闸门照常收尾）。
                 prev_task = getattr(engine, "_send_task", None)
                 engine._send_task = asyncio.current_task()
-                await asyncio.get_running_loop().run_in_executor(
-                    None, engine._query_lock.acquire
-                )
+                # 取消安全等锁：reply.abort 落在等锁窗口时，线程池事后拿到的锁由其
+                # 自身归还（acquire_lock_cancellable），而 finally 仍要恢复句柄并收尾，
+                # 否则技能轮会把三通道 query 锁卡死。@author aceFelix
+                locked = False
                 try:
+                    locked = await acquire_lock_cancellable(engine._query_lock)
                     handled = await dispatch_command(cmd_ctx, text)
                 finally:
-                    engine._query_lock.release()
+                    if locked:
+                        engine._query_lock.release()
                     engine._send_task = prev_task
                     # 技能轮也产生消息：与 _handle_send 同规则落盘会话
                     engine._after_turn()

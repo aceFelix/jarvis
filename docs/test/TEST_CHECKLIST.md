@@ -1,8 +1,12 @@
 # J.A.R.V.I.S 全面功能测试清单
 
-> 版本：2.0.1 | 覆盖 30 个功能模块，350+ 测试项
+> 版本：2.0.1 | 覆盖 36 个功能模块，348 项测试用例（编号唯一）
 >
 > 每项包含：**编号**、**测试目的**、**测试步骤**、**通过标准**
+>
+> 单文件体量：本清单约 840 行，已接近 900 行上限。因用例编号需跨节连续编排、
+> 人工走查需一屏到底，暂不按域拆分；**后续新增成体系的新模块请另立分册**
+> （如 `TEST_CHECKLIST-xxx.md`），不再追加到本文件。
 
 ---
 
@@ -341,30 +345,31 @@
 
 > 原 T-149～T-157（窗口弹出/反应炉动画/窗口单例/未安装降级等）随包删除一并废除；
 > `/talk` 现行为纯终端全双工对话，用例见第 14 节；
-> 图形化实时聊天用例见第 16 节工作台实时模式（T-174）。
+> 图形化实时聊天用例见 jarvis-desktop 仓库（本仓库 pywebview 窗口壳已于 2026-10 退役）。
 
 ---
 
-## 16. 桌面入口（三栏工作台；原常驻模式已于 2026-08 下线，托盘类用例已废除）
+## 16. 桌面入口（图形化窗口已退役：2026-10 pywebview 三栏工作台删除；托盘常驻模式 2026-08 已下线）
 
-### 16.1 工作台基本启停与单实例
+> 原 16.1 工作台窗口用例（T-158 启动工作台 / T-159 双击图标 / T-160 单实例聚焦 /
+> T-161 关闭窗口 / T-171 文本对话 / T-172 历史会话 / T-173 模型音色选择 /
+> T-174 窗口内 /talk / T-175 右栏指标 / T-176 未装 pywebview 降级 / T-177 透明效果 /
+> T-178 自绘标题栏 / T-179 任务栏图标 / T-180 思考块折叠 / T-181 工具组折叠）随窗口壳
+> 一并废除（原编号与第 16.4 / 16.5 / 第 17 节存在重用，本次清理后重复编号消除）。
+> 同样的交互口径现由 **jarvis-desktop** 仓库的 vitest 与人工走查覆盖；后端能力口径由
+> 本仓库第 35 节 serve 用例覆盖（引擎与退役前完全同一套零件）。图形化实时聊天（/talk
+> 音频桥）用例同样见 jarvis-desktop。
+
+### 16.1 退役入口提示与参数隐藏（2026-10 新增）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
-| T-158 | 启动工作台 | `jarvis --gui`（或 `--talk`，两者等价） | 打开透明背景三栏工作台（最大化，保留任务栏），反应炉淡蓝波纹动效 |
-| T-159 | 双击桌面图标 | 双击桌面「JARVIS」 | 静默启动，直接打开三栏工作台（无终端） |
-| T-160 | 单实例聚焦 | 窗口已驻留时再次双击图标/再跑 `--gui` | 不新建窗口，已驻留窗口被唤到前台 |
-| T-161 | 关闭窗口 | 点标题栏自绘 ✕ 按钮 | 进程退出，锁文件/端口释放 |
-| T-177 | 透明效果 | Windows 下打开工作台观察背景 | 桌面壁纸从窗口透出（非白/灰底） |
-| T-178 | 自绘标题栏 | 拖动标题栏空白区 / 点最小化 / 点关闭 | 窗口整体可拖；最小化到任务栏；关闭后进程退出（无全屏按钮：启动即铺满工作区不盖任务栏） |
-| T-179 | 任务栏图标 | 打开工作台看任务栏/Alt-Tab 图标 | 深蓝实底反应炉图标（与桌面图标同图案，不发白/不白板） |
-| T-171 | 文本对话 | 中栏输入框发消息 | 气泡流式渲染；工具调用卡片可展开查看 |
-| T-172 | 历史会话恢复 | 左栏切到历史面板点击某会话 | 中栏载入历史消息（工具块折叠为计数） |
-| T-173 | 模型/音色选择 | 左栏面板切换后点选模型/音色 | 后续对话生效，配置持久化 |
-| T-174 | /talk 实时模式 | 左栏切换到实时模式并开始 | 窗口内实时双工对话，说话时波纹加速 |
-| T-175 | 右栏指标 | 窗口打开后观察右栏 | CPU/内存/磁盘三件套每 2 秒刷新 |
-| T-176 | 未安装降级 | 不安装 pywebview 时 `--gui` | 提示缺少依赖并退出（退出码 3） |
-| T-180 | 思考块折叠 | 发一条会触发深度思考的消息（`/think on` 或复杂问题），观察回复结束前后 | 思考中思考块展开、标题显示「思考过程 · N 字」；回复结束自动收起成一行标题；点标题可展开/收起，且不被自动拨回 |
-| T-181 | 工具组折叠 | 发一条会连续调用多个工具的任务（如「列出目录并统计文件数」） | 连续工具调用聚合成一条「工具调用 ×N」框：执行中显示「执行中：<工具名>」，全部完成后自动收起并显示 ✓；有失败仍收起、标题标红「✗M 失败」；整轮仅一条工具时不包组；历史回放的「历史工具调用 ×N」汇总卡不并入组 |
+| T-359 | 退役提示 | Windows PowerShell（GBK）下执行 `jarvis --gui` | 退出码 0；打印「退役」说明 + jarvis-desktop 指引 + 自启清理路径（JARVIS.lnk / start_workbench.vbs）；**无 UnicodeEncodeError** |
+| T-360 | --talk 同口径 | `jarvis --talk` | 与 T-359 同一分支，输出一致 |
+| T-361 | 退役参数隐藏 | `jarvis --help` | 不出现 `--gui` / `--talk`（`argparse.SUPPRESS`），`--serve` 仍在列 |
+| T-362 | 退役分支零副作用 | 比对执行前后的 `~/.jarvis/settings.toml` mtime | 未加载、未写配置（拦截点在 `load_settings` 之前，旧自启项不会白跑初始化） |
+
+自动化用例：`tests/ui/test_workbench_engine_api.py::test_retired_args_hidden_from_help` 与
+`::test_gui_entry_announces_retirement`（后者含 `out.encode("gbk")` 断言钉住 GBK 可编码约束）。
 
 ### 16.2 语音互斥锁（替代原托盘多模式互斥）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -374,20 +379,19 @@
 | T-165 | 锁释放 | 退出语音会话 | 锁文件删除；心跳线程停止 |
 | T-166 | 崩溃接管 | 持锁进程被强杀，等 60 秒后 | 新进程可抢占锁（时间戳过期） |
 
-### 16.3 全局热键（保留，待工作台接线）
+### 16.3 全局热键（保留，待接线）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
-| T-168 | 热键唤起 | 按 Ctrl+Shift+J（接线后） | 唤起/聚焦工作台窗口 |
+| T-168 | 热键唤起 | 按 Ctrl+Shift+J（接线后） | 唤起/聚焦窗口（原为三栏工作台预留，窗口壳退役后暂无装配点，待桌面壳或后续方案接线后生效） |
 | T-169 | 热键去抖 | 快速按两次 | 只触发一次 |
 | T-170 | 原生热键 | hotkey_native=true（Windows） | RegisterHotKey 响应更快 |
 
-### 16.4 开机自启与快捷方式
-| 编号 | 测试目的 | 测试步骤 | 通过标准 |
-|------|---------|---------|---------|
-| T-171 | 安装自启 | `python -m agent.daemon.autostart install` | 注册到 Startup |
-| T-172 | 查看状态 | `python -m agent.daemon.autostart status` | 显示已安装 |
-| T-173 | 卸载自启 | `python -m agent.daemon.autostart uninstall` | 从 Startup 移除 |
-| T-174 | 桌面入口下线 | `python -m agent.daemon.autostart desktop` | 报未知命令（退出码 1），桌面快捷方式子命令已移除 |
+### 16.4 开机自启（已退役）
+
+> 原 T-171～T-174（`python -m agent.daemon.autostart install / status / uninstall / desktop`）
+> 随 `agent/daemon/autostart.py` 于 2026-10 删除一并废除：本仓库不再提供自启注册能力，
+> 开机启动请在 jarvis-desktop 设置内开启；存量残留的手动清理见
+> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md) 第七节（`jarvis --gui` 也会打印同一份指引）。
 
 ### 16.5 快速启动
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -723,7 +727,7 @@
 | T-313 | 可选依赖缺失(browser) | 不装 playwright | 优雅降级提示 |
 | T-314 | 可选依赖缺失(voice) | 不装 pyaudio | 优雅降级提示 |
 | T-315 | 可选依赖缺失(vision) | 不装 mediapipe | 优雅降级提示 |
-| T-316 | 可选依赖缺失(realtime_ui) | 不装 pywebview | 终端模式降级 |
+| T-316 | 可选依赖缺失(realtime_ui) | ❌ 已废除 | 2026-10 随 `--gui` 退役：`realtime_ui` extra 与 pywebview 依赖已从 `pyproject.toml` / `uv.lock` 移除 |
 | T-317 | API Key 过期 | 使用无效 Key | 明确错误提示 |
 | T-318 | 网络断开 | 断网后对话 | 友好错误提示 |
 | T-319 | 并发工具调用 | 同时多个工具 | 并发安全 |
@@ -733,7 +737,7 @@
 
 ## 35. serve 模式（外部前端接入）
 
-> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 21 + 路由 32 + 集成 2 + hub 27 = 82 项），工作台侧模型管理另见 `tests/ui/test_workbench_model_admin.py` 与 `tests/ui/test_workbench_engine_model_switch.py`；中栏降噪（思考块/工具组折叠）契约另见 `tests/ui/test_workbench_chat_fold.py`（`tests/ui/` 合计 126 项）。
+> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎层（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 34 + 路由 42 + 集成 2 + hub 27 = 105 项）；工作台引擎层单测见 `tests/ui/`（238 项，含模型管理 `test_workbench_model_admin.py`、引擎热切换 `test_workbench_engine_model_switch.py`、斜杠桥 `test_workbench_slash.py`、扩展面板 `test_workbench_extensions.py` 等）。原窗口壳用例 `test_workbench_single_instance.py`、`test_workbench_chat_fold.py` 与 `test_autostart_cli.py` 已随 2026-10 退役删除，中栏降噪（思考块/工具组折叠）契约改由 jarvis-desktop vitest 覆盖。
 
 ### 35.1 启动与握手
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -801,6 +805,15 @@
 | T-357 | 回滚失败原子性 | mock restore 失败后触发撤回 | `rewound` 回 `{ok:false,…}`，前端气泡**不裁**、聊天流弹错，后端消息也不截断 |
 | T-358 | /load 后跨重启撤回 | 对话几轮→退出→`/load` 旧会话（桌面：重开选历史会话）→撤回 | `extra.checkpoint_id` 随会话 JSON 持久化，检查点按 workdir 指纹定位仍可命中，文件回滚成功 |
 
+### 36.3 三通道 query 锁的取消语义（2026-10，等锁窗口）
+
+> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/ui/test_serve_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/query-lock-cancel-leak-fix.md)。
+
+| 编号 | 测试目的 | 测试步骤 | 通过标准 |
+|------|---------|---------|---------|
+| T-363 | 取消落在等锁窗口的收尾与归还 | 用 `_SlowLock`（acquire 前睡 0.3s）放大窗口，发 `send` 后立即 `reply.abort` | 本轮仍发 `assistant_done` + `info『已停止回复』`；底层锁被自动归还（可再次 acquire）；`query_loop.run` 一次未跑；`_send_task` 置空；后续指令照常消费 |
+| T-364 | 原语等锁语义 | `pytest tests/test_query_lock.py` | 空闲锁返回 `True` 且确实持有；被取消时抛 `CancelledError` 且线程池事后取得的锁被归还；占用期间等待者进不来，释放后依次拿到并归还、锁可复用 |
+
 ---
 
 ## 快速冒烟测试（每次改动必跑）
@@ -818,7 +831,7 @@
 | P1 | T-092 | 截图 | 15s |
 | P1 | T-128 | 语音闭环 | 30s |
 | P1 | T-133 | 实时双工启动 | 20s |
-| P1 | T-158 | Daemon 启停 | 20s |
+| P1 | T-359 | 退役入口提示（--gui） | 5s |
 | P1 | T-321 | serve 启动握手 | 15s |
 | P2 | T-196 | 跨设备协同 | 30s |
 | P2 | T-203 | 安全沙箱 | 20s |
@@ -826,8 +839,20 @@
 
 ---
 
-> **总计：364 项测试，覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358、2026-10 开发服务器关闭能力新增 T-DS-001–T-DS-006）
+> **总计：350 项测试用例（编号已去重），覆盖 36 个功能模块**（含 2026-08 桌面项目工作区新增 T-342–T-348、2026-10 消息级回溯新增 T-349–T-358、2026-10 开发服务器关闭能力新增 T-DS-001–T-DS-006、2026-10 三栏 GUI 退役新增 T-359–T-362、2026-10 query 锁取消语义新增 T-363–T-364；2026-10 同时废除工作台窗口类用例与开机自启类用例，并消除原 16 节内的重复编号）
 >
 > 测试环境：Windows 11（主）/ macOS（辅）/ Linux（辅）
 >
 > 前置条件：`pip install "jarvis-agent[all]"` + 配置 `DASHSCOPE_API_KEY`
+>
+> 另：文档一致性（本地链接有效性）由 `scripts/check_md_links.py` 作为 CI 门禁，
+> 其 17 条 pytest 用例见 `tests/test_md_link_checker.py`：既含 Linux CI 视角的平台无关判定
+> （首版曾在 Linux 上误报全仓链接，复盘见
+> [md-link-checker-linux-ci-fix.md](../fixlogs/md-link-checker-linux-ci-fix.md)），
+> 也含「链接目标必须已入 git」的入库门禁（曾漏过指向 `.gitignore` 排除目录的链接，
+> 复盘见 [md-link-checker-untracked-link-fix.md](../fixlogs/md-link-checker-untracked-link-fix.md)），
+> 以上不计入本清单用例数。
+>
+> 另：全量 `pytest` 当前为 2564 passed（桌面引擎 / 手机桥接 / 微信三通道的 query 锁
+> 取消语义修复后由 2560 → 2564：新增 `tests/test_query_lock.py` 3 例与
+> `tests/ui/test_serve_stdin_abort.py` 1 例），同样不计入本清单用例数。

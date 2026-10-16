@@ -620,16 +620,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="交互式首次配置引导：选厂商→输Key→测试连接→保存",
     )
-    p.add_argument(
-        "--talk",
-        action="store_true",
-        help="启动三栏工作台窗口（实时语音/文本对话一体，原独立实时窗口已合并）",
-    )
-    p.add_argument(
-        "--gui",
-        action="store_true",
-        help="启动三栏 GUI 工作台（与 --talk 等价，桌面图标入口）",
-    )
+    # 已退役入口（2026-10，aceFelix）：--gui / --talk 原用于拉起 pywebview 三栏
+    # 工作台窗口，窗口壳已从本仓库删除（图形化桌面由独立仓库 jarvis-desktop
+    # 承担）。参数本身保留是为了给老用户一个可读的落地提示：历史版本写入的
+    # 开机自启快捷方式指向 `jarvis --gui`，若直接报 unknown argument，在
+    # wscript 静默运行下用户根本看不到原因。help=SUPPRESS 使其不出现在
+    # --help 清单里，避免被当成可用功能。
+    p.add_argument("--talk", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)
     p.add_argument(
         "--serve",
         action="store_true",
@@ -649,6 +647,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def announce_workbench_retired() -> int:
+    """告知 --gui / --talk 已退役，并给出存量开机自启的手动清理路径。
+
+    只做提示与指引，不删任何用户文件：自启项落在系统 Startup 目录，自动
+    清理需重建旧版的注册表路径解析与文件删除逻辑，得不偿失。返回 0 而非
+    非零码，避开旧版 VBS 把失败当异常弹框。
+
+    文案只用 GBK 可编码字符（不用 ℹ 等符号）：该分支在 Rich 控制台建立
+    之前，裸 print 直接写 Windows ANSI 代码页的控制台，遇不可编码字符会
+    抛 UnicodeEncodeError。
+
+    @author aceFelix
+    """
+    print("提示：三栏工作台窗口（--gui / --talk）已于 2026-10 退役。")
+    print("  图形化桌面请改用独立仓库 jarvis-desktop（自身带开机自启设置）。")
+    print("  终端用法不受影响：`jarvis` 进 REPL，`jarvis --serve` 开后端。")
+    print("  若历史版本装过开机自启，需手动清理：")
+    print("    Windows: 删 Startup 目录下的 JARVIS.lnk（一般在")
+    print("             %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup）")
+    print("             与 ~/.jarvis/start_workbench.vbs、~/.jarvis/jarvis_window.ico")
+    print("    macOS:   删 ~/Library/LaunchAgents/ 下 JARVIS 的 .plist")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """程序主入口。
 
@@ -661,6 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor:
         from agent.doctor import run_doctor
         return run_doctor()
+
+    # 三栏工作台窗口已退役（2026-10）：不再拉起任何 GUI，只打印下线说明与
+    # 自启清理指引。放在加载配置之前：提示本身不依赖 settings，且避免旧
+    # 自启项每次开机都白白跑一遍初始化（背景：docs/fixlogs/workbench-gui-retired.md）。
+    if args.talk or args.gui:
+        return announce_workbench_retired()
 
     settings = load_settings(workdir=args.workdir)
 
@@ -741,11 +769,6 @@ def main(argv: list[str] | None = None) -> int:
         from agent.commands.handlers.config_commands import _show_config
         _show_config(ui, settings, provider, mcp_client=None)
         return 0
-
-    # 三栏工作台窗口（--gui 与 --talk 等价：--talk 已从独立实时窗口合并进工作台）
-    if args.talk or args.gui:
-        from agent.ui.workbench import run_workbench
-        return run_workbench(settings)
 
     # headless API 服务：不渲染本地 UI，桌面壳（jarvis-desktop）经 WS 接入
     if args.serve:

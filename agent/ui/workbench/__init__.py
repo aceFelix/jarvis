@@ -1,20 +1,22 @@
-"""JARVIS 三栏工作台（Workbench）—— 桌面图标的新宿主。
+"""JARVIS 工作台引擎层（Workbench）—— serve 与桌面壳共用的后端零件。
 
-单窗口三栏 GUI：
-- 左栏：模式切换（文本/实时）、模型与音色选择、历史会话列表（双面板切换）
-- 中栏：对话主区（气泡消息流 + 文本输入框）
-- 右栏：系统指标（CPU/内存/磁盘）
+本包内容：对话引擎（``engine.ChatEngine``）、指令/事件 API 门面
+（``api.WorkbenchAPI``）、系统指标采集（``metrics``）、模型管理与扩展
+面板接口（``model_admin`` / ``extensions_api`` / ``slash_bridge`` /
+``checkpoint_ops``）等。``jarvis --serve`` 拉起的 headless 服务与
+jarvis-desktop 桌面壳都装配这套零件，宿主只是从窗口换成 WebSocket。
 
-基于 pywebview + HTML5 Canvas，主进程主线程跑窗口，
-对话引擎/实时语音/指标采集跑在工作线程，通过事件队列与前端通信。
+退役说明（2026-10，aceFelix）：本包原有的 pywebview 三栏 GUI 窗口壳
+（``app.py`` / ``single_instance.py`` / ``win32_icon.py`` /
+``window_geometry.py`` 与 ``assets/`` 前端资源）已整体删除，入口参数
+``jarvis --gui`` / ``--talk`` 同步下线——图形化桌面由独立仓库
+**jarvis-desktop**（Electron）承担，两套 GUI 并存属重复建设。
+判断依据与影响面见
+``docs/fixlogs/workbench-gui-retired.md``。
 
-窗口行为：最大化（透明背景）、最小化到任务栏、单实例（二次双击聚焦）。
-
-@author aceFelix
+不再导出 ``run_workbench``；如需启动后端请用 ``jarvis --serve``。
 """
 
 from __future__ import annotations
 
-from agent.ui.workbench.app import run_workbench
-
-__all__ = ["run_workbench"]
+__all__: list[str] = []

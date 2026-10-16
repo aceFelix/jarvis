@@ -72,11 +72,6 @@ const FEATURES = [
     extras: ["wechat"],
     hint: null,
   },
-  {
-    name: "实时聊天窗口（独立语音对话窗口）",
-    extras: ["realtime_ui"],
-    hint: null,
-  },
 ];
 
 // ─── Python 检测 ───────────────────────────────────────────────────────────────

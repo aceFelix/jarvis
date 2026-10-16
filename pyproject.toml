@@ -79,12 +79,6 @@ daemon = [
     # 主动感知：系统资源监控（跨平台）
     "psutil>=5.9.0",
 ]
-realtime_ui = [
-    # 三栏工作台 GUI（jarvis --gui，HTML5 Canvas 方舟反应炉动画）
-    # Windows 上需要 Edge WebView2 Runtime（Win10/11 通常已预装）
-    # （原 /talk 独立实时窗口已于 2026-09 下线，/talk 现为纯终端）
-    "pywebview>=5.0",
-]
 wechat = [
     # 微信 ClawBot 接入（iLink Bot API HTTP 客户端）
     "aiohttp>=3.9.0",
@@ -106,7 +100,6 @@ all = [
     "jarvis-agent[vision]",
     "jarvis-agent[voice]",
     "jarvis-agent[daemon]",
-    "jarvis-agent[realtime_ui]",
     "jarvis-agent[wechat]",
 ]
 

@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.message import Message, TextContent
+from agent.utils.query_lock import acquire_lock_cancellable
 from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
 # 附件/渲染纯函数拆到 render.py（控本文件行数）；此处再导出保持
 # tests/ui 既有导入路径（from engine import _messages_to_render）不变。
@@ -689,14 +690,19 @@ class ChatEngine:
         # 协程仍可推进），拿到锁再 await run —— 与桥接侧 _exec_query 同构。
         # 用当前运行 loop（生产环境即 self._loop；单测直接 await 本协程时也可用），
         # 避免依赖 engine.start() 才赋值的 self._loop。
+        # acquire 必须在 try/finally 内：reply.abort 的取消若落在「等锁」窗口，
+        # 线程池事后仍会把锁拿走，acquire_lock_cancellable 负责把它归还；而 finally
+        # 仍需照常收尾（清句柄 + assistant_done），否则气泡永不落地、锁被永久占用。
         # @author aceFelix
-        await asyncio.get_running_loop().run_in_executor(None, self._query_lock.acquire)
+        locked = False
         try:
+            locked = await acquire_lock_cancellable(self._query_lock)
             await self._query_loop.run(composed, self._ctx, images=img_blocks or None)
         except Exception as e:
             self._emitter.emit("error", f"运行出错: {type(e).__name__}: {e}")
         finally:
-            self._query_lock.release()
+            if locked:
+                self._query_lock.release()
             self._send_task = None
             # 无论本轮成败都绑定检查点（query_loop.run 已把用户消息
             # append 进 _messages），出错轮次同样可撤回。@author aceFelix

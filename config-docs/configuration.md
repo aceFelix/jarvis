@@ -250,8 +250,8 @@ email_default_recipient = "target@qq.com"
 | `--verbose` | 详细输出 |
 | `--no-boot` | 跳过启动动画 |
 | `--quick` | 快速启动（跳过 MCP/LSP） |
-| `--gui` | 启动三栏 GUI 工作台（桌面图标同款入口） |
-| `--talk` | 与 `--gui` 等价（兼容旧快捷方式），启动三栏工作台 |
+| `--serve` | 启动 headless WebSocket 后端（仅监听 `127.0.0.1` + 随机端口，供 jarvis-desktop 等外部前端接入） |
+| `--gui` / `--talk` | ❌ 已退役（2026-10）：三栏 pywebview 工作台窗口已删除，执行仅打印下线说明与自启清理指引；参数仍保留解析但不再出现在 `--help`（图形化桌面请用 jarvis-desktop） |
 | `--no-update-check` | 跳过启动时的版本更新检查（等价 `[update] check = false`） |
 
 ---

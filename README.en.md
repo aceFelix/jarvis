@@ -153,14 +153,14 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot
 - Checks for a new release in the background on startup; when found, run `/update` to upgrade (disable with `--no-update-check`)
 
-> Install paths, optional dependency groups, per-OS system dependencies and the `--gui` workbench entry: see the [Installation Guide](docs/guide/installation.md) (Chinese).
-> To grasp where this project is heading in one read: the [Blueprint](docs/BLUEPRINT.md).
+> Install paths, optional dependency groups, per-OS system dependencies and the `--serve` backend entry: see the [Installation Guide](docs/guide/installation.md) (Chinese).
+> To grasp where this project is heading in one read: the [Blueprint](docs/blueprint/BLUEPRINT.md).
 
 ## Platform Support
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| Full features (chat / voice / workbench / desktop shell / GUI control / autostart) | ✅ **Fully developed & verified** | ✅ Code-adapted | ✅ Code-adapted |
+| Full features (chat / voice / GUI control / serve backend / jarvis-desktop shell) | ✅ **Fully developed & verified** | ✅ Code-adapted | ✅ Code-adapted |
 
 > ⚠️ All development and real-machine verification happens on Windows; macOS / Linux are code-level adaptations without full real-machine testing. Windows is recommended first. Per-feature differences: [Installation Guide](docs/guide/installation.md#平台系统依赖) (Chinese).
 
@@ -178,7 +178,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | Config reference / vendor setup / FAQ | [config-docs/](config-docs/configuration.md) (中文) |
 | Architecture (15 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
 | Testing / CI / publishing / directory layout | [docs/guide/development.md](docs/guide/development.md) (中文) |
-| Blueprint (vision · capability model · roadmap) | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) |
+| Blueprint (vision · capability model · roadmap) | [docs/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
 ## Development Roadmap
 

@@ -4,54 +4,51 @@
 
 ---
 
-## 三栏工作台（`--gui`）
+## 图形化桌面（jarvis-desktop）
 
-```bash
-jarvis --gui           # 启动三栏工作台窗口（--talk 与 --gui 等价）
-```
+图形化入口只有一个：独立仓库 **jarvis-desktop**（Electron 桌面应用）。它拉起并监管
+`jarvis --serve` 子进程，经 WebSocket 事件流渲染三栏布局（左：模式 / 会话 / 模型 / 音色
++ 项目区；中：对话气泡流；右：任务 / 用量 / 系统状态 / 运行健康），自带开机自启与
+系统通知。仓库内不另提供 GUI。
 
-双击桌面「JARVIS」图标（或开机自启）打开单窗口三栏工作台：
-透明背景透出桌面，方舟反应炉淡蓝动效居中律动（核心呼吸 + 三角线圈轮流点亮，说话时加速）。
-
-- **左栏**：模式切换（💬 文本 / 🎙️ 实时）+ 三面板切换（📜 历史会话 ⇄ 🤖 模型 ⇄ 🎵 音色）
-- **中栏**：气泡对话流（流式渲染；思考块与本轮连续工具调用在回复结束后各自折叠成一行，可点开查看）+ 文本输入框，支持历史会话恢复
-- **右栏**：CPU / 内存 / 磁盘实时指标
-- **窗口行为**：无边框铺满工作区启动（不盖任务栏；自绘标题栏可拖动，带最小化/关闭按钮，不提供全屏）、单实例（二次双击唤起已驻留窗口）
-- 日志位于 `~/.jarvis/workbench.log`
+> 📌 **三栏 pywebview 工作台已退役（2026-10-14）**：`jarvis --gui` / `--talk` 下线，
+> 窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` 与
+> `assets/`）已删除。退役原因是两套前端重复建设（气泡渲染 / 会话列表 / 模型选择器 /
+> 主题皮肤各自维护，口径漂移靠人工对齐），而非能力缺失——`agent/ui/workbench/` 剩下的
+> 4489 行引擎层止今为 serve 与桌面壳所用。判断依据与影响面见
+> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)。
 
 > 📌 **架构说明**：原「无窗口 daemon + 托盘遥控」常驻模式（`--daemon`、pystray 托盘菜单、
-> 托盘语音/文本终端派生）已于 2026-08 下线；原 `--talk` 独立实时窗口已合并进工作台。
-> 完整开发计划见 [docs/plans/workbench-gui.md](../plans/workbench-gui.md)。
->
-> 📌 **桌面入口演进**：桌面快捷方式（`autostart desktop`）已于 2026-09 下线，
-> 桌面入口由 **jarvis-desktop**（Electron 桌面应用，独立仓库）接管；
-> 本仓库终端内仍可用 `jarvis --gui` 打开三栏工作台窗口。
+> 托盘语音/文本终端派生）已于 2026-08 下线；原 `--talk` 独立实时窗口已于 2026-09 删除。
+> 工作台历史开发计划见 [docs/plans/workbench-gui.md](../plans/workbench-gui.md)（已完结）。
 >
 > 📌 **桌面安装包后端冻结**：本仓库 `packaging/` 存放把 `agent.serve` 用 PyInstaller 冻结成
 > 独立 `jarvis-serve.exe` 的入口（`serve_entry.py`）、打包规格（`jarvis-serve.spec`）与构建
 > 脚本（`build_serve.ps1`）；产物 `dist/jarvis-serve/` 由 jarvis-desktop 的 `npm run dist` 经
 > `extraResources` 拷入 NSIS 安装包，使终端用户无需安装 Python。
 
-## 开机自启
+## 开机自启（已退役）
 
-```bash
-python -m agent.daemon.autostart install            # 安装开机自启
-python -m agent.daemon.autostart uninstall          # 卸载开机自启
-python -m agent.daemon.autostart status             # 查看状态
-```
+开机自启原由 `python -m agent.daemon.autostart {install,uninstall,status}` 维护，
+本质是让系统开机静默拉起 `jarvis --gui` 窗口；随三栏 GUI 退役，该模块已于 2026-10
+删除（Windows Startup .lnk + VBS / macOS LaunchAgent 均不再提供）。
 
-| 平台 | 开机自启 |
+需要开机启动请在 **jarvis-desktop** 的设置内开启。旧版残留可手动清理（执行
+`jarvis --gui` 会打印同一份指引）：
+
+| 平台 | 残留位置 |
 |---|---|
-| Windows | Startup 文件夹 .lnk（指向静默 VBS，打开三栏工作台） |
-| macOS | LaunchAgent plist（`launchctl load`） |
-| Linux | 不支持（提示手动 systemd） |
+| Windows | `…\Start Menu\Programs\Startup\JARVIS.lnk`、`~/.jarvis/start_workbench.vbs`、`~/.jarvis/jarvis_window.ico` |
+| macOS | `~/Library/LaunchAgents/` 下 JARVIS 的 `.plist` |
+| Linux | 从未支持 |
 
-> 📌 桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status` 子命令）
-> 已于 2026-09 下线：桌面入口由 jarvis-desktop 桌面应用接管。存量桌面 JARVIS.lnk 可直接手动删除。
+> 📌 更早之前的桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status` 子命令）
+> 已于 2026-09 下线；存量桌面 JARVIS.lnk 可直接手动删除。
 
-## 全局热键（保留）
+## 全局热键（保留待接线）
 
-全局热键能力已保留（Windows 默认用原生 `RegisterHotKey`），预留新一代 GUI 工作台的「热键召唤窗口」场景：
+全局热键能力已保留（Windows 默认用原生 `RegisterHotKey`），原为 GUI 工作台的「热键召唤
+窗口」预留；窗口壳退役后该能力尚未接线，由桌面壳或后续方案自行调用：
 
 ```toml
 [daemon]
@@ -132,7 +129,7 @@ Agent 工具：
 ## 系统资源监控（休眠态）
 
 监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，
-当前处于休眠态，将由新一代 GUI 工作台重新接线。配置项预留：
+当前处于休眠态，待由 serve 宿主重新接线。配置项预留：
 
 ```toml
 [monitor]
@@ -228,7 +225,7 @@ token = ""                     # 认证 token，留空自动生成
 jarvis --serve         # 启动 headless API 服务（不渲染本地 UI，供外部前端接入）
 ```
 
-`--serve` 把 J.A.R.V.I.S 的对话引擎以 **WebSocket API** 形式对外服务，供 jarvis-desktop（Electron 桌面壳，独立仓库）等外部前端接入。它与 `--gui`/`--talk` 互斥：后者在本进程内渲染 pywebview 工作台，`--serve` 不渲染任何本地 UI，只装配与工作台**完全相同**的引擎零件（`ChatEngine` + `WorkbenchAPI` + `MetricsCollector`），经 `DesktopBridgeServer` 以 WS 事件流对外服务。
+`--serve` 把 J.A.R.V.I.S 的对话引擎以 **WebSocket API** 形式对外服务，供 jarvis-desktop（Electron 桌面壳，独立仓库）等外部前端接入。它是本仓库唯一的图形化后端入口（原 `--gui` / `--talk` 本地渲染的 pywebview 工作台已于 2026-10 退役），不渲染任何本地 UI，只装配与退役前工作台**完全相同**的引擎零件（`ChatEngine` + `WorkbenchAPI` + `MetricsCollector`），经 `DesktopBridgeServer` 以 WS 事件流对外服务。
 
 - **绑定收敛**：仅监听 `127.0.0.1` + 系统分配的随机端口，不对局域网暴露（这是与手机协同模式 `0.0.0.0` + 固定端口的关键差异）。
 - **token 认证**：WS 连接须带 token（`ws://127.0.0.1:<port>/?token=xxx`），token 错误服务端以 `4401` 关闭。

@@ -458,12 +458,43 @@ def test_api_get_state_includes_runtime_fields() -> None:
 # ---- 命令行参数 ----
 
 def test_parse_args_gui_and_talk():
-    """--gui 与 --talk 均被识别（两者等价启动工作台）。"""
+    """--gui / --talk 已退役但参数仍可解析：兼容旧开机自启项的调用。"""
     from agent.main import parse_args
 
     assert parse_args(["--gui"]).gui is True
     assert parse_args(["--talk"]).talk is True
     assert parse_args([]).gui is False and parse_args([]).talk is False
+
+
+def test_retired_args_hidden_from_help(capsys):
+    """退役参数不得出现在 --help（argparse.SUPPRESS），避开被当成可用功能。"""
+    import pytest
+
+    from agent.main import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    out = capsys.readouterr().out
+    assert "--gui" not in out and "--talk" not in out
+    assert "--serve" in out
+
+
+def test_gui_entry_announces_retirement(capsys):
+    """命中退役参数：只打印下线说明与自启清理指引并返回 0，不加载配置也不拉 GUI。
+
+    拦截点在 load_settings 之前，故本用例不会读写用户真实配置。
+    """
+    from agent.main import main
+
+    assert main(["--gui"]) == 0
+    out = capsys.readouterr().out
+    assert "退役" in out
+    assert "jarvis-desktop" in out
+    # 旧自启项常见残留路径必须提示到
+    assert "JARVIS.lnk" in out and "start_workbench.vbs" in out
+    # 文案必须可被 Windows GBK 控制台编码：该分支正在 Rich 建立之前走裸
+    # print，遇 ℹ 等不可编码字符会抛 UnicodeEncodeError 把提示本身弄崩
+    out.encode("gbk")
 
 
 def test_parse_args_serve():
@@ -472,5 +503,5 @@ def test_parse_args_serve():
 
     assert parse_args(["--serve"]).serve is True
     assert parse_args([]).serve is False
-    # 与 --gui/--talk 共存时 --gui/--talk 优先（分发顺序在前）
+    # 与已退役的 --gui/--talk 同时给出时仍能解析，但执行时退役提示优先返回
     assert parse_args(["--serve", "--gui"]).serve is True
