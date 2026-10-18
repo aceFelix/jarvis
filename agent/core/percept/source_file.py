@@ -181,10 +181,13 @@ class FileSource:
         kind = "dir_grew" if many else "file_added"
         if many:
             summary = f"{name} 目录新增 {len(added)} 个文件（如 {('、'.join(samples))}）"
-            hint = 0.45
+            # 0.55：要能过 W1 打扰门槛。预算侧 `percept:file` 权重 0.6，
+            # 0.6×0.55=0.33 > 门槛 0.3；旧值 0.45 乘完 0.27 会被判“不值得打扰”，
+            # 而目录堆积恰恰是本源唯一值得播报的那件事。
+            hint = 0.55
         else:
             summary = f"{name} 新增文件：{('、'.join(samples))}"
-            hint = 0.3
+            hint = 0.3   # 单个新文件不值得打断（只留痕）
         return PerceptEvent(
             source=SOURCE_FILE,
             kind=kind,

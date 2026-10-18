@@ -1,7 +1,9 @@
 """打扰预算单测 —— 五步闸门与重要度评分（阶段 8 验收②）。
 
 覆盖：静默时段只入库、时段结束后聚合冲刷成一条、同源窗口合并、
-低重要度降级、日预算上限、跨天重置、接受率闭环、跨午夜静默区间。
+低重要度直接抑制、日预算上限、跨天重置、接受率闭环、跨午夜静默区间，
+以及 2026-10 走查后的四条新口径（冲刷不占额度、有冷却、单条不套壳、
+不吞当前事件）与感知源权重登记。
 时间一律显式传 now，测试不依赖真实时钟。
 
 @author aceFelix
@@ -57,10 +59,13 @@ def test_flush_aggregates_pending(policy_paths):
     b.gate("提醒一", "deadline", dedup_key="d1", now=NIGHT)
     b.gate("提醒二", "calendar", dedup_key="d2", now=LATE_NIGHT)
     a = b.gate("新提醒", "system", dedup_key="d3", urgency=0.9, now=NEXT_MORNING)
-    # 第一条非静默调用先冲刷积压（聚合一条），本条本身暂未播
+    # 冲刷与当前事件**合一返回**：旧实现直接 return 摘要，把“新提醒”整条丢了
     assert a.kind == "emit"
-    assert "积压 2 条" in a.text
+    assert "补播 2 条提醒" in a.text
+    assert "新提醒" in a.text
     assert b.pending_count() == 0
+    # 摘要本身不占额度，只有当前事件那一次放行计入 count
+    assert b.stats()["count"] == 1
 
 
 def test_aggregate_window_suppress(policy_paths):
@@ -73,23 +78,35 @@ def test_aggregate_window_suppress(policy_paths):
     assert b.stats()["count"] == 1  # 抑制不计数
 
 
-def test_low_salience_queued(policy_paths):
-    """重要度低于门槛 → 入库暂缓（不占用播报额度）。"""
+def test_low_salience_suppressed_not_queued(policy_paths):
+    """重要度低于门槛 → 直接抑制且不入库（旧版“降级入库”会被下一条冲刷出去）。"""
     b = _budget(policy_paths)
     a = b.gate("随便说说", "default", urgency=0.1, now=MORNING)  # 0.5*0.1=0.05 < 0.3
-    assert a.kind == "queue"
+    assert a.kind == "suppress"
+    assert "仅留痕" in a.reason
+    assert b.pending_count() == 0        # 不进播报队列
     assert b.stats()["count"] == 0
+    # 后续高分请求不会把它冲出来（防“入队→冲刷”乒乓回归）
+    later = MORNING.replace(minute=30)
+    nxt = b.gate("真提醒", "deadline", dedup_key="ok", urgency=0.9, now=later)
+    assert nxt.kind == "emit" and "随便说说" not in nxt.text
 
 
-def test_daily_max_suppress(policy_paths):
-    """超出每日上限 → suppress。"""
+def test_daily_max_queues_for_later_delivery(policy_paths):
+    """超每日上限：够重要的事入库待补播（而不是丢掉），且补播不占额度。"""
     b = _budget(policy_paths, daily_max=2)
     for i in range(2):
         a = b.gate(f"播{i}", "briefing", dedup_key=f"b{i}", urgency=0.9, now=MORNING)
         assert a.kind == "emit"
     a = b.gate("播3", "briefing", dedup_key="b3", urgency=0.9, now=MORNING)
-    assert a.kind == "suppress"
-    assert "上限" in a.reason
+    assert a.kind == "queue" and "上限" in a.reason
+    assert b.pending_count() == 1
+    # 过了冷却时段后新请求到达 → 积压被补播，且不再消耗额度
+    later = MORNING.replace(hour=11)
+    b2 = _budget(policy_paths, daily_max=2)
+    a2 = b2.gate("播4", "briefing", dedup_key="b4", urgency=0.9, now=later)
+    assert a2.kind == "emit" and "播3" in a2.text
+    assert b2.stats()["count"] == 2   # 补播不消耗也不增加今日额度（仍是那 2 次）
 
 
 def test_day_rollover_resets(policy_paths):
@@ -103,13 +120,13 @@ def test_day_rollover_resets(policy_paths):
 
 
 def test_accept_rate_closes_loop(policy_paths):
-    """用户持续忽略 → 接受率下滑 → 同源事件最终降级入库。"""
+    """用户持续忽略 → 接受率下滑 → 同源事件最终被抑制（不再吵）。"""
     b = _budget(policy_paths, min_salience=0.3)
     for _ in range(4):
         b.record_accept("default", accepted=False)
     # default 权重 0.5 × urgency 0.9 = 0.45 → ×接受率 0.0 → 低于门槛
     a = b.gate("系统碎碎念", "default", urgency=0.9, now=MORNING)
-    assert a.kind == "queue"
+    assert a.kind == "suppress"
 
 
 def test_state_file_isolated(policy_paths):
@@ -119,3 +136,68 @@ def test_state_file_isolated(policy_paths):
     assert b.stats()["count"] == 0
     b.gate("hi", "briefing", urgency=0.9, now=MORNING)
     assert policy_paths["budget"].exists()
+
+
+# ---- 2026-10 走查后新增的四条口径 ----
+
+
+def test_flush_has_cooldown_no_relay(policy_paths):
+    """冲刷有冷却：一次冲刷之后 `aggregate_window_s` 内不再冲刷。
+
+    旧实现无冷却且④也入库，形成“入队→下一条就冲刷”的乒乓，
+    预算与门槛同时被旁路。
+    """
+    b = _budget(policy_paths, daily_max=1)
+    assert b.gate("播一", "briefing", dedup_key="k1", urgency=0.9, now=MORNING).kind == "emit"
+    assert b.gate("播二", "deadline", dedup_key="k2", urgency=0.9,
+                  now=MORNING.replace(minute=1)).kind == "queue"
+    # 首次冲刷（之前没刷过）：播二 补播出去，播三 自身因额度满入库
+    a = b.gate("播三", "calendar", dedup_key="k3", urgency=0.9, now=MORNING.replace(minute=2))
+    assert a.kind == "emit" and "播二" in a.text
+    # 关键：下一条紧跟而来（60s < 300s 冷却）不得再冲刷，否则就是继电器
+    a2 = b.gate("播四", "system", dedup_key="k4", urgency=0.9, now=MORNING.replace(minute=3))
+    assert a2.kind == "queue" and "播三" not in a2.text
+    # 冷却过后才真正补播，且不占今日额度
+    a3 = b.gate("播五", "schedule", dedup_key="k5", urgency=0.9,
+                now=datetime(2026, 8, 3, 12, 0))
+    assert a3.kind == "emit" and "播三" in a3.text
+    assert b.stats()["count"] == 1
+
+
+def test_single_pending_no_digest_shell(policy_paths):
+    """单条积压不套「积压 N 条」壳：一条也叫“积压”是文案说谎。"""
+    b = _budget(policy_paths)
+    b.gate("唯一一条", "deadline", dedup_key="only", now=NIGHT)
+    a = b.gate("另一条", "system", dedup_key="next", urgency=0.9, now=NEXT_MORNING)
+    assert "条提醒，一并呈上" not in a.text
+    assert "唯一一条" in a.text
+
+
+def test_flush_caps_lines_and_counts_omitted(policy_paths):
+    """聚合最多列 5 行，更早的略去但数量要注明（不默默丢信息）。"""
+    b = _budget(policy_paths)
+    for i in range(8):
+        b.gate(f"深夜{i}", "deadline", dedup_key=f"n{i}", now=NIGHT)
+    a = b.gate("白天", "system", dedup_key="day", urgency=0.9, now=NEXT_MORNING)
+    assert "补播 8 条提醒" in a.text
+    assert a.text.count("  • ") == 6        # 5 行积压 + 1 行附带的当前事件
+    assert "另有 3 条更早的已略去" in a.text
+    assert "深夜0" not in a.text and "深夜7" in a.text
+
+
+def test_percept_source_weights_registered(policy_paths):
+    """感知源必须显式登记权重：落回 default 会让先验乘完全部不过门槛。"""
+    b = _budget(policy_paths)
+    # 切屏（0.5×0.3=0.15）：只留痕不播报
+    a = b.gate("切到 chrome", "percept:window", dedup_key="w1",
+               urgency=0.3, now=MORNING)
+    assert a.kind == "suppress"
+    # 仓库未提交（0.7×0.5=0.35）：该说
+    assert b.gate("有 8 项未提交", "percept:vcs", dedup_key="v1",
+                  urgency=0.5, now=MORNING).kind == "emit"
+    # 白名单来信（0.9×0.75=0.675）：最该说
+    assert b.gate("老张来信", "percept:mail", dedup_key="m1",
+                  urgency=0.75, now=MORNING).kind == "emit"
+    # 停留超时（用户显式开了阈值，0.5×0.65=0.325）：能过闸
+    assert b.gate("在浏览器待了 40 分钟", "percept:window", dedup_key="w2",
+                  urgency=0.65, now=MORNING.replace(minute=20)).kind == "emit"

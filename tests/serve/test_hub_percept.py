@@ -243,8 +243,31 @@ def test_percept_event_goes_through_gate_and_queue(hub_percept):
     assert len(items) == 1 and items[0]["type"] == "proactive_notify"
     payload = items[0]["payload"]
     assert payload["kind"] == PERCEPT_NOTIFY_KIND == "percept"
-    assert payload["text"] == "切到 Chrome"
+    # 播报的是“口播版”（句末补了句号），不再是留痕摘要原样
+    assert payload["text"] == "切到 Chrome。"
     assert payload["title"] == "贾维斯观察"
+
+
+def test_broadcast_uses_speech_form_not_record_form(hub_percept):
+    """播报走口播版、留痕保持原样：两者不能再共用一句人眼写法。
+
+    2026-10 走查反馈：TTS 把 `explorer.exe` 与整串路径逐字符念出来，
+    像个无情的阅读机器。修后派生文本只用于播报，`payload.summary` 仍按
+    原事实入库（可查可回放）。
+    """
+    hub, eq, _budget = hub_percept
+    event = PerceptEvent(
+        source="window", kind="focus_changed",
+        payload={"summary": "切到 explorer.exe：C:\\Users\\me\\.jarvis",
+                 "process": "explorer.exe", "title": "C:\\Users\\me\\.jarvis"},
+        salience_hint=0.5, dedup_key="focus:explorer",
+    )
+    hub.percept_bus.publish(event)
+    spoken = _drain(eq)[0]["payload"]["text"]
+    assert spoken == "切到 资源管理器，jarvis 文件夹。"
+    assert "\\" not in spoken and ".exe" not in spoken
+    # 留痕一字未改
+    assert event.summary() == "切到 explorer.exe：C:\\Users\\me\\.jarvis"
 
 
 def test_low_salience_event_is_not_spoken(hub_percept):
@@ -266,8 +289,8 @@ def test_events_without_summary_still_reach_gate(hub_percept):
     hub.percept_bus.publish(PerceptEvent(source="vcs", kind="repo_unpushed",
                                         payload={"ahead": 3}))
     assert len(budget.calls) == 1
-    assert budget.calls[0]["text"] == "vcs.repo_unpushed"
-    assert _drain(eq)[0]["payload"]["text"] == "vcs.repo_unpushed"
+    assert budget.calls[0]["text"] == "vcs.repo_unpushed。"
+    assert _drain(eq)[0]["payload"]["text"] == "vcs.repo_unpushed。"
 
 
 def test_gate_exception_degrades_to_direct_notify(hub_percept):
@@ -281,7 +304,7 @@ def test_gate_exception_degrades_to_direct_notify(hub_percept):
     hub.percept_bus.publish(PerceptEvent(source="window", kind="focus_changed",
                                         payload={"summary": "切到 VS Code"}))
     items = _drain(eq)
-    assert len(items) == 1 and items[0]["payload"]["text"] == "切到 VS Code"
+    assert len(items) == 1 and items[0]["payload"]["text"] == "切到 VS Code。"
 
 
 # ---- 在场信号 → W1 away 推断 ----

@@ -3,10 +3,14 @@
 理论锚点：Horvitz《Attention-Sensitive Alerting》——打扰决策形式化为
 效用与中断代价的比较。本模块用可解释的确定性规则近似：
 
-- daily_max：每日主动播报次数上限（超出后只收录不播报）
+- daily_max：每日主动播报次数上限（超出后入库待补播）
 - quiet_hours：静默时段（如 23:00-07:00）只入库；时段结束后聚合为一条
+  （冲刷不占 daily_max——它是补播；且受 `aggregate_window_s` 冷却约束，
+  同一窗口内最多冲刷一次）
 - aggregate_window_s：同源事件窗口内合并成一条（防刷屏）
-- min_salience：重要度门槛，低分事件降级入库
+- min_salience：重要度门槛，低分事件**直接抑制**（只进感知总线与留痕文件，
+  不进播报队列）——旧版“降级入库”配合无冷却冲刷，等于每两条必播一条，
+  门槛被自己的冲刷路径旁路
 - channels：播报渠道优先级（桌面通知 > TTS > 手机推送）
 
 重要度评分 = 来源权重 × 时效紧迫度 × 相关性 × 历史接受率。
@@ -37,7 +41,25 @@ _DEFAULT_SOURCE_WEIGHTS = {
     "system": 0.7,        # 系统健康告警
     "schedule": 0.9,      # 用户自己设的提醒
     "default": 0.5,
+    # W2 感知源（`percept:<源名>`）：必须显式登记。旧版没有这几项，所有感知
+    # 事件落到 default 0.5，乘上源自带的低先验后**全部低于 0.3 门槛**，
+    # 再叠加“入队→下一条冲刷”的乒乓，实际效果是“该静默的照样吵你、
+    # 该吵的反而被门槛吃掉”（2026-10 人工走查发现，详见
+    # docs/fixlogs/notify-budget-percept-relay-fix.md）。取值口径：
+    # 用户显式开启且值得打断 > 顺路看到的现场事实。
+    "percept:mail": 0.9,       # 白名单来信：最该打断
+    "percept:vcs": 0.7,        # 仓库卫生（未提交/未推/落后）：开发者每天用得上
+    "percept:file": 0.6,       # 目录堆积：值得说，但不急
+    "percept:window": 0.5,     # 切屏：只让“停留超时”过闸，普通切换只留痕
+    "percept:vision": 0.4,     # 在场类：主要喂 away 推断，不直接播报
+    "percept:calendar": 0.7,   # 以下三个是收编位（本期未装配），先登记免得
+    "percept:system": 0.7,     # 将来接上又落回 default 重踩同一个坑
+    "percept:schedule": 0.9,
 }
+
+# 聚合冲刷单条最多列几行（超出只留最新的，并在尾部注明略去数量）：
+# 队列上限 50，不封顶时会拼出一条 50 行的巨块气泡，TTS 还会在 200 字处截断
+_FLUSH_MAX_LINES = 5
 
 
 @dataclass
@@ -119,22 +141,50 @@ class NotifyBudget:
     ) -> NotifyAction:
         """裁决一条通知请求：立即播报 / 入库暂缓 / 静默丢弃。
 
-        顺序：①非静默时段先冲刷积压（聚合成一条）；②静默时段直接入库；
-        ③窗口内同源重复合并；④低于 salience 门槛入库；⑤超日预算 suppress。
+        顺序：①非静默时段且已到冲刷时机→先聚合冲刷积压；②静默时段入库；
+        ③窗口内同源重复合并；④低于 salience 门槛**直接抑制**（不入队等补
+        播）；⑤超日预算入库。
+
+        冲刷与当前请求**合一返回**：旧实现在冲刷分支直接 `return`，把触发
+        冲刷的那条事件整条丢掉（既没播也没入队），而冲刷本身又无冷却，
+        导致“入队→下一条冲刷”乒乓、门槛被自己的冲刷路径旁路。
+        2026-10 人工走查发现，详见 docs/fixlogs/notify-budget-percept-relay-fix.md。
+
+        @author aceFelix
         """
         now = now or datetime.now()
         state = self._load()
         self._rollover_day(state, now)
         key = dedup_key or f"{source}:{text[:40]}"
 
-        # ① 非静默时段：先冲刷静默期积压（一次聚合播报）
-        if not self._in_quiet(now) and state.get("pending"):
-            return self._flush_pending(state, now)
+        # ① 积压冲刷：需同时满足“非静默时段 + 队列非空 + 距上次冲刷够久”。
+        #    冷却是必需的：没冷却时⑤入队的事件会被下一条请求立刻冲刷出去。
+        digest: NotifyAction | None = None
+        if (
+            not self._in_quiet(now)
+            and state.get("pending")
+            and self._flush_due(state, now)
+        ):
+            digest = self._flush_pending(state, now)
 
-        # ② 静默时段：只入库不打扰
+        current = self._gate_current(state, text, source, key, urgency, relevance, now)
+        self._save(state)   # 统一落盘：两个 helper 只改 state，不各自写文件
+        if digest is None:
+            return current
+        if not current.should_emit:
+            return digest
+        # 一次调用只起一条打扰：当前事件附在摘要尾部，不丢信息也不叠两个气泡
+        merged = f"{digest.text}\n  • [{source}] {text}"
+        return NotifyAction("emit", merged, f"{digest.reason}；并附当前事件")
+
+    def _gate_current(
+        self, state: dict, text: str, source: str, key: str,
+        urgency: float, relevance: float, now: datetime,
+    ) -> NotifyAction:
+        """当前这条请求自身的裁决（②~⑤），只改 state，不落盘。"""
+        # ② 静默时段：只入库不打扰（这类积压是“该说但当时不能说”，值得补播）
         if self._in_quiet(now):
             self._append_pending(state, text, source, key, now)
-            self._save(state)
             return NotifyAction("queue", text, f"静默时段（{self.config.quiet_hours}）暂缓入库")
 
         # ③ 聚合窗口：同源窗口内已播过 → 合并抑制
@@ -144,28 +194,28 @@ class NotifyBudget:
                 gap = (now - datetime.fromisoformat(recent["ts"])).total_seconds()
                 if 0 <= gap < self.config.aggregate_window_s:
                     recent["merged"] = recent.get("merged", 1) + 1
-                    self._save(state)
                     return NotifyAction("suppress", text, f"{int(gap)}s 前已播同源事件，窗口内合并")
             except ValueError:
                 pass
 
-        # ④ 重要度门槛
+        # ④ 重要度门槛：低于门槛**直接抑制**，不再入库等补播。门槛的语义是
+        #    “不值得打扰”，暂缓到“稍后说”是自我矛盾——它不会变得更有价值。
+        #    事件本身仍在感知总线与 events.jsonl 里，只是不出声。
         score = self.salience(source, urgency, relevance, state)
         if score < self.config.min_salience:
-            self._append_pending(state, text, source, key, now)
-            self._save(state)
-            return NotifyAction("queue", text, f"重要度 {score:.2f} 低于门槛 {self.config.min_salience}，入库暂缓")
+            return NotifyAction(
+                "suppress", text,
+                f"重要度 {score:.2f} 低于门槛 {self.config.min_salience}，仅留痕不播报",
+            )
 
-        # ⑤ 日预算
+        # ⑤ 日预算：够重要但额度用尽 → 入库等冲刷（冲刷不占额度，否则永远出不来）
         if state["count"] >= self.config.daily_max:
             self._append_pending(state, text, source, key, now)
-            self._save(state)
-            return NotifyAction("suppress", text, f"已达每日播报上限 {self.config.daily_max}")
+            return NotifyAction("queue", text, f"已达每日上限 {self.config.daily_max}，入库待补播")
 
         # 放行：计数 + 记 last_emit
         state["count"] += 1
         state.setdefault("last_emit", {})[key] = {"ts": now.isoformat(timespec="seconds"), "merged": 1}
-        self._save(state)
         return NotifyAction("emit", text, f"预算放行（今日 {state['count']}/{self.config.daily_max}，重要度 {score:.2f}）")
 
     def pending_count(self) -> int:
@@ -173,25 +223,48 @@ class NotifyBudget:
 
     # ---- 内部 ----
 
+    def _flush_due(self, state: dict, now: datetime) -> bool:
+        """冲刷冷却：同一个 `aggregate_window_s` 内最多冲刷一次。
+
+        为什么必须有：没冷却时，⑤（超额度）入队的事件会被下一条请求立刻
+        冲刷出去，变成“每两条播一条”的继电器——预算形同虚设。
+        """
+        last = state.get("last_flush")
+        if not last:
+            return True
+        try:
+            gap = (now - datetime.fromisoformat(str(last))).total_seconds()
+        except ValueError:
+            return True
+        return gap >= self.config.aggregate_window_s
+
     def _flush_pending(self, state: dict, now: datetime) -> NotifyAction:
-        """静默时段结束后，把积压聚合成一条播出。"""
-        items = state.get("pending", [])
+        """把积压聚合成一条播出。
+
+        三条口径修正（2026-10 走查）：① 冲刷**不占 daily_max**——它是补播
+        不是新增打扰，占额度会导致“预算满 → 积压播不出去 → 积压自己咬自己”
+        的死循环（旧实现确实把摘要文本重新塞回 pending）；② 单条不套
+        “积压 N 条”壳；③ 文案不再写“静默时段”——预算满造成的积压并不在静默
+        时段，旧文案在下午五点说“静默时段积压”是谎话。
+        """
+        items = list(state.get("pending", []))
         state["pending"] = []
-        joined = "\n".join(f"  • [{i['source']}] {i['text']}" for i in items)
-        text = f"📥 静默时段积压 {len(items)} 条，一并呈上：\n{joined}"
-        if state["count"] < self.config.daily_max:
-            state["count"] += 1
-            self._save(state)
-            return NotifyAction("emit", text, f"聚合冲刷 {len(items)} 条积压")
-        # 预算也满了：继续压着，等明天
-        state["pending"] = [{"ts": now.isoformat(timespec="seconds"), "source": "digest",
-                             "key": "digest", "text": text}]
-        self._save(state)
-        return NotifyAction("queue", text, "积压仍有但今日预算已尽")
+        state["last_flush"] = now.isoformat(timespec="seconds")
+        if not items:
+            return NotifyAction("queue", "", "无积压")   # 防御：调用方已判过非空
+        if len(items) == 1:
+            one = items[0]
+            return NotifyAction("emit", one["text"], "补播 1 条积压")
+        shown = items[-_FLUSH_MAX_LINES:]
+        omitted = len(items) - len(shown)
+        joined = "\n".join(f"  • [{i['source']}] {i['text']}" for i in shown)
+        tail = f"\n  （另有 {omitted} 条更早的已略去）" if omitted else ""
+        text = f"📥 补播 {len(items)} 条提醒，一并呈上：\n{joined}{tail}"
+        return NotifyAction("emit", text, f"聚合冲刷 {len(items)} 条积压")
 
     def _append_pending(self, state: dict, text: str, source: str, key: str, now: datetime) -> None:
+        """入待发队列（同 key 已入则只合并计数，不重复存文本）。"""
         pending = state.setdefault("pending", [])
-        # 同 key 已入库则合并计数，不重复存文本
         for item in pending:
             if item.get("key") == key:
                 item["merged"] = item.get("merged", 1) + 1

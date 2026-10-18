@@ -135,6 +135,30 @@ def test_status_get_carries_editable_config_segment():
     assert config["vcs_repos"] == []
 
 
+def test_status_get_carries_notify_budget(monkeypatch):
+    """状态里带 W1 打扰预算：面板要能回答“采到了为什么不说”。
+
+    读侧永不抛异常是底线：预算拿不到（未启用 / 状态文件坏了 / 单例初始化炸）
+    就当没有，不能为了可观测性把整个 status.get 带倒。
+    """
+    import agent.core.policy as policy_mod
+
+    class _Budget:
+        def stats(self):
+            return {"count": 3, "daily_max": 10, "pending": 2}
+
+    monkeypatch.setattr(policy_mod, "get_budget", lambda: _Budget())
+    server, _eq, _cq = make_desktop_server()
+    result = server._rpc_percept_status_get({})
+    assert result["notify_budget"] == {"count": 3, "daily_max": 10, "pending": 2}
+
+    def boom():
+        raise RuntimeError("预算初始化失败")
+
+    monkeypatch.setattr(policy_mod, "get_budget", boom)
+    assert server._rpc_percept_status_get({})["notify_budget"] == {}
+
+
 def test_config_set_result_carries_updated_config_segment(tmp_path):
     """写侧回读同样带 `config` 段，面板一次调用就能把表单与状态一起刷新。"""
     server, _eq, _cq = make_desktop_server()

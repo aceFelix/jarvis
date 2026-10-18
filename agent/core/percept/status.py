@@ -60,6 +60,7 @@ def build_status(
     *,
     hub_enabled: bool | None = None,
     event_limit: int = EVENT_LIMIT,
+    notify_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """汇总一份感知状态（`percept.status.get` 的 result）。
 
@@ -69,11 +70,15 @@ def build_status(
             统计与事件段落返回空，但配置段照常可用（面板才不会白屏）。
         hub_enabled: 宿主是否已接线（serve 场景）。None 时按 bus 是否为 None 推断。
         event_limit: 最近事件返回条数（上限 :data:`EVENT_LIMIT`）。
+        notify_budget: W1 打扰预算的 `stats()`（今日额度与待补播条数）。由
+            宿主（RPC 层）传入而不是本模块自己去拿：感知层（W2）不该反向依赖
+            判断层（W1）的单例，方向保持“上层向下层取数”。None = 预算未启用，
+            面板就不显示那一行。
 
     Returns:
         ``{enabled, assembled, bus_running, counters, dedup_window_s, log_file,
-        sources: [...], recent_events: [...], pending: [...]}``，全部为可 JSON
-        序列化的基础类型。
+        sources: [...], recent_events: [...], pending: [...], notify_budget}``，
+        全部为可 JSON 序列化的基础类型。
 
     @author aceFelix
     """
@@ -113,6 +118,8 @@ def build_status(
         "sources": sources,
         "recent_events": [ev.to_dict() for ev in (bus.recent(limit) if bus else [])],
         "pending": list(PENDING_SOURCES),
+        # “采到了为什么不说”的答案在这：额度用完了还是被门槛判为不值得打扰
+        "notify_budget": dict(notify_budget) if notify_budget else {},
     }
 
 

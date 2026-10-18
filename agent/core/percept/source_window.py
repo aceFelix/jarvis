@@ -249,7 +249,13 @@ class WindowSource:
         )
 
     def _linger_event(self, process: str, stayed_s: float) -> PerceptEvent:
-        """停留超时事件（"在浏览器泡了 40 分钟"），去重键按应用避免重复催。"""
+        """停留超时事件（"在浏览器泡了 40 分钟"），去重键按应用避免重复催。
+
+        先验 0.65 比 `focus_changed` 的 0.3 高一大截，因为停留阈值是**用户
+        显式设的**（`window_linger_minutes > 0` 才会发）——他既然开了这个旋钮，
+        就是在说“这件事该告诉我”。预算侧 `percept:window` 权重 0.5，
+        0.5×0.65=0.325 刚好过 0.3 门槛；而普通切换 0.5×0.3=0.15 永远只留痕。
+        """
         minutes = int(stayed_s // 60)
         label = process or self._title
         return PerceptEvent(
@@ -261,7 +267,7 @@ class WindowSource:
                 "title": self._title,
                 "minutes": minutes,
             },
-            salience_hint=0.45,
+            salience_hint=0.65,
             dedup_key=f"linger:{label.lower()}",
         )
 

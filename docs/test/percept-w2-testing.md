@@ -148,20 +148,28 @@ cd /e/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis
 | T3 排除名单 | 切到 1Password / KeePass 类应用 | **永不出事件**（命中排除名单即不采） |
 | T4 去重 | 在两个窗口间来回切 5 次 | jsonl **不新增行**；桌面面板总览「闸门计数」的 `dedup` **上涨**（`emit` 不变）。⚠️ 只看"没新行"是无效判据，那和"采集坏了"无法区分 |
 | T5 文件源 | `for i in 1 2 3 4 5 6 7; do echo x > ~/Downloads/w2_probe_$i.txt; done` | 最多等 30 秒：若干 `file_added`，跨过阈值 5 后**一条** `dir_grew`（而不是刷 7 条） |
-| T6 仓库源 | `cd jarvis && echo x >> README.md` | 最多等 2 分钟：一条 `repo_dirty_grew`（带未提交项数与分支名）；**再等 2 分钟不会有第二条**（只在刚跨线那次报）；测完 `git checkout -- README.md` |
+| T6 仓库源 | `cd jarvis && echo x >> README.md` | 最多等 2 分钟：jsonl 里一条 `repo_dirty_grew`（带未提交项数与分支名）；**再等 2 分钟不会有第二条**（只在刚跨线那次报）；这条过闸会**上屏**（见 D2）；测完 `git checkout -- README.md` |
 | T7 坏源隔离 | `vcs_repos` 加一个不存在的路径，重启后端 | 该源连败 3 次自动停用（面板徽标显末次错误），**其他源照常采** |
 | T8 留痕开关 | 面板关掉「本地留痕事件」 | jsonl 停止增长，但面板「最近事件」仍有（内存环形）；「留痕文件」一行显「已关闭」 |
 | T9 计数对账 | `wc -l ~/.jarvis/percept/events.jsonl` | 与面板 `emit` 计数一致（`log_events=false` 时不涨但 `emit` 照涨） |
 
-## 3. 阶段三：打扰闸门（桌面，验证「采到 ≠ 一定吵你」）
+## 3. 阶段三：打扰闸门与口播（桌面，验证「采到 ≠ 一定吵你」）
+
+> 2026-10 修正：本阶段原判据写的是“切应用应该看到气泡”，**错**。
+> 普通切换的重要度 = `percept:window` 权重 0.5 × 先验 0.3 = 0.15，低于门槛
+> 0.3 ⇒ 只留痕不出声（[复盘](../fixlogs/notify-budget-percept-relay-fix.md)）。
 
 | # | 操作 | 判据 |
 |---|---|---|
-| D1 事件上屏 | 开窗口源后切应用 | 标题「贾维斯观察」的气泡（`kind=percept` 走默认渲染） |
-| D2 日额度 | 配置里 `[policy.notify_budget] daily_max = 1`，重启后端，连切 5 个窗口 | 气泡最多一条；jsonl 里事件**一条不少**（W1 只入库不播） |
-| D3 静默时段 | `quiet_hours` 设成覆盖当前时刻 | 全部只入库；时段结束后聚合成一条冲刷 |
-| D4 在场静默 | 装好 mediapipe+opencv 后开视觉源，人离开再回来 | jsonl 里有 `face_appear`/`face_disappear`，但**永不上屏、不占日额度**；同时驱动 W1 的 away 推断 |
-| D5 反馈条 | 面板拨任一开关 | 子返回头下方出现**绿色反馈条**「✓ 已保存并重装配总线」（不滚动也看得见——错误看不见会被误读成"开关坏了"） |
+| D1 默认静默 | 开着窗口源切 5 次应用 | **一条气泡都没有**，但 jsonl 五条不少——这才是“采到不等于吵你” |
+| D2 该出声的出声 | 面板把「停留提醒阈值」改成 30 并在一个应用里待满；或 `echo x >> README.md` 触发仓库源 | 收到**一条**「贾维斯观察」气泡（vcs 0.7×0.5=0.35、linger 0.5×0.65=0.325 都过闸） |
+| D3 日额度 | 配置里 `[policy.notify_budget] daily_max = 1`，重启后端，连触 3 条“该播的” | 只播第一条；其余**入库不播**（面板「打扰预算」行的 `待补播` 上涨）；**不再出现“每两条播一条”的乒乓** |
+| D4 补播与冷却 | 接着 D3，超过 5 分钟（`aggregate_window_s`）后再触发一条 | 出现一条「📥 补播 N 条提醒，一并呈上」；5 分钟内不会连续出现第二条摘要；单条积压**不套「积压 N 条」壳** |
+| D5 静默时段 | `quiet_hours` 设成覆盖当前时刻 | 全部只入库；时段结束后聚合一条，且**不占日额度**（它是补播） |
+| D6 口播验收 | 上面任意一条气泡，开着 TTS 听 | 念的是「切到 资源管理器，jarvis 文件夹」而不是「切到 explorer 点 e x e 冒号 C 冒号反斜杠」；无 `.exe`、无反斜杠、无逐字符拼读；`events.jsonl` 里的 `summary` **仍保留原路径**（留痕不被改写） |
+| D7 在场静默 | 装好 mediapipe+opencv 后开视觉源，人离开再回来 | jsonl 里有 `face_appear`/`face_disappear`，但**永不上屏、不占日额度**；同时驱动 W1 的 away 推断 |
+| D8 反馈条 | 面板拨任一开关 | 子返回头下方出现**绿色反馈条**「✓ 已保存并重装配总线」（不滚动也看得见——错误看不见会被误读成"开关坏了"） |
+| D9 预算可见 | 看面板总览「打扰预算」行 | 「今日 3/10 · 待补播 2 条」与 `notify_state.json` 一致；把 `notify_budget_enabled` 改 false 重启 → **整行消失**（不是显示 0/0） |
 
 ## 4. 阶段四：面板功能面
 
@@ -183,7 +191,7 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; .venv\Scripts\python.exe -m p
 cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run typecheck; npm run build
 ```
 
-基线：jarvis **2787 passed**；桌面 **490 passed** + typecheck + build 全绿；
+基线：jarvis **2809 passed**；桌面 **492 passed** + typecheck + build 全绿；
 死链门禁 `python scripts/check_md_links.py` → dead 0 / untracked 0。
 
 ## 6. 收尾
@@ -200,5 +208,10 @@ ls ~/.jarvis/settings.toml*
 3. `settings.toml` 的相关段落（**API key 那几行自行打码**）。
 
 按项目规矩，人工测试发现并修掉的缺陷要补 `docs/fixlogs/` 复盘——
-本轮已产出 [percept-config-set-envelope-fix.md](../fixlogs/percept-config-set-envelope-fix.md)
-（协议信封键 `type` 混进配置白名单，导致面板所有开关点了没反应）。
+本轮已产出两份：
+
+- [percept-config-set-envelope-fix.md](../fixlogs/percept-config-set-envelope-fix.md)
+  （协议信封键 `type` 混进配置白名单，导致面板所有开关点了没反应）；
+- [notify-budget-percept-relay-fix.md](../fixlogs/notify-budget-percept-relay-fix.md)
+  （感知源权重未登记 + 冲刷无冷却且绕开门槛，导致“每两条必播一条”与
+  “静默时段积压 1 条”的谎话文案；顺带修了 TTS 逐字符念路径）。

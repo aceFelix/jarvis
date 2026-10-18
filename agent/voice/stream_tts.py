@@ -43,6 +43,7 @@ from typing import Any
 
 # 复用 tts.py 的 CosyVoiceTTS 基建
 from agent.voice.tts import CosyVoiceTTS
+from agent.voice.tts_text import normalize_for_speech
 
 # ---- Markdown 清洗正则（与 voice_loop._TTSFeeder 保持一致）----
 _MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -216,7 +217,7 @@ class StreamTTSPlayer:
         self._in_think = False
         self._in_tool_tag = False
         if self._buf.strip():
-            text = _clean_inline(self._buf)
+            text = normalize_for_speech(_clean_inline(self._buf))
             if text.strip():
                 self._sentence_count += 1
                 self._tts.feed(text)
@@ -277,8 +278,13 @@ class StreamTTSPlayer:
                 self._send_sentence(sentence)
 
     def _send_sentence(self, text: str) -> None:
-        """送一句到 CosyVoice WS。同时尝试重连（若上次 WS 已断开）。"""
-        cleaned = _clean_inline(text)
+        """送一句到 CosyVoice WS。同时尝试重连（若上次 WS 已断开）。
+
+        除了 markdown 剥离还要过一道口播归一化（`tts_text` 与本模块的同步
+        口径）：路径、`.exe`、`17:20` 这类写法不转换会被逐字符念出来。只在
+        整句级别做，不逐 chunk——路径被切在两个 chunk 里时正则只能匹配半条。
+        """
+        cleaned = normalize_for_speech(_clean_inline(text))
         if not cleaned.strip():
             return
 

@@ -2,8 +2,8 @@
 
 这里验的是"面板看到的形状"：总开关如何压住逐源、已实现源排在前面、未装配收编位
 带理由而不给开关、没有总线时读数段返回空而不抛、留痕路径按三态区分"没跑"与
-"已关"、事件条数受上限约束、源自报细节原样透出。总线本身的裁决在
-tests/core/test_percept_bus.py，RPC 层在 tests/serve/test_serve_percept_rpc.py。
+"已关"、事件条数受上限约束、源自报细节原样透出、W1 打扰预算统计透传。总线本身的
+裁决在 tests/core/test_percept_bus.py，RPC 层在 tests/serve/test_serve_percept_rpc.py。
 
 @author aceFelix
 """
@@ -189,3 +189,24 @@ def test_status_reports_assembled_from_hub_flag(tmp_path):
     assert status["assembled"] is True
     assert status["enabled"] is False
     assert status["log_events"] is True
+
+
+def test_status_carries_notify_budget(tmp_path):
+    """打扰预算透传：面板要能回答“采到了为什么不说”。
+
+    预算统计由宿主传入而不是本模块去拿 W1 单例：感知层不该反向依赖判断层。
+    """
+    budget = {"day": "2026-10-18", "count": 7, "daily_max": 10,
+              "pending": 3, "quiet_hours": "23:00-07:00"}
+    status = build_status(_settings(), None, notify_budget=budget)
+    assert status["notify_budget"]["pending"] == 3
+    assert status["notify_budget"]["count"] == 7
+    # 传入的是快照副本：面板拿到一份不会跟着预算实例变
+    budget["count"] = 99
+    assert status["notify_budget"]["count"] == 7
+
+
+def test_status_without_budget_shows_empty_dict(tmp_path):
+    """预算未启用（notify_budget_enabled=false）时回空 dict，面板不显那一行。"""
+    assert build_status(_settings(), None)["notify_budget"] == {}
+    assert build_status(_settings(), None, notify_budget=None)["notify_budget"] == {}

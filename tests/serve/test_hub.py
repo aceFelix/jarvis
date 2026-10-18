@@ -350,7 +350,7 @@ class TestTtsBroadcast:
             h._emit(kind="reminder", title="贾维斯提醒", text="喝水")
             inst = _wait_instance(fake_tts)
             assert inst.spoken.wait(2)
-            assert inst.text == "先生，提醒您：喝水"
+            assert inst.text == "先生，提醒您：喝水。"   # 口播归一化补了句末句号
             assert len(_drain(eq)) == 1
             # TTS 构造参数取自 settings 的 tts_* 字段
             assert inst.kw["model"] == "cosyvoice-v3-flash"

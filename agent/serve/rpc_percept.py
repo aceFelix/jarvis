@@ -44,6 +44,25 @@ logger = logging.getLogger("jarvis.serve.rpc_percept")
 TRANSPORT_ENVELOPE_KEYS = frozenset({"type", "id"})
 
 
+def _budget_stats() -> dict[str, Any]:
+    """W1 打扰预算的当前状态（今日额度 / 待补播条数）。
+
+    面板要能回答“明明采到了为什么不说话”，而答案在预算侧不在总线侧：
+    额度用尽、静默时段、被重要度门槛判为不值得打扰，三种情形对用户都是
+    “没声音”。读侧永不抛异常：拿不到就当没有，不能为了可观测性把主流程带倒。
+
+    @author aceFelix
+    """
+    try:
+        from agent.core.policy import get_budget
+
+        budget = get_budget()
+        return budget.stats() if budget is not None else {}
+    except Exception as e:  # 预算未启用/状态文件异常都不影响状态主流程
+        logger.debug("打扰预算状态读取失败（忽略）: %s", e)
+        return {}
+
+
 class PerceptRpcMixin:
     """percept.status.get / percept.config.set 两个指令的处理器。
 
@@ -82,6 +101,7 @@ class PerceptRpcMixin:
 
         @author aceFelix
         """
+        kwargs.setdefault("notify_budget", _budget_stats())
         status = build_status(self._settings, bus, **kwargs)
         status["config"] = read_percept_config(self._settings)
         return status

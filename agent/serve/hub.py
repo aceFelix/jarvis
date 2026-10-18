@@ -433,9 +433,14 @@ class ProactiveHub:
             text = event.summary()
             if not text:
                 return
+            # 播报用“口播版”而不是留痕摘要：summary 里带 `explorer.exe` 与
+            # 完整路径，给人眼看合适、给 TTS 念就是逐字符拼读。留痕不变。
+            from agent.core.percept.speech import spoken_summary
+
+            spoken = spoken_summary(event) or text
             emitted = self._engine.gate_notify(
                 f"percept:{event.source}",
-                text,
+                spoken,
                 # 去重键沿用总线口径：预算侧聚合与总线去重对齐，不会“总线觉得
                 # 是新事、预算觉得是旧事”各算一份
                 dedup_key=event.key(),
