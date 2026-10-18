@@ -36,6 +36,13 @@ if TYPE_CHECKING:  # 仅为 IDE/类型检查声明宿主属性，运行期不引
 
 logger = logging.getLogger("jarvis.serve.rpc_percept")
 
+#: WS 请求帧是 ``{"type": <指令名>, ...参数}`` 的**平铺**结构（见 `protocol.py`
+#: 头部注释与桌面壳 `ws.ts::sendCommand`），分发时整份 dict 原样交给 handler，
+#: 所以 `data` 里必然带协议信封键。它们属于传输层、不是配置项，白名单校验前
+#: 必须剥掉——否则面板每一次写回都会被「不支持的感知配置项 type」挡掉（真实
+#: 客户端 100% 必现；单测直传业务 dict 所以测不出来，2026-10 人工走查才抓到）。
+TRANSPORT_ENVELOPE_KEYS = frozenset({"type", "id"})
+
 
 class PerceptRpcMixin:
     """percept.status.get / percept.config.set 两个指令的处理器。
@@ -93,7 +100,10 @@ class PerceptRpcMixin:
 
         @author aceFelix
         """
-        patch = validate_percept_config(data)
+        # 先剥传输层信封，再进白名单：业务键里的未知键仍然照报（见常量注释）
+        patch = validate_percept_config(
+            {k: v for k, v in data.items() if k not in TRANSPORT_ENVELOPE_KEYS}
+        )
         if not patch:
             raise ValueError("percept.config.set 至少需要一个有效的配置项")
         if not save_percept_config(patch):

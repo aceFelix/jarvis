@@ -157,6 +157,43 @@ def test_config_set_rejects_unknown_key(tmp_path):
     assert not (tmp_path / "settings.toml").exists()
 
 
+def test_config_set_accepts_real_transport_frame(tmp_path):
+    """真实客户端的平铺请求帧（带协议信封键 `type`）必须写通。
+
+    回归 2026-10 人工走查发现的「感知源面板所有开关点了没反应」：桌面壳
+    `sendCommand` 发的是 `{type: cmd, ...params}`，分发时整帧进 handler，信封键
+    混进白名单校验会让每一条写回都报错——旧用例直传业务 dict，所以没测出来。
+    """
+    hub = _StubHub()
+    settings = Settings(percept_enabled=False)
+    server, _eq, _cq = make_desktop_server(settings, hub=hub)
+
+    result = server._rpc_percept_config_set({
+        "type": "percept.config.set", "enabled": True, "window_enabled": True,
+    })
+
+    on_disk = tomllib.loads((tmp_path / "settings.toml").read_text(encoding="utf-8"))
+    assert on_disk["percept"] == {"enabled": True, "window_enabled": True}
+    assert result["applied"] == {"enabled": True, "window_enabled": True}
+
+
+def test_config_set_envelope_does_not_hide_unknown_key(tmp_path):
+    """剥信封不等于放宽白名单：混在帧里的未知业务键照样报错且不落盘。"""
+    server, _eq, _cq = make_desktop_server()
+    with pytest.raises(ValueError, match="不支持"):
+        server._rpc_percept_config_set(
+            {"type": "percept.config.set", "dedup_window_s": 10}
+        )
+    assert not (tmp_path / "settings.toml").exists()
+
+
+def test_config_set_envelope_only_frame_still_rejected():
+    """只带信封、不带任何配置项的帧，仍按「至少需要一个有效配置项」报错。"""
+    server, _eq, _cq = make_desktop_server()
+    with pytest.raises(ValueError, match="至少"):
+        server._rpc_percept_config_set({"type": "percept.config.set"})
+
+
 def test_config_set_requires_at_least_one_field():
     """空补丁（或全是无效键）报错，避免"点了保存但什么都没改"的静默成功。"""
     server, _eq, _cq = make_desktop_server()
