@@ -108,7 +108,7 @@ def build_status(
         "bus_running": bool(stats.get("running")) if stats else False,
         "counters": stats.get("counters") or {},
         "dedup_window_s": int(stats.get("dedup_window_s") or 0) if stats else 0,
-        "log_file": str(stats.get("log_path") or "") if stats else "",
+        "log_file": _log_file(settings, stats),
         "log_events": bool(getattr(settings, "percept_log_events", True)),
         "sources": sources,
         "recent_events": [ev.to_dict() for ev in (bus.recent(limit) if bus else [])],
@@ -119,6 +119,31 @@ def build_status(
 def _sort_key(name: str) -> tuple[int, str]:
     """已实现的源排前面（面板主列表），收编位排后面（灰显说明）。"""
     return (0 if name in IMPLEMENTED_SOURCES else 1, name)
+
+
+def _log_file(settings: Any, stats: dict[str, Any]) -> str:
+    """留痕文件路径的三态口径（2026-10 人工走查修正）。
+
+    早先只从总线统计里取，总线没跑就回空串，而前端空值的兜底文案是
+    “未开启（关掉「本地留痕事件」后的状态）”——于是“开关是绿的、文案却说已关”，
+    把“没跑”误报成“已关”。现在把三种情况分开说：
+
+    - 留痕开关真关 → 空（这是唯一该显示“已关闭”的情形）；
+    - 总线在跑 → 用它**实际写入**的路径（宿主可以改 `log_path`，不能拿默认值糊弄）；
+    - 没跑但开关开着 → 回默认路径：面板要能回答“事件将来写到哪”。
+
+    @author aceFelix
+    """
+    if not bool(getattr(settings, "percept_log_events", True)):
+        return ""
+    path = str(stats.get("log_path") or "") if stats else ""
+    if path:
+        return path
+    # 包内入口函数，顶层导入会与 `__init__` 相互拉取，故在函数内局部导入
+    from agent.core.percept import default_log_path
+
+    fallback = default_log_path()
+    return str(fallback) if fallback is not None else ""
 
 
 def _enable_attr(name: str) -> str:

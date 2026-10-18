@@ -1,9 +1,9 @@
 """W2 感知层状态快照（agent/core/percept/status.py）—— 面板数据源的拼装口径。
 
 这里验的是"面板看到的形状"：总开关如何压住逐源、已实现源排在前面、未装配收编位
-带理由而不给开关、没有总线时读数段返回空而不抛、事件条数受上限约束、源自报细节
-原样透出。总线本身的裁决在 tests/core/test_percept_bus.py，RPC 层在
-tests/serve/test_serve_percept_rpc.py。
+带理由而不给开关、没有总线时读数段返回空而不抛、留痕路径按三态区分"没跑"与
+"已关"、事件条数受上限约束、源自报细节原样透出。总线本身的裁决在
+tests/core/test_percept_bus.py，RPC 层在 tests/serve/test_serve_percept_rpc.py。
 
 @author aceFelix
 """
@@ -47,6 +47,13 @@ def _bus(tmp_path, *, sources=()):
     for src in sources:
         bus.register_source(src)
     return bus
+
+
+def _patch_home(monkeypatch, tmp_path) -> None:
+    """把 `~/.jarvis` 重定向到 tmp_path（全仓统一走 store.user_jarvis_dir）。"""
+    import agent.core.memory.store as store
+
+    monkeypatch.setattr(store, "user_jarvis_dir", lambda: tmp_path)
 
 
 # ---- 逐源 enabled 的推导 ----
@@ -97,17 +104,47 @@ def test_implemented_sources_come_before_pending_ones(tmp_path):
 
 # ---- 没有总线时的降级 ----
 
-def test_status_without_bus_still_shows_config(tmp_path):
-    """bus=None（终端 REPL / 总开关关）：配置段照常，统计与事件段为空，绝不抛。"""
+def test_status_without_bus_still_shows_config(tmp_path, monkeypatch):
+    """bus=None（终端 REPL / 总开关关）：配置段照常，统计与事件段返回空值而不抛异常。"""
+    _patch_home(monkeypatch, tmp_path)
     status = build_status(_settings(percept_enabled=True, percept_file_enabled=True), None)
     assert status["assembled"] is False
     assert status["bus_running"] is False
     assert status["counters"] == {}
     assert status["recent_events"] == []
-    assert status["log_file"] == ""
+    # 留痕开关还开着：总线没跑也要回默认路径（面板要能回答“事件将来写到哪”，
+    # 不能把“没跑”误报成“已关”）
+    assert status["log_file"].endswith(("percept/events.jsonl", "percept\\events.jsonl"))
     file_item = next(s for s in status["sources"] if s["name"] == "file")
     assert file_item["enabled"] is True          # 配置说开了
     assert file_item["registered"] is False      # 但总线里没有这个源
+
+
+def test_log_file_three_states(tmp_path, monkeypatch):
+    """留痕路径三态：开关真关→空；总线在跑→实际路径；没跑但开着→默认路径。
+
+    2026-10 人工走查修正：旧实现只在总线在跑时给路径，否则回空串，而前端空值
+    兜底文案是“未开启”，于是总开关关着时面板会出现“留痕开关是绿的、
+    文案却说已关”的自相矛盾。
+    """
+    from agent.core.percept import init_percept
+
+    _patch_home(monkeypatch, tmp_path)
+
+    # ① 留痕真关 → 空（唯一该显示“已关闭”的情形）
+    init_percept(Settings(percept_log_events=False))
+    off = build_status(_settings(percept_log_events=False), None)
+    assert off["log_file"] == "" and off["log_events"] is False
+
+    # ② 总线在跑 → 用它实际写入的那个（宿主改过 log_path，拿默认值就是谎报）
+    init_percept(Settings(percept_log_events=True))
+    bus = _bus(tmp_path, sources=[PollSource("vcs", lambda: None, interval_s=60)])
+    on_bus = build_status(_settings(), bus)
+    assert on_bus["log_file"] == str(tmp_path / "events.jsonl")
+
+    # ③ 没跑但开关开着 → 默认路径
+    no_bus = build_status(_settings(percept_log_events=True), None)
+    assert no_bus["log_file"].endswith(("percept/events.jsonl", "percept\\events.jsonl"))
 
 
 # ---- 有总线时透出统计、事件与自报细节 ----
