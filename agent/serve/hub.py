@@ -444,7 +444,14 @@ class ProactiveHub:
                 # 去重键沿用总线口径：预算侧聚合与总线去重对齐，不会“总线觉得
                 # 是新事、预算觉得是旧事”各算一份
                 dedup_key=event.key(),
-                urgency=float(getattr(event, "salience_hint", 0.5) or 0.5),
+                # 先验 0 是“这类事件永远别播”的显式表达，旧写法
+                # `getattr(...) or 0.5` 会把它静默抬成 0.5、反而可能过闸；
+                # 只有字段真缺失才用默认值。
+                urgency=float(
+                    event.salience_hint
+                    if getattr(event, "salience_hint", None) is not None
+                    else 0.5
+                ),
             )
             if emitted is None:
                 return

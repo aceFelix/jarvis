@@ -50,7 +50,8 @@ SOURCE_HINTS: dict[str, str] = {
 #: 未装配的收编位给面板的固定理由（与 factory.PENDING_SOURCES 同源）
 PENDING_REASON = "本期未装配：面板上刻意不给开关，避免「有开关、背后没人采」的假可用"
 
-#: 一次返回的最近事件条数上限（面板列表够看即可，全量自查请读留痕文件）
+#: 一次返回的最近事件条数上限（面板列表够看即可；全量自查请直接读留痕文件，
+#: 它的滚动上限是 `history_max * 10` 行，比这里大一个量级）
 EVENT_LIMIT = 50
 
 
@@ -116,7 +117,7 @@ def build_status(
         "log_file": _log_file(settings, stats),
         "log_events": bool(getattr(settings, "percept_log_events", True)),
         "sources": sources,
-        "recent_events": [ev.to_dict() for ev in (bus.recent(limit) if bus else [])],
+        "recent_events": _recent_events(bus, limit),
         "pending": list(PENDING_SOURCES),
         # “采到了为什么不说”的答案在这：额度用完了还是被门槛判为不值得打扰
         "notify_budget": dict(notify_budget) if notify_budget else {},
@@ -126,6 +127,21 @@ def build_status(
 def _sort_key(name: str) -> tuple[int, str]:
     """已实现的源排前面（面板主列表），收编位排后面（灰显说明）。"""
     return (0 if name in IMPLEMENTED_SOURCES else 1, name)
+
+
+def _recent_events(bus: PerceptBus | None, limit: int) -> list[dict[str, Any]]:
+    """最近事件：直接转发总线的 `recent_dicts()`（磁盘优先、内存兜底）。
+
+    为什么不能只看内存（aceFelix，2026-10-19 人工走查）：配置热更新会重建
+    总线，新实例的历史是空的——用户每改一次参数，面板就显示“还没有采到
+    事件”，而 `events.jsonl` 明明一直在写（当时总线已采到 24 条）。留痕文件
+    的定位本来就是“让用户看见到底采了什么”，拿它当面板数据源是对既有
+    承诺的兑现，不是新增语义。
+
+    选择规则不写在本模块：`bus.export()`（隐私自查）要同一份口径，两处各自
+    实现就会漂移，故收在 `PerceptBus.recent_dicts` 一处。
+    """
+    return bus.recent_dicts(limit) if bus is not None else []
 
 
 def _log_file(settings: Any, stats: dict[str, Any]) -> str:

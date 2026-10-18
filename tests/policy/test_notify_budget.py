@@ -3,7 +3,8 @@
 覆盖：静默时段只入库、时段结束后聚合冲刷成一条、同源窗口合并、
 低重要度直接抑制、日预算上限、跨天重置、接受率闭环、跨午夜静默区间，
 以及 2026-10 走查后的四条新口径（冲刷不占额度、有冷却、单条不套壳、
-不吞当前事件）与感知源权重登记。
+不吞当前事件）与感知源权重登记，和 2026-10-19 的闸门换序（静默入库
+前必须先过门槛）与冲刷按时间重排。
 时间一律显式传 now，测试不依赖真实时钟。
 
 @author aceFelix
@@ -201,3 +202,52 @@ def test_percept_source_weights_registered(policy_paths):
     # 停留超时（用户显式开了阈值，0.5×0.65=0.325）：能过闸
     assert b.gate("在浏览器待了 40 分钟", "percept:window", dedup_key="w2",
                   urgency=0.65, now=MORNING.replace(minute=20)).kind == "emit"
+
+
+# ---- 2026-10-19 走查：静默入库必须先过门槛 ----
+
+
+def test_quiet_hours_low_salience_suppressed(policy_paths):
+    """静默时段不再是门槛的后门：低分事件夜里也不入库。"""
+    b = _budget(policy_paths)
+    a = b.gate("切到 记事本", "percept:window", dedup_key="w1",
+               urgency=0.3, now=NIGHT)              # 0.5×0.3=0.15 < 0.3
+    assert a.kind == "suppress" and "仅留痕" in a.reason
+    assert b.pending_count() == 0
+    # 早上冲刷时它不该冒出来（旧顺序下这类碎事会绕过门槛被念给用户）
+    nxt = b.gate("真提醒", "deadline", dedup_key="d1", urgency=0.9, now=NEXT_MORNING)
+    assert nxt.kind == "emit" and "记事本" not in nxt.text
+
+
+def test_quiet_hours_high_salience_still_queued(policy_paths):
+    """换序不能把补播功能一起改掉：够重要的事夜里仍入库等补播。"""
+    b = _budget(policy_paths)
+    a = b.gate("老张来信", "percept:mail", dedup_key="m1", urgency=0.75, now=NIGHT)
+    assert a.kind == "queue" and "静默" in a.reason
+    assert b.pending_count() == 1
+
+
+def test_non_percept_sources_unaffected_by_reorder(policy_paths):
+    """换序对非感知源零回归：daemon 默认紧迫度 0.6 下最低档 0.5×0.6=0.30 仍过线。
+
+    最后一个是故意拿未登记源探边界：它落 default 0.5，得分刚好等于门槛（不是
+    小于），所以仍入库。浮点上 0.5*0.6 与 0.3 是同一个 double，这条用例
+    把这个刀尖事实钉住，以后改默认权重时会立刻报警。
+    """
+    b = _budget(policy_paths)
+    for i, src in enumerate(["briefing", "deadline", "calendar", "system",
+                             "schedule", "未登记源"]):
+        a = b.gate(f"夜间{i}", src, dedup_key=f"k{i}", urgency=0.6, now=NIGHT)
+        assert a.kind == "queue", f"{src} 在默认紧迫度 0.6 下不该被门槛拦掉"
+    assert b.pending_count() == 6
+
+
+def test_flush_reorders_pending_by_time(policy_paths):
+    """同 key 合并会把 ts 刷成最新，冲刷时必须按时间重排（否则“最近 N 条”挑错）。"""
+    b = _budget(policy_paths)
+    b.gate("最早发生", "deadline", dedup_key="a", now=NIGHT)                    # 23:30
+    b.gate("较晚发生", "calendar", dedup_key="b", now=NIGHT.replace(minute=45))  # 23:45
+    # 同 key 再来一次：a 的 ts 被刷到 23:50，但位置仍在 b 前面
+    b.gate("最早发生", "deadline", dedup_key="a", now=NIGHT.replace(minute=50))
+    a = b.gate("白天", "system", dedup_key="s", urgency=0.9, now=NEXT_MORNING)
+    assert a.text.index("较晚发生") < a.text.index("最早发生")

@@ -191,14 +191,18 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 
 | 指令 | 用途 | 回执要点 |
 |---|---|---|
-| `percept.status.get` | 在采什么（逐源开关/总线计数/源自报的不可用原因）+ 采到了什么（最近事件 + 留痕文件路径）+ 怎么配的（`config` 段） | 无宿主或未装配时统计段回空值，不报错；`config` 段在总开关关着时照常回（面板才能编辑） |
+| `percept.status.get` | 在采什么（逐源开关/总线计数/源自报的不可用原因）+ 采到了什么（最近事件 + 留痕文件路径）+ 怎么配的（`config` 段）+ 打扰预算（`notify_budget`） | 无宿主或未装配时统计段回空值，不报错；`config` 段在总开关关着时照常回（面板才能编辑）；**最近事件读磁盘留痕尾部**，所以改过配置也不会空掉 |
 | `percept.config.set` | 改逐源开关与名单（守望目录 / 登记仓库 / 发件人白名单 / 排除应用）与两个分钟阈值 | 先落 `settings.toml` 再改运行时，然后由宿主**重装配总线**（当场生效，不必重启）；`hot_applied=false` 意味着还没重装配 |
 
-> 🧷 **口径**：两条指令与热重装配已有单测（`tests/serve/test_serve_percept_rpc.py`，20 例），
+> 🧷 **口径**：两条指令与热重装配已有单测（`tests/serve/test_serve_percept_rpc.py`，21 例），
 > 其中三例特意走**真实平铺帧**（入参带协议信封键 `type`）：2026-10 人工走查发现
 > 面板每一次写回都会被「不支持的感知配置项 type」挡掉（表现为“所有开关点了没反应”、
 > `settings.toml` 不出现 `[percept]` 段），根因与修法见
 > [percept.config.set 信封键复盘](../fixlogs/percept-config-set-envelope-fix.md)。
+> 2026-10-19 又修了一处同类问题：面板的「最近事件」与「闸门计数」原本挂在总线
+> 实例上，而**保存一次配置就重建一次总线**，于是“已保存并重装配”与“还没有采到
+> 事件”会同时出现在屏幕上（磁盘上其实已有 24 条）；现在事件改读磁盘、计数在重建时
+> 继承，见 [面板历史空复盘](../fixlogs/percept-panel-history-lost-on-rebuild-fix.md)。
 > 桌面壳侧「感知源」面板已接入兄弟仓 `jarvis-desktop/`（入口：管家服务面板的服务
 > 清单；实现 `src/renderer/src/components/PerceptSourcePanel.tsx` 系列，契约镜像
 > `src/shared/percept-contracts.ts`，面板口径见该仓 `docs/architecture.md`）。

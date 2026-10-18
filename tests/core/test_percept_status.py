@@ -166,6 +166,30 @@ def test_status_passes_bus_counters_and_event_limit(tmp_path):
     assert len(clamped["recent_events"]) == 5      # 实际只有 5 条，上限不硬凑
 
 
+def test_recent_events_come_from_disk_after_bus_rebuild(tmp_path):
+    """面板数据源以磁盘为权威：重建后的新总线（内存空）仍能列出事件。
+
+    2026-10-19 走查复现：`events.jsonl` 已有 24 条，面板却显示“还没有采到
+    事件”——旧实现只读内存环形缓冲，而改一次配置就换一台总线。
+    """
+    old = _bus(tmp_path)
+    old.publish(_event("重建前采到的"), now=1000.0)
+    fresh = _bus(tmp_path)                       # 改配置后的下一轮装配
+    assert fresh.recent() == []                  # 内存确实是空的
+    status = build_status(_settings(percept_enabled=True), fresh)
+    assert [e["payload"]["summary"] for e in status["recent_events"]] == ["重建前采到的"]
+
+
+def test_recent_events_fall_back_to_memory_without_log(tmp_path):
+    """关掉留痕（无 log_path）→ 回退内存历史，面板不能因此空掉。"""
+    bus = PerceptBus(BusConfig(dedup_window_s=300), log_path=None)
+    bus.publish(_event("只进内存"), now=1000.0)
+    status = build_status(
+        _settings(percept_enabled=True, percept_log_events=False), bus)
+    assert [e["payload"]["summary"] for e in status["recent_events"]] == ["只进内存"]
+    assert status["log_file"] == ""
+
+
 def _event(tag: str):
     from agent.core.percept.event import PerceptEvent
 

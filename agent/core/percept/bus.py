@@ -38,6 +38,10 @@ from agent.core.percept.event import PerceptEvent, clamp_payload
 
 logger = logging.getLogger("jarvis.percept")
 
+#: 读留痕尾部时每行的字节预算。一条事件 JSON 实测 200~500 字节（payload 已
+#: 经 `clamp_payload` 限长），给 4KB 是宁可多读不可漏行的取向。
+_LOG_TAIL_BYTES = 4096
+
 #: 源采集回调：无参，返回若干事件（或单个）。
 CollectFn = Callable[[], Iterable[PerceptEvent] | PerceptEvent | None]
 #: 订阅回调：收到一条事件，返回值忽略。
@@ -523,11 +527,101 @@ class PerceptBus:
             items = list(self._history)[-max(1, int(limit)):]
         return list(reversed(items))
 
+    def recent_from_log(self, limit: int = 20) -> list[dict[str, Any]]:
+        """从留痕文件读最近若干条（倒序）；没留痕/读不到都回空列表。
+
+        为什么需要它（2026-10-19 走查）：`recent()` 是**内存环形缓冲**，而配置
+        热更新会重建总线（见 `init_percept`），新实例的历史是空的——于是面板
+        在用户每次改完参数后都显示“还没有采到事件”，而 `events.jsonl` 其实
+        一直在写。磁盘是跨实例的唯一权威，把它作为面板数据源才能兑现
+        “可见即可导出”这个旧承诺（留痕本就是为了让用户能自查采了什么）。
+
+        只读文件尾部而不是全量：上限按行数字节预算估算，大文件也只读几十 KB；
+        首行可能是截在半处的残行，跳过。单行解析失败直接略过，不影响其余。
+        """
+        n = max(1, int(limit))
+        path = self._log_path
+        if path is None:
+            return []
+        try:
+            size = path.stat().st_size
+            span = min(size, n * _LOG_TAIL_BYTES)
+            with open(path, "rb") as fh:
+                fh.seek(size - span)
+                raw = fh.read()
+        except OSError as e:
+            logger.debug("感知留痕尾部读取失败(%s): %s", path, e)
+            return []
+        lines = raw.decode("utf-8", errors="ignore").splitlines()
+        if size > span and lines:
+            lines = lines[1:]   # 首行是从中间截开的半条 JSON，丢掉
+        out: list[dict[str, Any]] = []
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                out.append(data)
+                if len(out) >= n:
+                    break
+        return out
+
+    def recent_dicts(self, limit: int = 20) -> list[dict[str, Any]]:
+        """最近事件的字典形式（面板与导出共用的唯一入口）。
+
+        选择规则只写在这里，两个调用方不各自算一遍：
+
+        1. 留痕开着（`_log_path` 非空）且磁盘读到了 → 用磁盘（跨总线实例的
+           唯一权威，重建后不会空掉）；
+        2. 没开留痕，或磁盘读不到 → 回退内存环形缓冲。后者不是冗余：内存
+           有事件而磁盘读不到，说明写盘失败（`counters.log_errors` 会非零），
+           观测口仍要能回答“采到了什么”。
+        """
+        if self._log_path is not None:
+            from_disk = self.recent_from_log(limit)
+            if from_disk:
+                return from_disk
+        return [ev.to_dict() for ev in self.recent(limit)]
+
+    def inherit_stats_from(self, previous: "PerceptBus | None") -> None:
+        """把上一台总线的**观测账本**接过来（重建总线时不丢证据）。
+
+        与 :meth:`recent_from_log` 同一个根因：闸门计数（dedup / throttle /
+        low_salience …）也是实例级的，改一次配置就归零，用户拿不到“刚才那
+        笔为什么没播”的答案。这里只接计数与内存历史，不接磁盘。
+
+        刻意**不**继承 `_seen` / `_last_emit`：那两个是“这台总线的去重与节流
+        窗口”，属于行为而不是观测；跨实例延续会把“重启后重新计时”这个可预期
+        语义搅浑，排查时更难解释。
+
+        Args:
+            previous: 被替换掉的旧总线实例；None 或自身时不做任何事。
+        """
+        if previous is None or previous is self:
+            return
+        # 先取快照再合并：避免同时持有两把锁（嵌套锁方向一变就是死锁隐患）
+        with previous._lock:
+            counters = dict(previous._counters)
+            history = list(previous._history)
+        with self._lock:
+            for name, value in counters.items():
+                if name in self._counters:
+                    self._counters[name] += int(value)
+            for event in history:
+                self._history.append(event)   # deque(maxlen) 自动掉最旧的
+
     def export(self, limit: int = 200) -> dict[str, Any]:
         """采集范围一键导出（隐私自查用：用户能看见"到底采了什么"）。
 
         包含当前逐源开关、采样间隔、最近事件的完整 payload，
         不含任何隐藏字段——审计口径要求"可见即可导出"。
+
+        事件段与面板同源（`recent_dicts`）：留痕开着时读磁盘。审计报告里
+        “只采到 3 条”如果其实是因为刚重建过总线，那份自查就是误导性的。
         """
         return {
             "config": {
@@ -536,7 +630,7 @@ class PerceptBus:
                 "throttle_s": dict(self.config.throttle_s),
             },
             "stats": self.stats(),
-            "events": [ev.to_dict() for ev in self.recent(limit)],
+            "events": self.recent_dicts(limit),
         }
 
     def _prune_seen_locked(self, mono: float) -> None:

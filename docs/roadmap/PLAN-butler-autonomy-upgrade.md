@@ -193,6 +193,14 @@ rules:
 > 表态”（`~/.jarvis/percept/consent.json`），只在从未做过选择时把引导装进 hub 的
 > pending 槽，等桌面壳连上 WS 的首帧才投递并记账；壳侧给「管家服务」按钮挂一次性
 > 提示点作着陆点。引导到达时仍全关，不擅自开始采集。
+> ✅ **两轮人工实机走查修复（2026-10-18 / 10-19）**：打扰预算的“入队-冲刷”
+> 乒乓与播报改走口播版（[复盘](../fixlogs/notify-budget-percept-relay-fix.md)）；
+> 面板观测口易失（改一次配置就重建总线、历史与计数归零）与静默时段绕过
+> 重要度门槛（[复盘](../fixlogs/percept-panel-history-lost-on-rebuild-fix.md)）。
+> 上行是交付当时的快照，**当前计数以架构文档为准**：`test_percept_bus` 47、
+> `test_percept_init` 12、`test_percept_status` 13、`test_hub_percept` 24、
+> `test_notify_budget` 18、`test_percept_speech` 9，桌面 `percept.test.tsx` 34。
+> 实机走查清单见 [W2 感知层实机走查清单](../test/percept-w2-testing.md)。
 > 本期不动的：`schedule`/`calendar`/`system` 三个收编位
 > （理由见架构文档第七节）。
 

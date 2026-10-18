@@ -417,6 +417,100 @@ def test_history_ring_is_bounded_and_newest_first(tmp_path):
     assert [e.payload["i"] for e in recent] == [4, 3, 2]
 
 
+# ---- 磁盘为权威的最近事件（2026-10-19 走查：面板“还没有采到事件”）----
+
+
+def test_recent_from_log_reads_newest_first(tmp_path):
+    """磁盘尾部读取与内存历史同序（最新在前），面板才能直接渲染。"""
+    bus = make_bus(tmp_path, dedup_window_s=0)
+    for i in range(3):
+        bus.publish(ev(payload={"summary": f"落盘 {i}", "i": i}), now=1000.0 + i)
+    assert [row["payload"]["i"] for row in bus.recent_from_log(10)] == [2, 1, 0]
+
+
+def test_recent_from_log_survives_bus_rebuild(tmp_path):
+    """改配置会重建总线：新实例内存为空，但磁盘读得到。"""
+    old = make_bus(tmp_path)
+    old.publish(ev(summary="重建前采到的"), now=1000.0)
+    fresh = make_bus(tmp_path)                 # 同一台宿主的下一轮装配
+    assert fresh.recent() == []                # 内存确实是空的
+    rows = fresh.recent_from_log(20)
+    assert len(rows) == 1 and rows[0]["payload"]["summary"] == "重建前采到的"
+
+
+def test_recent_from_log_drops_partial_head_after_seek(tmp_path):
+    """按字节读尾部会把首行切成半条：残行必须静默丢掉，不能当成解析失败。"""
+    bus = make_bus(tmp_path, dedup_window_s=0)
+    for i in range(60):   # 每行 >150 字节，总量远超 1 行的 4KB 预算
+        bus.publish(ev(payload={"summary": f"填充 {i} " + "x" * 80, "i": i}),
+                    now=1000.0 + i)
+    rows = bus.recent_from_log(1)     # span=4096 < size → 必然从行中截开
+    assert len(rows) == 1 and rows[0]["payload"]["i"] == 59
+
+
+def test_recent_from_log_skips_broken_lines(tmp_path):
+    """单行坏 JSON 只丢自己，不连累其余（读侧永不抛异常）。"""
+    log = tmp_path / "events.jsonl"
+    good = json.dumps({"source": "file", "payload": {"summary": "完整一条"}},
+                      ensure_ascii=False)
+    log.write_text(f"坏行不是 JSON\n{good}\n", encoding="utf-8")
+    rows = make_bus(tmp_path).recent_from_log(10)
+    assert [r["payload"]["summary"] for r in rows] == ["完整一条"]
+
+
+def test_recent_from_log_empty_without_log_path():
+    """关掉留痕（log_path=None）→ 读不到东西，调用方据此回退内存。"""
+    assert PerceptBus(BusConfig(), log_path=None).recent_from_log(10) == []
+
+
+def test_export_reads_disk_after_rebuild(tmp_path):
+    """隐私自查导出与面板同源：重建后的新总线也要能报出真实采集量。
+
+    审计口径写的是“可见即可导出”：如果只读内存，刚改过配置的用户导出会得到
+    “只采到 0 条”，而磁盘上躺着全部历史——那份自查就是误导性的。
+    """
+    old = make_bus(tmp_path)
+    old.publish(ev(summary="重建前采到的"), now=1000.0)
+    fresh = make_bus(tmp_path)
+    events = fresh.export()["events"]
+    assert [e["payload"]["summary"] for e in events] == ["重建前采到的"]
+
+
+# ---- 重建总线时继承观测账本 ----
+
+
+def test_inherit_stats_from_carries_counters_and_history(tmp_path):
+    """计数累加、内存历史拼接：改一次配置不再抹一次证据。"""
+    old = make_bus(tmp_path, dedup_window_s=0)
+    old.publish(ev(payload={"summary": "旧的", "i": 0}), now=1000.0)
+    old.publish(ev(source="file", payload={"summary": "旧的 2", "i": 1}), now=2000.0)
+    fresh = make_bus(tmp_path, dedup_window_s=0)
+    fresh.inherit_stats_from(old)
+    fresh.publish(ev(source="mail", payload={"summary": "新的", "i": 2}), now=3000.0)
+    assert fresh.stats()["counters"]["emit"] == 3
+    assert [e.payload["i"] for e in fresh.recent()] == [2, 1, 0]
+
+
+def test_inherit_stats_from_ignores_none_and_self(tmp_path):
+    """没旧实例/传了自己都等于空操作（宿主首次装配走的就是这条路）。"""
+    fresh = make_bus(tmp_path)
+    fresh.inherit_stats_from(None)
+    fresh.inherit_stats_from(fresh)
+    assert fresh.stats()["counters"]["emit"] == 0
+
+
+def test_inherit_does_not_carry_dedup_window(tmp_path):
+    """只接观测，不接行为：去重窗口跨实例延续会把“重启后重新计时”搅浑。"""
+    old = make_bus(tmp_path)
+    old.publish(ev(summary="同一件事"), now=1000.0)
+    fresh = make_bus(tmp_path)
+    fresh.inherit_stats_from(old)
+    result = fresh.publish(ev(summary="同一件事"), now=1010.0)   # 窗口内但新实例
+    assert result.stage == "emit"                     # 去重窗口确实重新计时了
+    # 计数是“旧 1 + 新 1”：观测累加、行为不继承，两件事在这条用例里分开成立
+    assert fresh.stats()["counters"]["emit"] == 2
+
+
 def test_payload_values_are_clamped(tmp_path):
     """长标题/长日志尾行必须截断：总线要常驻，payload 不能无界。"""
     bus = make_bus(tmp_path)

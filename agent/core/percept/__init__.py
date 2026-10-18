@@ -82,6 +82,11 @@ def init_percept(settings: Any = None, *, bus: PerceptBus | None = None) -> Perc
     Returns:
         生效的总线实例，便于宿主链式调用 ``subscribe``/``start``。
 
+    重建路径会把旧总线的**观测账本**（闸门计数 + 内存历史）接到新实例上：
+    不然“改一次配置 = 抹一次证据”，面板在用户最需要对比效果的那一刻空掉
+    （2026-10-19 人工走查发现，详见 docs/fixlogs/）。显式传入 `bus` 时**不**
+    继承：那是测试与宿主自装配入口，拿陈旧的计数去污染一个新实例更难解释。
+
     @author aceFelix
     """
     global _settings, _bus_singleton
@@ -89,8 +94,11 @@ def init_percept(settings: Any = None, *, bus: PerceptBus | None = None) -> Perc
     if bus is not None:
         _bus_singleton = bus
         return bus
+    previous = _bus_singleton
     _bus_singleton = None  # 下次 get_bus 按新配置重建
-    return get_bus()
+    fresh = get_bus()
+    fresh.inherit_stats_from(previous)
+    return fresh
 
 
 def _cfg(field: str, default: Any) -> Any:

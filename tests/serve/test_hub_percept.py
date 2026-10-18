@@ -248,6 +248,21 @@ def test_percept_event_goes_through_gate_and_queue(hub_percept):
     assert payload["title"] == "贾维斯观察"
 
 
+def test_zero_salience_hint_is_not_raised_to_default(hub_percept):
+    """先验 0 = “这类事件永远别播”，不能被 `getattr(...) or 0.5` 静默抬成 0.5。
+
+    旧写法下“最保守的评分”反而可能过闸（0.5×权重 ≥ 0.3），与“0 分”的意图
+    完全相反。这里拿一个非静默 kind 传 0 分，验证原值能送到闸门。
+    """
+    hub, _eq, budget = hub_percept
+    hub.percept_bus.publish(PerceptEvent(
+        source="vision", kind="gesture",
+        payload={"summary": "手势：比了个 OK"}, salience_hint=0.0,
+        dedup_key="gesture:ok",
+    ))
+    assert budget.calls[0]["urgency"] == 0.0
+
+
 def test_broadcast_uses_speech_form_not_record_form(hub_percept):
     """播报走口播版、留痕保持原样：两者不能再共用一句人眼写法。
 

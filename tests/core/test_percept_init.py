@@ -22,6 +22,7 @@ from agent.core.percept import (
     source_enabled_map,
 )
 from agent.core.percept.bus import BusConfig, PerceptBus, PollSource
+from agent.core.percept.event import PerceptEvent
 
 
 def test_defaults_are_all_off_without_settings():
@@ -109,6 +110,37 @@ def test_explicit_bus_becomes_singleton():
     mine = PerceptBus(BusConfig(dedup_window_s=7), log_path=None)
     assert init_percept(Settings(percept_enabled=True), bus=mine) is mine
     assert get_bus() is mine
+
+
+def test_reinit_carries_over_observation_ledger(monkeypatch, tmp_path):
+    """重建总线要接上观测账本：面板不能因为“改过一次配置”就空掉。
+
+    2026-10-19 走查现场：用户保存配置后闸门计数全 0、最近事件空，而留痕
+    文件已经写了 24 条——因为计数与历史都挂在被替换掉的旧实例上。
+    """
+    import agent.core.memory.store as store
+
+    monkeypatch.setattr(store, "user_jarvis_dir", lambda: tmp_path)
+    first = init_percept(Settings(percept_dedup_window_s=0))
+    first.publish(PerceptEvent(source="vcs", kind="build_failed",
+                               payload={"summary": "重建前采到的"}))
+    second = init_percept(Settings(percept_dedup_window_s=30))
+    assert second is not first
+    assert second.stats()["counters"]["emit"] == 1
+    assert [e.payload["summary"] for e in second.recent()] == ["重建前采到的"]
+
+
+def test_explicit_bus_does_not_inherit_stale_counters(monkeypatch, tmp_path):
+    """显式传 bus 时不继承：测试与自装配入口不该被陈旧计数污染。"""
+    import agent.core.memory.store as store
+
+    monkeypatch.setattr(store, "user_jarvis_dir", lambda: tmp_path)
+    old = init_percept(Settings(percept_dedup_window_s=0))
+    old.publish(PerceptEvent(source="vcs", kind="build_failed",
+                             payload={"summary": "旧账本"}))
+    mine = PerceptBus(BusConfig(), log_path=None)
+    assert init_percept(Settings(percept_enabled=True), bus=mine) is mine
+    assert mine.stats()["counters"]["emit"] == 0 and mine.recent() == []
 
 
 def test_shutdown_stops_thread_and_closes_sources():

@@ -6,11 +6,14 @@
 - daily_max：每日主动播报次数上限（超出后入库待补播）
 - quiet_hours：静默时段（如 23:00-07:00）只入库；时段结束后聚合为一条
   （冲刷不占 daily_max——它是补播；且受 `aggregate_window_s` 冷却约束，
-  同一窗口内最多冲刷一次）
+  同一窗口内最多冲刷一次）。**静默入库前仍要先过 min_salience**：
+  门槛判的是“这件事值不值得打扰”，静默判的是“现在方不方便打扰”，
+  前者不成立的事不该在队列里等着半夜过后补播
 - aggregate_window_s：同源事件窗口内合并成一条（防刷屏）
 - min_salience：重要度门槛，低分事件**直接抑制**（只进感知总线与留痕文件，
   不进播报队列）——旧版“降级入库”配合无冷却冲刷，等于每两条必播一条，
-  门槛被自己的冲刷路径旁路
+  门槛被自己的冲刷路径旁路；而闸门顺序把静默排在门槛之前，于是低分事件
+  照样能在夜里排队、早上绕过门槛播出（2026-10-19 走查发现，见 fixlog）
 - channels：播报渠道优先级（桌面通知 > TTS > 手机推送）
 
 重要度评分 = 来源权重 × 时效紧迫度 × 相关性 × 历史接受率。
@@ -181,8 +184,25 @@ class NotifyBudget:
         self, state: dict, text: str, source: str, key: str,
         urgency: float, relevance: float, now: datetime,
     ) -> NotifyAction:
-        """当前这条请求自身的裁决（②~⑤），只改 state，不落盘。"""
-        # ② 静默时段：只入库不打扰（这类积压是“该说但当时不能说”，值得补播）
+        """当前这条请求自身的裁决（④→②→③→⑤），只改 state，不落盘。
+
+        闸门顺序在 2026-10-19 调过一次：门槛提到静默判断**之前**。旧顺序下
+        静默时段入库完全不评分，于是 0.15 分的“切到记事本”照样排队，早上
+        一出静默就被冲刷绕过门槛念给用户听——和它白天被拦掉是同一件事，
+        等于门槛只在白天生效。实测换序不影响任何非感知源：简报/截止/日程
+        的权重×紧迫度最低也是 0.5×0.6=0.30，仍在门槛之上。
+        """
+        # ④ 重要度门槛：低于门槛**直接抑制**，任何时段都不配占用队列。
+        #    事件本身仍在感知总线与 events.jsonl 里，只是不出声。
+        score = self.salience(source, urgency, relevance, state)
+        if score < self.config.min_salience:
+            return NotifyAction(
+                "suppress", text,
+                f"重要度 {score:.2f} 低于门槛 {self.config.min_salience}，仅留痕不播报",
+            )
+
+        # ② 静默时段：够重要但当时不能说 → 入库待补播（这类积压是“该说但
+        #    当时不能说”，值得补播；不够重要的在上一步已经被拦掉了）
         if self._in_quiet(now):
             self._append_pending(state, text, source, key, now)
             return NotifyAction("queue", text, f"静默时段（{self.config.quiet_hours}）暂缓入库")
@@ -197,16 +217,6 @@ class NotifyBudget:
                     return NotifyAction("suppress", text, f"{int(gap)}s 前已播同源事件，窗口内合并")
             except ValueError:
                 pass
-
-        # ④ 重要度门槛：低于门槛**直接抑制**，不再入库等补播。门槛的语义是
-        #    “不值得打扰”，暂缓到“稍后说”是自我矛盾——它不会变得更有价值。
-        #    事件本身仍在感知总线与 events.jsonl 里，只是不出声。
-        score = self.salience(source, urgency, relevance, state)
-        if score < self.config.min_salience:
-            return NotifyAction(
-                "suppress", text,
-                f"重要度 {score:.2f} 低于门槛 {self.config.min_salience}，仅留痕不播报",
-            )
 
         # ⑤ 日预算：够重要但额度用尽 → 入库等冲刷（冲刷不占额度，否则永远出不来）
         if state["count"] >= self.config.daily_max:
@@ -247,7 +257,9 @@ class NotifyBudget:
         “积压 N 条”壳；③ 文案不再写“静默时段”——预算满造成的积压并不在静默
         时段，旧文案在下午五点说“静默时段积压”是谎话。
         """
-        items = list(state.get("pending", []))
+        # 按时间重排：同 key 合并时会把 ts 刷成最新一次（见 _append_pending），
+        # 但条目位置不变，于是队列不再单调，补播摘要里“最近 N 条”会挑错。
+        items = sorted(state.get("pending", []), key=lambda i: str(i.get("ts", "")))
         state["pending"] = []
         state["last_flush"] = now.isoformat(timespec="seconds")
         if not items:
@@ -267,6 +279,8 @@ class NotifyBudget:
         pending = state.setdefault("pending", [])
         for item in pending:
             if item.get("key") == key:
+                # ts 刷成最新一次 = “这件事最后一次发生的时间”，代价是队列不再
+                # 按 ts 有序，故冲刷侧统一重排（见 _flush_pending）
                 item["merged"] = item.get("merged", 1) + 1
                 item["ts"] = now.isoformat(timespec="seconds")
                 return
