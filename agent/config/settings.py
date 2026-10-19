@@ -33,6 +33,7 @@ from agent.config.models_config import (
     models_path_for,
     user_config_paths,
 )
+from agent.config.settings_domains import apply_domain_tables
 from agent.permissions.modes import PermissionMode, parse_mode
 
 
@@ -239,6 +240,15 @@ class Settings:
     email_smtp_password: str = ""
     email_sender: str = ""
     email_default_recipient: str = ""
+    # 邮件**收件**（W2 mail 事件源，决策 3：IMAP IDLE 长连接 + 断线降级轮询）。
+    # 只读取信封头（FROM/SUBJECT/DATE），永不拉正文；imap_password 留空时
+    # 源回退到 smtp_password（163/QQ 等厂商两边用同一个授权码，不强制用户录两遍）。
+    # @author aceFelix
+    email_imap_host: str = ""
+    email_imap_port: int = 993
+    email_imap_user: str = ""
+    email_imap_password: str = ""
+    email_imap_mailbox: str = "INBOX"
 
     # LSP 集成
     # 启动时按 [lsp.servers.<name>] 配置启动语言服务器
@@ -321,6 +331,53 @@ class Settings:
     notify_quiet_hours: str = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）
     notify_aggregate_window_s: int = 300   # 同源事件聚合窗口（秒）
     notify_min_salience: float = 0.3       # 重要度门槛（低于此值只入库不播）
+
+    # W2 感知层（阶段 9，见 core/percept/）：统一事件总线 + 逐源采集。
+    # 隐私口径已拍板（PLAN 第 8 节决策 2）：总开关与**逐源开关全部默认关**，
+    # 未获同意时源的 collect() 一次都不会被调用；默认值一律偏保守（关/少/短）。
+    # @author aceFelix
+    percept_enabled: bool = False          # 感知层总开关（关=不起线程、不采一个字节）
+    percept_dedup_window_s: int = 300      # 同一事件去重窗口（秒）
+    percept_min_salience: float = 0.0      # 总线地板分（0=不裁，重要度裁决交给 W1）
+    percept_history_max: int = 200         # 内存环形历史条数（留痕行数上限=此值×10）
+    percept_log_events: bool = True        # 事件本地留痕（false=完全不碰磁盘）
+    percept_auto_disable_after_errors: int = 3  # 源连败自动停用阈值（0=只隔离不罢工）
+
+    # 前台窗口源——唯一有明显隐私属性的源，默认只留「进程名 + 标题前 40 字」
+    percept_window_enabled: bool = False
+    percept_window_interval_s: int = 5     # 采样间隔（秒）
+    percept_window_title_max_chars: int = 40
+    percept_window_title_full_enabled: bool = False   # 显式开才保留完整标题
+    percept_window_exclude_apps: list = field(default_factory=list)  # 排除应用（子串、不分大小写）
+    percept_window_linger_minutes: int = 0  # >0 才发「在同一应用待太久」
+
+    # 文件守望源——只订阅白名单目录（空列表=该源即使开了也不采）
+    percept_file_enabled: bool = False
+    percept_file_watch_dirs: list = field(default_factory=list)
+    percept_file_interval_s: int = 30
+    percept_file_max_entries: int = 2000   # 单目录快照条目上限（超出截断并记 truncated）
+    percept_file_grow_threshold: int = 5   # 新增文件达此数才聚合提醒（避免一个个刷）
+    percept_file_ignore_suffixes: list = field(default_factory=list)  # 额外忽略后缀
+    percept_file_min_interval_s: int = 0   # 文件源同源投递最小间隔（0=不额外节流）
+
+    # 仓库与邮件源（第 3 步）、既有源收编（第 4 步）
+    percept_vcs_enabled: bool = False
+    percept_vcs_repos: list = field(default_factory=list)
+    percept_vcs_interval_s: int = 120
+    percept_vcs_min_interval_s: int = 60   # 同源投递最小间隔（总线节流）
+    percept_mail_enabled: bool = False
+    percept_mail_min_interval_s: int = 0   # 0=靠 IDLE 事件驱动，不额外节流
+    percept_mail_watch_senders: list = field(default_factory=list)  # 发件人白名单（空=全报）
+    percept_calendar_enabled: bool = False
+    percept_system_enabled: bool = False
+    percept_schedule_enabled: bool = False
+    # 视觉在场源（唯一会碰摄像头的源，默认关）：在场事实与手势进总线
+    percept_vision_enabled: bool = False
+    percept_vision_camera_index: int = 0
+    percept_vision_fps: int = 2          # 低帧率：常驻 CPU 成本按帧率线性增长
+    percept_vision_gesture_enabled: bool = True
+    percept_vision_auto_stop_minutes: int = 0   # >0 空闲自动关摄像头（代价：关闭期间检测不到回来）
+    percept_vision_interval_s: int = 5          # 总线排空本源的节拍（秒）
 
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
@@ -505,9 +562,11 @@ def _resolve_local_path(raw: str, cwd: Path, pkg_root: Path) -> Path | None:
 
 
 def _apply_toml(s: Settings, data: dict) -> Settings:
-    """把 TOML 顶层字段映射到 Settings。
+    """把 TOML 顶层字段与各功能域表映射到 Settings。
 
-    [tts] 表的子字段映射到 tts_* 顶层字段。
+    表 → 字段的映射是纯数据，声明在 agent/config/settings_domains.py（原先是
+    20+ 个同构循环，加一个域就抄一遍，文件因此突破 800 行上限）。本函数只保留
+    顶层平铺键、permission_mode 解析与 [llm] 模型域归一这三处真正的逻辑。
     """
     if not data:
         return s
@@ -548,312 +607,12 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
             updates[key] = data[key]
     if "permission_mode" in data:
         updates["permission_mode"] = parse_mode(str(data["permission_mode"]))
-    # [tts] 表 → tts_* 字段
-    tts_table = data.get("tts", {})
-    if isinstance(tts_table, dict):
-        for sub_key, field in (
-            ("model", "tts_model"),
-            ("voice", "tts_voice"),
-            ("volume", "tts_volume"),
-            ("speech_rate", "tts_speech_rate"),
-            ("pitch_rate", "tts_pitch_rate"),
-        ):
-            if sub_key in tts_table:
-                updates[field] = tts_table[sub_key]
-        # [tts.custom_voices] 子表 → settings.custom_voices（/tts-voice 添加的音色）
-        cv_table = tts_table.get("custom_voices")
-        if isinstance(cv_table, dict) and cv_table:
-            updates["custom_voices"] = {
-                str(k): dict(v) for k, v in cv_table.items() if isinstance(v, dict)
-            }
-    # [stt] 表 → stt_* 字段
-    stt_table = data.get("stt", {})
-    if isinstance(stt_table, dict):
-        for sub_key, field in (
-            ("model", "stt_model"),
-            ("max_seconds", "stt_max_seconds"),
-            ("silence_seconds", "stt_silence_seconds"),
-        ):
-            if sub_key in stt_table:
-                updates[field] = stt_table[sub_key]
-    # [voice] 表 → voice_* 字段
-    voice_table = data.get("voice", {})
-    if isinstance(voice_table, dict):
-        for sub_key, field in (
-            ("barge_in", "voice_barge_in"),
-            ("barge_in_key", "voice_barge_in_key"),
-        ):
-            if sub_key in voice_table:
-                updates[field] = voice_table[sub_key]
-    # [realtime_talk] 表 → realtime_* 字段 + dashscope_api_key
-    rt_table = data.get("realtime_talk", {})
-    if isinstance(rt_table, dict):
-        for sub_key, field in (
-            ("api_key", "dashscope_api_key"),
-            ("ws_url", "realtime_ws_url"),
-            ("model", "realtime_model"),
-            ("voice", "realtime_voice"),
-            ("event_log", "realtime_event_log"),
-            ("echo_suppress_with_aec", "realtime_echo_suppress_with_aec"),
-            ("half_duplex", "realtime_half_duplex"),
-            ("rescue", "realtime_rescue"),
-            ("turn_detection", "realtime_turn_detection"),
-            ("silence_ms", "realtime_silence_ms"),
-            ("tools_mode", "realtime_tools_mode"),
-        ):
-            if sub_key in rt_table:
-                updates[field] = rt_table[sub_key]
-    # [bridge] 表 → bridge_* 字段（P3-1 跨设备协同）
-    bridge_table = data.get("bridge", {})
-    if isinstance(bridge_table, dict):
-        for sub_key, field in (
-            ("http_port", "bridge_http_port"),
-            ("ws_port", "bridge_ws_port"),
-            ("token", "bridge_token"),
-        ):
-            if sub_key in bridge_table:
-                updates[field] = bridge_table[sub_key]
-    # [ui] 表 → UI 字段
-    ui_table = data.get("ui", {})
-    if isinstance(ui_table, dict):
-        for sub_key, field in (
-            ("boot_animation", "boot_animation"),
-        ):
-            if sub_key in ui_table:
-                updates[field] = ui_table[sub_key]
-    # [context] 表 → 上下文压缩字段
-    ctx_table = data.get("context", {})
-    if isinstance(ctx_table, dict):
-        for sub_key, field in (
-            ("compaction", "context_compaction"),
-            ("tool_result_keep_recent", "tool_result_keep_recent"),
-            ("context_window", "context_window"),
-            ("compact_ratio", "compact_ratio"),
-            ("compact_refreeze_growth", "compact_refreeze_growth"),
-            ("compact_max_output_tokens", "compact_max_output_tokens"),
-        ):
-            if sub_key in ctx_table:
-                updates[field] = ctx_table[sub_key]
-    # [memory] 表 → 记忆持久化字段
-    mem_table = data.get("memory", {})
-    if isinstance(mem_table, dict):
-        for sub_key, field in (
-            # auto_resume_session 已下线：用户旧配置里残留该键时静默忽略
-            ("long_term_memory", "long_term_memory"),
-            # 画像记忆（Phase 1a）
-            ("profile_enabled", "profile_enabled"),
-            ("profile_max_entries", "profile_max_entries"),
-            ("profile_inject_token_limit", "profile_inject_token_limit"),
-            ("profile_refine_min_messages", "profile_refine_min_messages"),
-            ("profile_refine_interval", "profile_refine_interval"),
-            ("profile_refine_model", "profile_refine_model"),
-            ("profile_refine_provider", "profile_refine_provider"),
-            ("profile_refine_base_url", "profile_refine_base_url"),
-            ("profile_refine_api_key", "profile_refine_api_key"),
-        ):
-            if sub_key in mem_table:
-                updates[field] = mem_table[sub_key]
-        # [memory.refine] 子表 → profile_refine_* 简写形式
-        refine_table = mem_table.get("refine", {})
-        if isinstance(refine_table, dict):
-            for sub_key, field in (
-                ("model", "profile_refine_model"),
-                ("provider", "profile_refine_provider"),
-                ("base_url", "profile_refine_base_url"),
-                ("api_key", "profile_refine_api_key"),
-                ("interval", "profile_refine_interval"),
-            ):
-                if sub_key in refine_table:
-                    updates[field] = refine_table[sub_key]
-    # [skills] 表 → Skill 系统字段
-    skills_table = data.get("skills", {})
-    if isinstance(skills_table, dict):
-        for sub_key, field in (
-            ("enable", "enable_skills"),
-        ):
-            if sub_key in skills_table:
-                updates[field] = skills_table[sub_key]
-    # [mcp] 表 → MCP 接入字段
-    mcp_table = data.get("mcp", {})
-    if isinstance(mcp_table, dict):
-        for sub_key, field in (
-            ("enable", "enable_mcp"),
-        ):
-            if sub_key in mcp_table:
-                updates[field] = mcp_table[sub_key]
-    # [profile_bridge] 表 → 知识图谱画像桥字段（P2 画像双向同步）
-    bridge_table = data.get("profile_bridge", {})
-    if isinstance(bridge_table, dict):
-        for sub_key, field in (
-            ("enabled", "profile_bridge_enabled"),
-            ("server", "profile_bridge_server"),
-            ("token_limit", "profile_bridge_token_limit"),
-        ):
-            if sub_key in bridge_table:
-                updates[field] = bridge_table[sub_key]
-    # [plugins] 表 → 插件市场字段
-    plugins_table = data.get("plugins", {})
-    if isinstance(plugins_table, dict):
-        for sub_key, field in (
-            ("enable", "enable_plugins"),
-            ("marketplace_url", "plugin_marketplace"),
-            ("marketplace_local", "plugin_market_local"),
-        ):
-            if sub_key in plugins_table:
-                updates[field] = plugins_table[sub_key]
-    # [cli_anything] 表 → 自定义 harness 市场字段
-    cli_anything_table = data.get("cli_anything", {})
-    if isinstance(cli_anything_table, dict):
-        for sub_key, field in (
-            ("market_url", "harness_market_url"),
-            ("market_local", "harness_market_local"),
-        ):
-            if sub_key in cli_anything_table:
-                updates[field] = cli_anything_table[sub_key]
-    # [email] 表 → 邮件发送字段
-    email_table = data.get("email", {})
-    if isinstance(email_table, dict):
-        for sub_key, field in (
-            ("enabled", "email_enabled"),
-            ("smtp_host", "email_smtp_host"),
-            ("smtp_port", "email_smtp_port"),
-            ("smtp_user", "email_smtp_user"),
-            ("smtp_password", "email_smtp_password"),
-            ("sender", "email_sender"),
-            ("default_recipient", "email_default_recipient"),
-        ):
-            if sub_key in email_table:
-                updates[field] = email_table[sub_key]
-    # [lsp] 表 → LSP 集成字段
-    # 注意：必须区分「没有 [lsp] 表」与「[lsp] 表为空」——models.toml 等模型域文件
-    # 不含 [lsp] 表，若无条件写 updates["lsp_servers"]，会把先从 settings.toml 读到的
-    # lsp_servers 清空（2026-09 模型域拆分后暴露）。作者：aceFelix
-    lsp_table = data.get("lsp")
-    if isinstance(lsp_table, dict):
-        for sub_key, field in (
-            ("enable", "enable_lsp"),
-        ):
-            if sub_key in lsp_table:
-                updates[field] = lsp_table[sub_key]
-        # [lsp.servers.<name>] → lsp_servers（子表存在才覆盖，显式空子表可表达清空）
-        servers_table = lsp_table.get("servers")
-        if isinstance(servers_table, dict):
-            updates["lsp_servers"] = dict(servers_table)
-    # [daemon] 表 → 常驻模式字段
-    daemon_table = data.get("daemon", {})
-    if isinstance(daemon_table, dict):
-        for sub_key, field in (
-            ("hotkey", "daemon_hotkey"),
-            ("hotkey_native", "daemon_hotkey_native"),
-            ("hotkey_debounce_ms", "daemon_hotkey_debounce_ms"),
-            # P2-3 每日简报
-            ("briefing_enabled", "briefing_enabled"),
-            ("briefing_time", "briefing_time"),
-            ("briefing_catchup_window_min", "briefing_catchup_window_min"),
-            # 二期：主动播报 TTS 待机语音总开关
-            ("proactive_tts_enabled", "proactive_tts_enabled"),
-        ):
-            if sub_key in daemon_table:
-                updates[field] = daemon_table[sub_key]
-
-    # [monitor] 表 → 监控字段
-    monitor_table = data.get("monitor", {})
-    if isinstance(monitor_table, dict):
-        for sub_key, field in (
-            ("enabled", "monitor_enabled"),
-            ("cpu_threshold", "monitor_cpu_threshold"),
-            ("memory_threshold", "monitor_memory_threshold"),
-            ("disk_threshold", "monitor_disk_threshold"),
-            ("check_interval", "monitor_check_interval"),
-            ("alert_cooldown", "monitor_alert_cooldown"),
-            # P2-3 增强
-            ("disk_trend_days", "monitor_disk_trend_days"),
-            ("high_cpu_duration", "monitor_high_cpu_duration"),
-            ("work_break_interval", "monitor_work_break_interval"),
-        ):
-            if sub_key in monitor_table:
-                updates[field] = monitor_table[sub_key]
-    # [deadline] 表 → 截止日期追踪字段
-    deadline_table = data.get("deadline", {})
-    if isinstance(deadline_table, dict):
-        for sub_key, field in (
-            ("enabled", "deadline_enabled"),
-            ("check_time", "deadline_check_time"),
-        ):
-            if sub_key in deadline_table:
-                updates[field] = deadline_table[sub_key]
-    # [calendar] 表 → 日历集成字段
-    calendar_table = data.get("calendar", {})
-    if isinstance(calendar_table, dict):
-        for sub_key, field in (
-            ("enabled", "calendar_enabled"),
-            ("backend", "calendar_backend"),
-            ("ics_path", "calendar_ics_path"),
-            ("ics_url", "calendar_ics_url"),
-            ("remind_minutes_before", "calendar_remind_minutes_before"),
-        ):
-            if sub_key in calendar_table:
-                updates[field] = calendar_table[sub_key]
-    # [sandbox] 表 → 安全沙箱字段（P3-8）
-    sandbox_table = data.get("sandbox", {})
-    if isinstance(sandbox_table, dict):
-        for sub_key, field in (
-            ("enabled", "sandbox_enabled"),
-            ("max_memory_mb", "sandbox_max_memory_mb"),
-            ("max_cpu_seconds", "sandbox_max_cpu_seconds"),
-            ("max_processes", "sandbox_max_processes"),
-            ("timeout", "sandbox_timeout"),
-            ("block_network", "sandbox_block_network"),
-            ("auto_allow_medium", "sandbox_auto_allow_medium"),
-            ("audit", "sandbox_audit"),
-            ("max_snapshots", "sandbox_max_snapshots"),
-        ):
-            if sub_key in sandbox_table:
-                updates[field] = sandbox_table[sub_key]
-        # excluded_commands 是数组
-        if "excluded_commands" in sandbox_table:
-            updates["sandbox_excluded_commands"] = list(sandbox_table["excluded_commands"])
-    # [checkpoint] 表 → 消息级回溯检查点字段（shadow git）@author aceFelix
-    checkpoint_table = data.get("checkpoint", {})
-    if isinstance(checkpoint_table, dict):
-        for sub_key, field in (
-            ("enabled", "checkpoint_enabled"),
-            ("max_per_session", "checkpoint_max_per_session"),
-            ("timeout_seconds", "checkpoint_timeout_seconds"),
-        ):
-            if sub_key in checkpoint_table:
-                updates[field] = checkpoint_table[sub_key]
-    # [policy] 表 → W1 运行时层字段；嵌套 [policy.notify_budget] → 打扰预算
-    # enabled/path 两键已废弃（策略引擎并入管线），不再映射即静默忽略
-    # @author aceFelix
-    policy_table = data.get("policy", {})
-    if isinstance(policy_table, dict):
-        for sub_key, field in (
-            ("away_idle_minutes", "away_idle_minutes"),
-        ):
-            if sub_key in policy_table:
-                updates[field] = policy_table[sub_key]
-        budget_table = policy_table.get("notify_budget", {})
-        if isinstance(budget_table, dict):
-            for sub_key, field in (
-                ("enabled", "notify_budget_enabled"),
-                ("daily_max", "notify_daily_max"),
-                ("quiet_hours", "notify_quiet_hours"),
-                ("aggregate_window_s", "notify_aggregate_window_s"),
-                ("min_salience", "notify_min_salience"),
-            ):
-                if sub_key in budget_table:
-                    updates[field] = budget_table[sub_key]
-    # [tools] 表 → 工具延迟加载字段
-    tools_table = data.get("tools", {})
-    if isinstance(tools_table, dict):
-        for sub_key, field in (
-            ("deferred_loading", "tools_deferred_loading"),
-            ("chat_detection", "tools_chat_detection"),
-        ):
-            if sub_key in tools_table:
-                updates[field] = tools_table[sub_key]
+    # 各功能域表（[tts]/[stt]/[voice]/[monitor]/[sandbox]/[policy]/[percept]/…）
+    # → Settings 字段，映射表见 settings_domains.py；表缺失整表跳过
+    apply_domain_tables(data, updates)
     # [llm] 表 → models 列表 + 自定义模型配置
+    # [llm] 表 → models 列表 + 自定义模型配置（需归一化旧字段名，是真正的逻辑，
+    # 故不入 settings_domains.py 的声明式映射）
     llm_table = data.get("llm", {})
     if isinstance(llm_table, dict):
         models_table = llm_table.get("models", {})
@@ -875,11 +634,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
                     c["provider"] = c.get("vendor") or c.get("api_format", "openai")
                 normalized[cname] = c
             updates["custom_models"] = normalized
-    # [update] 表 → 版本自更新字段（Phase 1）
-    update_table = data.get("update", {})
-    if isinstance(update_table, dict):
-        if "check" in update_table:
-            updates["update_check"] = bool(update_table["check"])
+    # 注：[update] 表的 check 键已由 apply_domain_tables 强制 bool 处理
     return s.with_overrides(**updates)
 
 

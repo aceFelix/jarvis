@@ -281,13 +281,18 @@ class ProactiveEngine:
 
     # ---- 通知出口（W1 预算闸门）----
 
-    def _dispatch_notify(self, source: str, text: str, *, dedup_key: str = "",
-                         urgency: float = 0.6) -> bool:
-        """所有主动播报的唯一出口：先过打扰预算，再走 on_notify。
+    def gate_notify(self, source: str, text: str, *, dedup_key: str = "",
+                    urgency: float = 0.6) -> str | None:
+        """W1 打扰闸门的**唯一实现**：返回该播的文本，None = 不播。
 
-        返回是否真正播报。未播 reasons（静默/聚合/预算外/away）由预算模块
-        给解释文本，落 daemon 日志可审计；积压在静默时段结束后聚合一条。
-        未注入 budget 时保持旧行为直接播报（向后兼容）。
+        为何单独拆出来：W2 感知层的事件由 serve 宿主（ProactiveHub）订阅总线后
+        投递，它需要同一道闸门，但**不能复用 `on_notify` 回调**（简报与感知事件的
+        桌面渲染 kind 不同）。拆开后闸门只有一份实现，`_dispatch_notify` 只是
+        它的“播完就走 on_notify”包装，不变量“所有打扰都过同一个闸”仍然成立。
+
+        行为：away 时把 emit 降级为 queue（不对空房间说话）；预算未注入时
+        只在 away 情况下静默丢弃；预算自身异常降级为直接播（不因闸门挂掉而不提醒）。
+
         @author aceFelix
         """
         import logging
@@ -302,29 +307,39 @@ class ProactiveEngine:
             away = False
         if self._budget is not None:
             try:
-                if away:
-                    action = self._budget.gate(text, source, dedup_key=dedup_key,
-                                               urgency=urgency)
-                    # 再入库一份带 away 标记的：gate 可能已聚合/冲刷，保守起见
-                    # away 时直接降级为 queue 语义（不入 pending 也不丢信息）
-                    if action.kind == "emit":
-                        from agent.core.policy.budget import NotifyAction
+                action = self._budget.gate(text, source, dedup_key=dedup_key,
+                                           urgency=urgency)
+                if away and action.kind == "emit":
+                    # 再入库一份：gate 可能已聚合/冲刷，保守起见 away 一律降为
+                    # queue 语义（不入 pending 也不丢信息）
+                    from agent.core.policy.budget import NotifyAction
 
-                        action = NotifyAction("queue", text, "无人值守，暂缓入库")
-                else:
-                    action = self._budget.gate(text, source, dedup_key=dedup_key,
-                                               urgency=urgency)
+                    action = NotifyAction("queue", text, "无人值守，暂缓入库")
                 if not action.should_emit:
                     logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
-                    return False
-                self._on_notify(action.text)
-                return True
+                    return None
+                return action.text
             except Exception as e:
                 logger.warning("打扰预算异常，降级直接播报: %s", e)
         elif away:
             logger.info("无人值守，跳过播报[%s]", source)
+            return None
+        return text
+
+    def _dispatch_notify(self, source: str, text: str, *, dedup_key: str = "",
+                         urgency: float = 0.6) -> bool:
+        """所有主动播报的唯一出口：先过打扰预算，再走 on_notify。
+
+        返回是否真正播报。未播 reasons（静默/聚合/预算外/away）由预算模块
+        给解释文本，落 daemon 日志可审计；积压在静默时段结束后聚合为一条。
+        未注入 budget 时保持旧行为直接播报（向后兼容）。
+        闸门本体在 ``gate_notify``（W2 感知事件走同一个闸）。
+        @author aceFelix
+        """
+        emitted = self.gate_notify(source, text, dedup_key=dedup_key, urgency=urgency)
+        if emitted is None:
             return False
-        self._on_notify(text)
+        self._on_notify(emitted)
         return True
 
     # ---- 每日简报 ----

@@ -13,12 +13,16 @@
 绑定收敛为 127.0.0.1 + 随机端口（桌面壳经 stdout 握手 JSON 获取），
 不对局域网暴露——这是与手机协同模式（0.0.0.0 + 固定端口）的关键差异。
 
+指令家族的分文件（2026-10 拆分，本类一度过 800 行上限）：`email.*` 见
+``rpc_email.py``、`extensions.exec` 见 ``rpc_extensions.py``、`percept.*` 见
+``rpc_percept.py``，均以混入类组合进本类（指令名、回执口径与注册方式不变）；
+宿主专属工具（``_register_rpc`` / ``_send_json`` / ``_api`` 等）由本类提供。
+
 @author aceFelix
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import queue
 import threading
@@ -34,14 +38,11 @@ from agent.config.desktop_settings import (
     save_setting,
     validate_setting,
 )
-from agent.config.email_settings import (
-    apply_email_config,
-    read_email_config,
-    save_email_config,
-    validate_email_config,
-)
 from agent.config.settings import Settings
 from agent.serve import protocol
+from agent.serve.rpc_email import EmailRpcMixin
+from agent.serve.rpc_extensions import ExtensionsRpcMixin
+from agent.serve.rpc_percept import PerceptRpcMixin
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.metrics import collect_metrics
 from agent.ui.workbench.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
@@ -54,11 +55,16 @@ _MAX_ATTACH_FILES = 5
 _MAX_FILE_CHARS = 200_000
 
 
-class DesktopBridgeServer(BridgeServer):
+class DesktopBridgeServer(
+    PerceptRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
+):
     """桌面壳 API 服务器：BridgeServer 传输层 + ChatEngine 指令路由。
 
     生命周期由 ``agent.serve.app.run_serve`` 管理：
     start() → 事件泵启动 → WS 客户端连接 → 指令/事件双向流 → stop()。
+
+    三个指令家族由混入类提供（percept.* / email.* / extensions.exec），
+    本类只留传输与引擎路由相关的部分。
 
     @author aceFelix
     """
@@ -200,6 +206,12 @@ class DesktopBridgeServer(BridgeServer):
         # _rpc_types 满足契约自检。@author aceFelix
         self.register_ws_handler(protocol.CMD_EXTENSIONS, self._cmd_extensions)
         self._rpc_types.add(protocol.CMD_EXTENSIONS)
+        # percept.status.get / percept.config.set（W2 第 5 步，2026-10）：桌面「感知源」
+        # 面板的数据源与逐源开关。两者都是快速本地 IO（读内存快照 / 写一行 TOML），
+        # 走同步 _register_rpc；handler 实现在 rpc_percept.PerceptRpcMixin。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_PERCEPT_STATUS_GET, self._rpc_percept_status_get)
+        self._register_rpc(protocol.CMD_PERCEPT_CONFIG_SET, self._rpc_percept_config_set)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
@@ -231,66 +243,6 @@ class DesktopBridgeServer(BridgeServer):
     def _rpc_wechat_pairing(self, data: dict) -> Any:
         """wechat.pairing：透传手机端显示的数字配对码。"""
         return self._api.wechat_pairing(str(data.get("code", "")))
-
-    async def _cmd_email_send(self, ws: Any, data: dict) -> None:
-        """email.send 指令：管家服务「邮件发送」表单落地（异步，避免阻塞事件循环）。
-
-        校验 subject/body 非空（快速失败，与其它 _rpc_* 抛 ValueError 同口径）后，
-        把实际的 SMTP 发送放进 asyncio.to_thread 的工作线程执行——api.send_email
-        是同步阻塞 IO（timeout 30s），直接 await 会冻住事件循环、掐断流式事件。
-        回执 result 为 {"ok": true, "message": ...}；失败 ok=false + 错误原文
-        （邮件未启用 / 缺配置 / 认证失败等，前端弹窗内联显示）。@author aceFelix
-        """
-        try:
-            subject = str(data.get("subject") or "").strip()
-            body = str(data.get("body") or "").strip()
-            if not subject:
-                raise ValueError("邮件主题不能为空")
-            if not body:
-                raise ValueError("邮件正文不能为空")
-            result = await asyncio.to_thread(
-                self._api.send_email,
-                {
-                    "to": str(data.get("to") or ""),
-                    "cc": str(data.get("cc") or ""),
-                    "bcc": str(data.get("bcc") or ""),
-                    "subject": subject,
-                    "body": body,
-                },
-            )
-            msg = protocol.build_reply(protocol.CMD_EMAIL_SEND, ok=True, result=result)
-        except Exception as e:  # noqa: BLE001 - 回执携带错误，连接不中断
-            msg = protocol.build_reply(
-                protocol.CMD_EMAIL_SEND, ok=False, error=f"{type(e).__name__}: {e}"
-            )
-        await self._send_json(ws, msg)
-
-    async def _cmd_extensions(self, ws: Any, data: dict) -> None:
-        """extensions.exec 指令：桌面「扩展服务」面板的通用扩展动作入口（异步）。
-
-        payload 形如 ``{"category": ..., "action": ..., ...}``；业务实现见
-        agent/ui/workbench/extensions_api.py。插件/harness 安装含网络 IO（git 克隆/
-        远程下载），故放 asyncio.to_thread 工作线程执行，避免冻住事件循环。回执
-        result = {"ok": bool, "data": ..., "message": str}；异常（非法分类/动作）
-        走 ok=false + 错误原文。@author aceFelix
-        """
-        try:
-            payload: dict[str, Any] = {
-                "category": str(data.get("category") or ""),
-                "action": str(data.get("action") or ""),
-            }
-            # 透传其余动作参数（name/command/args/env/keyword/id 等），
-            # 排除协议信封字段（type 由 WS 层消费，category/action 已单独取）
-            for key, value in data.items():
-                if key not in ("type", "category", "action"):
-                    payload[key] = value
-            result = await asyncio.to_thread(self._api.run_extension, payload)
-            msg = protocol.build_reply(protocol.CMD_EXTENSIONS, ok=True, result=result)
-        except Exception as e:  # noqa: BLE001 - 回执携带错误，连接不中断
-            msg = protocol.build_reply(
-                protocol.CMD_EXTENSIONS, ok=False, error=f"{type(e).__name__}: {e}"
-            )
-        await self._send_json(ws, msg)
 
     async def _cmd_talk_audio(self, ws: Any, data: dict) -> None:
         """talk.audio 指令：桌面全双工会话的麦克风帧（fire-and-forget，无回执）。
@@ -666,33 +618,6 @@ class DesktopBridgeServer(BridgeServer):
             self._hub.hot_update_schedule()
         return {key: value}
 
-    def _rpc_email_config_get(self, data: dict) -> dict:
-        """email.config.get：邮箱服务面板数据源（当前发件邮箱与 SMTP 服务信息）。
-
-        授权码**不回传明文**，只回 ``has_password`` 布尔——桌面壳据此把密码框渲染为
-        「已配置，留空即不修改」。字段口径见 agent/config/email_settings.py。
-
-        @author aceFelix
-        """
-        return read_email_config(self._settings)
-
-    def _rpc_email_config_set(self, data: dict) -> dict:
-        """email.config.set：修改邮箱服务配置（校验 → 落盘 → 运行时生效 → 回读）。
-
-        顺序与 settings.set 一致：先落盘 settings.toml 的 [email] 表，再改运行时
-        Settings（SendEmailTool 每次现读，立即生效）；落盘失败则回执报错且不动运行时。
-        授权码留空 = 保持原值（不回传、不覆盖）。回执 result 为落盘后的完整配置快照。
-
-        @author aceFelix
-        """
-        patch = validate_email_config(data)
-        if not patch:
-            raise ValueError("email.config.set 至少需要一个有效的配置项")
-        if not save_email_config(patch):
-            raise RuntimeError("settings.toml 落盘失败，请检查磁盘写权限")
-        apply_email_config(self._settings, patch)
-        return read_email_config(self._settings)
-
     # ---- 桌面项目工作区 project.* ----
 
     def _rpc_project_set(self, data: dict) -> dict:
@@ -739,11 +664,21 @@ class DesktopBridgeServer(BridgeServer):
         broadcast 在无在线客户端时会被丢弃，桌面壳的首屏七路刷新（含设置面板
         settings.get 回填）将永不触发；改为按连接推送，同时覆盖断线重连场景。
 
+        同一个时机也用来投递感知层的**首次引导**（W2 第 7 步）：道理与 init
+        完全一样——启动期投会被丢。宿主没接线或已经问过都是空操作，失败不得
+        影响连接。
+
         @author aceFelix
         """
         await self._send_json(
             ws, {"event": protocol.EVT_INIT, "data": self._api.get_state()}
         )
+        drain = getattr(self._hub, "drain_percept_ask", None)
+        if callable(drain):
+            try:
+                drain()
+            except Exception:  # noqa: BLE001 - 引导投递失败不能阻断连接
+                pass
 
     # ---- 事件泵 ----
 

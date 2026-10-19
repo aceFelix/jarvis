@@ -24,6 +24,10 @@ mediapipe GestureRecognizer 支持的手势:
 
 依赖: pip install mediapipe opencv-python
 模型: 自动从 Google Storage 下载缓存到 ~/.jarvis/models/
+
+生产接线（2026-10，阶段 9 W2）：`agent/core/percept/source_vision.py` 把本监控器
+的手势/人脸事件接入统一事件总线（逐源默认关）；`agent/tools/vision/vision_tools.py`
+的按需启停工具仍可直接使用本类。
 """
 
 from __future__ import annotations
@@ -196,6 +200,19 @@ class VisionWatcher:
     def available(self) -> bool:
         """mediapipe + cv2 是否可用。"""
         return self._available
+
+    def set_event_handler(self, handler: Callable[["VisionEvent"], None]) -> None:
+        """换事件回调（W2 感知源需要在实例已存在时接自己的入队函数）。
+
+        构造时传 on_event 适合“谁创建谁消费”；感知层装配的顺序相反
+        （源先建、watcher 后起），故提供一个显式改接入口。运行中改接
+        下一帧即生效（采集线程每帧只读 `self._on_event`）。
+
+        @author aceFelix
+        """
+        if not callable(handler):
+            raise ValueError("on_event 必须是可调用对象")
+        self._on_event = handler
 
     @property
     def running(self) -> bool:

@@ -154,6 +154,56 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 
 ---
 
+## W2 感知层（`[percept]`，阶段 9）
+
+统一事件总线 + 逐源采集：把“时钟驱动”扩成“工作现场驱动”。总线只裁**事件层
+噪声**（去重窗口 / 同源节流 / 地板分 / 连败自动停用），“该不该现在打扰”仍由
+上面的 `[policy.notify_budget]` 决定。机制详见
+[17-W2 感知层](../docs/architecture/17-W2感知层.md)。
+
+> 🔒 **隐私口径（已拍板的决策 2）**：总开关与逐源开关**全部默认关**，未显式打开的
+> 源一个字节都不采；事件只本地落盘（`~/.jarvis/percept/events.jsonl`），不随对话上传。
+> “问过没”只记在一个本机文件里：`~/.jarvis/percept/consent.json`（无记录且从未开过
+> 总开关且本文件无 `[percept]` 表时，桌面壳连上后才会收到一条只出现一次的引导）。
+> ✅ **当前状态（W2 第 5/6/7 步已接线）**：serve 宿主 `ProactiveHub` 启动时装配总线，
+> 感知事件与简报/截止日期走**同一个打扰预算闸门**（首次引导例外：它不过闸门、不播报）。改开关有两条路：
+> - **桌面壳「管家服务 → 感知源」面板**（已上线）：经 `percept.status.get` / 
+>   `percept.config.set` 改逐源开关与名单，**先落本文件再改运行时，并由宿主重装配
+>   总线即时生效**（关掉视觉就当场释放摄像头），不必重启；面板可改字段见
+>   `agent/config/percept_settings.py`（只放开关与名单）；
+> - **直接改本文件的 `[percept]` 表**：仍需**重启桌面壳/`--serve`** 才生效（逐源开关
+>   与采样间隔在启动时快照），极客参数（去重窗口/地板分/采样间隔/帧率）只能走这条。
+> ⚠️ 仅 `--serve` / 桌面壳运行期间采集（终端 REPL 不装总线）。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[percept] enabled` | `false` | 感知层总开关（关 = 不起轮询线程、不采任何源） |
+| `[percept] dedup_window_s` | `300` | 同一件事的去重窗口（秒） |
+| `[percept] min_salience` | `0.0` | 总线地板分（0 = 不裁，重要度裁决交给 W1） |
+| `[percept] history_max` | `200` | 内存环形历史条数（留痕文件上限 = 此值×10 行） |
+| `[percept] log_events` | `true` | 本地留痕；`false` = 完全不碰磁盘 |
+| `[percept] auto_disable_after_errors` | `3` | 单源连续失败达此数自动停用（0 = 只隔离不罢工） |
+| `window_enabled` / `window_interval_s` | `false` / `5` | 前台窗口源（唯一有明显隐私属性的源） |
+| `window_title_max_chars` / `window_title_full_enabled` | `40` / `false` | 标题截断长度；开后者才保留完整标题（仍剥凭据片段） |
+| `window_exclude_apps` / `window_linger_minutes` | `[]` / `0` | 排除应用（留空则用内置敏感名单）；停留提醒阈值 |
+| `file_enabled` / `file_watch_dirs` | `false` / `[]` | 文件守望源（**只订阅白名单目录**，空列表 = 开了也不采） |
+| `file_interval_s` / `file_max_entries` / `file_grow_threshold` / `file_ignore_suffixes` / `file_min_interval_s` | `30` / `2000` / `5` / `[]` / `0` | 文件源参数 |
+| `vcs_enabled` / `vcs_repos` / `vcs_interval_s` / `vcs_min_interval_s` | `false` / `[]` / `120` / `60` | 仓库源（登记制，只跑 `git status`/`stash list` 两条只读命令） |
+| `mail_enabled` / `mail_min_interval_s` / `mail_watch_senders` | `false` / `0` / `[]` | 邮件源（IMAP 只读 IDLE）；白名单非空 = 只报命中的人 |
+| `vision_enabled` / `vision_camera_index` / `vision_fps` | `false` / `0` / `2` | 视觉在场源（**唯一会碰摄像头的源**，需 `pip install "jarvis-agent[vision]"`） |
+| `vision_gesture_enabled` / `vision_auto_stop_minutes` / `vision_interval_s` | `true` / `0` / `5` | 是否跑手势识别；`0` = 不自动关摄像头，`>0` 空闲自动关（代价：关闭期间检测不到“回来了”）；总线排空节拍 |
+| `calendar_enabled` / `system_enabled` / `schedule_enabled` | `false` | 既有能力收编位（本体未装配，开了也不会采，理由见架构文档第七节） |
+
+> 👀 **视觉源与 away**：打开 `vision_enabled` 后，人脸离开画面会触发无人值守（away），
+> 回来时由人脸重新出现解除；而摄像头一旦不再工作（开了 `vision_auto_stop_minutes`、
+> 被视觉工具停止、启动失败）就再也等不到“回来”，所以视觉推断的 away 有
+> **30 分钟有效期**（`agent/core/policy/state.py` 的 `VISION_AWAY_TTL_MIN`），到期自动不再
+> 压制播报。手动 `/away` 不被摄像头取消也不过期（优先级：手动 > 视觉 > 空闲推断）。
+
+邮箱收件凭据配在 `[email]` 表（见下方“邮件”节），需同时开 `[percept] mail_enabled`。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |
@@ -232,6 +282,14 @@ email_smtp_user = "your@163.com"
 email_smtp_password = "授权码"    # 不是登录密码！
 email_sender = "your@163.com"
 email_default_recipient = "target@qq.com"
+# 收件（W2 mail 事件源，需同时开 [percept].mail_enabled）：IMAP 只读，
+# 只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，永不拉正文、不把邮件标成已读。
+# imap_user / imap_password 留空则复用 SMTP 同一套（163/QQ 两边同一个授权码）。
+email_imap_host = "imap.163.com"
+email_imap_port = 993            # 993 = SSL；143 走 STARTTLS
+email_imap_user = "your@163.com"
+email_imap_password = "授权码"
+email_imap_mailbox = "INBOX"
 ```
 
 ---

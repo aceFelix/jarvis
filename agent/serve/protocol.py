@@ -112,6 +112,18 @@ extensions.exec     category: str（mcp/tools/     {ok: bool, data: <各动作
                     skills/plugins/harness）,      结构化结果>, message?: str}
                     action: str,                   （桌面「扩展服务」面板：
                     ...其余动作参数                 五类扩展的清单与增删改启停）
+percept.status.get  [event_limit?: int（≤ 50）]  {enabled, assembled, bus_running,
+                                                counters, dedup_window_s, log_file,
+                                                log_events, sources: [{name, label,
+                                                hint, enabled, implemented,
+                                                registered, bus_enabled, stats,
+                                                detail, pending_reason?}],
+                                                recent_events: [...], pending: [...]}
+                                                （桌面「感知源」面板：在采什么、
+                                                采到了什么，隐私自查口径）
+percept.config.set  一个或多个 [percept] 白名单   同 percept.status.get 快照 +
+                    字段（开关 bool / 名单 list /   {hot_applied, applied}（改完
+                    分钟 int）                     由宿主重装配总线，无需重启）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -143,7 +155,9 @@ extensions.exec     category: str（mcp/tools/     {ok: bool, data: <各动作
   ``voice_ai_text``（源自解耦 voice_loop 经 ServeVoiceAdapter 外抛）
 - 主动播报：``proactive_notify``（payload ``{kind, title, text, task_id}``，
   kind = ``briefing`` 每日简报 / ``reminder`` 用户提醒 / ``deadline``
-  截止日期；源自 ProactiveHub，见 ``agent/serve/hub.py``）
+  截止日期 / ``percept`` W2 感知事件播报（标题固定「贾维斯观察」，task_id 为空；
+  桌面壳 dispatcher 对未知 kind 走默认渲染，无需壳侧改动）；
+  源自 ProactiveHub，见 ``agent/serve/hub.py``）
 - 初始化：``init``（连接建立后首推，payload 同 state.get）
 - 运行健康：``mcp_ready``（MCP 后台连接落定时推一次，payload 即 state.get 的
   mcp 快照 ``{connected, failed, tools}``；桌面 init 时快照常为 None——MCP 约 9s
@@ -264,6 +278,16 @@ CMD_EMAIL_CONFIG_SET = "email.config.set"
 # @author aceFelix
 CMD_EXTENSIONS = "extensions.exec"
 
+# percept.status.get / percept.config.set（W2 阶段 9 第 5 步，2026-10）：桌面标题栏
+# 「管家服务 → 感知源」面板。get 一次带回总开关/逐源启用/总线计数/源自报细节/
+# 最近事件/留痕文件路径（“可见即可导出”的隐私自查口径）；set 改 [percept] 白名单
+# 里的开关与名单，先落盘 settings.toml 再改运行时，最后让 ProactiveHub 重装配总线
+#（逐源开关是装配期快照）。字段白名单单一真源见 agent/config/percept_settings.py，
+# 状态拼装见 agent/core/percept/status.py。感知域无密钥；未装配的收编位（calendar/
+# system/schedule）刻意不入白名单，不给假可用开关。@author aceFelix
+CMD_PERCEPT_STATUS_GET = "percept.status.get"
+CMD_PERCEPT_CONFIG_SET = "percept.config.set"
+
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MESSAGE,
@@ -317,6 +341,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_EMAIL_CONFIG_GET,
     CMD_EMAIL_CONFIG_SET,
     CMD_EXTENSIONS,
+    CMD_PERCEPT_STATUS_GET,
+    CMD_PERCEPT_CONFIG_SET,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----
