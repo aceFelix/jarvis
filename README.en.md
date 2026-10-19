@@ -125,6 +125,7 @@
 | 🎙️ **Listens & speaks** | `/voice` turn-by-turn voice chat, `/talk` full-duplex realtime (speak to interrupt), TTS announces proactive reminders | [Voice](docs/guide/voice.md) |
 | 🖱️ **Operates your PC** | Mouse/keyboard/screenshot/window tools + visual template locating, drives any software like a human | [GUI Automation](docs/guide/ecosystem.md#gui-自动化) |
 | 🗓️ **Proactive butler** | Daily briefing, timed reminders, deadline tracking, system monitoring — it acts without being asked | [Proactive System](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
+| 👀 **Working-context perception** | Five event sources (foreground window / folder pile-up / repo state / important mail / camera presence) feed one event bus; the notify budget decides when it is actually worth speaking up (**every source off by default**, you are told once after connecting if you never chose, and everything collected is exportable for self-audit) | [Percept sources](docs/guide/desktop.md#感知源阶段-9--w2已接线) |
 | 🛎️ **Butler services** | jarvis-desktop title-bar entry: email service (view/edit the current mailbox + configure SMTP + send mail) calls the backend tools directly (more to come) | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧰 **Extension services** | jarvis-desktop title-bar entry: a right-column panel managing MCP servers (add/edit/remove + enable/disable), built-in tools, skills, plugins and harness tools (marketplace search/install/uninstall/toggle) in one place | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧠 **Three-layer memory** | Session persistence + long-term memory + profile distillation, knows you better over time | [Memory](docs/guide/concepts.md#记忆系统) |
@@ -189,6 +190,8 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - [x] **Phase 5**: The JARVIS form (proactive perception + subagents + proactive reminders + jarvis-desktop shell)
 - [x] **Phase 6**: Cross-platform (Windows / macOS / Linux)
 - [x] **Phase 7**: Realtime chat UI (Arc Reactor workbench + full-duplex interrupt + desktop app)
+- [x] **Phase 8**: W1 runtime layer (authorization leases + notify budget + unattended mode; declarative rules merged into the five-layer pipeline) — shipped in v2.2.3
+- [x] **Phase 9**: W2 perception layer (unified event bus + five event sources + per-source opt-in + first-run consent + the desktop “Percept sources” panel) — shipped in v2.2.5
 
 > Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/blueprint/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
