@@ -150,6 +150,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 ```
 
 - 默认接阿里云 DashScope（`qwen3.7-plus` 多模态），也可 `export DASHSCOPE_API_KEY=sk-xxx` 后直接启动
+- 不想装 Python、只想用图形界面？直接下载 [jarvis-desktop 安装包](https://github.com/aceFelix/jarvis-desktop/releases/latest)（Windows，免装 Python 双击即用）
 - 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）

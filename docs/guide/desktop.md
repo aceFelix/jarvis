@@ -11,6 +11,11 @@
 + 项目区；中：对话气泡流；右：任务 / 用量 / 系统状态 / 运行健康），自带开机自启与
 系统通知。仓库内不另提供 GUI。
 
+> 📌 **拿安装包（免装 Python 的用法）**：到 jarvis-desktop 的
+> [Releases](https://github.com/aceFelix/jarvis-desktop/releases/latest) 下载
+> `JARVIS.Desktop-Setup-<版本>.exe`，双击即装——包里已经带了冻结好的 `jarvis-serve.exe`。
+> 直链、体积与 SmartScreen 提示的说明见桌面仓库 README 的「下载安装包」一节。
+
 > 📌 **三栏 pywebview 工作台已退役（2026-10-14）**：`jarvis --gui` / `--talk` 下线，
 > 窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` 与
 > `assets/`）已删除。退役原因是两套前端重复建设（气泡渲染 / 会话列表 / 模型选择器 /
