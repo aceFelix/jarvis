@@ -272,7 +272,9 @@ cd <workspace>/.jv-test/venv/Scripts
 ./python.exe -m agent.main                           # 进入实测
 ```
 
-逐功能手工走查见 [docs/test/TEST_CHECKLIST.md](../test/TEST_CHECKLIST.md)。
+逐功能手工走查见 [docs/test/TEST_CHECKLIST.md](../test/TEST_CHECKLIST.md)；
+W2 感知层的实机走查（Windows/Git Bash，含 `[percept]` 完整配置）另见
+[W2 感知层实机走查清单](../test/percept-w2-testing.md)。
 
 ### 注意事项
 

@@ -31,12 +31,12 @@
 | [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
 | [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | 💤 休眠 |
 | [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控 | 💤 休眠 |
-| [core/daemon/vision_watcher.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/vision_watcher.py) | 视觉守望者 | 💤 休眠 |
+| [core/daemon/vision_watcher.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/vision_watcher.py) | 视觉守望者 | ✅ 在用（2026-10 由 W2 感知源 `percept/source_vision.py` 接入总线，默认关） |
 | [core/daemon/holidays.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/holidays.py) | 节假日识别 | 💤 休眠 |
 
 > 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
 > ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报，并行用本机 CosyVoice 做待机 TTS 朗读（二期，`proactive_tts_enabled`，忙时跳过）；**仅 `--serve` / 桌面壳运行期间生效**（终端侧 2026-10 另接 `CliReminderHost`，仅文本上屏不播 TTS）。
-> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 轻量采集落地（现经 serve 事件供桌面壳右栏）；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）、`vision_watcher.py`、`holidays.py` 待二期接线。
+> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 轻量采集落地（现经 serve 事件供桌面壳右栏）；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）、`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
 
 ## 二、桌面入口（当前形态：jarvis-desktop）
 
@@ -125,7 +125,7 @@ rm ~/Library/LaunchAgents/*JARVIS*.plist
 | DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` | ✅ serve 宿主 ProactiveHub 装配 |
 | CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` | 💤 休眠（二期） |
 | Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` | 💤 休眠（二期） |
-| VisionWatcher | mediapipe 本地手势/人脸监控 | — | 💤 休眠 |
+| VisionWatcher | mediapipe 本地手势/人脸监控 | `[percept] vision_*` | ✅ 在用（2026-10：W2 感知源接入总线，`vision_enabled` 默认关） |
 | Holidays | 节假日/工作日识别 | — | 💤 休眠 |
 
 ## 七、设计取舍（下线复盘）

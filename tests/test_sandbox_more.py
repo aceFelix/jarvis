@@ -370,7 +370,11 @@ class TestSandboxExecutor:
     async def test_run_timeout(self):
         """普通执行超时：timed_out 标记 + 进程被 kill。"""
         ex = SandboxExecutor(SandboxConfig(enabled=False, timeout=120))
-        result = await ex.run('python -c "import time; time.sleep(5)"', timeout=1)
+        # 用 sys.executable 而不是裸 `python`：本机 PATH 里没有 python 时（未激活
+        # venv 的开发机与 CI 容器都会）子进程直接 FileNotFound，超时断言变成
+        # 假失败；路径加引号防空格，正斜杠避开转义。
+        exe = sys.executable.replace("\\", "/")
+        result = await ex.run(f'"{exe}" -c "import time; time.sleep(5)"', timeout=1)
         assert result.timed_out is True
         assert result.sandboxed is False
         assert "超时" in result.error

@@ -19,9 +19,33 @@ from typing import Any
 _STATE_FILE = Path.home() / ".jarvis" / "policy_state.json"
 _PENDING_FILE = Path.home() / ".jarvis" / "pending_approvals.json"
 
+#: 会被 `is_away()` 直接采信的 away 来源。manual=用户明说了 /away；
+#: vision=W2 感知层的人脸不在场推断（阶段 9 补上 W1 递延的这一项）。
+#: 仅当 source 在此名单里时 `active` 才直接生效（空闲推断走 idle_minutes 分支）。
+PRESENCE_SOURCES: tuple[str, ...] = ("manual", "vision")
+
+#: 视觉推断的 away 有效期（分钟）。“人回来”只能由人脸重新出现上报，而摄像头
+#: 随时可能不再工作（配了 `percept_vision_auto_stop_minutes` 后空闲自动关闭、
+#: 被视觉工具停掉、启动失败），停掉之后就永远等不到那一条事件，所以“人不在”
+#: 这个事实只在有限窗口内可靠：到期后不再压制播报。
+#: 为什么不用“现场活动就自动解除”：`policy_gate` 里工具执行也会刷新活动，
+#: 而 jarvis 自己跑任务是“机器在动”不是“人在场”，用它解除等于自己把自己叫醒。
+#: 宁可到点后多提醒几条（还有静默时段与日额度兜底），不可因一次误判沉默整晚。
+VISION_AWAY_TTL_MIN = 30
+
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _minutes_since(iso: str) -> float | None:
+    """距那个 ISO 时间过了多少分钟；时间缺失或解不动返回 None（调用方当“不可靠”处理）。"""
+    if not iso:
+        return None
+    try:
+        return (datetime.now() - datetime.fromisoformat(iso)).total_seconds() / 60.0
+    except ValueError:
+        return None
 
 
 def _atomic_write(path: Path, payload: Any) -> None:
@@ -48,9 +72,8 @@ def brief_args(args: dict[str, Any], limit: int = 120) -> str:
 class PolicyStateStore:
     """away 状态 + 最近活动时间。
 
-    判定优先级：手动 /away（manual）> 空闲时长推断（idle_minutes>0 时，
-    距 last_activity 超过阈值即视为 away）。VisionWatcher 人脸离开接入留
-    给阶段 9（W2 事件源），本期不动摄像头。
+    判定优先级：手动 /away（manual）> 在场推断（vision，需摄像头开启）>
+    空闲时长推断（idle_minutes>0 时，距 last_activity 超过阈值即视为 away）。
 
     @author aceFelix
     """
@@ -86,6 +109,25 @@ class PolicyStateStore:
         _atomic_write(self._path, data)
         self._mtime = -1.0  # 强制下次重读
 
+    def set_presence_away(self, active: bool, *, source: str = "vision") -> bool:
+        """在场推断（视觉）驱动的 away 迁移，返回是否真的改了状态。
+
+        两条保守规则写在这里而不是调用方（哪个宿主都一样）：
+        1. **手动优先**：用户已经 /away 了，摄像头不得替他取消（否则“说了不在
+           却被人脸检测拉回来”，手动指令的可信度就垮了）；
+        2. **幂等**：状态与来源都没变时不写盘，免摄像头在在场边界抖时反复落盘。
+
+        @author aceFelix
+        """
+        data = self._load()
+        away = data.get("away", {})
+        if away.get("active") and away.get("source") == "manual":
+            return False
+        if bool(away.get("active")) == bool(active) and away.get("source") == source:
+            return False
+        self.set_away(bool(active), source=source)
+        return True
+
     def touch_activity(self, throttle_s: float = 60.0) -> None:
         """刷新最近活动时间（工具执行即视为"现场有活动"）。
 
@@ -106,12 +148,20 @@ class PolicyStateStore:
     def is_away(self, idle_minutes: int = 0) -> tuple[bool, str]:
         """当前是否无人值守。返回 (away, 依据说明)。
 
-        idle_minutes<=0 时仅认手动标志（本期默认，空闲推断可配置开启）。
+        idle_minutes<=0 时仅认“在场类”显式标志（手动 /away 或视觉推断），
+        空闲推断需阈值>0 才启用（本期默认关，避免误判压掉提醒）。
         """
         data = self._load()
         away = data.get("away", {})
-        if away.get("active") and away.get("source") == "manual":
-            return True, "手动 /away"
+        src = str(away.get("source") or "manual")
+        if away.get("active") and src in PRESENCE_SOURCES:
+            if src == "manual":
+                return True, "手动 /away"
+            # 视觉推断：只在有效期内采信（见 VISION_AWAY_TTL_MIN 的说明）
+            minutes = _minutes_since(str(away.get("since") or ""))
+            if minutes is not None and minutes <= VISION_AWAY_TTL_MIN:
+                return True, f"视觉：人脸不在画面（{int(minutes)} 分钟前）"
+            return False, ""
         if idle_minutes > 0:
             last = data.get("last_activity", "")
             if last:
@@ -121,7 +171,7 @@ class PolicyStateStore:
                         return True, f"空闲 {int(idle)} 分钟（阈值 {idle_minutes}）"
                 except ValueError:
                     pass
-        # 空闲推断出的 away 未成立时，手动标志以外的 active 不再算数
+        # 空闲推断出的 away 未成立时，不在采信名单内的 active 不算数
         return False, ""
 
 

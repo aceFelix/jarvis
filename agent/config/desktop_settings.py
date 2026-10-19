@@ -5,8 +5,8 @@
 本模块是「桌面可改」白名单的单一真源：
 - DESKTOP_SETTING_SPECS 登记 key → TOML 节/字段、Settings 属性、类型与取值范围；
 - validate_setting 类型 + 范围 + HH:MM 校验（失败抛 ValueError，调用方回执报错）；
-- save_setting 外科式文本落盘（与 model_registry save_* 族同口径：保留注释与
-  其他字段，节缺失追加末尾，文件缺失创建最小文件）；
+- save_setting 外科式文本落盘（委派 agent/config/toml_writer.py 的 save_section，
+  与邮箱配置、W2 感知面板共用一份实现）；
 - apply_setting 改运行时 Settings 实例（tts/proactive_tts 每次播报现读立即生效；
   briefing/deadline 另需 ProactiveHub.hot_update_schedule 重注册调度任务）。
 密钥（api_key 等）、自由路径与极客参数一律不入 SCHEMA——桌面协议永不触碰。
@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from agent.config.toml_writer import bool_literal, save_section, str_literal
 
 # HH:MM 24 小时制（briefing_time / deadline_check_time 取值格式）
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -110,51 +111,19 @@ def apply_setting(settings: Any, spec: SettingSpec, value: Any) -> None:
 def _toml_literal(spec: SettingSpec, value: Any) -> str:
     """设置值转 TOML 字面量（float 保留小数点，避免被解析成整数）。"""
     if spec.kind == "bool":
-        return "true" if value else "false"
+        return bool_literal(bool(value))
     if spec.kind == "int":
         return str(int(value))
     if spec.kind == "float":
         return repr(float(value))
-    return f'"{value}"'
+    return str_literal(str(value))
 
 
 def save_setting(spec: SettingSpec, value: Any) -> bool:
-    """外科式落盘单个设置项到 ~/.jarvis/settings.toml（保留注释与其他字段）。
+    """外科式落盘单个设置项到 ~/.jarvis/settings.toml（实现委派 toml_writer）。
 
-    - 节存在：替换已有字段行，节内没有则插在节头后；
-    - 节不存在：文件末尾追加新节；文件不存在则创建最小文件。
     返回 True 表示成功；IO 失败返回 False（调用方据此回执报错，不改运行时）。
+
+    @author aceFelix
     """
-    line = f"{spec.field} = {_toml_literal(spec, value)}"
-    toml_path = Path.home() / ".jarvis" / "settings.toml"
-    try:
-        toml_path.parent.mkdir(parents=True, exist_ok=True)
-        if not toml_path.exists():
-            toml_path.write_text(f"[{spec.section}]\n{line}\n", encoding="utf-8")
-            return True
-
-        content = toml_path.read_text(encoding="utf-8")
-        # 节头匹配不用 \s*$（\s 会吞换行导致后续切片偏移），只容忍行内空白
-        section_match = re.search(
-            rf"^\[{re.escape(spec.section)}\][ \t]*$", content, re.MULTILINE
-        )
-        if section_match:
-            head_end = section_match.end() + 1  # 跳过节头后的换行
-            rest = content[head_end:]
-            nxt = re.search(r"^\[", rest, re.MULTILINE)
-            sec_end = head_end + (nxt.start() if nxt else len(rest))
-            section = content[head_end:sec_end]
-            if re.search(rf"^{re.escape(spec.field)}\s*=", section, re.MULTILINE):
-                new_section = re.sub(
-                    rf"^{re.escape(spec.field)}\s*=.*$", line, section, flags=re.MULTILINE
-                )
-            else:
-                new_section = line + "\n" + section
-            content = content[:head_end] + new_section + content[sec_end:]
-        else:
-            content = content.rstrip() + f"\n\n[{spec.section}]\n{line}\n"
-
-        toml_path.write_text(content, encoding="utf-8")
-        return True
-    except OSError:
-        return False
+    return save_section(spec.section, {spec.field: _toml_literal(spec, value)})

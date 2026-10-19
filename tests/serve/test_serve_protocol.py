@@ -9,7 +9,10 @@
 - settings.get/set RPC：白名单全键取值、校验、先落盘后生效、调度键热更新、
   落盘失败不动运行时
 - email.config.get/set RPC：读不回授权码明文、落盘后运行时生效、授权码留空
-  保持原值、端口/类型校验、落盘失败不动运行时
+  保持原值、端口/类型校验、落盘失败不动运行时（handler 在 rpc_email 混入，
+  落盘函数因此 patch 在 agent.serve.rpc_email 而不是 server 模块）
+- percept.status.get / percept.config.set RPC：状态快照口径、白名单校验、
+  先落盘后生效、宿主重装配（hot_applied）、hub 缺失时降级
 
 @author aceFelix
 """
@@ -17,16 +20,15 @@
 from __future__ import annotations
 
 import asyncio
-import queue
 
 import pytest
 
 from agent.config.settings import Settings
 from agent.serve import protocol
+from agent.serve import rpc_email as email_rpc_mod
 from agent.serve import server as server_mod
 from agent.serve.server import DesktopBridgeServer
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
+from tests.serve.support import make_desktop_server
 
 
 # ---- 握手 JSON ----
@@ -70,12 +72,9 @@ def test_build_reply_error():
 # ---- 指令注册完整性 ----
 
 def _make_server() -> DesktopBridgeServer:
-    settings = Settings()
-    event_queue: queue.Queue = queue.Queue()
-    command_queue: queue.Queue = queue.Queue()
-    engine = ChatEngine(settings, event_queue, command_queue)
-    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
-    return DesktopBridgeServer(api, settings)
+    """造裸配置的桌面服务器（构造真源见 tests/serve/support.py）。"""
+    server, _eq, _cq = make_desktop_server()
+    return server
 
 
 def test_all_desktop_commands_registered():
@@ -119,16 +118,19 @@ def test_desktop_commands_count():
     slash_bridge.py，结果走 slash_result 事件）；同月补全目录
     +slash.commands（46→47，只读返回桌面可执行命令列表）。
     2026-10 桌面管家服务：+email.send（47→48，标题栏「管家服务 → 邮件发送」
-    表单直连 SendEmailTool，异步处理器 + to_thread，见 server._cmd_email_send）。
+    表单直连 SendEmailTool，异步处理器 + to_thread，见 rpc_email._cmd_email_send）。
     2026-10 管家服务「邮箱服务」改版：+email.config.get / email.config.set
     （48→50，查看/修改当前发件邮箱与 SMTP 配置，读写 settings.toml 的 [email]
     表，授权码不回传明文、留空=保持，见 agent/config/email_settings.py）。
     2026-10 桌面扩展服务：+extensions.exec（50→51，一条通用指令承载五类扩展
     MCP/内置工具/技能/插件/harness 的清单与增删改启停，见 ui/workbench/
     extensions_api.py）。
+    2026-10 W2 感知层第 5 步：+percept.status.get / percept.config.set（51→53，
+    桌面「感知源」面板的在采什么/采到了什么与逐源开关，改完由宿主重装配总线，
+    见 agent/serve/rpc_percept.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 51
+    assert len(protocol.DESKTOP_COMMANDS) == 53
 
 
 def test_all_registered_rpcs_declared():
@@ -219,7 +221,7 @@ def test_email_config_set_persist_then_runtime(monkeypatch):
     """email.config.set：先落盘成功后运行时 Settings 立即生效，回执回读快照。"""
     calls: list = []
     monkeypatch.setattr(
-        server_mod, "save_email_config", lambda patch: calls.append(patch) or True
+        email_rpc_mod, "save_email_config", lambda patch: calls.append(patch) or True
     )
     server = _make_server()
     result = server._rpc_email_config_set(
@@ -235,7 +237,7 @@ def test_email_config_set_persist_then_runtime(monkeypatch):
 
 def test_email_config_set_blank_password_keeps_original(monkeypatch):
     """授权码留空 = 保持不变（不写入补丁、不覆盖原值，明文不回传）。"""
-    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: True)
+    monkeypatch.setattr(email_rpc_mod, "save_email_config", lambda patch: True)
     server = _make_server()
     server._settings.email_smtp_password = "original-code"
     server._rpc_email_config_set({"smtp_password": "", "sender": "me@163.com"})
@@ -243,9 +245,59 @@ def test_email_config_set_blank_password_keeps_original(monkeypatch):
     assert server._settings.email_sender == "me@163.com"
 
 
+def test_email_config_get_hides_imap_password_and_reports_readiness():
+    """阶段 9 收件字段：imap_password 同样是 secret，就绪位按 host+账号+凭据判定。"""
+    server = _make_server()
+    server._settings.email_imap_host = "imap.163.com"
+    server._settings.email_imap_user = "me@163.com"
+    server._settings.email_imap_password = "imap-secret"
+    result = server._rpc_email_config_get({})
+    assert "imap_password" not in result
+    assert result["imap_host"] == "imap.163.com"
+    assert result["imap_port"] == 993
+    assert result["has_imap_password"] is True
+    assert result["imap_ready"] is True
+
+    # 只配了 host：凭据缺失 → 未就绪（面板据此提示“还差授权码”）
+    server._settings.email_imap_password = ""
+    server._settings.email_smtp_password = ""
+    server._settings.email_smtp_user = ""
+    got = server._rpc_email_config_get({})
+    assert got["has_imap_password"] is False and got["imap_ready"] is False
+
+
+def test_email_config_imap_ready_falls_back_to_smtp_credentials():
+    """163/QQ 就是一个授权码两边用：imap 账号/凭据留空时回退 SMTP，就绪位跟着算。"""
+    server = _make_server()
+    server._settings.email_imap_host = "imap.163.com"
+    server._settings.email_smtp_user = "me@163.com"
+    server._settings.email_smtp_password = "same-code"
+    result = server._rpc_email_config_get({})
+    assert result["has_imap_password"] is True
+    assert result["imap_ready"] is True
+    assert "smtp_password" not in result and "imap_password" not in result
+
+
+def test_email_config_set_imap_password_semantics(monkeypatch):
+    """写侧同样守 secret 口径：留空=保持原值，非空才落盘；imap_port 要过区间校验。"""
+    calls: list = []
+    monkeypatch.setattr(
+        email_rpc_mod, "save_email_config", lambda patch: calls.append(patch) or True
+    )
+    server = _make_server()
+    server._settings.email_imap_password = "original-imap"
+    result = server._rpc_email_config_set({"imap_password": "", "imap_host": "imap.qq.com"})
+    assert calls[-1] == {"imap_host": "imap.qq.com"}      # 空授权码不写补丁
+    assert server._settings.email_imap_password == "original-imap"
+    assert server._settings.email_imap_host == "imap.qq.com"
+    assert "imap_password" not in result
+    with pytest.raises(ValueError):
+        server._rpc_email_config_set({"imap_port": 70000})
+
+
 def test_email_config_set_validation(monkeypatch):
     """端口超范围 / 类型不符 → ValueError；无有效字段（全空补丁）→ ValueError。"""
-    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: True)
+    monkeypatch.setattr(email_rpc_mod, "save_email_config", lambda patch: True)
     server = _make_server()
     with pytest.raises(ValueError):
         server._rpc_email_config_set({"smtp_port": 0})
@@ -260,7 +312,7 @@ def test_email_config_set_validation(monkeypatch):
 
 def test_email_config_set_persist_failure_keeps_runtime(monkeypatch):
     """落盘失败 → RuntimeError 且运行时值不变（避免本次生效重启回退分裂）。"""
-    monkeypatch.setattr(server_mod, "save_email_config", lambda patch: False)
+    monkeypatch.setattr(email_rpc_mod, "save_email_config", lambda patch: False)
     server = _make_server()
     with pytest.raises(RuntimeError):
         server._rpc_email_config_set({"smtp_user": "me@163.com"})
@@ -318,12 +370,9 @@ class _StubHub:
 
 
 def _make_server_with_hub(hub):
-    settings = Settings()
-    event_queue: queue.Queue = queue.Queue()
-    command_queue: queue.Queue = queue.Queue()
-    engine = ChatEngine(settings, event_queue, command_queue)
-    api = WorkbenchAPI(event_queue, command_queue, engine, settings)
-    return DesktopBridgeServer(api, settings, hub=hub)
+    """带 hub 替身的桌面服务器（构造真源见 tests/serve/support.py）。"""
+    server, _eq, _cq = make_desktop_server(hub=hub)
+    return server
 
 
 def test_proactive_ack_routes_to_hub():

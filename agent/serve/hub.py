@@ -12,7 +12,10 @@
   （二期：开关 ``proactive_tts_enabled``，对话/语音忙时跳过朗读，朗读失败
   静默降级，不影响事件通道）；
 - 提醒工具（ScheduleReminder 等）经 ChatEngine registry_hook 挂载同一
-  Scheduler 实例，对话里说「提醒我」即可创建任务。
+  Scheduler 实例，对话里说「提醒我」即可创建任务；
+- **W2 感知层接线（阶段 9 第 4 步）**：``percept_enabled`` 打开时装配事件总线
+  （``register_sources`` + 订阅 + ``start``），感知事件经 ``ProactiveEngine.gate_notify``
+  ——与简报同一个闸门——投出去；人脸离开/进入画面同时驱动 W1 的 away 推断。
 
 与老 daemon 常驻语义的差异：serve 进程随桌面壳启停，播报仅在运行期间
 生效。补救链：Scheduler 自带错过补偿（一次性任务 ≤1 小时）+ 本模块的
@@ -24,6 +27,7 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from datetime import datetime
@@ -52,6 +56,38 @@ _DEADLINE_PREFIX = "📋 截止日期提醒"
 _TTS_TEXT_LIMIT = 200
 _TTS_MORE_SUFFIX = "……详细内容请查看桌面壳。"
 _REMINDER_PREFIX = "先生，提醒您："
+
+logger = logging.getLogger("jarvis.serve.hub")
+
+# ---- W2 感知层接线口径（阶段 9 第 4 步）----
+
+#: 感知事件播报的桌面渲染 kind。桌面壳 dispatcher 对未知 kind 走默认渲染
+#: （全文上屏 + 系统通知），因此新增这个值不需要壳侧改代码；contracts.ts 的
+#: kind 也是开放联合（`| string`）。
+PERCEPT_NOTIFY_KIND = "percept"
+PERCEPT_NOTIFY_TITLE = "贾维斯观察"
+
+#: 只记账不播报的 kind：在场信号的价值在于驱动 away 推断，不是在耳边报
+#: “先生您离开了/回来了”。人反复进出房间时这类事件会成串出现，若都走
+#: 播报就会把日额度吃光（而且体验很差），所以在这里直接拦下。
+PERCEPT_SILENT_KINDS: frozenset[str] = frozenset(
+    {"face_appear", "face_disappear", "watch_stopped"}
+)
+
+#: 首次启动引导的 kind（W2 第 7 步）。与感知事件不同：它是**一次性说明**，
+#: 不过打扰预算（被静默时段/日额度压掉就永久丢了，而不是“晚点再说”），
+#: 也不做 TTS 朗读（开机的整段文字用听的很干扰），但依旧上屏 + 系统通知，
+#: 因为“默认全关”不等于“用户知道自己可以开”。
+PERCEPT_ASK_KIND = "percept_ask"
+PERCEPT_ASK_TITLE = "贾维斯的观察能力"
+PERCEPT_ASK_TEXT = (
+    "我可以看你工作的现场：前台切到哪个应用、白名单目录里堆了多少文件、\n"
+    "登记仓库有没有未提交、邮箱有没有重要来信、摄像头前你在不在场。\n"
+    "这些能力出厂全部关闭，没打开的源一个字节都不采；采到的事件也只写本机\n"
+    "~/.jarvis/percept/events.jsonl，不随对话上传。\n"
+    "想试试：标题栏「管家服务」→「感知源」，拨总开关与想开的源（改完当场生效，\n"
+    "不必重启）。不想用：什么都不用做，我会一直保持关闭。这条提示只出现一次。"
+)
 
 
 class ProactiveHub:
@@ -108,6 +144,14 @@ class ProactiveHub:
         )
         self._started = False
         self._catchup_timer: threading.Timer | None = None
+        # W2 感知总线接线态（未启用时全部为 None/空，面板可据此区分“没装配”与“装配了但全关”）
+        self._bus: Any = None
+        self._bus_unsub: Callable[[], None] | None = None
+        self._percept_status: dict[str, bool] = {}
+        # 待投递的首次引导（None = 不需要问或已经问过）：绝不在启动时直接投
+        # 进队列——那时无在线客户端，事件泵会把它丢掉（同 init 事件改按连接首推的
+        # 原因）。由 serve 在每条连接建立时 drain_percept_ask() 取出。
+        self._percept_ask: dict[str, str] | None = None
 
     # ---- 对外只读访问（registry_hook 注册提醒/截止日期工具用） ----
 
@@ -115,6 +159,16 @@ class ProactiveHub:
     def scheduler(self) -> Scheduler:
         """内部 Scheduler 单例（register_schedule_tools 挂载点）。"""
         return self._scheduler
+
+    @property
+    def percept_bus(self) -> Any:
+        """感知总线实例（未启用时为 None）；`percept.*` RPC 与面板读统计用。"""
+        return self._bus
+
+    @property
+    def percept_status(self) -> dict[str, bool]:
+        """逐源启用结果（装配时快照，供面板与日志）。"""
+        return dict(self._percept_status)
 
     @property
     def deadline_tracker(self) -> DeadlineTracker:
@@ -130,6 +184,8 @@ class ProactiveHub:
         self._started = True
         self._scheduler.start()
         self._engine.start()
+        # W2 感知层：总开关打开才装配总线（关着时不起线程、不注册采集器）
+        self._start_percept()
         # 补播判定仅在进程启动时做一次，不持久化（重启不重复补）
         if self.missed_briefing_minutes() is not None:
             self._catchup_timer = threading.Timer(
@@ -153,6 +209,8 @@ class ProactiveHub:
         if self._catchup_timer is not None:
             self._catchup_timer.cancel()
             self._catchup_timer = None
+        # 先断感知源（否则引擎已停、总线还在往队列投事件），再停引擎与调度器
+        self._stop_percept()
         self._engine.stop()
         self._scheduler.stop()
 
@@ -174,6 +232,23 @@ class ProactiveHub:
     def acknowledge(self, task_id: str) -> bool:
         """确认提醒任务（桌面壳 proactive.ack 指令入口，停止升级重发）。"""
         return self._scheduler.acknowledge(task_id)
+
+    def hot_update_percept(self) -> dict[str, bool]:
+        """桌面 `percept.config.set` 改完配置后：停旧总线 → 按新配置重装配。
+
+        为什么要重装配：逐源开关是 `register_sources` 造实例时的快照（采样间隔、
+        摄像头参数也一样），只改运行时 Settings 不会让新升的源真的开始采。
+        先停后起有一个硬收益：旧资源会被真正释放（IMAP 登出、摄像头关闭），
+        于是“在面板上关掉视觉就立即断摄像头”这条隐私承诺能兑现。
+
+        Returns:
+            重装配后的逐源启用表（总开关关时为空表）。
+
+        @author aceFelix
+        """
+        self._stop_percept()
+        self._start_percept()
+        return dict(self._percept_status)
 
     # ---- 到期/通知回调（复刻老 NotificationMixin 语义，通道换成事件流） ----
 
@@ -198,8 +273,14 @@ class ProactiveHub:
         kind = "deadline" if message.startswith(_DEADLINE_PREFIX) else "briefing"
         self._emit(kind=kind, title="贾维斯主动提醒", text=message)
 
-    def _emit(self, *, kind: str, title: str, text: str, task_id: str = "") -> None:
-        """投递 proactive_notify 事件进 serve 事件队列（线程安全），并并行触发 TTS 朗读通道。"""
+    def _emit(
+        self, *, kind: str, title: str, text: str, task_id: str = "", speak: bool = True
+    ) -> None:
+        """投递 proactive_notify 事件进 serve 事件队列（线程安全）。
+
+        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人；
+        事件通道不受这个开关影响（气泡与系统通知照旧）。
+        """
         self._event_queue.put_nowait(
             {
                 "type": protocol.EVT_PROACTIVE_NOTIFY,
@@ -211,7 +292,200 @@ class ProactiveHub:
                 },
             }
         )
-        self._spawn_tts(kind, text)
+        if speak:
+            self._spawn_tts(kind, text)
+
+    # ---- W2 感知层接线（阶段 9 第 4 步：总线 → 同一个 W1 闸门 → 事件流） ----
+
+    def _start_percept(self) -> None:
+        """装配感知总线：注入配置 → 登记源 → 订阅 → 起轮询线程。
+
+        总开关 `percept_enabled` 关着时只注入配置快照、不登记也不订阅：面板与
+        CLI 读 `source_enabled_map()` / `default_log_path()` 时必须拿到当前配置，
+        而不是上一次会话的陈旧快照；“没开”与“没装配”的区分交给状态里的
+        `enabled` 字段，不靠“装配与否”这个模糊信号。
+
+        本路径全程不得抛异常：感知是增强能力，装配失败只能降级为“不感知”，
+        不能拖垮 serve 启动。
+
+        @author aceFelix
+        """
+        try:
+            from agent.core.percept import init_percept, register_sources
+
+            bus = init_percept(self._settings)
+            # 先判“要不要问一次”再处理装配：总开关关着时正是引导该出现的
+            # 时候（开着他就已经做过选择了）
+            self._arm_percept_ask()
+            if not getattr(self._settings, "percept_enabled", False):
+                logger.info("感知层总开关关闭，本次不装配总线（仅注入配置快照）")
+                return
+            self._percept_status = register_sources(bus, self._settings)
+            self._bus_unsub = bus.subscribe(self._on_percept_event)
+            self._bus = bus
+            started = bus.start()
+            logger.info(
+                "感知总线已装配：启用源 %s，轮询线程%s",
+                ",".join(sorted(k for k, v in self._percept_status.items() if v)) or "（无）",
+                "已起" if started else "未起（无需轮询的源）",
+            )
+        except Exception as e:
+            logger.warning("感知总线装配失败，本次不启用感知: %s", e)
+            self._bus = None
+            self._bus_unsub = None
+            self._percept_status = {}
+
+    def _stop_percept(self) -> None:
+        """退订并释放感知源（幂等；没装配过就是空操作）。
+
+        先退订再停线程：订阅方持有 self，不退订则总线单例里会留着
+        一个指向已停 hub 的回调（重启 hub 时同一个单例会把旧回调也叫起来）。
+        `shutdown_sources()` 负责真正释放资源（IMAP 登出、关摄像头）。
+
+        @author aceFelix
+        """
+        unsub = self._bus_unsub
+        self._bus_unsub = None
+        self._percept_status = {}   # 拆完就是“没装配”，不给面板留陈旧的启用表
+        self._percept_ask = None    # 未投递的引导不跨会话堆积（下次 start 会重新判）
+        if callable(unsub):
+            try:
+                unsub()
+            except Exception as e:  # 退订失败不影响后面的释放
+                logger.warning("感知订阅退订异常: %s", e)
+        bus = self._bus
+        self._bus = None
+        if bus is None:
+            return
+        try:
+            bus.stop()
+            bus.shutdown_sources()
+        except Exception as e:
+            logger.warning("感知总线停机异常: %s", e)
+
+    def _arm_percept_ask(self) -> None:
+        """按判据决定是否装一条“待投递的首次引导”（不在此刻投递）。
+
+        判据全在 `percept/consent.py`：没问过、总开关没开、也没在手改的
+        `settings.toml` 里写过 `[percept]`——三者同时成立才装。本方法不得抛出：
+        引导只是“告诉用户有这个东西”，读不到记录/解析不了配置都不能拖垮感知装配。
+
+        @author aceFelix
+        """
+        if self._percept_ask is not None:
+            return
+        try:
+            from agent.core.percept.consent import needs_ask
+
+            if needs_ask(self._settings):
+                self._percept_ask = {
+                    "kind": PERCEPT_ASK_KIND,
+                    "title": PERCEPT_ASK_TITLE,
+                    "text": PERCEPT_ASK_TEXT,
+                }
+        except Exception as e:  # noqa: BLE001 - 引导能力异常不影响主流程
+            logger.warning("感知首次引导判定失败，本次不问: %s", e)
+
+    def drain_percept_ask(self) -> bool:
+        """取出待投递的首次引导、投递并记账（serve 在客户端连上后调）。
+
+        为什么不在启动时投：事件泵广播给“当前在线客户端”，serve 刚起来时桌面壳
+        还没连上 WS，那条引导会被直接丢掉而且记录已写——“只问一次”就变成了“一次
+        也没问到”。因此只有真投递出去了才 mark_asked。
+
+        调用方是 WS 事件循环（单线程串行跑 `_on_client_connected`），所以这里不
+        加锁也不会并发重发；重连场景由记录文件兑现“只问一次”。
+
+        @author aceFelix
+        """
+        pending = self._percept_ask
+        if pending is None:
+            return False
+        self._percept_ask = None
+        self._emit(
+            kind=pending["kind"],
+            title=pending["title"],
+            text=pending["text"],
+            speak=False,
+        )
+        try:
+            from agent.core.percept.consent import mark_asked
+
+            mark_asked(master_enabled=bool(getattr(self._settings, "percept_enabled", False)))
+        except Exception as e:  # noqa: BLE001 - 落盘失败最差下次多问一次
+            logger.warning("感知询问记录写入失败，本次仍按已询问处理: %s", e)
+        return True
+
+    def _on_percept_event(self, event: Any) -> None:
+        """总线投递来的一条感知事件：先做状态迁移，再决定要不要打扰。
+
+        本回调跑在总线轮询线程里（或 push 型源的自有线程），所以只能做
+        内存安全的事：拼文本、过闸门（预算文件读写）、投事件队列。
+        任何异常都不能外溢——总线虽然对订阅方做了隔离，但这里自己吃掉
+        并记日志能给出更准确的上下文。
+
+        @author aceFelix
+        """
+        try:
+            self._apply_presence(event)
+            if getattr(event, "kind", "") in PERCEPT_SILENT_KINDS:
+                return
+            text = event.summary()
+            if not text:
+                return
+            # 播报用“口播版”而不是留痕摘要：summary 里带 `explorer.exe` 与
+            # 完整路径，给人眼看合适、给 TTS 念就是逐字符拼读。留痕不变。
+            from agent.core.percept.speech import spoken_summary
+
+            spoken = spoken_summary(event) or text
+            emitted = self._engine.gate_notify(
+                f"percept:{event.source}",
+                spoken,
+                # 去重键沿用总线口径：预算侧聚合与总线去重对齐，不会“总线觉得
+                # 是新事、预算觉得是旧事”各算一份
+                dedup_key=event.key(),
+                # 先验 0 是“这类事件永远别播”的显式表达，旧写法
+                # `getattr(...) or 0.5` 会把它静默抬成 0.5、反而可能过闸；
+                # 只有字段真缺失才用默认值。
+                urgency=float(
+                    event.salience_hint
+                    if getattr(event, "salience_hint", None) is not None
+                    else 0.5
+                ),
+            )
+            if emitted is None:
+                return
+            self._emit(kind=PERCEPT_NOTIFY_KIND, title=PERCEPT_NOTIFY_TITLE, text=emitted)
+        except Exception as e:
+            logger.warning("感知事件处理失败(%s.%s): %s",
+                          getattr(event, "source", "?"), getattr(event, "kind", "?"), e)
+
+    def _apply_presence(self, event: Any) -> None:
+        """人脸进/出画面 → W1 的 away 推断（补上阶段 8 递延的视觉不在场判定）。
+
+        为什么“离开”靠摄像头、“回来”不全靠摄像头：视觉源空闲时会自动关摄像头
+        （隐私与 CPU），而人回来时摄像头可能已关。所以 `is_away()` 给视觉推断加了
+        有效期（`VISION_AWAY_TTL_MIN`），到期自动不再压制播报；手动 /away 不参与，
+        摄像头也不得替用户取消（见 `set_presence_away`）。
+
+        @author aceFelix
+        """
+        if getattr(event, "source", "") != "vision":
+            return
+        kind = getattr(event, "kind", "")
+        if kind == "face_disappear":
+            active = True
+        elif kind == "face_appear":
+            active = False
+        else:
+            return
+        try:
+            from agent.core.policy import get_policy_state
+
+            if get_policy_state().set_presence_away(active):
+                logger.info("感知推断在场状态: %s", "离开" if active else "回到工位")
+        except Exception as e:
+            logger.warning("在场推断写入失败: %s", e)
 
     # ---- TTS 待机朗读通道（二期：复活老 daemon「待机 TTS」，开关 proactive_tts_enabled） ----
 
