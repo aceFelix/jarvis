@@ -238,15 +238,17 @@ Scan to join and exchange Agent app development experience, plugins and various 
 <table>
 <tr>
   <td align="center">WeChat group "Hello Jarvis."</td>
-  <td align="center">QQ group "Hello Jarvis." (1109055256)</td>
+  <td align="center">QQ group "Hello Jarvis."<br/>(1109055256)</td>
+  <td align="center">Douyin group "Hello Jarvis."<br/>(777346526350)</td>
 </tr>
 <tr>
   <td><img src="assets/communication/discussion-group.png" alt="WeChat group Hello Jarvis." width="150"/></td>
   <td><img src="assets/communication/discussion-group2.jpg" alt="QQ group Hello Jarvis." width="150"/></td>
+  <td><img src="assets/communication/discussion-group3.jpg" alt="Douyin group Hello Jarvis." width="150"/></td>
 </tr>
 </table>
 
-> The WeChat QR code is valid for 7 days; once it expires, get the latest invite from the QQ group.
+> The WeChat QR code is valid for 7 days; once it expires, get the latest invite from the QQ group. The QQ and Douyin groups can be joined by searching the group number directly in their apps, so they are not affected by expired QR codes.
 
 </div>
 
