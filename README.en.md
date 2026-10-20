@@ -16,6 +16,7 @@
 <a href="https://bailian.console.aliyun.com"><img src="https://img.shields.io/badge/DashScope-Bailian-FF6A00.svg?logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
 <a href="#disclaimer"><img src="https://img.shields.io/badge/status-Beta%20In%20Development-yellow.svg" alt="Status" /></a>
 <a href="https://github.com/aceFelix/jarvis"><img src="https://img.shields.io/github/stars/aceFelix/jarvis?style=social" alt="GitHub stars" /></a>
+<a href="https://gitcode.com/acefelix/jarvis"><img src="https://gitcode.com/acefelix/jarvis/star/badge.svg" alt="GitCode stars" /></a>
 <a href="https://www.marvel.com/characters/iron-man-tony-stark"><img src="https://img.shields.io/badge/In%20tribute%20to-Iron%20Man-B31B1B.svg" alt="In tribute to Iron Man" /></a>
 
 </div>
@@ -154,6 +155,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - All config lives in `~/.jarvis/` (settings.toml + models.toml); `/mode` switches permission mode, `/think` tunes deep thinking
 - Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot
 - Checks for a new release in the background on startup; when found, run `/update` to upgrade (disable with `--no-update-check`)
+- Mirrored on [GitCode](https://gitcode.com/acefelix/jarvis) and [GitHub](https://github.com/aceFelix/jarvis) — every commit is pushed to both
 
 > Install paths, optional dependency groups, per-OS system dependencies and the `--serve` backend entry: see the [Installation Guide](docs/guide/installation.md) (Chinese).
 > To grasp where this project is heading in one read: the [Blueprint](docs/blueprint/BLUEPRINT.md).

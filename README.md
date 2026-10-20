@@ -16,6 +16,7 @@
 <a href="https://bailian.console.aliyun.com"><img src="https://img.shields.io/badge/DashScope-%E7%99%BE%E7%82%BC-FF6A00.svg?logo=alibabacloud&logoColor=white" alt="DashScope" /></a>
 <a href="#反馈声明"><img src="https://img.shields.io/badge/status-Beta%20%E5%BC%80%E5%8F%91%E9%AA%8C%E8%AF%81%E4%B8%AD-yellow.svg" alt="Status" /></a>
 <a href="https://github.com/aceFelix/jarvis"><img src="https://img.shields.io/github/stars/aceFelix/jarvis?style=social" alt="GitHub stars" /></a>
+<a href="https://gitcode.com/acefelix/jarvis"><img src="https://gitcode.com/acefelix/jarvis/star/badge.svg" alt="GitCode stars" /></a>
 <a href="https://www.marvel.com/characters/iron-man-tony-stark"><img src="https://img.shields.io/badge/%E8%87%B4%E6%95%AC-Iron%20Man-B31B1B.svg" alt="致敬 Iron Man" /></a>
 
 </div>
@@ -154,6 +155,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
+- 本仓库在 [GitCode](https://gitcode.com/acefelix/jarvis) 与 [GitHub](https://github.com/aceFelix/jarvis) 双平台同步托管，每次提交两边一并推送
 
 > 安装路径、可选依赖组、各平台系统依赖、`--serve` 后端入口等详见 [安装指南](docs/guide/installation.md)。
 > 想一句话理解这个项目要去哪，读 [蓝图文档](docs/blueprint/BLUEPRINT.md)。
