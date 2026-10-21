@@ -91,11 +91,45 @@ def _build_recovery_executor(settings: Settings) -> "ToolRecoveryExecutor":
     return ToolRecoveryExecutor(global_enabled=settings.enable_tool_self_healing)
 
 
+def init_actions(settings: Settings) -> list:
+    """装配副作用账本并作废上一次进程遗留的待发动作（宿主启动时调一次）。
+
+    为什么需要“作废”而不是“补发”：延时窗口的意义在于用户此刻还能喊停，
+    重启后没人在场，自动把一个外发不可逆动作发出去是最不该发生的事。
+    所以遗留项一律转 cancelled 并交给调用方播报，账本上留得下痕迹。
+
+    Args:
+        settings: 已加载的配置（读 ``[actions]`` 字段）。
+
+    Returns:
+        被作废的待发动作列表（空=无遗留）。
+    @author aceFelix
+    """
+    from agent.core.actions import configure_journal, get_journal, get_window, resume_pending
+
+    configure_journal(enabled=bool(getattr(settings, "actions_journal_enabled", True)))
+    stale = resume_pending(get_journal(), get_window())
+    if stale:
+        try:
+            from agent.core.diag import diag_log
+
+            diag_log("actions", f"作废上次遗留的待发动作 {len(stale)} 项")
+        except Exception:
+            pass  # 诊断日志挂了不影响启动与记账
+    return stale
+
+
 def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> ToolContext:
     """构造工具执行上下文。
 
+    顺带按配置装配副作用账本单例（W3.2）：账本是进程级全局状态，放这里是因为
+    全部宿主（repl / serve / daemon / model_manager）都经本函数，装配一处不漏挂。
+    重建单例不会丢数据（台账在磁盘上），也不影响已登记的延时窗口。
     @author aceFelix
     """
+    from agent.core.actions import configure_journal
+
+    configure_journal(enabled=bool(getattr(settings, "actions_journal_enabled", True)))
     return ToolContext(
         workdir=settings.workdir,
         messages=messages,

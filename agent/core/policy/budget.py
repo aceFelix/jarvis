@@ -58,6 +58,13 @@ _DEFAULT_SOURCE_WEIGHTS = {
     "percept:calendar": 0.7,   # 以下三个是收编位（本期未装配），先登记免得
     "percept:system": 0.7,     # 将来接上又落回 default 重踩同一个坑
     "percept:schedule": 0.9,
+    # W3 任务脊柱（源名固定 `task`，见 `core/tasks/driver.py::NOTIFY_SOURCE`）：
+    # 后台目标都是用户明确交代的长线任务，权重与 `schedule` 同级。
+    # 驱动器递出来的紧迫度固定给 0.45（后台结果不是“突发紧事”），因此
+    # 0.9×0.45=0.405 仍在门槛之上；不登记则落 default 0.5→得分 0.225，
+    # 整个脊柱会“永远不吱声”——与 percept 当年那个坑同源，故一并登记
+    # （docs/fixlogs/notify-budget-percept-relay-fix.md）。
+    "task": 0.9,
 }
 
 # 聚合冲刷单条最多列几行（超出只留最新的，并在尾部注明略去数量）：

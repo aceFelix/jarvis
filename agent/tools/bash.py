@@ -21,7 +21,7 @@ from agent.core.context import ToolContext
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.sandbox.audit import SandboxAuditor
 from agent.core.sandbox.executor import SandboxConfig, SandboxExecutor
-from agent.core.sandbox.risk_scorer import RiskLevel, RiskScorer
+from agent.core.sandbox.risk_scorer import RiskLevel, RiskScorer, looks_network_outbound
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
 from agent.permissions.modes import SANDBOX_AUTO_ALLOW_PREFIX
 from agent.permissions.shell_classifier import get_command_head
@@ -50,6 +50,33 @@ def get_sandbox_auditor(settings: Any = None) -> SandboxAuditor:
         enabled = getattr(settings, "sandbox_audit", True) if settings else True
         _sandbox_auditor = SandboxAuditor(enabled=enabled)
     return _sandbox_auditor
+
+
+def _hold_pending_reason(command: str, settings: Any) -> str:
+    """待发窗口未结案时，给出“这条命令不能自动放行”的理由；不需要收紧时返回空。
+
+    为什么必须有这一段（W3.2 绕道收紧，口径 A 收窄版）：延时窗口拦的是一条
+    tool_use，“把这件事做成”是模型的目标。实机测过（2026-10-21）：只靠返回文案
+    约束时，模型会换 `Bash curl` 把被拦下的外发动作真做掉，而沙箱对中风险
+    命令默认自动放行——用户以为拦住了，实际已发生。所以预约未结案期间，网络
+    外发类命令的“自动放行”这条捷径关掉，改问人；其余命令不受影响。
+    关掉 `actions.hold_blocks_equivalent` 即退回“只靠文案约束”的旧行为。
+    @author aceFelix
+    """
+    if settings is not None and not getattr(settings, "actions_hold_blocks_equivalent", True):
+        return ""
+    if not looks_network_outbound(command):
+        return ""    # 收窄：只看外发通路，不相干的命令一律照旧
+    from agent.core.actions import get_window
+
+    if get_window().size <= 0:
+        return ""
+    labels = get_window().pending_labels()
+    what = labels[0][:40] if labels else "一项不可逆动作"
+    return (
+        f"有 {len(labels) or 1} 项动作在待发窗口里尚未执行（如：{what}），"
+        f"该命令可能达成同一目的，不再自动放行：{command}"
+    )
 
 
 class BashTool(Tool):
@@ -106,6 +133,10 @@ class BashTool(Tool):
         auto_allow_medium = getattr(settings, "sandbox_auto_allow_medium", True) if settings else True
 
         if sandbox_enabled and auto_allow_medium and risk == RiskLevel.MEDIUM:
+            # 预约未结案时不许走“自动放行”这条捷径（口径与代价见上面函数）
+            blocked = _hold_pending_reason(cmd, settings)
+            if blocked:
+                return PermissionResult.ask(blocked)
             # reason 前缀是跨层协议标记：/away 时 W1 闸门据此把这类
             # 自动放行升级回 ASK 走待批（详见 permissions/modes.py）
             return PermissionResult.allow(

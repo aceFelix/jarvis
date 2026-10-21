@@ -81,6 +81,11 @@ jarvis --quick                # REPL 快速启动
 `schedule.json` 补偿 + 简报补播窗口，默认 2 小时、`briefing_catchup_window_min` 可配）。
 详见 [docs/plans/proactive-desktop.md](../plans/proactive-desktop.md)。能力清单：
 
+> 🧾 **阶段 10（W3）任务脊柱也走这条通道**：后台目标推进一步后，播报经同一个
+> 打扰闸门裁决，命中后以 `proactive_notify` 的 `kind=task`（标题「任务脊柱」）投递。
+> 桌面壳**无需任何改动**（未知 kind 走默认渲染：全文上屏 + 系统通知）；
+> `tasks.*` / `actions.*` RPC 与右栏「任务中心」改版属下一切片。
+
 **每日简报**：每天 08:30 自动播报今日概览（待触发提醒、节假日、系统状态、截止日期、日历事件）。
 
 **截止日期追踪**：对贾维斯说"下周五之前交项目报告"，自动注册截止日期，分级提醒（提前 7/3/1/0 天 + 逾期每天）。

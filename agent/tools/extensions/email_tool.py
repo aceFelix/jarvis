@@ -97,6 +97,16 @@ class SendEmailTool(Tool):
         """SMTP 连接不建议并发，返回 False。"""
         return False
 
+    def is_irreversible(self, args: dict[str, Any]) -> bool:
+        """邮件交给 SMTP 服务器就收不回来，进 W3.2 延时窗口。本仓第一个声明位。
+
+        判定口径是"事实能不能收回"而不是"代码里有没有对应删除接口"：多数邮箱
+        厂商的"撤回已发邮件"对已投递到对方服务器的信无效，所以不给假的补偿计划。
+        需要更长冷静期可在 ``[actions].undo_window_s`` 上调，不必改代码。
+        @author aceFelix
+        """
+        return True
+
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
         """发送邮件默认需要用户确认。"""
         to = args.get("to", "")

@@ -327,6 +327,7 @@ async def run_subagent(
     workdir: str,
     permission_mode: PermissionMode = PermissionMode.YOLO,
     parent_ui: Any = None,
+    extra: dict[str, Any] | None = None,
 ) -> SubagentResult:
     """执行一个子 agent。
 
@@ -340,6 +341,9 @@ async def run_subagent(
         workdir: 工作目录（继承主 agent 的）。
         permission_mode: 权限模式（默认 YOLO，子 agent 自主操作不需逐个确认）。
         parent_ui: 主 agent 的 UI 对象（用于打印子 agent 的进度提示）。None 则静默。
+        extra: 写进子 ctx.extra 的宿主数据。任务脊柱靠它传 ``task_id``（副作用归属）
+            与 ``effect_ids`` 列表（账本 id 回扣），否则驱动器无法把一步的副作用
+            回填到 ``TaskStep.journal_ids``，``/undo --task`` 端到端就取不到条目。
 
     Returns:
         SubagentResult: 子 agent 的执行结果。
@@ -381,6 +385,9 @@ async def run_subagent(
         messages=sub_messages,
         permission_mode=permission_mode.value,
         ui=parent_ui,  # 复用主 UI 打印子 agent 的工具调用提示
+        # 只浅拷贝：effect_ids 必须是宿主传进来的同一个列表对象，子代理往里
+        # 追加的 id 跑完才读得到（拷贝就会把回扣链断在这一行）
+        extra=dict(extra or {}),
     )
 
     # 5. 跑！

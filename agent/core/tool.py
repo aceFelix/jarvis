@@ -8,8 +8,10 @@
    - is_concurrency_safe 默认 False（默认假设不能并行）
    - is_destructive 默认 False
    - check_permissions 默认返回 ASK
-3. build_tool() 提供这些默认值，等价于原项目 buildTool()。
-4. BaseTool 基类提供便利实现；轻量工具可继承它，复杂工具可单独实现 Tool 协议。
+3. 这些默认值直接长在 Tool 抽象基类上（早期注释里的 build_tool()/BaseTool 从未
+   落地，v0.1 只有 Tool 一条路，轻量工具继承 Tool 即可白拿全部安全默认值）。
+4. 工具只需重写自己确实成立的那几个属性；没重写的一律按"危险"侧处理，
+   所以新增工具忘写 check_permissions 的后果是"多问一次"，不是"少问一次"。
 """
 
 from __future__ import annotations
@@ -62,6 +64,28 @@ class Tool(abc.ABC):
     def is_destructive(self, args: dict[str, Any]) -> bool:
         """是否不可逆（删除/覆盖/发送）。默认 False。"""
         return False
+
+    def is_irreversible(self, args: dict[str, Any]) -> bool:
+        """是否是"出了本机就收不回"的对外副作用。默认 False（fail-closed）。
+
+        为什么单列一位而不复用 is_destructive：is_destructive 的语义包含
+        "删除/覆盖"，FileWrite 也为 True，但本地写入有检查点可回滚；把延时窗口
+        挂在它上面等于每次存文件都要干等 30 秒。两者正交：
+        - destructive + 可回滚 → 记账本、引用本轮检查点，/undo 能退；
+        - irreversible（外发邮件/消息/对外 API 写）→ 先入延时窗口，到点才真执行。
+
+        @author aceFelix
+        """
+        return False
+
+    def describe_irreversible(self, args: dict[str, Any]) -> str:
+        """给延时窗口与撤销报告用的一行预览（默认回退到活动描述）。
+
+        文案要含"发往谁"：窗口到点或用户撤不回时，账本只能凭这行话说清
+        "已发往 zhangsan@…"，只写工具名等于没报告。
+        @author aceFelix
+        """
+        return self.activity_description(args) or self.user_facing_name(args)
 
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
         """是否能与其他工具并行执行。默认 False（保守）。"""
@@ -211,6 +235,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.file_ops.glob import GlobTool
     from agent.tools.file_ops.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
+    from agent.tools.track_goal import TrackGoalTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_tool import SendEmailTool
@@ -225,6 +250,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(GrepTool())
     registry.register(LocationTool())
     registry.register(TodoWriteTool())
+    # W3.1 跨会话目标入口（“替我盯着…”落到台账，阶段 10 收尾切片）@author aceFelix
+    registry.register(TrackGoalTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())

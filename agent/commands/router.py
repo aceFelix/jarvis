@@ -72,6 +72,7 @@ from agent.commands.handlers.tool_commands import (
     handle_server,
     handle_tools,
 )
+from agent.commands.handlers.undo_commands import handle_undo  # W3.2 副作用账本 @author aceFelix
 from agent.commands.handlers.update_commands import handle_update
 from agent.commands.handlers.voice_commands import (
     handle_listen,
@@ -188,6 +189,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/back": handle_back,
     "/pending": handle_pending,
     "/lease": handle_lease,
+    # W3.2 兑现层命令（阶段 10）：副作用账本 /undo @author aceFelix
+    "/undo": handle_undo,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -219,6 +222,8 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/config ", handle_config_show),
     ("/config", handle_config_show),
     ("/lease ", handle_lease),  # /lease list|revoke|签发带参 @author aceFelix
+    ("/undo ", handle_undo),   # /undo list|cancel|<id>|--task <id> @author aceFelix
+    ("/tasks ", handle_tasks),  # /tasks add|show|pause|resume|cancel|advance|delete @author aceFelix
 ]
 
 

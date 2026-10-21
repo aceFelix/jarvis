@@ -204,6 +204,47 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 
 ---
 
+## W3 兑现层（`[actions]` / `[tasks]`，阶段 10）
+
+“敢放手”与“替我盯着”两组开关：前者把工具调用记成可执行的补偿计划（`/undo`），
+后者把目标拆成带条件等待的步骤、由后台驱动器推进。机制详见
+[18-W3兑现层](../docs/architecture/18-W3兑现层.md)。
+
+> 🔒 **两个默认值取向不同是有意的**：账本**默认开**（关掉等于把已发生的副作用记不住，
+> `/undo` 就无从补偿）；任务脊柱**默认关**（它会自主调 LLM 花钱并自己动手执行，必须用户
+> 显式授权，同 `[percept]` 逐源默认关的口径）。
+> 两本台账都只落 `~/.jarvis/`（`actions.jsonl` 与 `goals/<id>.json`），含收件人等敏感字段，不随对话上传。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[actions] journal_enabled` | `true` | 副作用账本总开关（`false` = 不记账也不延时，`/undo` 无从下手） |
+| `[actions] undo_window_s` | `30` | 不可逆动作延时窗口（秒）；`0` = 不拦、直接执行（**照样记账**） |
+| `[actions] track_local_writes` | `true` | 本地破坏性写是否记一条可回滚条目（引用本轮 shadow-git 检查点） |
+| `[actions] irreversible_tools` | `[]` | 应急口子：确实要多保护的工具才填（改配置不改代码）。❗ 拿 `WebFetch` 这类只读工具演示窗口是错的测法：它无副作用、可重来，只能演出一堆成本（见 [w3-delay-window-bypass-fix](../docs/fixlogs/w3-delay-window-bypass-fix.md)） |
+| `[actions] hold_blocks_equivalent` | `true` | 待发窗口未结案时，网络外发类中风险命令（`curl`/`wget`/`Invoke-WebRequest`…）取消沙箱自动放行、改问人；本机命令不受影响。无 UI 环境 ASK→DENY 误伤不可接受时设 `false` |
+| `[tasks] enabled` | `false` | 驱动器总开关（`false` = 只读台账不自走，`/tasks` 第二节照旧能列） |
+| `[tasks] blocked_ask_days` | `3` | 阻塞超此天数主动问一次（走 `[policy.notify_budget]` 闸门；同一件事不重复问） |
+| `[tasks] step_max_attempts` | `3` | 单步失败重试上限（到上限定局 `failed` 并来问，不会无退避自旋） |
+| `[tasks] retry_backoff_s` | `60` | 重试退避间隔（秒）；本期为**固定间隔**，不按失败次数翻倍 |
+| `[tasks] wait_deadline_hours` | `72` | 条件等待最长时限（超时转 `blocked_timeout` 来问用户，绝不静默挂起）。只对 `file_exists` / `percept_event` 兜底；`time` 类自带确定时刻，不补 deadline（叠加会出现“到点前先超时”的自相矛盾）。单条目标可用 `/tasks add … --deadline <小时>` 临时覆盖 |
+
+> ⚠️ **延时窗口只延后、不豁免**：拦截点就在五层权限判定与 W1 策略闸门**之后**，
+> DENY 永不放宽；到点重放用账本里冻结的那一份参数，因此模型后续改口也改写不了已排队的动作。
+> 窗口期间也不会给等价通路留后门：外发类中风险命令的自动放行被临时关掉（只把 ALLOW 变 ASK，
+> 从不把 DENY 变 ALLOW）。
+> 进程重启时仍未发出的预约动作**一律作废**（启动时逐条播报），不会把上一个进程里你没确认第二次的
+> 不可逆动作自动补发。
+
+相关命令：`/undo`（`list` / `cancel` / `<id>` / `--task <id>`）见
+[命令参考·对话控制](../docs/guide/commands.md#对话控制)；`/tasks`（两节 + 写入子命令
+`add`/`show`/`pause`/`resume`/`cancel`/`advance`/`delete`）见
+[命令参考·多 Agent 与插件](../docs/guide/commands.md#多-agent-与插件)。
+建目标还有另两个入口：对我说人话（`TrackGoal` 工具）与桌面指令 `tasks.exec`，
+三个入口共用 `core/tasks/spine_ops.py`，语义完全一致。
+驱动器只在 REPL（`-m agent`）与 `--serve` / 桌面壳两种宿主下启动，两者不要同时开。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |

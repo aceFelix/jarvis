@@ -71,6 +71,65 @@ _CALENDAR_NOTE = "__proactive_calendar__"
 _PROFILE_MAINT_NOTE = "__proactive_profile_maintenance__"
 
 
+def apply_notify_gate(
+    source: str,
+    text: str,
+    *,
+    dedup_key: str = "",
+    urgency: float = 0.6,
+    budget: Any = None,
+) -> str | None:
+    """W1 打扰闸门的**唯一实现**：返回该播的文本，None = 不播。
+
+    为什么是模块函数而不是 ``ProactiveEngine`` 的私有方法：闸门只依赖“预算单例 +
+    在场状态”，跟“引擎有没有注册定时任务”无关。W3 任务脊柱的后台推进跑在
+    没有 ``ProactiveEngine`` 的宿主里（CLI REPL 就没有一个），它也要过同一道闸；
+    放在模块层就不必为“另一个宿主也要闸门”再抄一份实现（口径分叉比没有闸门更危险）。
+
+    ``ProactiveEngine.gate_notify`` 仍是本函数的薄包装，保持既有调用点与
+    “预算未注入时只在 away 情况下静默丢弃”的行为不变。
+
+    Args:
+        source: 播报源名（预算权重表的键，如 ``briefing`` / ``percept:mail`` / ``task``）。
+        text: 拟播报文本。
+        dedup_key: 聚合去重键（同键短时间内不叠两条）。
+        urgency: 时效紧迫度（与来源权重相乘）。
+        budget: ``NotifyBudget`` 实例；None = 不设预算闸（仅保留 away 拦截）。
+
+    @author aceFelix
+    """
+    import logging
+
+    logger = logging.getLogger("jarvis.proactive")
+    # away 分流：人不在，播报全部暂缓入库（TTS 不对空房间说话）
+    try:
+        from agent.core.policy import get_policy_state
+
+        away, _ = get_policy_state().is_away()
+    except Exception:
+        away = False
+    if budget is not None:
+        try:
+            action = budget.gate(text, source, dedup_key=dedup_key,
+                                 urgency=urgency)
+            if away and action.kind == "emit":
+                # 再入库一份：gate 可能已聚合/冲刷，保守起见 away 一律降为
+                # queue 语义（不入 pending 也不丢信息）
+                from agent.core.policy.budget import NotifyAction
+
+                action = NotifyAction("queue", text, "无人值守，暂缓入库")
+            if not action.should_emit:
+                logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
+                return None
+            return action.text
+        except Exception as e:
+            logger.warning("打扰预算异常，降级直接播报: %s", e)
+    elif away:
+        logger.info("无人值守，跳过播报[%s]", source)
+        return None
+    return text
+
+
 class ProactiveEngine:
     """主动感知引擎。
 
@@ -283,48 +342,21 @@ class ProactiveEngine:
 
     def gate_notify(self, source: str, text: str, *, dedup_key: str = "",
                     urgency: float = 0.6) -> str | None:
-        """W1 打扰闸门的**唯一实现**：返回该播的文本，None = 不播。
+        """W1 打扰闸门入口（实现已提到模块层 ``apply_notify_gate``）。
 
         为何单独拆出来：W2 感知层的事件由 serve 宿主（ProactiveHub）订阅总线后
         投递，它需要同一道闸门，但**不能复用 `on_notify` 回调**（简报与感知事件的
         桌面渲染 kind 不同）。拆开后闸门只有一份实现，`_dispatch_notify` 只是
         它的“播完就走 on_notify”包装，不变量“所有打扰都过同一个闸”仍然成立。
 
-        行为：away 时把 emit 降级为 queue（不对空房间说话）；预算未注入时
-        只在 away 情况下静默丢弃；预算自身异常降级为直接播（不因闸门挂掉而不提醒）。
+        W3 任务脊柱的宿主没有 ``ProactiveEngine``（CLI REPL），它们直接调
+        ``apply_notify_gate`` 并递 ``get_budget()``，与本方法共用同一份实现。
 
         @author aceFelix
         """
-        import logging
-
-        logger = logging.getLogger("jarvis.proactive")
-        # away 分流：人不在，播报全部暂缓入库（TTS 不对空房间说话）
-        try:
-            from agent.core.policy import get_policy_state
-
-            away, _ = get_policy_state().is_away()
-        except Exception:
-            away = False
-        if self._budget is not None:
-            try:
-                action = self._budget.gate(text, source, dedup_key=dedup_key,
-                                           urgency=urgency)
-                if away and action.kind == "emit":
-                    # 再入库一份：gate 可能已聚合/冲刷，保守起见 away 一律降为
-                    # queue 语义（不入 pending 也不丢信息）
-                    from agent.core.policy.budget import NotifyAction
-
-                    action = NotifyAction("queue", text, "无人值守，暂缓入库")
-                if not action.should_emit:
-                    logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
-                    return None
-                return action.text
-            except Exception as e:
-                logger.warning("打扰预算异常，降级直接播报: %s", e)
-        elif away:
-            logger.info("无人值守，跳过播报[%s]", source)
-            return None
-        return text
+        return apply_notify_gate(
+            source, text, dedup_key=dedup_key, urgency=urgency, budget=self._budget,
+        )
 
     def _dispatch_notify(self, source: str, text: str, *, dedup_key: str = "",
                          urgency: float = 0.6) -> bool:

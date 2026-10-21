@@ -16,6 +16,9 @@
 - **W2 感知层接线（阶段 9 第 4 步）**：``percept_enabled`` 打开时装配事件总线
   （``register_sources`` + 订阅 + ``start``），感知事件经 ``ProactiveEngine.gate_notify``
   ——与简报同一个闸门——投出去；人脸离开/进入画面同时驱动 W1 的 away 推断。
+- **W3 任务脊柱接线（阶段 10）**：``tasks_enabled`` 打开时装配后台驱动器
+  （``core/tasks/driver.py``），目标推进一步的结论与“卡住了”的询问同样经
+  ``gate_notify`` 投成 ``proactive_notify`` 事件；未打开时不起线程，但台账仍可读。
 
 与老 daemon 常驻语义的差异：serve 进程随桌面壳启停，播报仅在运行期间
 生效。补救链：Scheduler 自带错过补偿（一次性任务 ≤1 小时）+ 本模块的
@@ -89,6 +92,14 @@ PERCEPT_ASK_TEXT = (
     "不必重启）。不想用：什么都不用做，我会一直保持关闭。这条提示只出现一次。"
 )
 
+# ---- W3 任务脊柱接线口径（阶段 10）----
+
+#: 后台目标播报的桌面渲染 kind。与感知事件同理：壳侧 dispatcher 对未知 kind
+#: 走默认渲染（全文上屏 + 系统通知），contracts.ts 的 kind 是开放联合，
+#: 因此本期不动桌面壳也能看到内容（专门的任务面板属下一切片）。
+TASK_NOTIFY_KIND = "task"
+TASK_NOTIFY_TITLE = "任务脊柱"
+
 
 class ProactiveHub:
     """主动播报中枢：Scheduler + ProactiveEngine 的 serve 宿主装配体。
@@ -152,6 +163,8 @@ class ProactiveHub:
         # 进队列——那时无在线客户端，事件泵会把它丢掉（同 init 事件改按连接首推的
         # 原因）。由 serve 在每条连接建立时 drain_percept_ask() 取出。
         self._percept_ask: dict[str, str] | None = None
+        # W3 任务脊柱驱动器（未启用/装配失败时为 None；台账读侧不依赖它）
+        self._task_driver: Any = None
 
     # ---- 对外只读访问（registry_hook 注册提醒/截止日期工具用） ----
 
@@ -186,6 +199,8 @@ class ProactiveHub:
         self._engine.start()
         # W2 感知层：总开关打开才装配总线（关着时不起线程、不注册采集器）
         self._start_percept()
+        # W3 任务脊柱：排在感知之后装配（``percept_event`` 类等待要订阅已装配的总线）
+        self._start_tasks()
         # 补播判定仅在进程启动时做一次，不持久化（重启不重复补）
         if self.missed_briefing_minutes() is not None:
             self._catchup_timer = threading.Timer(
@@ -209,7 +224,9 @@ class ProactiveHub:
         if self._catchup_timer is not None:
             self._catchup_timer.cancel()
             self._catchup_timer = None
-        # 先断感知源（否则引擎已停、总线还在往队列投事件），再停引擎与调度器
+        # 先断后台推进器（否则引擎已停、驱动器还在往队列投目标结果），
+        # 再断感知源（否则引擎已停、总线还在往队列投事件），最后停引擎与调度器
+        self._stop_tasks()
         self._stop_percept()
         self._engine.stop()
         self._scheduler.stop()
@@ -362,6 +379,69 @@ class ProactiveHub:
             bus.shutdown_sources()
         except Exception as e:
             logger.warning("感知总线停机异常: %s", e)
+
+    # ---- W3 任务脊柱接线（阶段 10：后台目标 → 同一个 W1 闸门 → 事件流） ----
+
+    def _start_tasks(self) -> None:
+        """装配任务脊柱驱动器（``tasks_enabled`` 关着时不起线程）。
+
+        与感知层同一口径：装配失败只降级为“不自动推进”，不得拖垮 serve 启动；
+        台账读写不靠驱动器（``/tasks`` 与下一切片的 ``tasks.*`` 读侧在禁用态照旧能列）。
+
+        为什么先 ``resume()`` 再 ``start()``：上次进程遗留的 ``running`` 步骤必须先复位，
+        否则驱动线程一上来就认为“那步还在跑”，台账永久停在假的活动态。
+
+        @author aceFelix
+        """
+        if not bool(getattr(self._settings, "tasks_enabled", False)):
+            return
+        try:
+            from agent.core.tasks.driver import build_driver, make_gate_notifier
+
+            def _emit_task(text: str) -> None:
+                self._emit(kind=TASK_NOTIFY_KIND, title=TASK_NOTIFY_TITLE, text=text)
+
+            self._task_driver = build_driver(
+                self._settings,
+                # 目标播报与简报/感知事件走同一个闸门（同一份实现），不另开
+                # 一条“后台可以随便说”的路
+                notifier=make_gate_notifier(_emit_task),
+                session_name="serve",
+                workdir=str(getattr(self._settings, "workdir", "") or ""),
+                bus_getter=lambda: self._bus,
+            )
+            reset = self._task_driver.resume()
+            started = self._task_driver.start()
+            logger.info(
+                "任务脊柱已装配：驱动线程%s，复位上次中断步骤 %d 个",
+                "已起" if started else "未起（缺可用 provider）",
+                reset,
+            )
+        except Exception as e:  # noqa: BLE001 - 脊柱是增强能力，失败不影响 serve 启动
+            logger.warning("任务脊柱装配失败，本次不自动推进目标: %s", e)
+            self._task_driver = None
+
+    def _stop_tasks(self) -> None:
+        """停驱动线程并清除进程级句柄（幂等；没装配过就是空操作）。
+
+        必须把全局句柄也清掉：驱动器持有 notifier，而 notifier 闭包持有本 hub，
+        留着它就是一个指向已停 hub 的投递入口（与感知侧“先退订再停”同理）。
+
+        @author aceFelix
+        """
+        driver, self._task_driver = self._task_driver, None
+        if driver is None:
+            return
+        try:
+            driver.stop()
+        except Exception as e:  # noqa: BLE001 - 停机失败不影响后面的引擎回收
+            logger.warning("任务脊柱停机异常: %s", e)
+        try:
+            from agent.core.tasks.driver import set_driver
+
+            set_driver(None)
+        except Exception:
+            pass
 
     def _arm_percept_ask(self) -> None:
         """按判据决定是否装一条“待投递的首次引导”（不在此刻投递）。

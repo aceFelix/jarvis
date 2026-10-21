@@ -379,6 +379,24 @@ class Settings:
     percept_vision_auto_stop_minutes: int = 0   # >0 空闲自动关摄像头（代价：关闭期间检测不到回来）
     percept_vision_interval_s: int = 5          # 总线排空本源的节拍（秒）
 
+    # W3 兑现层（阶段 10，见 core/actions/journal.py 与 core/tasks/spine.py）：
+    # 副作用账本 + 不可逆动作延时窗口 + 跨会话任务脊柱。
+    # 两个默认值取向不同是有意的：账本**默认开**，它是"敢放手"的前提，关掉等于
+    # 把已经发生的副作用记不住，/undo 就无从补偿；任务脊柱**默认关**，它会自主调
+    # LLM 花钱、还会自己动手执行，必须用户显式授权（同 W2 逐源默认关的口径）。
+    # @author aceFelix
+    actions_journal_enabled: bool = True        # 副作用账本总开关（关=不记账也不延时）
+    actions_undo_window_s: int = 30             # 不可逆动作延时窗口（秒）；0=不拦直接执行
+    actions_track_local_writes: bool = True     # 本地破坏性写是否记一条可回滚条目
+    actions_irreversible_tools: list = field(default_factory=list)  # 额外当不可逆处理的工具名
+    actions_hold_blocks_equivalent: bool = True  # 待发窗口未结案时，等价外发命令不再自动放行
+
+    tasks_enabled: bool = False                 # 任务脊柱驱动器总开关（关=只读台账不自走）
+    tasks_blocked_ask_days: int = 3             # 阻塞超此天数主动问一次（走 W1 预算闸门）
+    tasks_step_max_attempts: int = 3            # 单步失败重试上限
+    tasks_retry_backoff_s: int = 60             # 重试退避间隔（秒）；本期固定间隔不翻倍
+    tasks_wait_deadline_hours: int = 72         # 条件等待最长时限（超时转 blocked_timeout 来问）
+
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。

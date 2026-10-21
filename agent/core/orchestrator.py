@@ -5,6 +5,9 @@
 2. 权限校验: 每个工具调用前过 PermissionChecker，ASK 时通过 UI 问用户。
 3. 失败隔离: 一个工具失败不影响其他工具（返回 is_error=True 的结果给 LLM）。
 4. 中断响应: 检查 ctx.abort_event，被取消时停止后续调度。
+5. W3.2 兑现层：出了本机就收不回的对外副作用（``Tool.is_irreversible``）先入
+   延时窗口、不真执行，期间可 ``/undo cancel`` 撤回；本地可回滚的写操作照常
+   执行但记进副作用账本，供 ``/undo`` 按本轮检查点回退。
 
 返回: 每个 tool_use 对应一个 ToolResultContent，按 tool_use_id 对齐。
 """
@@ -268,6 +271,15 @@ class ToolOrchestrator:
         except Exception:
             effective_input = tu.input  # 钩子系统异常时不阻塞工具执行
 
+        # ---- W3.2 不可逆动作：先入延时窗口，本轮不真执行 ----
+        # 位置刻意在权限判定与 W1 闸门之后、钩子之后：窗口只"延后"执行，
+        # 不豁免任何一次确认；而钩子已经跑过，说明"允许做这件事"的所有判定
+        # 都已成立，只是把"做"推迟到用户下一次能喊停的时机之前。
+        # @author aceFelix
+        held = self._maybe_hold_irreversible(tool, tu, effective_input, ctx)
+        if held is not None:
+            return held
+
         # ---- 工具错误自愈 ----
         # 优先用 RecoveryExecutor 包装 call，失败时自动重试/降级/询问用户
         # 如果未配置 recovery 或自愈关闭，直接调用原始 call
@@ -306,6 +318,14 @@ class ToolOrchestrator:
             )
         except Exception:
             pass  # 审计失败不影响工具执行
+
+        # ---- W3.2 副作用账本：把这次真实影响记成可执行的补偿计划 ----
+        # 位置在审计之后、结果序列化之前：只记"确实执行完且未报错"的那些。
+        # 失败的工具调用已经由工具自己把错误回给模型，再入账本会让 /undo
+        # 面对一堆根本没发生的动作。
+        # @author aceFelix
+        self._record_effect(tool, tu, effective_input, ctx, result)
+
         if isinstance(data, str):
             content_str = data
         elif data is None:
@@ -380,6 +400,287 @@ class ToolOrchestrator:
             # 图片走独立通道，不受上面 content_str 的超长截断影响。
             images=result.images,
         )
+
+    # ---- W3.2 副作用账本与延时窗口 ----
+
+    @staticmethod
+    def _actions_config(ctx: ToolContext) -> dict[str, Any]:
+        """读 ``[actions]`` 配置（无 settings 时用安全缺省）。
+
+        缺省口径：账本开、窗口 30 秒、本地写跟踪开。三者都是"少做事"方向，
+        所以配置读不出来时按缺省走比按"全关"走更安全——全关等于默默放弃保护。
+        @author aceFelix
+        """
+        s = getattr(ctx, "settings", None)
+        return {
+            "enabled": bool(getattr(s, "actions_journal_enabled", True)),
+            "window_s": float(getattr(s, "actions_undo_window_s", 30) or 0),
+            "track_local": bool(getattr(s, "actions_track_local_writes", True)),
+            "extra_tools": set(getattr(s, "actions_irreversible_tools", []) or []),
+        }
+
+    @staticmethod
+    def _is_irreversible_call(tool: Tool, args: dict[str, Any], extra_tools: set[str]) -> bool:
+        """这是否一个"出了本机就收不回"的调用。
+
+        配置里的 ``irreversible_tools`` 名单是给"代码里还没声明、但用户本机确实
+        想保护"的工具留的应急口子（改配置比重启改代码快）。
+        @author aceFelix
+        """
+        try:
+            if tool.is_irreversible(args):
+                return True
+        except Exception:
+            pass  # 工具自己报错时按"可逆"处理，不能因为它把一个正常调用拖进窗口
+        return tool.name in extra_tools
+
+    def _maybe_hold_irreversible(
+        self,
+        tool: Tool,
+        tu: ToolUseContent,
+        args: dict[str, Any],
+        ctx: ToolContext,
+    ) -> ToolResultContent | None:
+        """不可逆调用先入延时窗口；返回给模型的结果内容，None 表示不拦。
+
+        为什么要返回一个正常结果而不能什么都不返：本轮历史里已经留下了这个
+        tool_use，缺对应 tool_result 会让该会话之后所有请求被 API 拒收（见
+        docs/fixlogs/dangling-tool-use-fix.md）。
+
+        为什么文案里必须写死「不要绕道」：实机测过（2026-10-21），只告诉模型
+        「已排队、稍后自动执行」时，它会自己判断「换个工具效果一样」，转头用
+        Bash/curl 把被拦下的那件事真做掉——窗口拦的是一条工具调用，不拦等价
+        路径就等于没拦，而且用户以为拦住了（详见
+        docs/fixlogs/w3-delay-window-bypass-fix.md）。
+        @author aceFelix
+        """
+        cfg = self._actions_config(ctx)
+        if not cfg["enabled"] or cfg["window_s"] <= 0:
+            return None  # 窗口关闭：执行照常，由 _record_effect 记一笔"不可撤销"
+        if not self._is_irreversible_call(tool, args, cfg["extra_tools"]):
+            return None
+
+        import time as _time
+
+        from agent.core.actions import (
+            STATE_HELD, UNDO_NONE, EffectRecord, get_journal, get_window,
+        )
+
+        preview = ""
+        try:
+            preview = tool.describe_irreversible(args) or tool.name
+        except Exception:
+            preview = tool.name
+        window_s = cfg["window_s"]
+        journal = get_journal()
+        rec = EffectRecord(
+            tool=tool.name,
+            args=dict(args),
+            preview=preview,
+            reversible=False,
+            # 外发动作的补偿计划写不出真实回滚，只能如实标"不可撤销"：窗口到点之后
+            # 连补偿的说法都不能编，否则 /undo 会给出一个假的"已撤销"。
+            undo_spec={"kind": UNDO_NONE, "reason": "该动作已离开本机，无法撤回"},
+            state=STATE_HELD,
+            due_at=_time.time() + window_s,
+            workdir=ctx.workdir,
+            session_id=str((ctx.extra or {}).get("session_name", "") or ""),
+            permission_mode=str(ctx.permission_mode),
+            task_id=str((ctx.extra or {}).get("task_id", "") or ""),
+        )
+        if not journal.record(rec):
+            return None  # 账本写不进就退回原行为：无人能查的"延后执行"比立即执行更糟
+
+        loop = asyncio.get_running_loop()
+        get_window().schedule(
+            rec.id, window_s,
+            lambda: loop.create_task(self._fire_irreversible(rec, ctx)),
+            loop=loop,
+            # label 是给权限层看的：窗口未结案时它要解释“为什么这条命令突然
+            # 不自动放行”，不能为了取名字去重读整本账（见 tools/bash.py）
+            label=preview,
+        )
+        self._note_effect_id(ctx, rec.id)
+        text = (
+            f"已排入 {window_s:.0f} 秒待发窗口，尚未执行：{preview}。\n"
+            f"期间输入 /undo cancel 可撤回；到点自动执行，执行结果另行播报。\n"
+            # 这段「不要绕道」是给模型看的行为约束，缺它就等于把拦截留成摆设：
+            # 模型换一条等价路径就能把用户以为拦住的外发动作做掉。
+            "【不要绕道】窗口结案前不得改用其它工具或命令行达成同一目的"
+            "（如 Bash/curl、脚本、浏览器模拟发送或抓取）——那样用户以为已被拦住的"
+            "动作会照常发生。请如实告知用户已排入待发窗口并等待；确实不能等就说明"
+            "受阻原因，由用户决定，不要自行找替代通路。"
+        )
+        if ctx.ui:
+            try:
+                ctx.ui.info(f"待发窗口已开启（{window_s:.0f}s）：{preview}")
+            except Exception:
+                pass
+            # 也要给 UI 一个收尾的 tool_result：上面的 tool_use 已经开了一张工具卡片，
+            # 不给它结果就会永远转圈（桌面/工作台都靠 tool_result 结案）
+            try:
+                ctx.ui.tool_result(tool.name, tu.id, text, is_error=False)
+            except Exception:
+                pass
+        return ToolResultContent(tool_use_id=tu.id, content=text, is_error=False)
+
+    async def _fire_irreversible(self, rec: Any, ctx: ToolContext) -> None:
+        """延时窗口到点：按账本里冻结的那一份参数真执行。
+
+        三个刻意的设计：
+        1. 不再走权限管线——用户在窗口前已经确认过一次，重走一遍会因这里没有
+           可用 UI 而 fail-closed 拒掉自己刚批准的动作（无 UI 时 ASK 直接 DENY）；
+        2. 用的是账本里的 args 而不是对方的 tool_use——模型后续改口也不该影响
+           已经排队的动作，这是"冻结参数"的全部意义；
+        3. 用户按了停止就不再发——中断意味着人还在且反悔了，此时自动执行外发动作
+           是最不该发生的事。
+        @author aceFelix
+        """
+        from agent.core.actions import STATE_APPLIED, STATE_CANCELLED, STATE_FAILED, STATE_HELD, get_journal
+
+        journal = get_journal()
+        current = journal.get(rec.id)
+        if current is None or current.state != STATE_HELD:
+            return  # 已被 /undo cancel 撤走，或被上一轮重置
+        if ctx.abort_event.is_set():
+            journal.set_state(rec.id, STATE_CANCELLED, error="用户已中断本轮，预约动作按取消处理")
+            return
+        tool = self._registry.get(rec.tool)
+        if tool is None:
+            journal.set_state(rec.id, STATE_FAILED, error="工具已不在注册表中，无从执行")
+            return
+
+        # 一个最小上下文：ui 置空（本轮 UI 的归属轮次已结束，工具不该往已收尾的对话里
+        # 写气泡），messages 置空（工具约定只读不写），extra 浅拷贝保留工具自己需要的
+        # 运行态（如已发现的工具名、工作目录相关缓存）。
+        fire_ctx = ToolContext(
+            workdir=rec.workdir or ctx.workdir,
+            messages=[],
+            abort_event=asyncio.Event(),
+            permission_mode=rec.permission_mode or str(ctx.permission_mode),
+            ui=None,
+            extra=dict(ctx.extra or {}),
+            settings=ctx.settings,
+        )
+        note: str
+        try:
+            result = await tool.call(dict(rec.args), fire_ctx)
+        except Exception as e:  # noqa: BLE001 - 定时器回调里绝不能冒泡
+            journal.set_state(rec.id, STATE_FAILED, error=f"{type(e).__name__}: {e}"[:200])
+            note = f"预约动作执行失败：{rec.label} — {type(e).__name__}"
+        else:
+            if result.is_error:
+                detail = str(result.data)[:160]
+                journal.set_state(rec.id, STATE_FAILED, error=detail)
+                note = f"预约动作执行失败：{rec.label} — {detail}"
+            else:
+                journal.set_state(rec.id, STATE_APPLIED)
+                note = f"预约动作已执行：{rec.label}"
+        # 反馈只在"说得出"的时候说：原轮次的 UI 在 REPL/桌面下通常还活着，能收到；
+        # 收不到就算了，动作本身已经执行完，报告缺失不该再抛错打断事件循环。
+        try:
+            if ctx.ui:
+                ctx.ui.info(note)
+        except Exception:
+            pass
+
+    def _record_effect(
+        self,
+        tool: Tool,
+        tu: ToolUseContent,
+        args: dict[str, Any],
+        ctx: ToolContext,
+        result: ToolResult,
+    ) -> None:
+        """把一次已执行的副作用记进账本（本地写引用本轮检查点，外发标不可撤销）。
+
+        本地写为什么必须有本轮检查点才记：没有检查点就记不成可执行的补偿计划，
+        记了反而让 /undo 列出一堆撤不动的条目。宁可少记，不可假可撤销。
+        @author aceFelix
+        """
+        cfg = self._actions_config(ctx)
+        if not cfg["enabled"] or getattr(result, "is_error", False):
+            return
+        try:
+            irreversible = self._is_irreversible_call(tool, args, cfg["extra_tools"])
+            destructive = bool(tool.is_destructive(args))
+        except Exception:
+            return
+        if not irreversible and not (destructive and cfg["track_local"]):
+            return
+
+        from agent.core.actions import (
+            STATE_APPLIED, UNDO_CHECKPOINT, UNDO_NONE, EffectRecord, get_journal,
+        )
+
+        preview = ""
+        try:
+            preview = tool.activity_description(args) or tool.user_facing_name(args)
+        except Exception:
+            preview = tool.name
+
+        undo_spec: dict[str, Any]
+        reversible = False
+        if irreversible:
+            # 窗口关闭（window_s<=0）才会走到这里：确实是执行完了的外发动作
+            undo_spec = {"kind": UNDO_NONE, "reason": "该动作已离开本机，无法撤回"}
+        else:
+            cid = self._turn_checkpoint_id(ctx)
+            if not cid:
+                return
+            undo_spec = {"kind": UNDO_CHECKPOINT, "cid": cid, "workdir": ctx.workdir}
+            reversible = True
+
+        rec = EffectRecord(
+            tool=tool.name,
+            args=dict(args),
+            preview=preview,
+            reversible=reversible,
+            undo_spec=undo_spec,
+            state=STATE_APPLIED,
+            workdir=ctx.workdir,
+            session_id=str((ctx.extra or {}).get("session_name", "") or ""),
+            permission_mode=str(ctx.permission_mode),
+            task_id=str((ctx.extra or {}).get("task_id", "") or ""),
+        )
+        if get_journal().record(rec):
+            self._note_effect_id(ctx, rec.id)
+
+    @staticmethod
+    def _note_effect_id(ctx: ToolContext, rec_id: str) -> None:
+        """把新记的账本 id 回报给宿主（``ctx.extra["effect_ids"]``），供任务脊柱回填。
+
+        为什么需要这一环：`/undo --task <goal>` 靠 `TaskStep.journal_ids` 找到一步
+        干过什么，而驱动器在子代理跑完前拿不到任何账本 id。没这个回扣链，
+        `journal_ids` 永远为空，“按目标批量补偿”就只是单测里手工造得起的功能。
+        宿主没传列表时静默跳过：普通对话不需要它，不该为它弄一个全局累加器。
+        @author aceFelix
+        """
+        bucket = (ctx.extra or {}).get("effect_ids")
+        if isinstance(bucket, list) and rec_id:
+            bucket.append(rec_id)
+
+    @staticmethod
+    def _turn_checkpoint_id(ctx: ToolContext) -> str:
+        """取本轮的文件检查点 ID（宿主在轮次开始前写入 ``ctx.extra``）。
+
+        为什么要 extra 而不是去翻 messages：检查点是轮次开始前打的，但它的 cid
+        要到轮次结束才挂到用户消息上（main.py / engine.py 都是这个顺序），工具
+        调用时刻消息里还查不到。
+
+        区分"键存在但为空"与"键不存在"：前者说明宿主自己管每轮 cid、本轮确实
+        没有检查点（没装 git 或已关闭），必须照实返回"无"；去翻消息会拿到
+        **上一轮**的 cid，把"回退到本轮开始前"做成"多退一轮"。
+        @author aceFelix
+        """
+        extra = ctx.extra or {}
+        if "checkpoint_cid" in extra:
+            return str(extra.get("checkpoint_cid", "") or "")
+        for m in reversed(ctx.messages or []):
+            if getattr(m, "role", "") == "user":
+                return str((getattr(m, "extra", None) or {}).get("checkpoint_id", "") or "")
+        return ""
+
 
 
 # ---- 文件访问追踪（供压缩后文件回灌）----

@@ -382,3 +382,34 @@ class CheckpointManager:
             return False, "回滚超时，请检查工作区是否有文件占用"
         except Exception as e:
             return False, f"回滚失败: {type(e).__name__}: {e}"
+
+
+def manager_from_settings(
+    settings: Any,
+    *,
+    workdir: str = "",
+    session_name: str = "",
+    fallback_session: str = "session",
+) -> CheckpointManager:
+    """按 Settings 的 ``[checkpoint]`` 字段构造管理器（三个宿主共用的唯一口径）。
+
+    为什么要有这个工厂：REPL（``main.py``）、工作台（``ui/workbench/checkpoint_ops.py``）
+    与副作用账本（``core/actions/journal.py``）都要建一个指向同一目录的管理器，
+    参数取值完全一致。三处各写一份时，任何一处改默认值（比如配额、超时）
+    就会与其他两处不一致：``/undo`` 回滚看不到 ``/rewind`` 打的快照就是最坏后果。
+
+    Args:
+        settings: 全局配置（读 ``checkpoint_*`` 字段）。
+        workdir: 空则取 ``settings.workdir``，再空取当前目录。
+        session_name: 会话名；空时用 ``fallback_session``（仅影响日志与提交信息，
+            存储位置按 workdir 指纹定位，与会话名无关）。
+
+    @author aceFelix
+    """
+    return CheckpointManager(
+        workdir or str(getattr(settings, "workdir", "") or Path.cwd()),
+        session_name or fallback_session,
+        enabled=bool(getattr(settings, "checkpoint_enabled", True)),
+        max_checkpoints=int(getattr(settings, "checkpoint_max_per_session", 20) or 20),
+        timeout_seconds=int(getattr(settings, "checkpoint_timeout_seconds", _GIT_TIMEOUT) or _GIT_TIMEOUT),
+    )

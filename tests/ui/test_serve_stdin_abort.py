@@ -8,6 +8,9 @@
 - ChatEngine.abort_current_reply 线程安全取消当前 send 轮次，
   _command_loop 捕获 CancelledError 后继续服务后续指令。
 
+引擎预置会话时用真 ``ToolContext``：``_handle_send`` 轮前会把本轮检查点 cid
+与会话名写进 ``ctx.extra``（W3.2 副作用账本要用），空对象没有这个字段。
+
 @author aceFelix
 """
 
@@ -21,6 +24,7 @@ import time
 import pytest
 
 from agent.config.settings import Settings
+from agent.core.context import ToolContext
 from agent.tools.bash import BashTool
 from agent.ui.workbench.bridge import WorkbenchUI, _EventEmitter
 from agent.ui.workbench.engine import ChatEngine
@@ -139,7 +143,7 @@ def test_engine_abort_current_reply(monkeypatch):
     # 预置会话状态跳过重型装配（与既有引擎测试同法）
     engine._session_ready = True
     engine._query_loop = _HangingLoop()
-    engine._ctx = object()
+    engine._ctx = ToolContext(workdir="", messages=[])
     engine._messages = []  # new_session 存活断言会 clear 它，预置防空
     # 屏蔽一轮结束后的持久化/标题生成（非本测试关注点）
     monkeypatch.setattr(engine, "_after_turn", lambda: None)
@@ -244,7 +248,7 @@ def test_abort_during_lock_wait_returns_lock_and_closes_turn(monkeypatch):
     # 预置会话状态跳过重型装配（与既有引擎测试同法）
     engine._session_ready = True
     engine._query_loop = _NeverRunLoop()
-    engine._ctx = object()
+    engine._ctx = ToolContext(workdir="", messages=[])
     engine._messages = []
     monkeypatch.setattr(engine, "_after_turn", lambda: None)
 

@@ -51,6 +51,7 @@ from agent.bootstrap import (
 from agent.bridge import get_bridge_server
 from agent.commands.router import CommandContext, dispatch_command
 from agent.config.settings import Settings, load_settings
+from agent.core.checkpoint import manager_from_settings
 from agent.core.images import paste_clipboard_image
 from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
@@ -292,18 +293,25 @@ async def repl(settings: Settings) -> int:
     _title_generated = False   # 2轮后 LLM 自动生成标题
     _dialog_count = 0
 
-    # 消息级回溯检查点：每轮对话前用 shadow git 对工作目录打检查点，
-    # /rewind 时可连带回滚文件。存储按 workdir 定位，/load 旧会话仍可命中；
-    # 未装 git / 关闭开关时 available()=False，自动退化为仅对话回退。
+    # 消息级回溯检查点：每轮对话前用 shadow git 对工作目录打检查点，/rewind 时可
+    # 连带回滚文件。存储按 workdir 定位，/load 旧会话仍可命中；未装 git / 关闭
+    # 开关时 available()=False，自动退化为仅对话回退。字段口径见工厂。
     # @author aceFelix
-    from agent.core.checkpoint import CheckpointManager
-    ckpt_mgr = CheckpointManager(
-        settings.workdir, _session_name,
-        enabled=getattr(settings, "checkpoint_enabled", True),
-        max_checkpoints=getattr(settings, "checkpoint_max_per_session", 20),
-        timeout_seconds=getattr(settings, "checkpoint_timeout_seconds", 10),
-    )
+    ckpt_mgr = manager_from_settings(settings, session_name=_session_name)
     ctx.extra["checkpoint_mgr"] = ckpt_mgr
+    # 副作用账本（W3.2）要靠会话名把记录归人可读的台账；本轮的检查点 cid 则在
+    # 轮前补写进 extra，因为 cid 要到轮结束才挂到用户消息上，工具调用时还查不到。
+    # @author aceFelix
+    ctx.extra["session_name"] = _session_name
+    ctx.extra.setdefault("checkpoint_cid", "")
+
+    # W3 兑现层宿主装配（副作用账本 + 任务脊柱）：重启后没人能在延时窗口里喊停，
+    # 上个进程排队但未发出的不可逆外发动作一律按取消处理并如实告知；
+    # `tasks_enabled` 打开时同时起后台驱动线程，退出时收。细节全在 cli_host。
+    # @author aceFelix
+    from agent.core.tasks import CliSpineHost
+    spine_host = CliSpineHost(settings, ui=ui, provider=provider, session_name=_session_name)
+    spine_host.start()
 
     # 启用诊断日志（settings.debug=True 时同时输出到 stderr）
     from agent.core.diag import set_debug as _set_diag_debug
@@ -444,6 +452,9 @@ async def repl(settings: Settings) -> int:
             # 轮前检查点：记录工作区"发消息前"状态，绑定到本轮用户消息，
             # 供 /rewind / 桌面撤回连带回滚文件。@author aceFelix
             ckpt_id = ckpt_mgr.create(reason=stripped) if ckpt_mgr.available() else None
+            # 给本轮工具调用（副作用账本的本地写回滚口径）留一份 cid，轮末
+            # 再按既有逻辑挂到用户消息上。@author aceFelix
+            ctx.extra["checkpoint_cid"] = ckpt_id or ""
             _pre_msg_len = len(messages)
 
             # 只取显式添加（Ctrl+V / /paste / /image）的待发送图片，
@@ -539,11 +550,13 @@ async def repl(settings: Settings) -> int:
                session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated,
                settings=settings)
 
-    # 先收提醒调度线程再告别：避免 goodbye 之后还有后台播报插进来
-    try:
-        reminder_host.stop()
-    except Exception:
-        pass
+    # 先收后台线程再告别：避免 goodbye 之后还有提醒/目标播报插进来，
+    # 也避免后台线程拖住进程退出（脊柱与提醒同口径）
+    for _bg_host in (spine_host, reminder_host):
+        try:
+            _bg_host.stop()
+        except Exception:
+            pass
 
     ui.goodbye()
     # 清理 MCP 连接（静默处理 anyio cancel scope 错误）

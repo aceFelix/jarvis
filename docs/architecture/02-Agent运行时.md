@@ -187,7 +187,7 @@ async for event in self._provider.stream(...):
 
 ## 三、ToolOrchestrator 工具编排器
 
-[ToolOrchestrator](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/orchestrator.py#L35-L374) 负责把模型返回的 tool_use 批量调度执行。
+[ToolOrchestrator](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/orchestrator.py) 负责把模型返回的 tool_use 批量调度执行。
 
 ### 执行流程
 
@@ -199,8 +199,16 @@ async for event in self._provider.stream(...):
    - `is_concurrency_safe=False` → 串行执行（避免竞争）
 3. **执行 + 结果收集**：
    - Hook: TOOL_BEFORE（可拒绝/修改输入）
+   - **不可逆动作拦截（W3.2）**：`tool.is_irreversible(input)` 为真时本轮**不执行**，
+     而是记一条 `held` 快照（参数冻结）+ 登记延时窗口，返回一条**非 error** 的
+     "已排入 30 秒待发窗口"结果，并给 UI 同一条 `tool_result` 结案（否则工具卡片永远转圈）。
+     插入位置刻意在**权限判定与 W1 策略闸门之后**：只延后、不豁免（见
+     [18-W3兑现层](18-W3兑现层.md) §4.3）
    - **错误自愈包装**：`ToolRecoveryExecutor.execute()` 按错误分类自动重试/降级/提示用户
    - 调用 `tool.call(input, ctx)`
+   - **副作用记账（W3.2）**：成功执行后按口径写账本——破坏性本地写引用**本轮** shadow git
+     检查点 cid（`ctx.extra["checkpoint_cid"]`）作 `undo_spec`，外发类记 `kind=none`；
+     无检查点则不记（宁少记不误报"可撤销"）
    - 异常封装为 `is_error=True` 的 ToolResultContent
    - 超长结果截断（默认 20000 字符）+ 落盘持久化
    - Hook: TOOL_AFTER
@@ -261,6 +269,10 @@ class Tool(abc.ABC):
     def is_read_only(self, args) -> bool: return False
     def is_destructive(self, args) -> bool: return False
     def is_concurrency_safe(self, args) -> bool: return False
+    # W3.2："出了本机就收不回"（与 is_destructive 正交：后者含删除/覆盖，
+    # FileWrite 也为 True 但可由检查点回滚；延时窗口只挂这一位）
+    def is_irreversible(self, args) -> bool: return False
+    def describe_irreversible(self, args) -> str: ...   # 给预览，默认回退 activity_description
 
     # 权限（默认 ASK = 最安全）
     def check_permissions(self, args, ctx) -> PermissionResult:
@@ -268,6 +280,10 @@ class Tool(abc.ABC):
 ```
 
 **为什么 fail-closed**：新工具不显式声明安全，默认被当危险操作要求确认。防止意外破坏。
+
+> 为什么新增 `is_irreversible` 而不复用 `is_destructive`：延时窗口挂在后者上等于
+> 每次存文件都要干等 30 秒。两位的四种组合与当前声明了不可逆的工具（`SendEmailTool`）
+> 见 [18-W3兑现层](18-W3兑现层.md) §一与 §十一。
 
 ### ToolRegistry
 

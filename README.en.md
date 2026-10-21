@@ -131,6 +131,8 @@
 | 🧰 **Extension services** | jarvis-desktop title-bar entry: a right-column panel managing MCP servers (add/edit/remove + enable/disable), built-in tools, skills, plugins and harness tools (marketplace search/install/uninstall/toggle) in one place | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧠 **Three-layer memory** | Session persistence + long-term memory + profile distillation, knows you better over time | [Memory](docs/guide/concepts.md#记忆系统) |
 | 📱 **One session, many ends** | jarvis-desktop shell / phone QR / WeChat ClawBot share the same session | [Desktop & Remote](docs/guide/desktop.md) |
+| 🧭 **Butler runtime layer** | Path-scoped no-confirmation rules in permissions.yaml + authorization leases (stop interrupting me) + notify budget (cut the noise) + `/away` unattended queue for approval | [W1 runtime layer](docs/architecture/16-W1判断层.md) (中文) |
+| 🧾 **The layer that makes it safe to let go** | Outbound mail waits in a 30-second send window (`/undo cancel` stops it, and equivalent outbound commands like `curl` stop being auto-allowed while a hold is open), files it wrote for you roll back per turn with `/undo`; long-lived goals survive across sessions via the task spine (zero LLM calls while it waits), and **one sentence is enough to create one** — `/tasks add …` or just ask J.A.R.V.I.S | [W3 execution layer](docs/architecture/18-W3兑现层.md) (中文) |
 | 🧩 **Open ecosystem** | MCP, plugin marketplace, Skill packs, CLI-Anything (turn any software into a tool), multi-agent collaboration | [Ecosystem](docs/guide/ecosystem.md) |
 | 🔐 **Security baseline** | Five-layer permissions + four-level sandbox + operation audit + keyring encryption, hard-blocks dangerous ops | [Concepts](docs/guide/concepts.md#五层权限系统) |
 
@@ -178,9 +180,11 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | Voice chat / realtime duplex / voices | [docs/guide/voice.md](docs/guide/voice.md) (中文) |
 | Desktop shell / proactive reminders / phone / WeChat / serve protocol | [docs/guide/desktop.md](docs/guide/desktop.md) (中文) |
 | Permissions / compaction / memory / sandbox / self-healing | [docs/guide/concepts.md](docs/guide/concepts.md) (中文) |
+| Authorization leases / notify budget / unattended mode | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) (中文) |
+| Reversible actions (`/undo`) / cross-session task spine | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) (中文) |
 | Multi-agent / plugins / CLI-Anything / email | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) (中文) |
 | Config reference / vendor setup / FAQ | [config-docs/](config-docs/configuration.md) (中文) |
-| Architecture (15 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
+| Architecture (18 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
 | Testing / CI / publishing / directory layout | [docs/guide/development.md](docs/guide/development.md) (中文) |
 | Blueprint (vision · capability model · roadmap) | [docs/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
@@ -195,6 +199,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - [x] **Phase 7**: Realtime chat UI (Arc Reactor workbench + full-duplex interrupt + desktop app)
 - [x] **Phase 8**: W1 runtime layer (authorization leases + notify budget + unattended mode; declarative rules merged into the five-layer pipeline) — shipped in v2.2.3
 - [x] **Phase 9**: W2 perception layer (unified event bus + five event sources + per-source opt-in + first-run consent + the desktop “Percept sources” panel) — shipped in v2.2.5
+- [x] **Phase 10**: W3 execution layer (effect journal + delay window for irreversible actions + `/undo`; cross-session task spine + background driver + `/tasks`) — **backend delivered with 315 unit tests**, including the three ways to create a goal (`/tasks add|show|pause|resume|cancel|advance|delete` sub-commands, the `TrackGoal` tool, and the `tasks.exec` / `actions.exec` serve RPCs, all sharing `core/tasks/spine_ops.py`); the non-LLM half can now be walked end-to-end with one command: `python scripts/smoke_w3_spine.py` (40 checks, temp-dir only); the send-window path has been walked on a real machine (two defects found and fixed there: workaround via equivalent commands, and the broken `/undo --task` attribution); the to-time execution, driver step advance and desktop shell rendering still await a manual walkthrough, not released yet; the desktop “task center” panel lives in the jarvis-desktop repo
 
 > Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/blueprint/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
