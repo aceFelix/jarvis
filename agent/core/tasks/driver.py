@@ -33,6 +33,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from agent.core.tasks.approval_ops import ApprovalOpsMixin
 from agent.core.tasks.spawn import (
     StepOutcome,
     default_spawn,
@@ -83,8 +84,11 @@ NOTIFY_SOURCE = "task"
 GATE_URGENCY = 0.45
 
 
-class TaskDriver:
+class TaskDriver(ApprovalOpsMixin):
     """任务脊柱的后台驱动器（一条线程 + 到期唤醒 + 总线订阅）。
+
+    阻塞标记、询问投递与授权答复三件事由 :class:`ApprovalOpsMixin` 提供
+    （变化原因不同：一个是“什么时候醒”，一个是“卡住之后怎么跟用户打交道”）。
 
     用法::
 
@@ -387,9 +391,37 @@ class TaskDriver:
             # 回填副作用归属（/undo --task 靠它）；去重且保留已有项：重试同一
             # 步时上一次的记录不能被新一次覆盖掉
             step.journal_ids = list(dict.fromkeys(list(step.journal_ids) + effect_ids))
-        if outcome.success:
+        if outcome.denials and not effect_ids:
+            # 受阻：本步有权限拒绝、且一个副作用都没产出——真的是一件也没做成。
+            # 绝不能报成已完成（2026-10-22 实机：子代理如实汇报被拦，旧代码凭
+            # success=True 把步骤定成 done 并向用户播报“已完成”）。
+            d0 = outcome.denials[0]
+            step.result = (outcome.report or step.result)[:400]
+            step.last_error = (
+                f"{d0.get('tool', '?')} 被拒：{d0.get('reason', '')}"
+                + (f"（另有 {len(outcome.denials) - 1} 项）" if len(outcome.denials) > 1 else "")
+            )[:200]
+            step.next_run_at = self.blocked_hold()
+            # 接回已写好却从来没人调的那条询问通路（BLOCK_APPROVAL → _ask →
+            # request_approval）；mark=False 让落盘统一走下面的收尾
+            self._block(
+                goal, step, BLOCK_APPROVAL,
+                f"需要授权：{step.last_error}。批准后这一步会立刻重试。",
+                mark=False,
+            )
+        elif outcome.success:
             step.state = STEP_DONE
             step.result = (outcome.report or "已完成")[:400]
+            if outcome.denials:
+                # 已有产出就不算卡住（否则会对着一个干完了的目标说“需要授权”），
+                # 但被拦下的那几次必须如实附在结论里：隐去它就是拿“看起来成功”
+                # 换掉真实历史（2026-10-22 第二轮实机：FileWrite 已写成并入账，
+                # 随后的 Bash 确认被拒，当时被误判成整步卡住）。
+                step.result = (
+                    step.result
+                    + f"\n本步另有 {len(outcome.denials)} 次操作被权限拦下："
+                    + "、".join(str(d.get("tool", "?")) for d in outcome.denials[:3])
+                )[:400]
             step.last_error = ""
             step.asked = False
             step.next_run_at = 0.0
@@ -447,6 +479,7 @@ class TaskDriver:
                 definition, prompt,
                 provider=self._resolve_provider(), workdir=self._workdir_for(goal),
                 task_id=goal.id, session_name=self._session_name, effect_ids=effect_ids,
+                settings=self._settings,
             )
         except Exception as e:  # noqa: BLE001 - 子代理整体异常也要归一成失败结果
             logger.warning("步骤执行异常(goal=%s step=%s): %s", goal.id, step.id, e)
@@ -501,83 +534,6 @@ class TaskDriver:
         目），否则用驱动器自己的缺省。用错目录是最坏的一类错：改动没报错，只是
         落到了另一个仓库。"""
         return goal.workdir or self._workdir
-
-    # ---- 阻塞与询问 ----
-
-    def _block(
-        self,
-        goal: TaskGoal,
-        step: TaskStep,
-        reason: str,
-        note: str,
-        *,
-        mark: bool = True,
-    ) -> None:
-        """把步骤标成阻塞，并按原因决定要不要问用户。
-
-        只管“还在等”的两类（等条件超时、等授权）：重试到上限的失败走
-        ``_run_step`` 里的 failed 终态路径，不进本函数（见那边的注释）。
-        @author aceFelix
-        """
-        step.state = STEP_BLOCKED
-        step.block_reason = reason
-        goal.blocked_since = goal.blocked_since or time.time()
-        if mark:
-            self._store.save(goal)
-        if reason == BLOCK_TIMEOUT:
-            self._ask(goal, step, f"等条件超时（{note}），要不要继续等、换做法，还是先搁下？")
-        elif reason == BLOCK_APPROVAL:
-            self._ask(goal, step, note)
-
-    def _ask(self, goal: TaskGoal, step: TaskStep, question: str) -> None:
-        """就一个步骤问用户一次（同一原因不重复问，走 W1 预算闸门）。
-
-        阻塞超过 ``blocked_ask_days`` 也允许再问一次（用户可能真忘了，长期静默的
-        目标比多打扰一次更糟），所以判据是"本步骤本轮未问"而不是"从未问过"。
-        @author aceFelix
-        """
-        if step.asked:
-            if not self._ask_days:
-                return
-            aged = goal.blocked_since and (time.time() - goal.blocked_since) / 86400.0 >= self._ask_days
-            if not aged:
-                return
-        step.asked = True
-        self._notify(
-            f"目标「{goal.goal[:24]}」卡在第 {self._index_of(goal, step) + 1} 步"
-            f"「{step.desc[:20]}」：{question}",
-            dedup_key=f"ask:{goal.id}:{step.id}",
-        )
-        self._store.save(goal)
-
-    def request_approval(self, goal_id: str, step_id: str, *, approve: bool) -> bool:
-        """用户对一次"需要授权"的答复（W3 后端切片的可编程入口，供命令/后续面板用）。
-
-        Args:
-            goal_id: 目标 ID。
-            step_id: 步骤 ID。
-            approve: True=放行（把步骤退回 pending 并清掉 asked，等驱动器重试）；
-                False=整目标暂停（不再自动推进，等用户明确恢复）。
-
-        Returns:
-            是否找到并改动了目标。
-        @author aceFelix
-        """
-        def _apply(g: TaskGoal) -> None:
-            for s in g.steps:
-                if s.id == step_id:
-                    if approve:
-                        s.state = STEP_PENDING
-                        s.block_reason = ""
-                        s.asked = False
-                        s.attempts = 0
-                    else:
-                        s.state = STEP_BLOCKED
-                        s.block_reason = BLOCK_APPROVAL
-                        g.status = GOAL_PAUSED
-            g.refresh_status()
-
-        return self._store.update(goal_id, _apply) is not None
 
     def _notify(self, text: str, *, dedup_key: str = "") -> None:
         """播报一律经宿主注入的 notifier（内部必须先过 gate_notify）。"""

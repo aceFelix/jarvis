@@ -77,6 +77,11 @@ _WORKDIR_KEY = "jarvis.workdir"
 
 _GIT_TIMEOUT = 10  # 单条 git 命令默认超时（秒）
 
+#: 任务级检查点的默认保留条数（每个工作目录，与消息级配额互不占）。
+#: 取 8 的理由：一个目标通常 2-4 步，8 条够回退两到三步又不致于把 .jarvis
+#: 目录养胖；要更多由用户改 [tasks].checkpoint_max。
+_TASK_MAX_DEFAULT = 8
+
 
 def _git_available() -> bool:
     """系统 PATH 中是否存在 git 可执行文件。"""
@@ -128,11 +133,15 @@ class CheckpointManager:
         max_checkpoints: int = 20,
         timeout_seconds: int = _GIT_TIMEOUT,
         base_dir: str | None = None,
+        task_max_checkpoints: int = _TASK_MAX_DEFAULT,
     ) -> None:
         self._workdir = str(Path(workdir).resolve())
         self._session_name = session_name
         self._enabled = enabled
         self._max = max(1, int(max_checkpoints))
+        # 任务级检查点单独一份配额：不分开的话后台值守每推一步吃一条，会
+        # 把 /rewind 的消息级回溯挤没（journal.py 顶部早就为这个警告过）。
+        self._task_max = max(1, int(task_max_checkpoints))
         self._timeout = max(1, int(timeout_seconds))
         root = Path(base_dir) if base_dir else Path.home() / ".jarvis" / "checkpoints"
         self._store_dir = root / _workdir_key(self._workdir)
@@ -261,12 +270,16 @@ class CheckpointManager:
 
     # ---- 核心操作 ----
 
-    def create(self, reason: str = "") -> str | None:
+    def create(self, reason: str = "", *, kind: str = "turn") -> str | None:
         """打一个检查点（工作区当前状态），返回 checkpoint_id。
 
-        每轮对话开始前调用。不可用/超时/出错一律返回 None，调用方
+        每轮对话开始前调用（``kind="turn"``）；任务脊柱每推一步之前调一次
+        （``kind="task"``）。不可用/超时/出错一律返回 None，调用方
         降级为"仅对话回退"。孤儿 commit + 独立 ref 使每个检查点互不
         牵连，便于按配额删除最旧检查点。
+
+        ``kind`` 只影响配额归属（两族各守各的上限），不影响存储位置：
+        同一个 shadow 仓库里 ref 序号全局递增，跨族不会撞号。
 
         @author aceFelix
         """
@@ -288,7 +301,7 @@ class CheckpointManager:
             self._git("update-ref", ref, cid)
             entries.append({
                 "id": cid, "ref": ref, "seq": seq,
-                "ts": time.time(), "reason": reason[:120],
+                "ts": time.time(), "reason": reason[:120], "kind": kind,
             })
             self._save_manifest(entries)
             self._prune(entries)
@@ -302,20 +315,36 @@ class CheckpointManager:
             return None
 
     def _prune(self, entries: list[dict[str, Any]]) -> None:
-        """配额修剪：超过 max_checkpoints 的旧检查点删 ref + gc 回收。"""
-        while len(entries) > self._max:
-            old = entries.pop(0)
+        """按 ``kind`` 分族各自守配额，超出者删 ref + gc 回收。
+
+        从新到旧扫描、配额内留、超出丢：这样保证被丢的总是该族里最旧那几条，
+        而旧版 manifest 里没 ``kind`` 字段的条目一律归入消息级族（向后兼容）。
+        只在真发生过修剪时跑一次 gc：它是整仓扫描，不能每条检查点都顺带跑一遍。
+
+        @author aceFelix
+        """
+        quotas = {"turn": self._max, "task": self._task_max}
+        kept: list[dict[str, Any]] = []
+        dropped: list[dict[str, Any]] = []
+        seen: dict[str, int] = {}
+        for e in reversed(entries):
+            kind = str(e.get("kind") or "turn")
+            seen[kind] = seen.get(kind, 0) + 1
+            (kept if seen[kind] <= quotas.get(kind, self._max) else dropped).append(e)
+        kept.reverse()
+        if not dropped:
+            return
+        for e in dropped:
             try:
-                self._git("update-ref", "-d", old.get("ref", ""))
-            except Exception:
+                self._git("update-ref", "-d", e.get("ref", ""))
+            except Exception:  # noqa: BLE001 - 删不掉 ref 也只是多留一个孤儿 commit
                 pass
-            self._save_manifest(entries)
-        if len(entries) == self._max:
-            # 恰好发生修剪时回收一次（限制频率：仅在越限触发后执行）
-            try:
-                self._git("gc", "--prune=now", "--quiet")
-            except Exception:
-                pass
+        self._save_manifest(kept)
+        entries[:] = kept
+        try:
+            self._git("gc", "--prune=now", "--quiet")
+        except Exception:  # noqa: BLE001 - gc 失败不影响可用性
+            pass
 
     def has_checkpoint(self, checkpoint_id: str) -> bool:
         """检查点是否仍存在（未被配额修剪）。"""
@@ -412,4 +441,7 @@ def manager_from_settings(
         enabled=bool(getattr(settings, "checkpoint_enabled", True)),
         max_checkpoints=int(getattr(settings, "checkpoint_max_per_session", 20) or 20),
         timeout_seconds=int(getattr(settings, "checkpoint_timeout_seconds", _GIT_TIMEOUT) or _GIT_TIMEOUT),
+        task_max_checkpoints=int(
+            getattr(settings, "tasks_checkpoint_max", _TASK_MAX_DEFAULT) or _TASK_MAX_DEFAULT
+        ),
     )

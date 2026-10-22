@@ -9,8 +9,9 @@
 > 阶段一～三（账本）需要“让模型干活”，阶段四/五的**写台账部分不需要 LLM 参与也能跑**，
 > 想直观感受“替我盯着”，从 §4.2 与 §5 开始最快。
 > **想 3 秒先拿到结论：直接跑 §0.5 的一键走查脚本**（四十项逐行打灯，不经模型、不碰用户数据）。
+> **想看“到点真的自己把活干了”：跑 §0.6 的实机自检**（十二项判据，要花一次 LLM 调用）。
 >
-> @author aceFelix　|　更新：2026-10-21
+> @author aceFelix　|　更新：2026-10-22
 
 ## 0. 前置（一次性）
 
@@ -50,6 +51,7 @@ blocked_ask_days = 3
 step_max_attempts = 3
 retry_backoff_s = 60
 wait_deadline_hours = 72
+checkpoint_max = 8          # 任务级检查点配额（与 [checkpoint].max_per_session 分开计）
 ```
 
 ⚠️ **TOML 转义陷阱**（同 W2）：路径里的反斜杠要写 `\\`，或者直接用正斜杠。
@@ -93,12 +95,56 @@ REPL 与 serve **不要同时开**：两边都会装配账本并各自起延时�
 | 绕道硬拦 | 有未结案动作时 `curl` 改问人，`git commit` / `ls` 照旧放行；开关关掉即退回 |
 | 入口三 RPC | `tasks.exec create` 回结构化 `goal`、`delete` 第一拍带目标明细、`cancel_hold` 一拍生效、未知动作报错不断连、信封键不泄漏 |
 
-⚠ **脚本测不到的三段仍然要人工走查**（所以本清单不作废）：① 到点**真执行**（脚本在到点前
-就把它撤回了，见 §2.5）；② 驱动器**推进步骤**（要调 LLM，见 §4.5）；③ 桌面壳渲染
-（属 jarvis-desktop 仓，见 §5.10）。
+⚠ **上面四十项全部“不经模型”**，所以它们测不到两件只有真 LLM 才能验的事：
+① 到点**真的有人去执行**；② 执行产生的副作用**真的能撤**（驱动器推步骤）。
+这两件由 §0.6 的实机自检负责；剩下只有桌面壳渲染（属 jarvis-desktop 仓，见 §5.10）
+仍需人工看一眼。
 
 脚本只写临时目录（`~/.jarvis` 一个字都不碰），跑完自动清理；它自身也有回归
 （`tests/test_w3_smoke_script.py`，4 例）：脚本坏了自己会红，不会指着假象说"通过"。
+
+## 0.6 实机自检：到点真的自己把活干了（约 1-2 分钟，要花一次 LLM）
+
+```bash
+# 前提：凭据在环境变量里（默认读 DEEPSEEK_API_KEY，可用 --key-env 换）
+./.venv/Scripts/python.exe scripts/livecheck_w3.py
+# 换模型/端点/等待时长
+./.venv/Scripts/python.exe scripts/livecheck_w3.py --model deepseek-chat --wait 30
+```
+
+它起一个真实的 `agent.serve` 子进程，用 WS 建一个 `time:+45s` 的目标，然后
+**什么都不做**，看它自己把步骤推完，十二项判据逐行打灯：
+
+| 判据 | 钉住什么 |
+|---|---|
+| 驱动器真的起了线程 | `driver_running`（与 `tasks_config.enabled` 分开报，前者才是“真在跑”） |
+| 等待期间状态是 blocked | 不烧轮询那一半（到点前一次 LLM 也不调） |
+| 到点后自己进入 running | 没人按键它也会开工 |
+| 播报以 `task` 源推出来了 | 桌面「任务中心」将来要消费的就是这个事件 |
+| **结论与实际产出一致** | 报 done 就必须真写了文件并入了账；报受阻就必须确实没写 |
+| 文件真被写出来 / 账本多一条 / 台账 `journal_ids` 回填 | 后台改动的归属接线（2026-10-22 前永远为空） |
+| `undo_task` 两拍确认 + 真撤掉 + 文件消失 | 后台步骤的改动**在回退体系里** |
+| `stdout` 握手行之前无杂质 | Electron 逐行解析握手的契约 |
+
+隔离与成本：**不改用户的 `settings.toml`**（凭据、开关、权限规则全在子进程的
+内存 Settings 里），台账与账本钉在系统临时目录；任务级 shadow git 会在
+`~/.jarvis/checkpoints` 下按工作目录指纹建一个仓库，脚本结束时按本轮目录名
+删掉自己建那一个（`--keep-checkpoints` 可留下看）。
+
+⚠ 默认配置下它会停在「需要授权」那一条判据上——**那不是 bug**：`FileWrite`
+无条件 ASK，无人值守无 UI 就是落 DENY。要让它真写成功，用带路径 spec 的
+allow 规则（脚本自己已配了一份）：
+
+```yaml
+rules:
+  - pattern: "FileWrite(**)"      # 裸工具名的 allow 放宽不了工具特判 ASK
+    value: allow
+    source: project
+```
+
+修前与修后的区别就在播报：旧代码对着一个**什么也没做成**的步骤说「已完成：1/1 步」，
+现在要么真的做完、要么如实说「卡在第 1 步…需要授权」。详见
+[w3-driver-approval-blocked-report.md](../fixlogs/w3-driver-approval-blocked-report.md)。
 
 ## 1. 阶段一：账本装配与遗留作废
 
@@ -208,7 +254,7 @@ REPL 与 serve **不要同时开**：两边都会装配账本并各自起延时�
 
 | # | 操作 | 看到这样算过 |
 |---|---|---|
-| 6.1 | `./.venv/Scripts/python.exe -m pytest -q` | 全部通过，无新增失败（本切片后全量 **3146 例**，W3 单测 **315 例**） |
+| 6.1 | `./.venv/Scripts/python.exe -m pytest -q` | 全部通过，无新增失败（本轮实机修复后全量 **3193 例**，W3 单测 **362 例**） |
 | 6.1b | `./.venv/Scripts/python.exe scripts/smoke_w3_spine.py` | 一行结论「全部通过」（§0.5），这是不靠肉眼就能重复跑的那层 |
 | 6.2 | `./.venv/Scripts/python.exe scripts/check_md_links.py` | `dead links: 0`、`untracked links: 0` |
 | 6.3 | `tests/serve/test_serve_protocol.py` | 协议计数 55：新增的 `tasks.exec` / `actions.exec` 已在 `DESKTOP_COMMANDS` 与 RPC 分发表两边对上 |
@@ -231,6 +277,8 @@ REPL 与 serve **不要同时开**：两边都会装配账本并各自起延时�
 | RPC 返回 `need_confirm` 但以为报了错 | `delete` / `undo` / `undo_task` 未带 `confirm=true` 就只回预览，两拍确认是默认行为（避免桌面一个误点就抹掉台账） |
 | 一键走查有项红了 | 脚本会把该项的「期望」打在下一行；`advance`/定局/硬拦这几项红了多半是 `spine_ops.py` 或权限判定被改动，先 `git diff` 定位再判是不是回退 |
 | 走查脚本要不要手动清理 | 不用：台账/账本都在系统临时目录里，跑完随目录删掉（`tests/test_w3_smoke_script.py` 里钉了这条） |
+| 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。配一条带路径 spec 的 allow 规则（见 §0.6）或先拿授权租约。**这不是回退**：旧代码同场景播报的是「已完成」 |
+| 播报「已完成」但工作区里没那个文件 | 本轮修掉的谎报缺陷（D2）。先跑 `scripts/livecheck_w3.py`，它有一项判据专盯「结论与实际产出一致」 |
 
 ## 附录 A：手工往台账写一个固定 id 的目标
 

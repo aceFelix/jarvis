@@ -183,6 +183,7 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("step_max_attempts", "tasks_step_max_attempts"),
         ("retry_backoff_s", "tasks_retry_backoff_s"),
         ("wait_deadline_hours", "tasks_wait_deadline_hours"),
+        ("checkpoint_max", "tasks_checkpoint_max"),
     )),
     ("percept", (  # W2 感知层：子键不带 percept_ 前缀（与 [policy.notify_budget] 同口径）
         ("enabled", "percept_enabled"),

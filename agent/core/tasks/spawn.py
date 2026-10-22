@@ -15,16 +15,26 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger("jarvis.tasks.spawn")
 
 
 @dataclass
 class StepOutcome:
     """一步执行的归一结果（注入的 spawn 与真实子代理都返回这个形状）。
 
-    归一是必要的：驱动器只看这三个字段就能决定"继续推进 / 退避重试 / 定局失败"，
+    归一是必要的：驱动器只看这几个字段就能决定"继续推进 / 退避重试 / 定局失败"，
     不必知道执行体是子代理、插件还是测试桩。
+
+    ``denials`` 是本轮被权限拦下的调用清单（由 :func:`default_spawn` 从子 ctx.extra
+    里取回）。驱动器把它与“本步到底有没有产出”合起来判：有 denial 且一个副作用都
+    没记上，才是真卡住（去问用户）；已有产出却夹着被拒，则照实把被拒项附在结论里
+    落 done。两种都不能把被拦下报成“已完成”（2026-10-22 两轮实机各踩过一头，
+    见 docs/fixlogs/w3-driver-approval-blocked-report.md）。注入通路（测试/自定义
+    编排）不填即表示未受阻。
 
     @author aceFelix
     """
@@ -32,6 +42,7 @@ class StepOutcome:
     success: bool
     report: str = ""
     error: str = ""
+    denials: list[dict[str, Any]] = field(default_factory=list)
 
 
 def default_step_definition() -> Any:
@@ -63,6 +74,55 @@ def default_step_definition() -> Any:
     )
 
 
+def _host_rules(settings: Any) -> Any:
+    """取宿主配好的声明式权限规则（供子代理继承），缺失/读失败一律给空集。
+
+    为什么每次现取而不缓存：``permissions_file`` 指向的 YAML 用户随时可改，而后台
+    任务是长周期运行的，缓存会把“改了规则”变成静默失效。读一次本地 YAML 的代价
+    远低于这个理解成本。
+
+    @author aceFelix
+    """
+    from agent.permissions.rules import RuleSet, load_rules
+
+    path = str(getattr(settings, "permissions_file", "") or "").strip()
+    if not path:
+        return RuleSet()
+    try:
+        return load_rules(path)
+    except Exception as e:  # noqa: BLE001 - 规则读不到就只能回到默认判定
+        logger.warning("加载权限规则失败（本子代理按默认判定跑）: %s", e)
+        return RuleSet()
+
+
+def _step_checkpoint(settings: Any, workdir: str, task_id: str, step_desc: str) -> str:
+    """为本步打一个任务级 shadow git 检查点，返回 cid（不可用时给空串）。
+
+    没有它，后台步骤的文件改动在副作用账本里一条都不会记——编排器的规则是
+    “拿不到本轮检查点就不记”，于是 ``/undo --task`` 永远列不出东西（2026-10-22
+    实机走查确认过这条断链）。
+
+    配额走 ``kind="task"`` 与消息级分开计（见 checkpoint.py），所以不会把
+    ``/rewind`` 的回溯挤没；没装 git / 开关关闭时照实返回空串，不假装能回退。
+
+    @author aceFelix
+    """
+    if settings is None or not workdir:
+        return ""
+    try:
+        from agent.core.checkpoint import manager_from_settings
+
+        mgr = manager_from_settings(
+            settings, workdir=workdir, session_name="tasks", fallback_session="tasks",
+        )
+        if not mgr.available():
+            return ""
+        return mgr.create(f"任务 {task_id} 步骤: {step_desc[:40]}", kind="task") or ""
+    except Exception as e:  # noqa: BLE001 - 打不成检查点只意味着这步不可回退
+        logger.warning("任务步骤检查点创建失败: %s", e)
+        return ""
+
+
 def default_spawn(
     definition: Any,
     prompt: str,
@@ -72,6 +132,7 @@ def default_spawn(
     task_id: str = "",
     session_name: str = "",
     effect_ids: list[str] | None = None,
+    settings: Any = None,
 ) -> StepOutcome:
     """真实执行通路：在本线程的事件循环里跑一个子代理。
 
@@ -84,14 +145,35 @@ def default_spawn(
     键）；effect_ids 是同一个列表对象，编排器往里追加本步产生的账本 id，驱动器
     跑完回填到 ``TaskStep.journal_ids``。没这一段，台账里那列永远为空（这条链路
     2026-10-21 实机暴露过断点，见 docs/fixlogs/w3-delay-window-bypass-fix.md）。
+
+    受阻清单 ``denials`` 的容器由本函数建好写进子代理的 ctx.extra，编排器在
+    被拦下的第一现场往里追加，跑完由本函数取回装进 ``StepOutcome.denials``——
+    驱动器据此判断“这步到底是被拒还是做完了”（2026-10-22 实机暴露的谎报缺陷，
+    见 docs/fixlogs/w3-driver-approval-blocked-report.md）。两个容器不同的归宿各有原因：
+    effect_ids 要落到台账字段所以由驱动器持有，denials 只用于本轮判定所以由通路回报。
+    ``settings`` 则同时供两件事：把用户配好的声明式规则递给子代理（否则
+    “前台已放行、后台仍被拒”两个入口口径不一致），以及为本步打一个
+    任务级检查点并把 cid 交给编排器（没 cid 时本地写不入账）。
+
     @author aceFelix
     """
     from agent.collaboration.subagent import run_subagent
+    from agent.core.orchestrator import EXTRA_DENIALS
     from agent.permissions.modes import PermissionMode
 
-    extra: dict[str, Any] = {"task_id": task_id, "session_name": session_name}
+    extra: dict[str, Any] = {
+        "task_id": task_id,
+        "session_name": session_name,
+        # 容器必须在这里建、而不是等编排器自己 setdefault：异步子代理往
+        # ctx.extra 里塞新键后再取回同一对象容易断链，显式传一个列表最直白
+        EXTRA_DENIALS: [],
+    }
     if effect_ids is not None:
         extra["effect_ids"] = effect_ids
+    # 编排器只认这个键：有它才肯为一次本地写记可回滚条目
+    cid = _step_checkpoint(settings, workdir, task_id, prompt)
+    if cid:
+        extra["checkpoint_cid"] = cid
 
     async def _run() -> Any:
         return await run_subagent(
@@ -102,13 +184,17 @@ def default_spawn(
             permission_mode=PermissionMode.DEFAULT,
             parent_ui=None,
             extra=extra,
+            permission_rules=_host_rules(settings),
+            settings=settings,
         )
 
     # 每条后台线程自带一个新循环：驱动器线程没有运行中的循环，
     # asyncio.run 负责建/关，异常也一定收尾（不留悬空 task）。
     result = asyncio.run(_run())
+    denials = extra.get(EXTRA_DENIALS)
     return StepOutcome(
         success=bool(getattr(result, "success", False)),
         report=str(getattr(result, "report", "") or ""),
         error=str(getattr(result, "error", "") or ""),
+        denials=list(denials) if isinstance(denials, list) else [],
     )

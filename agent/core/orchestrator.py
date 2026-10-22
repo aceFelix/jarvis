@@ -28,6 +28,36 @@ from agent.core.tool import Tool, ToolRegistry
 from agent.core.tool_pairing import REASON_ORPHAN, make_placeholder_result
 from agent.permissions import PermissionChecker
 
+#: ``ctx.extra`` 里累计本回合权限拒绝的键。由宿主预先创建（与 ``effect_ids``
+#: 同一套路：必须是同一个列表对象，否则编排器往里追加的项宿主读不到）。
+#: 用途见 :func:`record_denial`。
+EXTRA_DENIALS = "denials"
+
+
+def record_denial(ctx: ToolContext, tool_name: str, reason: str) -> None:
+    """把一次权限拒绝记进 ``ctx.extra["denials"]``（宿主据此判定“本回合受阻”）。
+
+    为什么需要这个而不是让宿主去解析模型/子代理的文本汇报：无人值守的后台步骤
+    被拦下时，子代理会如实汇报“需要授权”，但汇报是自然语言，拿关键词去匹配既
+    会漏判也会误判。编排器这里是被拦下的**第一现场**，记一条结构化事实比事后
+    猜文本可靠得多。
+
+    只记工具名与原因，不记参数全文：参数可能含密钥/正文等敏感内容，而判断
+    “需不需要授权”用不到它们。
+
+    @author aceFelix
+    """
+    bucket = ctx.extra.get(EXTRA_DENIALS) if ctx.extra is not None else None
+    if not isinstance(bucket, list):
+        return  # 宿主没开这个容器就不记（主会话等路径不必为后台任务付这个代价）
+    bucket.append({"tool": tool_name, "reason": (reason or "")[:200]})
+
+
+def take_denials(ctx: ToolContext) -> list[dict[str, Any]]:
+    """取出宿主登记的拒绝列表（没开容器时给空表，调用方据此判“未受阻”）。"""
+    bucket = ctx.extra.get(EXTRA_DENIALS) if ctx.extra is not None else None
+    return list(bucket) if isinstance(bucket, list) else []
+
 
 @dataclass
 class _PendingCall:
@@ -101,6 +131,9 @@ class ToolOrchestrator:
             decision = await self._resolve_permission(perm, tool, tu, ctx)
             if decision.behavior == PermissionBehavior.DENY:
                 reason = decision.reason or "权限拒绝"
+                # 受阻的第一现场登记：任务脊柱靠它把“被拦下”与“干完了”分开，
+                # 绝不把权限拒绝当成一次正常完成报出去（见 record_denial）
+                record_denial(ctx, tu.name, reason)
                 results_by_id[tu.id] = ToolResultContent(
                     tool_use_id=tu.id,
                     content=f"权限拒绝: {reason}",

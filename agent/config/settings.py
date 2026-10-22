@@ -396,6 +396,9 @@ class Settings:
     tasks_step_max_attempts: int = 3            # 单步失败重试上限
     tasks_retry_backoff_s: int = 60             # 重试退避间隔（秒）；本期固定间隔不翻倍
     tasks_wait_deadline_hours: int = 72         # 条件等待最长时限（超时转 blocked_timeout 来问）
+    # 后台值守每推一步打一个 shadow git 检查点（改动可回退）；该配额与
+    # [checkpoint].max_per_session 分开计，避免把 /rewind 的消息级回溯挤没
+    tasks_checkpoint_max: int = 8
 
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。

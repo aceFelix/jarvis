@@ -79,7 +79,7 @@
 | **表达** | 双语音系统（`/voice` 半双工 + `/talk` 真全双工）+ 富文本终端 + 桌面壳 | ⭐⭐⭐⭐⭐ | —（无重大缺口） |
 | **思考** | ReAct 循环 + 多 Agent 协作 + 深度思考统一档位（11 厂商适配） | ⭐⭐⭐⭐ | 基本够用 |
 | **记忆** | 画像记忆（LLM 自动提炼 + 每日衰减）+ 长期记忆文件 + 知识图谱画像桥 | ⭐⭐⭐⭐ | 缺结构化可查询事实（时效/出处/冲突消解）、向量化情景记忆 |
-| **主动性** | ProactiveHub：每日简报 / 定时提醒 / 截止日期分级追踪 / 待机 TTS 播报 + 统一事件总线经打扰预算裁决 + **跨会话任务脊柱与可撤销副作用账本**（阶段 10） | ⭐⭐⭐ | 提醒→裁决→播报闭环已成；自动处理闭环已齐（脊柱：台账 + 驱动器 + 三个建目标入口 + serve RPC），但**缺模型侧的自动拆步与费用归集**，四条验收尚未实机走查 |
+| **主动性** | ProactiveHub：每日简报 / 定时提醒 / 截止日期分级追踪 / 待机 TTS 播报 + 统一事件总线经打扰预算裁决 + **跨会话任务脊柱与可撤销副作用账本**（阶段 10） | ⭐⭐⭐ | 提醒→裁决→播报闭环已成；自动处理闭环已齐（脊柱：台账 + 驱动器 + 三个建目标入口 + serve RPC），且“到点真的自己执行并入账”已实机跑穿，但**缺模型侧的自动拆步与费用归集** |
 | **个性化** | 画像注入系统提示，越用越懂你（实测能答出作息/偏好/项目） | ⭐⭐⭐ | 缺主动适配工作模式、关系网络 |
 | **系统维护** | 无 | ☆ | 完全空白（见第 6 节，这是现阶段主攻方向） |
 | **跨端** | 桌面壳 / 手机 PWA / 微信 ClawBot 三端共享同一会话 | ⭐⭐⭐ | 只同步对话，不同步"东西"（剪贴板/文件/通知） |
@@ -537,7 +537,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | **P3** 视频理解与生成 | 屏幕录制理解 | 12+ | ⬜ |
 | **P3** 安全沙箱执行 | 隔离高风险操作 | 已完成 | ✅ |
 | **F-4** 自主数字分身 | 代表用户处理事务 | 12+ | ⬜ |
-| **F-5** 可信自主执行 | 授权内自主 | 12+（依赖 8 + 10） | 🔄（W1 租约/预算 + W3 延时窗口与 `/undo` 均已就位，等实机验证与面板） |
+| **F-5** 可信自主执行 | 授权内自主 | 12+（依赖 8 + 10） | 🔄（W1 租约/预算 + W3 延时窗口与 `/undo` 均已就位，到点真执行已实机跑穿，缺面板） |
 | **F-6** 居家管家（IoT） | 智能家居 | 12+ | ⬜（待定位决策） |
 | **F-7** 全时环境感知 | 准全时 | 12+ | ⬜ |
 | **F-8** 多模态全时理解 | 全通道 | 12+ | ⬜ |
@@ -567,17 +567,21 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 - [x] **W1**：放宽判定确定可解释 + 租约过期即回 `ask` + 静默时段聚合 + 权限零回归（阶段 8 开发完成，分支 `feat/stage8-policy`；初版独立策略引擎经人工实测复盘认定为过度设计，已降级合并入五层管线，见 [16-W1运行时层](../architecture/16-W1判断层.md)）
 - [ ] **W2**：四类事件各产出恰好一条聚合提醒 + 常驻 CPU < 1% + 单源故障隔离
 - [ ] **W3**：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
-  ——**后端代码已交付**：四条均有单测锁定（315 例，见
+  ——**后端代码已交付**：四条均有单测锁定（362 例，见
   [18-W3兑现层](../architecture/18-W3兑现层.md) 第九节），“不经模型”那一半已用
-  `scripts/smoke_w3_spine.py` 实机跑绿（40/40）；**到点真执行、驱动推进步骤、桌面壳
-  三段仍未人工实机走查**，不在此打钩；
+  `scripts/smoke_w3_spine.py` 实机跑绿（40/40）；“到点真的自己把活干了并且真的能撤”
+  已于 **2026-10-22** 用 `scripts/livecheck_w3.py`（12 项）**实机跑穿**（真 LLM、真
+  shadow git、真按目标撤销）；**仍只剩桌面壳渲染一段未人工看过**，故此处不打钩；
   逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
   交付时的四处设计偏离与四个被测试打出的真缺陷见
   [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)；
   实机走查又抽出的两处（绕道、归属断链）见
   [w3-delay-window-bypass-fix](../fixlogs/w3-delay-window-bypass-fix.md)；
   目标入口三件套的交付取舍见
-  [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md)。
+  [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md)；
+  到点真执行那次跑出的四条断链（子代理不继承规则 / 受阻谎报已完成 / 后台改动
+  不入账 / `[actions]` 对后台无效）见
+  [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)。
 - [ ] **W4**：按轮挂 ≤12 工具时建响应 < 1s + 语音说"帮我查一下 XX"能异步拿到结果 + 记忆带时效与出处
 
 ### 电脑管家八件事（第 6 节）
@@ -618,6 +622,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 |---|---|
 | **管家形态升级详细计划（W1–W4）** | [roadmap/PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md) |
 | W3 兑现层交付复盘（设计偏离 + 真缺陷清单） | [fixlogs/w3-journal-spine-delivery.md](../fixlogs/w3-journal-spine-delivery.md) |
+| W3 驱动器受阻谎报实机复盘（四条断链） | [fixlogs/w3-driver-approval-blocked-report.md](../fixlogs/w3-driver-approval-blocked-report.md) |
 | 实时语音待机/唤醒/计费 | [roadmap/PLAN-future-realtime-voice-upgrade.md](../roadmap/PLAN-future-realtime-voice-upgrade.md) |
 | 实时语音稳定性 | [roadmap/PLAN-p1-realtime-stability.md](../roadmap/PLAN-p1-realtime-stability.md) |
 | 主动提醒既有实现 | [roadmap/PLAN-p2-proactive-reminder.md](../roadmap/PLAN-p2-proactive-reminder.md) |
@@ -630,7 +635,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ---
 
-**文档版本**：v2.0（合并版）| **最后更新**：2026-10-21 | **维护者**：艾斯（aceFelix）
+**文档版本**：v2.0（合并版）| **最后更新**：2026-10-22 | **维护者**：艾斯（aceFelix）
 
 > v2.0 内的修订（不拆版本号，只记已发生的变化）：2026-10-21 阶段 10（W3）后端交付后，
 > 重写了 2.1 的感知/主动性/安全权限三行与“一句话”结论（顺带补上阶段 9 漏改的总线描述），
@@ -638,6 +643,10 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 > 同日收尾切片：建目标的三个入口（`/tasks` 子命令 / `TrackGoal` / `tasks.exec` RPC）落地，
 > 2.1 主动性行与 P3 自主任务规划行的“缺模型侧建目标入口”口径已改，单测 190 → 315 例
 > （含一键实机走查脚本 `scripts/smoke_w3_spine.py` 自身的 4 例回归）。
+> 2026-10-22 实机自检切片：`scripts/livecheck_w3.py` 把“到点真执行 + 副作用入账 +
+> 按目标撤销”跑穿（12/12），当场抓出的四条断链已修（子代理继承宿主规则、受阻不再
+> 谎报已完成、任务级检查点入账、`[actions]` 对后台生效），单测 315 → 362 例，
+> 复盘见 [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)。
 
 > v2.0（2026-10-09）：由 `VISION.md` + `roadmap/jarvis-upgrade-roadmap.md` + `roadmap/VISION_ROADMAP(旧).md` 三份合并为一份蓝图；
 > 统一"阶段"进度坐标；补入电脑管家八件事技术选型、未来形态技术锚点、理论锚点与学习渠道。

@@ -8,12 +8,15 @@
 > **W2 的三项前置决策已于 2026-10 拍板**（定位边界 / 逐源默认关 / IMAP IDLE，见第 8 节）。
 > **W3（阶段 10）后端已开发完成**（副作用账本 + 不可逆动作延时窗口 + `/undo`，
 > 任务脊柱 + 驱动器 + 宿主接线 + `/tasks`（含写入子命令），加上建目标的三个入口：
-> `/tasks add` / `TrackGoal` 工具 / serve `tasks.exec`+`actions.exec` RPC，共 315 例单测，
-> 并有一条一键实机走查命令 `scripts/smoke_w3_spine.py`（40 项））；
+> `/tasks add` / `TrackGoal` 工具 / serve `tasks.exec`+`actions.exec` RPC，共 362 例单测，
+> 并有两条一键实机命令：`scripts/smoke_w3_spine.py`（40 项、不经模型）与
+> `scripts/livecheck_w3.py`（12 项、**真 LLM 跑穿到点自动执行 + 副作用入账 + 按目标撤销**）；
 > 落地复盘见 [18-W3兑现层](../architecture/18-W3兑现层.md)、
-> [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md) 与
-> [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md)；
-> **尚未实机走查**，桌面「任务中心」面板属 jarvis-desktop 仓。
+> [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)、
+> [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md) 与
+> [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)；
+> **到点真执行已于 2026-10-22 实机跑穿**（当场抓出四条断链并全部修掉），
+> 仍待人工的只剩桌面壳渲染，桌面「任务中心」面板属 jarvis-desktop 仓。
 > **W4 尚未开工**（本文档只做设计、排依赖、切片，不代表已开发）。
 > 定位：既有的 P1/P2/P3 清单是"能力愿望单"，本文档回答一个更前置的问题——
 > **已有的零件（调度器/感知器/记忆/审计/沙箱）之间缺哪几个接口，才能让"主动陪伴"和"无人值守"真的成立。**
@@ -294,10 +297,14 @@ class PerceptEvent:
 > `Tool.is_irreversible` 声明位、`orchestrator` 统一拦截、`/undo`、`/tasks`（两节 + 写入子命令）、
 > `TrackGoal` 工具、serve `tasks.exec`/`actions.exec`（`agent/serve/rpc_tasks.py`）、
 > `[actions]`/`[tasks]` 配置，以及 `budget.py` 登记 `task` 源权重（不登记就落 default 被误裁）。
-> 单测 315 例（账本 30 / 编排接入 31 / 绕道硬拦 18 / 台账 35 / 入口层 45 / 驱动器 39 /
-> `/undo` 21 / `/tasks` 34 / `TrackGoal` 31 / RPC 27 / 一键走查脚本 4）。
+> 单测 362 例（账本 30 / 编排接入 31 / 绕道硬拦 18 / 台账 35 / 入口层 45 / 驱动器 39 /
+> `/undo` 21 / `/tasks` 34 / `TrackGoal` 31 / RPC 27 / 一键走查脚本 4 / 实机修复回归 47）。
 > “不经模型”的那一半已用 `scripts/smoke_w3_spine.py` 实机跑绿（40/40，2026-10-21）；
-> 到点真执行、驱动器推进步骤、桌面壳渲染三段仍待人工跑。
+> 到点真执行与驱动器推进步骤已于 **2026-10-22** 用 `scripts/livecheck_w3.py` 实机跑穿
+> （12/12，真 LLM 写文件→入账→按目标撤销→文件消失），那一次跑出四条断链（子代理不继承
+> 宿主规则、受阻谎报已完成、后台改动不入账、`[actions]` 对后台无效）已全部修掉并各带回归，见
+> [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)；
+> 只剩桌面壳渲染一段仍待人工看。
 > 实机走查后补的两处（延时窗口被等价路径绕开、`/undo --task` 归属链路断）各带回归用例，见
 > [w3-delay-window-bypass-fix](../fixlogs/w3-delay-window-bypass-fix.md)。
 >
@@ -382,22 +389,32 @@ class PerceptEvent:
 | `agent/prompts/system.py` + `agent/prompts/text_blocks.py` | 根基础提示补 `TrackGoal` 用法行；新增按工具注册表条件注入的目标脊柱口径段；`system.py` 因超 800 行拆出逐字静态正文 `text_blocks.py`（行为不变，4 例护栏锁） |
 | `agent/serve/hub.py` + `agent/main.py` | 两个宿主的装配与起停；遗留窗口作废逐条播报 |
 | `agent/core/daemon/proactive.py` + `agent/core/policy/budget.py` | 闸门实现上提为 `apply_notify_gate`（`gate_notify` 变薄包装）；登记 `task` 源权重 0.9 |
-| `agent/core/checkpoint.py` | 新增 `manager_from_settings` 工厂（三处宿主各写一份构造 → 收拢） |
-| `tests/core/test_task_spine.py`、`test_task_driver.py`、`test_action_journal.py`、`test_orchestrator_irreversible.py`、`tests/commands/test_undo_commands.py`、`test_tasks_command.py`、`tests/core/test_spine_ops.py`、`tests/tools/test_track_goal.py`、`tests/serve/test_serve_tasks_rpc.py`、`tests/test_w3_smoke_script.py`（均新增） | 共 **315 例**（含走查后补的绕道硬拦与归属接线用例、收尾切片的入口层 45 + 工具 31 + RPC 27）：条件等待命中、重启续跑、等待/退避期 LLM 零调用、hold 必回非 error 结果、撤销/不可逆拒撤销 |
+| `agent/core/checkpoint.py` | 新增 `manager_from_settings` 工厂（三处宿主各写一份构造 → 收拢）；实机修复切片再加 `kind` 分族配额（`create(reason, *, kind="turn")` + `task_max_checkpoints`，任务级不挤占 `/rewind`） |
+| `agent/core/tasks/approval_ops.py`（新增，167 行） | 阻塞与授权从 `driver.py` 拆出：`_block`/`_ask`/`request_approval`/`APPROVAL_HOLD_S`/`blocked_hold()`；`TaskDriver(ApprovalOpsMixin)` 继承后调用点一字不改（守 800 行上限） |
+| `agent/collaboration/subagent.py` + `agent/core/tasks/spawn.py` | 子代理继承宿主 `permissions_file` 规则与 `settings`（不再写死空 `RuleSet()`）；步骤跑前打 `kind="task"` 检查点并把 cid / 拒绝清单交给编排器与驱动器 |
+| `tests/core/test_task_spine.py`、`test_task_driver.py`、`test_action_journal.py`、`test_orchestrator_irreversible.py`、`tests/commands/test_undo_commands.py`、`test_tasks_command.py`、`tests/core/test_spine_ops.py`、`tests/tools/test_track_goal.py`、`tests/serve/test_serve_tasks_rpc.py`、`tests/test_w3_smoke_script.py`、`tests/core/test_orchestrator_denials.py`、`test_driver_approval_blocked.py`、`test_checkpoint_task_quota.py`、`test_w3_step_side_effects.py`、`tests/collaboration/test_subagent_permission_rules.py`（均新增） | 共 **362 例**（含走查后补的绕道硬拦与归属接线用例、收尾切片的入口层 45 + 工具 31 + RPC 27、实机修复回归 47）：条件等待命中、重启续跑、等待/退避期 LLM 零调用、hold 必回非 error 结果、撤销/不可逆拒撤销、受阻不落 done、有产出却夹着被拒→落 done 并附说明 |
 | `scripts/smoke_w3_spine.py`（新增，619 行） | 一键实机走查：三个入口 + 延时窗口 + 绕道硬拦 + 两条 RPC 共 40 项，不经 LLM、台账/账本只写临时目录（`--no-serve` 可跳过 WS 段） |
+| `scripts/livecheck_w3.py`（新增，398 行） | 一键实机自检：真 LLM 跑穿“到点自动执行 + 副作用入账 + 按目标撤销”共 12 项；只改内存 Settings 不落盘用户配置，跑完自清理（`--wait` 控等待时长） |
 
 ### 4.4 验收
 
 - [ ] 关掉终端再打开，任务仍在跑；到点/条件满足自动推进下一步。
-  ——单测已锁（`test_resume_resets_stale_running` + 重启后继续推进），**未实机跑过**。
-- [ ] 条件等待命中前不重复调 LLM（无轮询烧钱）。
-  ——单测直接断言等待期/退避期 spawn 计数为 0（`TestNoPollingBurn`），**未实机跑过**。
-- [ ] 任意任务的副作用可一条命令回滚（不可逆项明确报告"此项无法撤销，已发往 X"）。
-  ——`/undo --task` + checkpoint `undo_spec`，拒撤项带原因（有单测；回退粒度是**整轮**）。
-- [ ] 不可逆动作在延时窗口内确实未发出，可撤回。
-  ——`test_orchestrator_irreversible` 断言“被 hold 时工具一次都没被调用”+ `/undo cancel`。
+  ——单测已锁（`test_resume_resets_stale_running` + 重启后继续推进）；后半句
+  “到点自动推进”已于 2026-10-22 实机跑穿（blocked→running→done 全程无人干预），
+  前半句“换个进程再打开”仍只有单测（实机自检不重启 serve）。
+- [x] 条件等待命中前不重复调 LLM（无轮询烧钱）。
+  ——单测直接断言等待期/退避期 spawn 计数为 0（`TestNoPollingBurn`）；实机已证：
+  等待那 40 余秒只读到一次状态查询，驱动器靠到期时刻唤醒，不烧轮询。
+- [x] 任意任务的副作用可一条命令回滚（不可逆项明确报告"此项无法撤销，已发往 X"）。
+  ——`/undo --task` + checkpoint `undo_spec`，拒撤项带原因（有单测；回退粒度是**整轮**）；
+  实机已证：后台步骤写的文件进了账本、`journal_ids` 回填、`actions.exec undo_task`
+  两拍把工作区真撤回去（文件消失）。
+- [x] 不可逆动作在延时窗口内确实未发出，可撤回。
+  ——`test_orchestrator_irreversible` 断言“被 hold 时工具一次都没被调用”+ `/undo cancel`；
+  2026-10-21 已实机跑过发件窗口一段。
 
-> ⚠️ **四条验收均仅有单测/集成级证据，人工实机走查尚未执行**，所以本节不打钩；
+> ⚠️ **四条验收中已有三条拿到实机证据**（2026-10-22，`scripts/livecheck_w3.py` 12/12），
+> 只有“换个进程仍继续跑”与桌面壳渲染两段仍靠单测/待人工，所以本节不全打钩；
 > 逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
 
 ---
@@ -485,11 +502,12 @@ class PerceptEvent:
   ——**代码已交付（随 v2.2.5）**：三条中“单源故障隔离”有单测锁定（连败自动停用
   + 异常不外溢）；“四类事件各产出恰好一条聚合提醒”与“常驻 CPU < 1%”**尚未实测**，
   不在此打钩；逐项跑法与判据见 [W2 实机走查清单](../test/percept-w2-testing.md)。
-- [ ] W3：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
-  ——**后端代码已交付（未随版本号发布）**：四条均有单测锁定（共 315 例，见
+- [ ] **W3**：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
+  ——**后端代码已交付（未随版本号发布）**：四条均有单测锁定（共 362 例，见
   [18-W3兑现层](../architecture/18-W3兑现层.md) 第九节），“不经模型”那一半另有
-  `scripts/smoke_w3_spine.py` 实机跑绿（40/40）；**到点真执行、驱动推进、桌面壳三段
-  的人工实机走查尚未执行**，
+  `scripts/smoke_w3_spine.py` 实机跑绿（40/40）；**到点真执行与驱动推进已于
+  2026-10-22 用 `scripts/livecheck_w3.py` 实机跑穿**（12/12，当场抓出并修掉四条断链），
+  只剩重启续跑与桌面壳两段待人工，
   故此处不打钩，逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
   交付当时的四处设计偏离与被测试打出的四个真实缺陷见
   [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)；

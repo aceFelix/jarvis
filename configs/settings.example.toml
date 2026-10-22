@@ -342,3 +342,5 @@ step_max_attempts = 3      # 单步失败重试上限
 retry_backoff_s = 60       # 重试退避间隔（秒）；本期固定间隔，不按失败次数翻倍
 wait_deadline_hours = 72   # 条件等待最长时限（超时转 blocked_timeout 来问，绝不静默挂起）
                            # 只对 file_exists / percept_event 兜底；time 类自带确定时刻，不补 deadline
+checkpoint_max = 8         # 后台每推一步先打一个 shadow git 检查点（改动可回退）；
+                           # 该配额与 [checkpoint].max_per_session 分族计数，不会把 /rewind 的消息级回退挤没
