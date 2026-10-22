@@ -200,9 +200,9 @@ quotas = {"turn": self._max, "task": self._task_max}   # 20 与 8 互不侵占
 - **到点真执行的"成功"依赖用户配置**：默认配置下后台步骤写文件仍会被拒（D1 修的是
   "配了规则能生效"，不是"默认放行"）。这条现在是**如实播报"需要授权"**而不是谎报，
   但用户要真的无人值守写文件，得配 `FileWrite(<路径spec>)` allow 规则或授权租约。
-- **桌面「任务中心」面板仍未做**：`tasks.exec` / `actions.exec` 已有单测与实机证据，
-  面板在 jarvis-desktop 仓，那边要消费的是本轮新增的 `need_confirm` + `preview` 两拍
-  与 `kind=task` 播报。
+- **桌面「任务中心」面板已于 2026-10-22 同日接完**（下一刀）：jarvis-desktop 右栏新增
+  「跨会话目标」与「副作用账本」两个区块，消费的正是本轮新增的 `need_confirm` + `preview`
+  两拍与 `kind=task` 播报；接的过程里发现了一个新的语义缺口（「批准」按不下去），见 §十。
 - **目标拆解仍靠人给步骤**：一句话拆成多步不在本层。
 - **token/费用未归集**：`SubagentResult` 不回报 usage，`TaskGoal.budget` 只是留位。
 - **受阻后模型换合法通路做完了步骤**：本轮第二次实机就是这种情况（FileWrite 成功 +
@@ -220,4 +220,46 @@ quotas = {"turn": self._max, "task": self._task_max}   # 20 与 8 互不侵占
 | `README.md` / `README.en.md` | 阶段 10 行：删去"待人工跑穿"，改为已跑穿 + 一条命令 |
 | `docs/guide/development.md` | 全量测试数、`scripts/livecheck_w3.py` 用法 |
 | `docs/architecture/12-配置系统.md` | dataclass 字段与 TOML 两处补 `tasks_checkpoint_max` / `[tasks] checkpoint_max` |
-| `docs/architecture/00-索引.md` | 本文件的链接与摘要；补 `approval_ops.py` 与 §0.6 实机自检口径 |
+| `docs/architecture/00-索引.md` | 本文件的链接与摘要；补 `approval_ops.py` 与 §0.6 实机自检口径；同日再补 `approve` 动词与桌面两个新区块的消费关系 |
+
+## 十、接面板时又补的一刀：「批准」必须真能放行
+
+写桌面面板时才发现问题：`request_approval(approve=True)` 只是把步骤退回 `pending`，
+驱动器重试走的是**同一条无 UI 的默认权限判定**，同一个 `FileWrite` 特判 ASK 会再拦
+一次——于是面板上那个「批准」按钮是个空转控件，而且它看起来已经生效了（回执写着
+「已批准」）。这是本文件 §4.2 那条修复留下的尾巴：只做了「如实告知需要授权」，
+没做「授权到底怎么给」。
+
+定位（两条都是既有设计，不是缺陷）：
+
+- 无人值守时能免去打断的通路只有 W1 的**授权租约**（`core/policy/lease.py`）；
+- `policy_gate` 第一步只放宽 ASK，放宽不了 DENY 与路径提醒；且**调用不带路径参数而
+  租约限了路径 → 不算命中**（所以 Bash 这类工具不会被限路径的租约放宽）。
+
+修法（三重收窄，写进代码常量与回执文案）：
+
+1. `TaskStep.denied_tools` 落盘：受阻时把第一现场记下的被拒工具名存进台账（重试定局
+   后清空，旧台账无这个键读回空表）；
+2. `ApprovalOpsMixin.approve_step`：先按 `denied_tools` + `workdir/**` + 默认 30 分钟
+   向 `LeaseStore` 签租约，再把步骤退回待执行并 `wake()`；`denied_tools` 为空时
+   **拒签**（范围不明等于全放行）并回 `False` + 该用 `/lease` 或带路径 allow 规则的提示；
+3. `tasks.exec approve` 一拍落手（点按钮本身就是表态），回执 `message` 写清工具、
+   目录、时长三件事，并明说租约放宽不了 Bash 这类无路径参数的调用。
+
+面板侧据此两条约束画界面：`denied_tools` 为空就**禁用**批准按钮（而不是点了拿错），
+目标被暂停时不递批准（驱动器不会重试，签了也是放着过期）。
+
+单测新增 12 例（全量 **3205 passed**，W3 单测 362→374）：
+
+| 文件 | 例数 | 钉住什么 |
+|---|---|---|
+| `tests/core/test_driver_approval_blocked.py` | 14→21 | 签出的租约只含本步被拒工具且限目标目录与短 TTL；`denied_tools` 为空不签；无 workdir 时签不限路径的租约并在文案里照实说；步骤已不在台账时「租约已签但未退回」；批准后下次重试真能过闸 |
+| `tests/serve/test_serve_tasks_rpc.py` | 27→32 | 驱动器没起时 `ok=false` 且**不签租约**；`minutes` 透传与非法值回退默认；回执带放行范围文案与被批步骤 id |
+
+桌面侧（jarvis-desktop 仓）同批交付：`shared/tasks-contracts.ts` 契约与宽容解析、
+`stores/taskActions.ts` + `stores/tasksStore.ts` + `backendStore.refreshTasks` 接线、
+`SpineTaskPanel.tsx` + `EffectJournalPanel.tsx` 两区块、`styles/task-center.css`、
+`i18n-tasks.ts`；验证到 `npm run typecheck` 零错 + `npm run build` 通过 +
+`npx vitest run` **524 passed**（含 `test/renderer/tasks.test.tsx` 30 例）。
+**未做实机渲染验证**（按仓库口径只跑编译与单测），界面效果需在桌面 `npm run dev` 里
+人工走查，走查项已写进 jarvis-desktop `docs/development.md` §5。

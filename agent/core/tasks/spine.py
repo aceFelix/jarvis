@@ -228,6 +228,9 @@ class TaskStep:
             步骤会被立刻重跑，退避形同虚设（烧钱方式最隐蔽的一种）。
         asked: 是否已就本步骤询问过用户（防止反复打扰，同一原因只问一次）。
         journal_ids: 本步骤产生的副作用账本记录 ID（/undo --task 的关联线索）。
+        denied_tools: 本轮被权限拦下的工具名（受阻时由驱动器写入，落 done / 重新
+            尝试时清空）。它是「批准」能签多大范围租约的唯一依据：丢了这份清单，
+            面板就只好放行全部工具（比用户同意的更大），或按钮只能假装生效。
 
     @author aceFelix
     """
@@ -245,6 +248,7 @@ class TaskStep:
     finished_at: float = 0.0
     next_run_at: float = 0.0
     journal_ids: list[str] = field(default_factory=list)
+    denied_tools: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -255,6 +259,7 @@ class TaskStep:
             "asked": self.asked, "started_at": self.started_at,
             "finished_at": self.finished_at, "next_run_at": self.next_run_at,
             "journal_ids": list(self.journal_ids),
+            "denied_tools": list(self.denied_tools),
         }
 
     @classmethod
@@ -280,6 +285,8 @@ class TaskStep:
             finished_at=float(data.get("finished_at") or 0.0),
             next_run_at=float(data.get("next_run_at") or 0.0),
             journal_ids=[str(x) for x in (data.get("journal_ids") or []) if x],
+            # 旧台账没这个键：读成空表即可（不假装知道被拒工具，批准时会如实说缺清单）
+            denied_tools=[str(x) for x in (data.get("denied_tools") or []) if x],
         )
 
     @property

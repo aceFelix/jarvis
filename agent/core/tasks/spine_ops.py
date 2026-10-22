@@ -388,6 +388,8 @@ def goal_detail(goal: TaskGoal) -> dict[str, Any]:
                 "wait": wait_readable(step.wait),
                 "next_run_at": iso_of(step.next_run_at) if step.next_run_at else "",
                 "journal_ids": list(step.journal_ids),
+                # 面板的「批准」要照这份清单签租约，所以必须随明细一起回传
+                "denied_tools": list(step.denied_tools),
             }
             if step is not None
             else None
@@ -401,6 +403,7 @@ def goal_detail(goal: TaskGoal) -> dict[str, Any]:
                 "result": s.result,
                 "last_error": s.last_error,
                 "journal_ids": list(s.journal_ids),
+                "denied_tools": list(s.denied_tools),
             }
             for s in goal.steps
         ],

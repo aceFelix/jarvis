@@ -25,7 +25,7 @@ from agent.config.settings import Settings
 from agent.core.actions import STATE_APPLIED, STATE_HELD, EffectRecord, configure_journal
 from agent.core.tasks import driver as driver_mod
 from agent.core.tasks.spine import configure_spine_store
-from agent.serve import protocol
+from agent.serve import protocol, rpc_tasks
 from tests.serve.support import make_desktop_server
 
 
@@ -287,3 +287,66 @@ def test_envelope_keys_never_leak_into_business_fields(server):
     assert len(spine.list_goals(None, limit=10)) == 1
     # 目标文本里没有因为信封键多出怪字段，状态查询也照常
     assert _tasks(srv, action="status")["count"] == 1
+
+
+# ---- tasks.exec approve（批准重试 = 签一条限定范围的租约 + 退回待执行） ----
+
+def test_tasks_verb_table_contains_approve():
+    """动词表是面板与文档共同的口径：漏一条就会静默报“未知动作”。"""
+    assert "approve" in rpc_tasks.TASK_ACTIONS
+
+
+def test_tasks_approve_requires_goal_and_step(server):
+    srv, _spine, _journal = server
+    with pytest.raises(ValueError):
+        _tasks(srv, action="approve", goal_id="g")
+    with pytest.raises(ValueError):
+        _tasks(srv, action="approve", step_id="s")
+
+
+def test_tasks_approve_without_driver_is_honest(server):
+    """没驱动器时不签租约也不回成功：“批了但没人重试”比“没批”更难解释。"""
+    srv, spine, _journal = server
+    _tasks(srv, action="create", goal="甲; 乙")
+    gid = spine.list_goals(None, limit=1)[0].id
+    sid = spine.load(gid).steps[0].id
+
+    data = _tasks(srv, action="approve", goal_id=gid, step_id=sid)
+
+    assert data["ok"] is False and "驱动器没起" in data["message"]
+    # 快照字段照常带回，面板不会因为一条没生效的批准就丢掉整屏状态
+    assert "goals" in data and "tasks_config" in data
+
+
+def test_tasks_approve_delegates_to_driver(server, monkeypatch):
+    """RPC 只做参数搬运与回执原样上抛：放行范围由驱动器一处定调。"""
+    srv, _spine, _journal = server
+    seen = {}
+
+    def _approve(goal_id, step_id, *, minutes):
+        seen.update(goal_id=goal_id, step_id=step_id, minutes=minutes)
+        return True, "已签发租约 [abcd1234]：FileWrite @ D:\\proj，有效期 30 分钟"
+
+    monkeypatch.setattr(driver_mod, "_driver", SimpleNamespace(approve_step=_approve))
+    data = _tasks(srv, action="approve", goal_id="g1", step_id="s1", minutes=15)
+
+    assert data["ok"] is True and "abcd1234" in data["message"]
+    assert seen == {"goal_id": "g1", "step_id": "s1", "minutes": 15}
+
+
+def test_tasks_approve_default_minutes_reads_the_constant(server, monkeypatch):
+    """不传 minutes 就用 approval_ops 的常量，不在 RPC 层再抄一份数字。"""
+    from agent.core.tasks.approval_ops import APPROVAL_LEASE_TTL_MIN
+
+    srv, _spine, _journal = server
+    seen = {}
+
+    def _approve(goal_id, step_id, *, minutes):
+        seen["minutes"] = minutes
+        return False, "这一步没记下被拒的工具名"
+
+    monkeypatch.setattr(driver_mod, "_driver", SimpleNamespace(approve_step=_approve))
+    data = _tasks(srv, action="approve", goal_id="g1", step_id="s1")
+
+    assert seen["minutes"] == APPROVAL_LEASE_TTL_MIN
+    assert data["ok"] is False and "被拒的工具名" in data["message"]

@@ -136,8 +136,12 @@
 
 1. **脊柱没有模型侧创建入口**：`SpineStore.add_goal` / `TaskDriver.request_approval` 等
    写入 API 已就位，但没有能建目标的工具。实机上 `/tasks` 第二节暂时是空的。
+   ——✅ 已由后续切片闭合（`/tasks add` + `TrackGoal` + `tasks.exec`），见
+   [w3-entry-rpc-delivery](w3-entry-rpc-delivery.md)。
 2. **serve 协议与桌面面板未动**：`tasks.*` / `actions.*` RPC、`DESKTOP_COMMANDS` 登记、
    右栏"任务中心"改 spine 视图，全部属下一切片。
+   ——✅ 后续切片均已闭合（2026-10-21 上 RPC；2026-10-22 兄弟仓 jarvis-desktop 接完
+   右栏「跨会话目标」与「副作用账本」两个区块，只剩实机渲染待人工看）。
 3. **token/费用未归集**：`SubagentResult` 不回报 usage，`TaskGoal.budget` 只是留位。
 4. **退避是固定间隔**，不做指数翻倍（配置项名 `retry_backoff_s` 与注释已按实际语义写明）。
 5. 清理/整理类维护工具（BLUEPRINT §6.2/6.3）要 W3 账本才安全 —— 账本本轮就位，工具另开。

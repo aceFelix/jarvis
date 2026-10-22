@@ -402,6 +402,9 @@ class TaskDriver(ApprovalOpsMixin):
                 + (f"（另有 {len(outcome.denials) - 1} 项）" if len(outcome.denials) > 1 else "")
             )[:200]
             step.next_run_at = self.blocked_hold()
+            # 记下被拒工具名单：面板的「批准」靠它签**只限这些工具**的租约。
+            # 不落盘就只能盲放行（全部工具全部路径）或按钮只能假装生效。
+            step.denied_tools = [str(d.get("tool") or "?") for d in outcome.denials[:8]]
             # 接回已写好却从来没人调的那条询问通路（BLOCK_APPROVAL → _ask →
             # request_approval）；mark=False 让落盘统一走下面的收尾
             self._block(
@@ -424,6 +427,7 @@ class TaskDriver(ApprovalOpsMixin):
                 )[:400]
             step.last_error = ""
             step.asked = False
+            step.denied_tools = []
             step.next_run_at = 0.0
         else:
             step.last_error = (outcome.error or "执行失败")[:200]

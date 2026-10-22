@@ -150,7 +150,7 @@ agent/
     ├── filelock.py    # ensure_dir + file_lock（`O_CREAT|O_EXCL` 跨进程锁；协作 TaskList 与任务脊柱共用）
     └── query_lock.py  # 会话 query 串行锁（桌面/手机/微信同会话互斥）
 
-tests/                 # 测试套件（3193 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱/感知/策略/命令/UI/serve）
+tests/                 # 测试套件（3205 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱/感知/策略/命令/UI/serve，含 W3 任务脊柱与副作用账本 374 例）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试

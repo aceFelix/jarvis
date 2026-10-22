@@ -249,12 +249,26 @@ rules:
 | 5.8 | **信封键泄露回归项**：发一帧带 `type`/`id`/`action` 的平铺入参（真实客户端就是这么发的） | `type`/`id` 不会混进业务字段（不出现 `ok=false` 的“未知字段”或 `goals` 里多一项）；单测直传业务 dict 测不出这条，所以专门盯（`test_envelope_keys_never_leak_into_business_fields`） |
 | 5.9 | 发一个不存在的 `action`（如 `tasks.exec` 带 `action=frobnicate`） | 回明确错误并列出合法动作，不抛异常不断连接 |
 | 5.10 | 桌面壳（可选）：起 serve + `npm run dev`，让脊柱推完一步 | 聊天区出现一条气泡，标题「任务脊柱」；`kind":"task"` 未被桌面壳当未知事件丢弃（默认渲染路径） |
+| 5.11 | `tasks.exec` 带 `action=approve`、`goal_id`、`step_id`（可带 `minutes`，默认 30） | **一拍生效、不要 confirm**（点「批准」本身就是表态）；回执 `message` 必须把**放行范围原样带回去**：放了哪几个工具（只限本步实际被拦的那些）、限定哪个目录（该目标 `workdir/**`）、多久（默认 30 分钟），并保留那句「Bash 这类不带路径参数的调用放宽不了」；去 `~/.jarvis/leases.json` 应能找到刚签的那条；重试后该步真能推过 |
+| 5.12 | `tasks.exec` 带 `action=approve` 但缺 `goal_id` 或 `step_id`；或对着 `[tasks] enabled=false` 的 serve 发 | 前者报明确错误（不静默忽略）；后者回 `ok=false` 且说「驱动器没起…没有可批准的步骤」——**绝不先把租约签出去**，“批了但没人重试”比“没批”还难解释 |
+
+### 5b. 桌面右栏两个区块（属 jarvis-desktop 仓）
+
+面板本身（目标台账 + 副作用账本）的代码与自动化测试都在兄弟仓，本仓只负责把快照与回执口径锁住。
+逐条实机走查项写在 jarvis-desktop 仓库的 `docs/development.md` 第 5 节
+「右栏跨会话目标与副作用账本」，本仓只需配合确认这三条后端口径（面板上看到的都从它们来）：
+
+| # | 操作 | 看到这样算过 |
+|---|---|---|
+| 5b.1 | `tasks.exec status` | 头部三态字段分得清：`driver_running`（线程真在跑）与 `tasks_config.enabled`（配置意图）是两回事，面板据此分别画「驱动器在盯」/「未起」/「未连接」 |
+| 5b.2 | 某步被 ASK 拦住后 `tasks.exec show` | 该步带 `denied_tools`（非空）——这是「批准」按钮能签租约的前提；被拦工具名落不进台账时按钮无处可批 |
+| 5b.3 | `actions.exec status` 的 `recent[].reversible=false` | 必须同时带 `reason`（面板把「撤不回」的原因直接透给用户，不自编理由） |
 
 ## 6. 阶段六：回归确认
 
 | # | 操作 | 看到这样算过 |
 |---|---|---|
-| 6.1 | `./.venv/Scripts/python.exe -m pytest -q` | 全部通过，无新增失败（本轮实机修复后全量 **3193 例**，W3 单测 **362 例**） |
+| 6.1 | `./.venv/Scripts/python.exe -m pytest -q` | 全部通过，无新增失败（本轮补完批准通路后全量 **3205 例**，W3 单测 **374 例**） |
 | 6.1b | `./.venv/Scripts/python.exe scripts/smoke_w3_spine.py` | 一行结论「全部通过」（§0.5），这是不靠肉眼就能重复跑的那层 |
 | 6.2 | `./.venv/Scripts/python.exe scripts/check_md_links.py` | `dead links: 0`、`untracked links: 0` |
 | 6.3 | `tests/serve/test_serve_protocol.py` | 协议计数 55：新增的 `tasks.exec` / `actions.exec` 已在 `DESKTOP_COMMANDS` 与 RPC 分发表两边对上 |
@@ -277,7 +291,7 @@ rules:
 | RPC 返回 `need_confirm` 但以为报了错 | `delete` / `undo` / `undo_task` 未带 `confirm=true` 就只回预览，两拍确认是默认行为（避免桌面一个误点就抹掉台账） |
 | 一键走查有项红了 | 脚本会把该项的「期望」打在下一行；`advance`/定局/硬拦这几项红了多半是 `spine_ops.py` 或权限判定被改动，先 `git diff` 定位再判是不是回退 |
 | 走查脚本要不要手动清理 | 不用：台账/账本都在系统临时目录里，跑完随目录删掉（`tests/test_w3_smoke_script.py` 里钉了这条） |
-| 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。配一条带路径 spec 的 allow 规则（见 §0.6）或先拿授权租约。**这不是回退**：旧代码同场景播报的是「已完成」 |
+| 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。三条解法：配一条带路径 spec 的 allow 规则（见 §0.6）、在桌面面板点「批准并重试」（走 `tasks.exec approve`，签限定范围租约）、或终端 `/lease grant` 手工拿租约。**这不是回退**：旧代码同场景播报的是「已完成」 |
 | 播报「已完成」但工作区里没那个文件 | 本轮修掉的谎报缺陷（D2）。先跑 `scripts/livecheck_w3.py`，它有一项判据专盯「结论与实际产出一致」 |
 
 ## 附录 A：手工往台账写一个固定 id 的目标

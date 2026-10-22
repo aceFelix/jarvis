@@ -5,9 +5,9 @@
 本来就是一次拼装、一次回传：
 
 - ``tasks.exec``：``status`` / ``create`` / ``show`` / ``pause`` / ``resume`` /
-  ``cancel`` / ``advance`` / ``delete``——跨会话目标台账的查看与管控，业务语义全部
-  复用 :mod:`agent.core.tasks.spine_ops`（与终端 ``/tasks`` 子命令、``TrackGoal``
-  工具同一份实现）；
+  ``cancel`` / ``advance`` / ``delete`` / ``approve``——跨会话目标台账的查看与管控，
+  业务语义全部复用 :mod:`agent.core.tasks.spine_ops`（与终端 ``/tasks`` 子命令、``TrackGoal``
+  工具同一份实现）；``approve`` 例外，它调驱动器的 :meth:`approve_step`（签租约 + 退回待执行）；
 - ``actions.exec``：``status`` / ``list`` / ``undo`` / ``cancel_hold`` / ``undo_task``
   ——副作用账本的查看、撤回窗口内动作、撤销已执行副作用与按目标批量撤销。
 
@@ -42,7 +42,10 @@ if TYPE_CHECKING:  # 仅为 IDE/类型检查声明宿主属性，运行期不引
 logger = logging.getLogger("jarvis.serve.rpc_tasks")
 
 #: tasks.exec 支持的动词（面板与测试都以此为准，写错直接报错而不是静默忽略）
-TASK_ACTIONS = ("status", "create", "show", "pause", "resume", "cancel", "advance", "delete")
+TASK_ACTIONS = (
+    "status", "create", "show", "pause", "resume", "cancel", "advance", "delete",
+    "approve",
+)
 ACTION_ACTIONS = ("status", "list", "undo", "cancel_hold", "undo_task")
 
 
@@ -92,6 +95,8 @@ class TasksRpcMixin:
             return self._tasks_create(payload, base)
         if action == "show":
             return self._tasks_show(payload, base)
+        if action == "approve":
+            return self._tasks_approve(payload, base)
         return self._tasks_control(payload, action, base)
 
     def _tasks_create(self, payload: dict[str, Any], base: dict[str, Any]) -> dict:
@@ -150,6 +155,35 @@ class TasksRpcMixin:
             return preview
         res = control_goal(goal_id, action)
         return {"action": action, **res.to_dict(), **base}
+
+    def _tasks_approve(self, payload: dict[str, Any], base: dict[str, Any]) -> dict:
+        """tasks.exec approve：批准一个等授权的步骤（签一条限定范围的租约 + 退回待执行）。
+
+        不做成 confirm 两拍：面板上点「批准」本身就是表态，再加一拍只是把同一句话
+        问两遍；但回执必须把“放了哪些工具、在哪个目录、多久”原样带回去——那是用户
+        唯一能核对放行范围的地方（租约可用 `/lease` 查与撤）。
+
+        没驱动器时照实说没处批准，不先把租约签出去：“批了但没人重试”比“没批”还难解释。
+        @author aceFelix
+        """
+        from agent.core.tasks.approval_ops import APPROVAL_LEASE_TTL_MIN
+        from agent.core.tasks.driver import get_driver
+
+        goal_id = str(payload.get("goal_id") or "").strip()
+        step_id = str(payload.get("step_id") or "").strip()
+        if not goal_id or not step_id:
+            raise ValueError("tasks.exec approve 必须给 goal_id 与 step_id")
+        driver = get_driver()
+        if driver is None:
+            return {
+                "ok": False, "action": "approve",
+                "message": "驱动器没起（[tasks] enabled=false 或没配凭据），没有可批准的步骤",
+                **base,
+            }
+        ok, msg = driver.approve_step(
+            goal_id, step_id, minutes=_as_int(payload.get("minutes"), APPROVAL_LEASE_TTL_MIN),
+        )
+        return {"ok": ok, "action": "approve", "message": msg, **base}
 
     def _tasks_config(self) -> dict[str, Any]:
         """`[tasks]` 里面板要显示的开关（只回开关与阈值，不回敏感项）。"""

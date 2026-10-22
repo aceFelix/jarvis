@@ -354,7 +354,11 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
   2. 终端命令（不经模型也能建，适合测试）：
      `/tasks add 等构建产物出现后跑冒烟测试 --wait file:C:/dist/app.exe`，
      配套 `show` / `pause` / `resume` / `cancel` / `advance` / `delete`；
-  3. 桌面指令 `tasks.exec`（「任务中心」面板的数据源，面板在 jarvis-desktop 仓）。
+  3. 桌面指令 `tasks.exec` / `actions.exec`：jarvis-desktop 右栏已于 2026-10-22 接完
+     「跨会话目标」与「副作用账本」两个区块（目标可暂停/继续/取消/删除，副作用可整轮回退，
+     待发窗口里的预约带倒计时可直接撤回）。目标行上若出现「等你授权」，点**「批准并重试」**
+     即可放行——它只按本步实际被拦的工具 + 目标自己的工作目录 + 30 分钟签一条限定范围租约，
+     不是“什么都放行”。
 
 配置与命令面见 [configuration.md · W3 兑现层](config-docs/configuration.md#w3-兑现层actions-tasks阶段-10)，
 机制见 [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md)。

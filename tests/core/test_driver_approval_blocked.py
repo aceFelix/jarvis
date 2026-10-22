@@ -22,10 +22,11 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from agent.core.tasks.approval_ops import APPROVAL_HOLD_S
+from agent.core.tasks.approval_ops import APPROVAL_HOLD_S, APPROVAL_LEASE_TTL_MIN
 from agent.core.tasks.driver import StepOutcome, TaskDriver
 from agent.core.tasks.spine import (
     BLOCK_APPROVAL,
+    BLOCK_TIMEOUT,
     GOAL_PAUSED,
     STEP_BLOCKED,
     STEP_DONE,
@@ -91,6 +92,13 @@ def _driver(tmp_path, stub: Stub, *, settings=None, goal: TaskGoal | None = None
 
 def _goal() -> TaskGoal:
     return TaskGoal(goal="把周报存成文件", steps=[TaskStep(desc="写入 weekly.txt")])
+
+
+def _parse_iso(text: str):
+    """解析租约的 ISO 时刻（只用于断言 TTL，不参与业务判定）。"""
+    from datetime import datetime
+
+    return datetime.fromisoformat(text)
 
 
 def _blocked_outcome() -> StepOutcome:
@@ -280,6 +288,129 @@ class TestRequestApproval:
         assert (after.state, after.block_reason, after.asked) == (
             before.state, before.block_reason, before.asked)
         assert driver._wake.is_set() is False
+
+
+class TestApproveStepGrantsLease:
+    """批准重试：租约必须按“被拒工具 + 本目标目录 + 短 TTL”三重收窄。
+
+    这条通路存在的全部理由：只把步骤退回 pending 是个空转按钮——重试走同一条
+    无 UI 的默认判定，同一个 ASK 还会落成 DENY（2026-10-22 实机之后补的设计）。
+    租约单例由 tests/conftest.py 指向 tmp_path，不会写用户真实 ~/.jarvis。
+    @author aceFelix
+    """
+
+    @staticmethod
+    def _blocked(tmp_path, *, tools=None, workdir=None, state=None, reason=None):
+        """跑出一个受阻步骤，并可按测试需要改写步骤的被拒清单/状态。"""
+        goal = TaskGoal(
+            goal="把周报存成文件", steps=[TaskStep(desc="写入 weekly.txt")],
+            workdir=str(workdir if workdir is not None else tmp_path / "proj"),
+        )
+        stub = Stub(_blocked_outcome())
+        driver, store = _driver(tmp_path, stub, goal=goal, notes=[])
+        driver._tick()
+        if tools is not None or state is not None or reason is not None:
+            def _edit(g):
+                s = g.steps[0]
+                if tools is not None:
+                    s.denied_tools = list(tools)
+                if state is not None:
+                    s.state = state
+                if reason is not None:
+                    s.block_reason = reason
+            store.update(goal.id, _edit)
+        return driver, store, goal.id, goal.steps[0].id
+
+    def test_blocked_step_persists_denied_tools(self, tmp_path):
+        """被拒工具名单必须跟着台账落盘：丢了它就只好盲放行。"""
+        _driver_, store, gid, sid = self._blocked(tmp_path)
+        step = store.load(gid).steps[0]
+        assert step.denied_tools == ["FileWrite"]
+        # 落盘形状里真带这个键（旧台账读成空表，但不能新台账丢字段）
+        assert store.load(gid).to_dict()["steps"][0]["denied_tools"] == ["FileWrite"]
+        assert sid == step.id
+
+    def test_approve_grants_narrowly_scoped_lease(self, tmp_path):
+        from agent.core.policy.lease import get_lease_store
+
+        driver, _store, gid, sid = self._blocked(tmp_path)
+        workdir = str(tmp_path / "proj")
+
+        ok, msg = driver.approve_step(gid, sid)
+
+        assert ok is True
+        assert "已签发租约" in msg and "FileWrite" in msg and workdir in msg
+        leases = get_lease_store().list_active()
+        assert len(leases) == 1
+        lease = leases[0]
+        # 三重收窄：只放刚批过的工具、只放本目标目录、只给半个钟头
+        assert lease.tools == ["FileWrite"]
+        assert lease.path_within == [f"{workdir}/**"]
+        assert lease.note and "周报" in lease.note
+        granted = _parse_iso(lease.granted_at)
+        assert int((_parse_iso(lease.expires_at) - granted).total_seconds() // 60) == APPROVAL_LEASE_TTL_MIN
+
+    def test_lease_covers_only_that_tool_and_directory(self, tmp_path):
+        """放行面的边界：换个工具、出了目录、不带路径参数都不能命中。"""
+        from agent.core.policy.lease import get_lease_store
+
+        driver, _store, gid, sid = self._blocked(tmp_path)
+        driver.approve_step(gid, sid)
+        store = get_lease_store()
+        workdir = str(tmp_path / "proj")
+
+        assert store.match("FileWrite", str(tmp_path / "proj" / "weekly.txt"), workdir) is not None
+        assert store.match("FileWrite", str(tmp_path / "other" / "x.txt"), workdir) is None
+        assert store.match("FileEdit", str(tmp_path / "proj" / "x.txt"), workdir) is None
+        # Bash 这类没有路径参数的调用：限路径的租约不算命中（宁可多问一次）
+        assert store.match("FileWrite", "", workdir) is None
+
+    def test_approve_resets_step_for_retry(self, tmp_path):
+        driver, store, gid, sid = self._blocked(tmp_path)
+        driver._wake.clear()
+
+        ok, _msg = driver.approve_step(gid, sid)
+
+        assert ok is True
+        after = store.load(gid).steps[0]
+        assert after.state == STEP_PENDING
+        assert after.next_run_at == 0.0 and after.asked is False
+        assert after.denied_tools == [], "重试前不该留着上一轮的旧清单误导下一次"
+        assert driver._wake.is_set()
+
+    def test_missing_tool_list_refuses_to_grant_anything(self, tmp_path):
+        """没有清单就不签：签“全部工具不限路径”比用户同意的更大。"""
+        from agent.core.policy.lease import get_lease_store
+
+        driver, store, gid, sid = self._blocked(tmp_path, tools=[])
+
+        ok, msg = driver.approve_step(gid, sid)
+
+        assert ok is False
+        assert "/lease" in msg
+        assert get_lease_store().list_active() == []
+        assert store.load(gid).steps[0].state == STEP_BLOCKED, "没签成就不能把步骤放回重试"
+
+    def test_only_approval_blocks_can_be_approved(self, tmp_path):
+        """等条件超时与已定局的步骤不是“待批准”，错状态必须拒绝。"""
+        driver, store, gid, sid = self._blocked(tmp_path, reason=BLOCK_TIMEOUT)
+        ok, msg = driver.approve_step(gid, sid)
+        assert ok is False and "不是等授权状态" in msg
+
+        driver2, store2, gid2, sid2 = self._blocked(tmp_path, state=STEP_DONE, reason="")
+        assert driver2.approve_step(gid2, sid2)[0] is False
+        assert store2.load(gid2).steps[0].state == STEP_DONE
+
+    def test_unknown_goal_or_step_is_honest(self, tmp_path):
+        from agent.core.policy.lease import get_lease_store
+
+        driver, _store, gid, _sid = self._blocked(tmp_path)
+
+        ok1, msg1 = driver.approve_step("nope", "nope")
+        assert ok1 is False and msg1
+        ok2, msg2 = driver.approve_step(gid, "no-such-step")
+        assert ok2 is False and "没有这个步骤" in msg2
+        assert get_lease_store().list_active() == []
 
 
 class TestHoldConstantSane:

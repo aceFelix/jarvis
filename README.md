@@ -198,7 +198,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
 - [x] **阶段 8**：W1 运行时层（授权租约 + 打扰预算 + 无人值守；声明式规则并入五层管线）——已随 v2.2.3 发布
 - [x] **阶段 9**：W2 感知层（统一事件总线 + 窗口/目录/仓库/来信/在场五类事件源 + 逐源默认关 + 首次启动询问 + 桌面「感知源」面板）——已随 v2.2.5 发布
-- [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——**后端已交付（362 例单测，全量 3193 例）**，含目标入口三件套（`/tasks add|show|pause|resume|cancel|advance|delete` 子命令、`TrackGoal` 工具、serve `tasks.exec`/`actions.exec` RPC，共用 `core/tasks/spine_ops.py`）；两条一键实机命令：“不经模型”那一半 `python scripts/smoke_w3_spine.py`（40 项），**“到点真的自己把活干了并且真的能撤”那一半 `python scripts/livecheck_w3.py`（12 项，真 LLM）** —— 后者已于 2026-10-22 全绿跑穿，当场发现并修掉四条断链（子代理不继承宿主权限规则、受阻却谎报已完成、后台改动不入账、`[actions]` 对后台无效）；延时窗口一段则于 2026-10-21 跑穿（修了两处：等价通路绕道、`/undo --task` 归属断链）；尚未发布，仍待人工的只剩桌面壳渲染，桌面「任务中心」面板属 jarvis-desktop 仓
+- [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——**后端已交付（374 例单测，全量 3205 例）**，含目标入口三件套（`/tasks add|show|pause|resume|cancel|advance|delete` 子命令、`TrackGoal` 工具、serve `tasks.exec`/`actions.exec` RPC，共用 `core/tasks/spine_ops.py`）；两条一键实机命令：“不经模型”那一半 `python scripts/smoke_w3_spine.py`（40 项），**“到点真的自己把活干了并且真的能撤”那一半 `python scripts/livecheck_w3.py`（12 项，真 LLM）** —— 后者已于 2026-10-22 全绿跑穿，当场发现并修掉四条断链（子代理不继承宿主权限规则、受阻却谎报已完成、后台改动不入账、`[actions]` 对后台无效）；延时窗口一段则于 2026-10-21 跑穿（修了两处：等价通路绕道、`/undo --task` 归属断链）；同日补上「批准并重试」的真通路（`tasks.exec approve`：按本步被拒工具 + 目标目录 + 30 分钟签限定范围租约），并在 jarvis-desktop 仓接完右栏「跨会话目标」与「副作用账本」两个区块（那边 524 例 vitest 全绿）；尚未发布，只剩桌面实机渲染需人工走查
 
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 
