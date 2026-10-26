@@ -279,8 +279,15 @@ class ProactiveHub:
 
         @author aceFelix
         """
+        # 去重账本先取下来再停：新总线是全新实例，不接续的话“同一个键 5 分钟内
+        # 只算一次”会跟着旧实例一起消失——实测现象是面板上连点几次保存，同一条
+        # 告警就被重复入库几次，白白扣掉打扰额度。
+        dedup_state = (self.percept_bus.export_dedup_state()
+                       if self.percept_bus is not None else None)
         self._stop_percept()
         self._start_percept()
+        if dedup_state and self.percept_bus is not None:
+            self.percept_bus.import_dedup_state(dedup_state)
         return dict(self._percept_status)
 
     # ---- 到期/通知回调（复刻老 NotificationMixin 语义，通道换成事件流） ----

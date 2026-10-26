@@ -58,6 +58,8 @@ PERCEPT_CONFIG_FIELDS: tuple[PerceptField, ...] = (
     PerceptField("vcs_enabled", "percept_vcs_enabled", "bool", "仓库状况"),
     PerceptField("mail_enabled", "percept_mail_enabled", "bool", "重要来信"),
     PerceptField("vision_enabled", "percept_vision_enabled", "bool", "摄像头在场"),
+    PerceptField("calendar_enabled", "percept_calendar_enabled", "bool", "日历事件"),
+    PerceptField("system_enabled", "percept_system_enabled", "bool", "系统资源"),
     PerceptField("log_events", "percept_log_events", "bool", "本地留痕事件", default=True),
     PerceptField(
         "file_watch_dirs", "percept_file_watch_dirs", "list", "守望目录（绝对路径）"

@@ -219,9 +219,12 @@ rules:
 > 重要度门槛（[复盘](../fixlogs/percept-panel-history-lost-on-rebuild-fix.md)）。
 > 上行是交付当时的快照，**当前计数以架构文档为准**：`test_percept_bus` 47、
 > `test_percept_init` 12、`test_percept_status` 13、`test_hub_percept` 24、
-> `test_notify_budget` 18、`test_percept_speech` 9，桌面 `percept.test.tsx` 34。
+> `test_notify_budget` 18、`test_percept_speech` 9、`test_percept_sources_catchup` 19，
+> 桌面 `percept.test.tsx` 35。
 > 实机走查清单见 [W2 感知层实机走查清单](../test/percept-w2-testing.md)。
-> 本期不动的：`schedule`/`calendar`/`system` 三个收编位
+> ✅ **阶段 11 收编**：`calendar` / `system` 两个休眠件已接进总线
+> （`source_calendar.py` / `source_system.py`，面板同步开开关）；
+> 仍未收编的只剩 `schedule`——它的提醒已经过 W1 闸门播报，再进总线会重复播报
 > （理由见架构文档第七节）。
 
 ### 3.1 设计
@@ -242,8 +245,8 @@ class PerceptEvent:
 | 文件守望 `file` | **自建目录快照**（白名单目录 walk + mtime/size 差分落 `~/.jarvis/percept/file_state.json`） | 只订阅白名单目录；纯轮询差分（不依赖 inotify） |
 | 仓库 `vcs` | `git status`/`git stash list` 只读差分（✅ 已实现） | 最小间隔 60s；仅订阅登记过的仓库；只在“刚跨过提醒线”那一档发一次 |
 | 邮件 `mail` | IMAP 只读 IDLE 长连接，断线自动降级为定时轮询（✅ 已实现，决策 3） | 只取信封头（发件人/主题/时间/Message-ID），不拉正文、不置已读；已报键落盘去重 |
-| 日历 `calendar` | 已有 `CalendarSource` 升级为事件源（本期未接：仍是休眠件） | 每 30 分钟 |
-| 系统 `system` | 已有 `SystemMonitor`（本期未接：同上） | 沿用 600s 冷却 |
+| 日历 `calendar` | 已有 `CalendarSource` 升级为事件源（✅ 阶段 11 已接总线：仍不起线程，由总线按间隔拉取） | 每 30 分钟 |
+| 系统 `system` | 已有 `SystemMonitor`（✅ 阶段 11 已接总线：只调 `check_now()` 拿快照） | 沿用 600s 冷却 |
 | 视觉 `vision` | 已有 `VisionWatcher`（mediapipe 手势/人脸）——✅ 本期已接总线 | 默认 2fps；在场类事件不播报、只驱动 away 推断 |
 
 > ⚠️ **与代码事实的修正**（2026-10 实现总线时核实）：`file` 行原文为"复用

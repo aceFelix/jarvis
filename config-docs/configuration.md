@@ -199,7 +199,9 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `mail_enabled` / `mail_min_interval_s` / `mail_watch_senders` | `false` / `0` / `[]` | 邮件源（IMAP 只读 IDLE）；白名单非空 = 只报命中的人 |
 | `vision_enabled` / `vision_camera_index` / `vision_fps` | `false` / `0` / `2` | 视觉在场源（**唯一会碰摄像头的源**，需 `pip install "jarvis-agent[vision]"`） |
 | `vision_gesture_enabled` / `vision_auto_stop_minutes` / `vision_interval_s` | `true` / `0` / `5` | 是否跑手势识别；`0` = 不自动关摄像头，`>0` 空闲自动关（代价：关闭期间检测不到“回来了”）；总线排空节拍 |
-| `calendar_enabled` / `system_enabled` / `schedule_enabled` | `false` | 既有能力收编位（本体未装配，开了也不会采，理由见架构文档第七节） |
+| `calendar_enabled` | `false` | 日历源（阶段 11 已接）：日程进入提前窗口时报**一次**；后端与提前量取 `[calendar]` 段的 `backend`/`ics_path`/`ics_url`/`remind_minutes_before`，感知层不另设一份 |
+| `system_enabled` | `false` | 系统资源源（阶段 11 已接）：CPU/内存/磁盘阈值告警，阈值取 `[monitor]` 那一组；`psutil` 缺失时该源自报不可用而不是报错 |
+| `schedule_enabled` | `false` | **留位未接入**：提醒已由提醒通道过 W1 闸门播报（静默时段降级投递），再进总线会重复播报；面板也不给这个开关 |
 
 > 👀 **视觉源与 away**：打开 `vision_enabled` 后，人脸离开画面会触发无人值守（away），
 > 回来时由人脸重新出现解除；而摄像头一旦不再工作（开了 `vision_auto_stop_minutes`、
