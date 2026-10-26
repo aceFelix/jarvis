@@ -432,6 +432,11 @@ class ProactiveHub:
 
         @author aceFelix
         """
+        # 先把“改配置后怎么生效”的宿主能力挂上去：挂晚了的话，开机第一句
+        # “帮我关掉窗口感知”就会得到一句“需重启生效”。接线细节见 config_hooks。
+        from agent.serve.config_hooks import register_hub_apply_hooks
+
+        register_hub_apply_hooks(self)
         try:
             from agent.core.percept import init_percept, register_sources
 

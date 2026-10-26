@@ -145,6 +145,7 @@ class TestPromptTextBlocksSplit:
         "_PLATFORM_MACOS",
         "_PLATFORM_LINUX",
         "_GOAL_SPINE_SECTION",
+        "_SELF_CONFIG_SECTION",
     )
 
     def test_system_reexports_the_same_objects(self):
@@ -178,4 +179,53 @@ class TestPromptTextBlocksSplit:
             path = Path(mod.__file__)
             lines = path.read_text(encoding="utf-8").splitlines()
             assert len(lines) <= 800, f"{path.name}: {len(lines)} 行"
+
+
+class _FakeConfigSetTool:
+    """最小化的 ConfigSet 替身，仅用于验证自配置段条件注入。"""
+
+    name = "ConfigSet"
+    description = "修改 jarvis 的配置项"
+    input_schema = {"type": "object", "properties": {}}
+    deferred = False
+
+    async def call(self, args, ctx):  # pragma: no cover - 不实际调用
+        raise NotImplementedError
+
+
+class TestSelfConfigSection:
+    """「# 调自己的配置」段按工具是否在场条件化注入（阶段 12）。
+
+    子代理的受限工具集里往往没有 ConfigSet（也不该有——它不该替用户改全局
+    配置），不判断就会让它去调一个手上没有的工具。同理：禁改沙箱/凭据、
+    confirm 项不代用户答复，这几条纪律必须逐字进提示。
+
+    @author aceFelix
+    """
+
+    def test_absent_when_no_config_tool(self):
+        """默认 ToolRegistry（没有 ConfigSet）时不注入。"""
+        p = build_system_prompt(".", ToolRegistry())
+        assert "# 调自己的配置" not in p
+
+    def test_present_when_config_tool_registered(self):
+        reg = ToolRegistry()
+        reg.register(_FakeConfigSetTool())
+        p = build_system_prompt(".", reg)
+        assert "# 调自己的配置" in p
+        assert "ConfigList" in p and "ConfigSet" in p
+
+    def test_section_states_the_three_disciplines(self):
+        """三条最容易越界的纪律不能被删：只按明确要求改 / 不碰沙箱凭据 / 不代人确认。"""
+        from agent.prompts.text_blocks import _SELF_CONFIG_SECTION as block
+
+        assert "只按用户明确要求改" in block
+        assert "沙箱与凭据一律不碰" in block
+        assert "confirm" in block and "说三件事" in block
+
+    def test_default_registry_gets_the_section(self):
+        """真宿主（默认工具表含两个 Config 工具）里该段必须在。"""
+        from agent.core.tool import build_default_registry
+
+        assert "# 调自己的配置" in build_system_prompt(".", build_default_registry())
 

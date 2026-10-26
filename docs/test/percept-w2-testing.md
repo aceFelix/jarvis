@@ -232,8 +232,14 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; .venv\Scripts\python.exe -m p
 cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run typecheck; npm run build
 ```
 
-基线（2026-10-26）：jarvis **3263 passed**；桌面 **528 passed** + typecheck + build 全绿；
+基线（2026-10-26，含阶段 12 自配置层 + 配置变更广播的新增用例）：jarvis **3377 passed**；
+桌面 **535 passed** + typecheck + build 全绿；
 死链门禁 `python scripts/check_md_links.py` → dead 0 / untracked 0。
+
+> 阶段 11 收尾时的基线是 3263；阶段 12 P1 新增 105 例（真源表 / 两个工具 / 宿主
+> 生效钩子 / 提示词段四份测试）；手测发现的「面板不跟新值」又补了 9 例后端
+> （变更监听器 3 + 工具广播 4 + 宿主事件 2）与 7 例桌面（`dispatcherSettings.test.ts`）。
+> 数字只管看"有没有少例"，不必较真——**绿比数字重要**。
 
 ## 6. 收尾
 

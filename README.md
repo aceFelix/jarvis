@@ -154,6 +154,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 默认接阿里云 DashScope（`qwen3.7-plus` 多模态），也可 `export DASHSCOPE_API_KEY=sk-xxx` 后直接启动
 - 不想装 Python、只想用图形界面？直接下载 [jarvis-desktop 安装包](https://github.com/aceFelix/jarvis-desktop/releases/latest)（Windows，免装 Python 双击即用）
 - 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
+- **懒得改配置就直接说**：“太吵了”“每天 7:15 给我出简报”“把我切窗口的记录关掉”——它自己改配置并当场生效，回执含原值多少、怎么 `/undo` 回退；沙箱开关与凭据一律拒绝（那是它该守的护栏）
 - 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
 - 本仓库在 [GitCode](https://gitcode.com/acefelix/jarvis) 与 [GitHub](https://github.com/aceFelix/jarvis) 双平台同步托管，每次提交两边一并推送
@@ -181,6 +182,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 权限 / 压缩 / 记忆 / 沙箱 / 自愈 | [docs/guide/concepts.md](docs/guide/concepts.md) |
 | 授权租约 / 打扰预算 / 无人值守 | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) |
 | 撤销行动（`/undo`）/ 跨会话任务脊柱 | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) |
+| 让它自己改配置（说了就改 / 能改什么 / 为什么要确认） | [docs/architecture/12-配置系统.md](docs/architecture/12-配置系统.md) |
 | 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
 | 架构设计（18 篇） | [docs/architecture/](docs/architecture/00-索引.md) |

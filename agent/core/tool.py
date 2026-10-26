@@ -236,6 +236,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.file_ops.grep import GrepTool
     from agent.tools.todo import TodoWriteTool
     from agent.tools.track_goal import TrackGoalTool
+    from agent.tools.config_tool import ConfigListTool, ConfigSetTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_tool import SendEmailTool
@@ -252,6 +253,9 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(TodoWriteTool())
     # W3.1 跨会话目标入口（“替我盯着…”落到台账，阶段 10 收尾切片）@author aceFelix
     registry.register(TrackGoalTool())
+    # 阶段 12 自配置层：模型只能改白名单里的体验类项，安全类直接 DENY @author aceFelix
+    registry.register(ConfigListTool())
+    registry.register(ConfigSetTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
