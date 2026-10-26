@@ -16,6 +16,7 @@ from agent.tools.file_ops.file_write import FileWriteTool
 from agent.tools.file_ops.glob import GlobTool
 from agent.tools.file_ops.grep import GrepTool
 from agent.tools.todo import TodoWriteTool
+from agent.tools.track_goal import TrackGoalTool
 from agent.tools.location import LocationTool
 from agent.tools.web.web import WebFetchTool, WebSearchTool
 
@@ -29,6 +30,7 @@ __all__ = [
     "GrepTool",
     "LocationTool",
     "TodoWriteTool",
+    "TrackGoalTool",
     "WebFetchTool",
     "WebSearchTool",
 ]

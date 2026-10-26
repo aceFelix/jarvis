@@ -3,7 +3,7 @@
 核心概念：
 1. **TodoTask**: 任务数据模型——id、标题、描述、状态、owner、依赖链。
 2. **依赖链**: blocks（此任务阻塞谁）/ blockedBy（谁阻塞此任务）。
-3. **文件锁**: 使用 portalocker 跨平台文件锁，保证并发安全。
+3. **文件锁**: 用 ``agent/utils/filelock.py`` 的原子创建锁文件互斥，保证并发安全。
 4. **High Water Mark**: 防止任务 ID 重用（已删除的 ID 不再分配）。
 5. **持久化**: ~/.jarvis/tasks/{team_name}/ 下每个任务一个 JSON 文件。
 
@@ -19,13 +19,16 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+# 文件锁与目录工具已提升到 agent/utils/filelock.py（W3.1 任务脊柱要用同一把锁，
+# 两处各写一遍只会改坏一边）。这里以原私有名引入，调用点与测试打桩入口不变。
+from agent.utils.filelock import ensure_dir as _ensure_dir, file_lock as _file_lock
 
 # ---------------------------------------------------------------------------
 # 数据模型
@@ -123,54 +126,8 @@ class TodoTask:
 
 
 # ---------------------------------------------------------------------------
-# 文件锁工具
+# 文件锁工具（已提升至 agent/utils/filelock.py，在本文件顶部以原名引入）
 # ---------------------------------------------------------------------------
-
-
-def _ensure_dir(path: Path) -> None:
-    """确保目录存在。"""
-    path.mkdir(parents=True, exist_ok=True)
-
-
-@contextlib.contextmanager
-def _file_lock(lock_path: Path, max_retries: int = 30):
-    """跨平台文件锁上下文管理器。
-
-    使用临时 lock 文件 + 轮询实现 Windows 兼容锁。
-    Python 的 fcntl/msvcrt 在不同 Python 版本行为不一致，
-    这里用 O_CREAT | O_EXCL 原子创建作为简单互斥锁。
-    """
-    import asyncio
-    import os as _os
-
-    _ensure_dir(lock_path.parent)
-
-    # 轮询尝试创建 lock 文件（O_CREAT | O_EXCL = 原子创建）
-    for attempt in range(max_retries + 1):
-        try:
-            fd = _os.open(
-                str(lock_path),
-                _os.O_CREAT | _os.O_EXCL | _os.O_WRONLY,
-                0o666,
-            )
-            _os.close(fd)
-            break  # 获取锁成功
-        except FileExistsError:
-            if attempt >= max_retries:
-                raise TimeoutError(
-                    f"无法在 {max_retries} 次重试内获取文件锁: {lock_path}"
-                )
-            # 等待后重试（指数退避）
-            time.sleep(min(0.005 * (2 ** attempt), 0.1))
-
-    try:
-        yield
-    finally:
-        # 释放锁：删除 lock 文件
-        try:
-            _os.unlink(str(lock_path))
-        except FileNotFoundError:
-            pass  # 已被删除
 
 
 # ---------------------------------------------------------------------------

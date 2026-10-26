@@ -31,15 +31,12 @@ def make_manager(engine: ChatEngine):
     检查点存储本身按 workdir 定位，跨目录的 checkpoint_id 天然查不到。
     @author aceFelix
     """
-    from agent.core.checkpoint import CheckpointManager
+    from agent.core.checkpoint import manager_from_settings
 
-    s = engine._settings
-    return CheckpointManager(
-        s.workdir,
-        getattr(engine, "_session_name", "") or "workbench",
-        enabled=getattr(s, "checkpoint_enabled", True),
-        max_checkpoints=getattr(s, "checkpoint_max_per_session", 20),
-        timeout_seconds=getattr(s, "checkpoint_timeout_seconds", 10),
+    return manager_from_settings(
+        engine._settings,
+        session_name=str(getattr(engine, "_session_name", "") or ""),
+        fallback_session="workbench",
     )
 
 

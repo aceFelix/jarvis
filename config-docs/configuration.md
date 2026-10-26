@@ -146,9 +146,16 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `[policy] away_idle_minutes` | `0` | 0 = 仅认手动 `/away`；>0 启用空闲推断自动 away |
 | `[policy.notify_budget] enabled` | `true` | 打扰预算闸门（false = 提醒不经预算直接播） |
 | `[policy.notify_budget] daily_max` | `10` | 每日主动播报上限 |
-| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用） |
+| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用）。提醒类在其中走 `reminder_channels` 的**降级投递**（只上屏不朗读、不入队不占额度）；未配已实现通道时其余播报入库待补播 |
 | `[policy.notify_budget] aggregate_window_s` | `300` | 同源事件聚合窗口（秒） |
-| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值只入库不播） |
+| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值**直接抑制**：只留痕、不入队也不补播；闸门顺序里门槛排在静默入库之前，2026-10-19 修正） |
+| `[policy.notify_budget] reminder_channels` | `["screen"]` | 静默时段/额度用尽时**用户自设提醒**的送达通道：`screen`=上屏不出声、`email`=另发一封、`sms`=留位未接入（警告并忽略）；空列表=退回入库待补播 |
+| `[policy.notify_budget] quiet_email_to` | `""` | 邮件通道的收件人，留空用 `[email].default_recipient` |
+
+> 提醒与简报/感知事件的差别是有意的：`escalate_count` 那套升级重发只有字段、无人递增，
+> 而冲刷靠“下一条通知请求”触发——对用户明说要过的提醒，整条延后就等于丢了，
+> 所以默认降级为“气泡照投、不朗读”而不是入库排队。机制见
+> [16-W1 判断层](../docs/architecture/16-W1判断层.md) 第四节。
 
 相关命令：`/away` `/back` `/pending` `/lease`（见 [命令参考](../docs/guide/commands.md#权限控制)）。
 
@@ -201,6 +208,52 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 > 压制播报。手动 `/away` 不被摄像头取消也不过期（优先级：手动 > 视觉 > 空闲推断）。
 
 邮箱收件凭据配在 `[email]` 表（见下方“邮件”节），需同时开 `[percept] mail_enabled`。
+
+---
+
+## W3 兑现层（`[actions]` / `[tasks]`，阶段 10）
+
+“敢放手”与“替我盯着”两组开关：前者把工具调用记成可执行的补偿计划（`/undo`），
+后者把目标拆成带条件等待的步骤、由后台驱动器推进。机制详见
+[18-W3兑现层](../docs/architecture/18-W3兑现层.md)。
+
+> 🔒 **两个默认值取向不同是有意的**：账本**默认开**（关掉等于把已发生的副作用记不住，
+> `/undo` 就无从补偿）；任务脊柱**默认关**（它会自主调 LLM 花钱并自己动手执行，必须用户
+> 显式授权，同 `[percept]` 逐源默认关的口径）。
+> 两本台账都只落 `~/.jarvis/`（`actions.jsonl` 与 `goals/<id>.json`），含收件人等敏感字段，不随对话上传。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[actions] journal_enabled` | `true` | 副作用账本总开关（`false` = 不记账也不延时，`/undo` 无从下手） |
+| `[actions] undo_window_s` | `30` | 不可逆动作延时窗口（秒）；`0` = 不拦、直接执行（**照样记账**） |
+| `[actions] track_local_writes` | `true` | 本地破坏性写是否记一条可回滚条目（引用本轮 shadow-git 检查点） |
+| `[actions] irreversible_tools` | `[]` | 应急口子：确实要多保护的工具才填（改配置不改代码）。❗ 拿 `WebFetch` 这类只读工具演示窗口是错的测法：它无副作用、可重来，只能演出一堆成本（见 [w3-delay-window-bypass-fix](../docs/fixlogs/w3-delay-window-bypass-fix.md)） |
+| `[actions] hold_blocks_equivalent` | `true` | 待发窗口未结案时，网络外发类中风险命令（`curl`/`wget`/`Invoke-WebRequest`…）取消沙箱自动放行、改问人；本机命令不受影响。无 UI 环境 ASK→DENY 误伤不可接受时设 `false` |
+| `[tasks] enabled` | `false` | 驱动器总开关（`false` = 只读台账不自走，`/tasks` 第二节照旧能列） |
+| `[tasks] blocked_ask_days` | `3` | 阻塞超此天数主动问一次（走 `[policy.notify_budget]` 闸门；同一件事不重复问） |
+| `[tasks] step_max_attempts` | `3` | 单步失败重试上限（到上限定局 `failed` 并来问，不会无退避自旋） |
+| `[tasks] retry_backoff_s` | `60` | 重试退避间隔（秒）；本期为**固定间隔**，不按失败次数翻倍 |
+| `[tasks] wait_deadline_hours` | `72` | 条件等待最长时限（超时转 `blocked_timeout` 来问用户，绝不静默挂起）。只对 `file_exists` / `percept_event` 兜底；`time` 类自带确定时刻，不补 deadline（叠加会出现“到点前先超时”的自相矛盾）。单条目标可用 `/tasks add … --deadline <小时>` 临时覆盖 |
+
+> ⚠️ **延时窗口只延后、不豁免**：拦截点就在五层权限判定与 W1 策略闸门**之后**，
+> DENY 永不放宽；到点重放用账本里冻结的那一份参数，因此模型后续改口也改写不了已排队的动作。
+> 窗口期间也不会给等价通路留后门：外发类中风险命令的自动放行被临时关掉（只把 ALLOW 变 ASK，
+> 从不把 DENY 变 ALLOW）。
+> 进程重启时仍未发出的预约动作**一律作废**（启动时逐条播报），不会把上一个进程里你没确认第二次的
+> 不可逆动作自动补发。
+
+相关命令：`/undo`（`list` / `cancel` / `<id>` / `--task <id>`）见
+[命令参考·对话控制](../docs/guide/commands.md#对话控制)；`/tasks`（两节 + 写入子命令
+`add`/`show`/`pause`/`resume`/`cancel`/`advance`/`delete`）见
+[命令参考·多 Agent 与插件](../docs/guide/commands.md#多-agent-与插件)。
+建目标还有另两个入口：对我说人话（`TrackGoal` 工具）与桌面指令 `tasks.exec`，
+三个入口共用 `core/tasks/spine_ops.py`，语义完全一致。
+桌面右栏已于 2026-10-22 接完「跨会话目标」与「副作用账本」两个区块（消费 `tasks.exec` /
+`actions.exec`），目标卡在等授权时可行内点**「批准并重试」**：后端按本步实际被拦的工具
++ 该目标的工作目录 + **默认 30 分钟**（常量 `APPROVAL_LEASE_TTL_MIN`，**不是配置项**；
+RPC 可临时传 `minutes`）签一条限定范围的授权租约，查看与提前撤销仍用 `/lease`。
+该通路只放宽 ASK，且**对不带路径参数的调用（如 `Bash`）无效**——限了路径的租约命中不了它。
+驱动器只在 REPL（`-m agent`）与 `--serve` / 桌面壳两种宿主下启动，两者不要同时开。
 
 ---
 

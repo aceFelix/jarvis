@@ -132,7 +132,8 @@
 | 🧰 **扩展服务** | jarvis-desktop 标题栏入口：右栏面板集中管理 MCP 服务（增删改+启停）、内置工具、技能、插件与 harness 工具（市场搜索/安装/卸载/启停） | [桌面与多端](docs/guide/desktop.md) |
 | 🧠 **三层记忆** | 会话存盘 + 长期记忆 + 画像提炼，越用越懂你 | [记忆系统](docs/guide/concepts.md#记忆系统) |
 | 📱 **多端同会话** | jarvis-desktop 桌面壳 / 手机扫码 / 微信 ClawBot，三端共享同一会话 | [桌面与多端](docs/guide/desktop.md) |
-| 🧭 **管家运行时层** | permissions.yaml 路径级免确认 + 授权租约免打断 + 打扰预算削废话 + /away 无人值守待批清单 | [W1 运行时层](docs/architecture/16-W1判断层.md) |
+| 🧭 **管家运行时层** | permissions.yaml 路径级免确认 + 授权租约免打断 + 打扰预算削废话 + /away 无人值守待批清单（静默时段里你亲口设的提醒改为**上屏不出声**，可配同时发邮件） | [W1 运行时层](docs/architecture/16-W1判断层.md) |
+| 🧾 **敢放手的一层** | 发出去的邮件先进 30 秒待发窗口（`/undo cancel` 可拦，窗口未结案期间 `curl` 这类外发命令也会临时改问人），替你写的文件可 `/undo` 整轮回退；"替我盯着这件事，条件到了再往下做"有跨会话任务脊柱承载，**一句话就能建目标**（`/tasks add …` 或对贾维斯说，等待期间一次 LLM 都不调） | [W3 兑现层](docs/architecture/18-W3兑现层.md) |
 | 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |
 | 🔐 **安全底线** | 五层权限 + 四级沙箱 + 操作审计 + keyring 加密存储，危险操作硬阻断 | [核心机制](docs/guide/concepts.md#五层权限系统) |
 
@@ -179,9 +180,10 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 桌面壳 / 主动提醒 / 手机 / 微信 / serve 协议 | [docs/guide/desktop.md](docs/guide/desktop.md) |
 | 权限 / 压缩 / 记忆 / 沙箱 / 自愈 | [docs/guide/concepts.md](docs/guide/concepts.md) |
 | 授权租约 / 打扰预算 / 无人值守 | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) |
+| 撤销行动（`/undo`）/ 跨会话任务脊柱 | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) |
 | 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
-| 架构设计（16 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
+| 架构设计（18 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
 | 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
 | 蓝图（愿景 · 能力模型 · 演进路线） | [docs/blueprint/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
@@ -196,6 +198,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 7**：实时聊天 UI（方舟反应炉工作台 + 全双工打断 + 桌面应用）
 - [x] **阶段 8**：W1 运行时层（授权租约 + 打扰预算 + 无人值守；声明式规则并入五层管线）——已随 v2.2.3 发布
 - [x] **阶段 9**：W2 感知层（统一事件总线 + 窗口/目录/仓库/来信/在场五类事件源 + 逐源默认关 + 首次启动询问 + 桌面「感知源」面板）——已随 v2.2.5 发布
+- [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——**后端已交付（374 例单测，全量 3205 例）**，含目标入口三件套（`/tasks add|show|approve|pause|resume|cancel|advance|delete` 子命令、`TrackGoal` 工具、serve `tasks.exec`/`actions.exec` RPC，共用 `core/tasks/spine_ops.py`）；两条一键实机命令：“不经模型”那一半 `python scripts/smoke_w3_spine.py`（40 项），**“到点真的自己把活干了并且真的能撤”那一半 `python scripts/livecheck_w3.py`（12 项，真 LLM）** —— 后者已于 2026-10-22 全绿跑穿，当场发现并修掉四条断链（子代理不继承宿主权限规则、受阻却谎报已完成、后台改动不入账、`[actions]` 对后台无效）；延时窗口一段则于 2026-10-21 跑穿（修了两处：等价通路绕道、`/undo --task` 归属断链）；同日补上「批准并重试」的真通路（`tasks.exec approve`：按本步被拒工具 + 目标目录 + 30 分钟签限定范围租约），并在 jarvis-desktop 仓接完右栏「跨会话目标」与「副作用账本」两个区块（那边 524 例 vitest 全绿）；尚未发布，只剩桌面实机渲染需人工走查
 
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 

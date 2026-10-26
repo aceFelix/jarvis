@@ -170,6 +170,21 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("policy", (  # W1 运行时层：enabled/path 两键已废弃（策略引擎并入管线），不在此映射即静默忽略
         ("away_idle_minutes", "away_idle_minutes"),
     )),
+    ("actions", (  # W3.2 副作用账本（子键不带 actions_ 前缀，与 [percept] 同口径）
+        ("journal_enabled", "actions_journal_enabled"),
+        ("undo_window_s", "actions_undo_window_s"),
+        ("track_local_writes", "actions_track_local_writes"),
+        ("irreversible_tools", "actions_irreversible_tools"),  # 数组，见 LIST_FIELDS
+        ("hold_blocks_equivalent", "actions_hold_blocks_equivalent"),
+    )),
+    ("tasks", (  # W3.1 任务脊柱（自主推进，默认关，需用户显式开启）
+        ("enabled", "tasks_enabled"),
+        ("blocked_ask_days", "tasks_blocked_ask_days"),
+        ("step_max_attempts", "tasks_step_max_attempts"),
+        ("retry_backoff_s", "tasks_retry_backoff_s"),
+        ("wait_deadline_hours", "tasks_wait_deadline_hours"),
+        ("checkpoint_max", "tasks_checkpoint_max"),
+    )),
     ("percept", (  # W2 感知层：子键不带 percept_ 前缀（与 [policy.notify_budget] 同口径）
         ("enabled", "percept_enabled"),
         ("dedup_window_s", "percept_dedup_window_s"),
@@ -231,6 +246,9 @@ SUB_TABLES: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         ("quiet_hours", "notify_quiet_hours"),
         ("aggregate_window_s", "notify_aggregate_window_s"),
         ("min_salience", "notify_min_salience"),
+        # 提醒类静默降级通道（2026-10-22）：数组直接搬运，与 [percept] 的列表字段同口径
+        ("reminder_channels", "notify_reminder_channels"),
+        ("quiet_email_to", "notify_quiet_email_to"),
     )),
 )
 
@@ -255,6 +273,7 @@ LIST_FIELDS: frozenset[str] = frozenset({
     "percept_file_ignore_suffixes",
     "percept_vcs_repos",
     "percept_mail_watch_senders",
+    "actions_irreversible_tools",
 })
 
 

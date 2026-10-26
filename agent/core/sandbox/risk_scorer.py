@@ -9,6 +9,8 @@
 沙箱策略:
 - LOW: 直接放行，无需沙箱
 - MEDIUM: 沙箱开启时自动放行（在沙箱内执行）；未开启时 ASK
+  （例外：W3.2 延时窗口里还压着未结案的不可逆外发预约时，网络外发类命令不再
+  自动放行，见 ``looks_network_outbound`` 与 docs/fixlogs/w3-delay-window-bypass-fix.md）
 - HIGH: 强制沙箱执行 + 文件快照保护
 - CRITICAL: 沙箱 + 快照 + 用户确认（即使沙箱开启也需确认）
 """
@@ -133,6 +135,46 @@ _CRITICAL_PATTERNS = [
     r"\brd\s+/s",                            # rd /s（递归删除）
 ]
 _CRITICAL_RE = [re.compile(p, re.IGNORECASE) for p in _CRITICAL_PATTERNS]
+
+# ---- 网络外发通路判定（不参与风险评分，单独成表）----
+#
+# 只服务一件事：W3.2 延时窗口里还压着未结案的不可逆外发预约时，把"可能把同一
+# 件事做掉"的命令从自动放行降级成问人。判的是**通路**而不是危险度，所以不复用
+# 上面任何一张评分表——把绕道判定混进风险等级会连带改掉所有命令的分级结果。
+_OUTBOUND_HEAD_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|\b(?:sudo|time|nohup)\s+)"
+    r"\s*(curl|wget|httpie|nc|netcat|telnet|ssh|scp|sftp|rsync|aria2c|"
+    r"Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b",
+    re.IGNORECASE,
+)
+# 解释器 + 网络/邮件库：脚本里抓取或直接发信（python -c "import smtplib…"）
+_OUTBOUND_SCRIPT_RE = re.compile(
+    r"\b(python\d*|py|node|deno|php|ruby|perl|powershell|pwsh|cmd|sh|bash)\b"
+    r".{0,400}?"
+    r"\b(smtplib|sendmail|urllib|http\.client|requests|aiohttp|httpx|socket|fetch\()",
+    re.IGNORECASE | re.DOTALL,
+)
+# 命令里出现显式外发协议/URL 即视为可能把东西送出本机
+_OUTBOUND_URL_RE = re.compile(
+    r"\b(?:https?|ftp|ftps|smtp|smtps|pop3|imap)://", re.IGNORECASE,
+)
+
+
+def looks_network_outbound(command: str) -> bool:
+    """命令是否可能把数据送出本机（预约期内的绕道收紧用，不代表风险等级）。
+
+    三个信号任一命中即算：外发命令头、解释器里带网络/邮件库、显式外发 URL。
+    判定故意宽松：误判的代价是多问一次，漏判的代价是用户以为被窗口拦住的邮件
+    真的发了出去——保护变成摆设比没有保护更糟。
+    @author aceFelix
+    """
+    if not command or not command.strip():
+        return False
+    return bool(
+        _OUTBOUND_HEAD_RE.search(command)
+        or _OUTBOUND_URL_RE.search(command)
+        or _OUTBOUND_SCRIPT_RE.search(command)
+    )
 
 
 class RiskScorer:

@@ -5,8 +5,20 @@
 > **W2（阶段 9）已开发完成**（分支链 `feat/stage9-percept` → `fix/notify-budget-speech`
 > → `fix/percept-observability`，已全部合入 master），随 **v2.2.5** 发布；落地复盘见
 > [17-W2感知层](../architecture/17-W2感知层.md) 与 `docs/fixlogs/` 下三份感知层复盘。
-> **W2 的三项前置决策已于 2026-10 拍板**（定位边界 / 逐源默认关 / IMAP IDLE，见第 8 节），
-> W3–W4 尚未开工（本文档只做设计、排依赖、切片，不代表已开发）。
+> **W2 的三项前置决策已于 2026-10 拍板**（定位边界 / 逐源默认关 / IMAP IDLE，见第 8 节）。
+> **W3（阶段 10）后端已开发完成**（副作用账本 + 不可逆动作延时窗口 + `/undo`，
+> 任务脊柱 + 驱动器 + 宿主接线 + `/tasks`（含写入子命令），加上建目标的三个入口：
+> `/tasks add` / `TrackGoal` 工具 / serve `tasks.exec`+`actions.exec` RPC，共 374 例单测，
+> 并有两条一键实机命令：`scripts/smoke_w3_spine.py`（40 项、不经模型）与
+> `scripts/livecheck_w3.py`（12 项、**真 LLM 跑穿到点自动执行 + 副作用入账 + 按目标撤销**）；
+> 落地复盘见 [18-W3兑现层](../architecture/18-W3兑现层.md)、
+> [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)、
+> [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md) 与
+> [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)；
+> **到点真执行已于 2026-10-22 实机跑穿**（当场抓出四条断链并全部修掉）；同日补上「批准并重试」
+> 的真通路（`tasks.exec approve`，签限定范围租约），**兄弟仓 jarvis-desktop 也已接完右栏
+> 「跨会话目标」与「副作用账本」两个区块**（那边 524 例 vitest 全绿），只剩桌面实机渲染待人工看。
+> **W4 尚未开工**（本文档只做设计、排依赖、切片，不代表已开发）。
 > 定位：既有的 P1/P2/P3 清单是"能力愿望单"，本文档回答一个更前置的问题——
 > **已有的零件（调度器/感知器/记忆/审计/沙箱）之间缺哪几个接口，才能让"主动陪伴"和"无人值守"真的成立。**
 >
@@ -36,9 +48,9 @@
 
 | 支柱 | 已有零件 | 缺口 |
 |---|---|---|
-| 感知 | `Scheduler`（`~/.jarvis/schedule.json` 持久化 + 错过补偿）、`VisionWatcher`（mediapipe 手势/人脸事件流）、`SystemMonitor`（阈值告警 + 600s 冷却）、`ProactiveEngine`（简报/截止/日历四源） | 事件源单一；各源之间无统一总线，无法交叉触发 |
-| 判断 | 五层权限管线（fail-closed）、`permissions.yaml`、`max_escalate` 防轰炸 | 高风险确认靠 instructions 让模型自判（不可靠）；无授权租约、无打扰预算、无无人值守策略 |
-| 兑现 | `ScheduleTask`（once/daily/weekly）、`Subagent`/`Team`/`TaskList`（单次查询内）、沙箱 + shadow-git 文件回滚、操作审计 | 无跨会话/跨天任务脊柱；无条件等待；无可撤销副作用账本 |
+| 感知 | `Scheduler`（`~/.jarvis/schedule.json` 持久化 + 错过补偿）、`VisionWatcher`（mediapipe 手势/人脸事件流）、`SystemMonitor`（阈值告警 + 600s 冷却）、`ProactiveEngine`（简报/截止/日历四源）、**W2 统一事件总线 + 五个现场源**（阶段 9） | 日历/系统/定时三个收编位未装配；总线只在 `--serve` / 桌面壳期间存在（终端 REPL 不装） |
+| 判断 | 五层权限管线（fail-closed）、`permissions.yaml`、`max_escalate` 防轰炸、**W1 授权租约 + 打扰预算 + 无人值守**（阶段 8） | 待批重放只有编程入口、未接命令面板；接受率闭环靠审计数据，尚未回流到权重 |
+| 兑现 | `ScheduleTask`（once/daily/weekly）、`Subagent`/`Team`/`TaskList`（单次查询内）、沙箱 + shadow-git 文件回滚、操作审计、**W3.1 任务脊柱 + W3.2 副作用账本**（阶段 10 后端） | 脊柱缺模型侧创建入口与桌面视图；token/费用未归集；设置/安装类副作用本期未记账 |
 | 记忆 | `store` / `profile_store` / `profile_refiner` / `prune` / `file_state` / `compactor` | 无实体-关系-时间结构化；无时效与出处；无冲突消解 |
 
 ---
@@ -131,9 +143,12 @@ rules:
 
 **③ 打扰预算（notify budget）** — `agent/core/policy/budget.py`：
 
-- `daily_max`（每日主动播报次数上限）、`quiet_hours`（静默时段只入库不打扰）、
+- `daily_max`（每日主动播报次数上限）、`quiet_hours`（静默时段只入库不打扰；
+  **用户自设提醒例外**，2026-10-22 改为降级上屏不发声，见 §3.1 注）、
   `aggregate_window_s`（同源事件 5 分钟内合并成一条）、`min_salience`（低于门槛不播报）、
-  `channels`（桌面通知 / TTS / 手机推送 的优先级与降级顺序）。
+  `channels`（桌面通知 / TTS / 手机推送 的优先级与降级顺序）——设计里的 `channels`
+  到 2026-10-22 只落地了提醒那一段（`reminder_channels = ["screen", "email"]`，
+  短信通道留位 `sms` 未接入），全量渠道优先级仍是待办。
 - **重要度评分** = 来源权重 × 时效紧迫度 × 与当前活跃任务的相关性 × 该来源历史接受率
   （接受率来自审计日志，形成"越用越懂你"的闭环）。
 - 落点：`ProactiveEngine` 的 `on_notify` 之前插入 budget 过滤，而不是在每个提醒源里各写一遍。
@@ -162,7 +177,9 @@ rules:
 ### 2.4 验收
 
 - [ ] 同一操作在"有租约/无租约/away"三种情境下得到确定的三种结果，且可解释（命中哪条规则）。
-- [ ] 静默时段内的提醒只入库不播报；解除后聚合为一条。
+- [x] 静默时段内的**简报/感知事件**只入库不播报、解除后聚合为一条；
+  **用户自设提醒**则降级上屏（气泡在、不发声）——2026-10-22 实测后拆成的两半，
+  原验收项只写了前者、把后者当成“不该纳闸”的理由，已在 §3.1 纠正。
 - [ ] 租约过期后行为立刻回到 `ask`，无需重启。
 - [ ] 既有权限行为零回归（五层管线测试全绿）。
 
@@ -239,9 +256,15 @@ class PerceptEvent:
 > 凭据（违背决策 1“只本机采集、不引入外部账号授权”），要么由 jarvis 自己跑构建
 > （属 W3 兑现层的主动执行）。本期 vcs 只做本机 git 可得到的四种事实，不假装已接 CI。
 
-- **Scheduler 本期不并入总线**（原设计“`schedule.fired` 也进总线”已推翻）：用户自己设的
-  提醒必须准点响，走预算闸门反而会被静默时段/日额度压掉——这是“提醒”与“打扰”的
-  语义差别，现有路径（`_on_fire` 直投事件）保持不变。
+- **Scheduler 本期不并入总线**（原设计“`schedule.fired` 也进总线”已推翻）：
+  提醒仍是“到点就送到”，不进感知事件流、不与观察类事件拼成一条摘要。
+  但下面这半个结论已于 **2026-10-22 推翻**：原写“现有路径（`_on_fire` 直投事件）
+  保持不变”，实测发现它把“提醒不该延后”连“提醒不该受任何额度约束”一起定了——
+  静默时段形同虚设（设三条就响三条）。现在的口径：**提醒纳闸但不延后**——
+  命中静默/超额时走**降级投递**（气泡与系统通知照投、TTS 不朗读、不占日额度），
+  即“准点”由上屏保证，“不打扰”由不出声保证；通道见
+  `[policy.notify_budget] reminder_channels`（机制详见
+  [16-W1 判断层](../architecture/16-W1判断层.md) 第四节）。
 - 成本控制硬约束：**本地规则/阈值先判，不每次调 LLM**；只有通过 salience 门槛的事件才进
   一次轻量 LLM 生成话术（可离线降级为模板文案）。
 - 隐私：每个源独立开关 + 状态可见（"正在观察：前台窗口 / 构建状态"）+ 数据仅本地落盘、
@@ -281,10 +304,43 @@ class PerceptEvent:
 
 ## 4. W3 · 兑现层：持久任务脊柱 + 可撤销行动
 
+> ✅ **本节已于阶段 10 落地（后端切片，2026-10-21）**：`agent/core/actions/journal.py`、
+> `agent/core/tasks/{spine,spine_ops,spawn,driver,cli_host}.py`、`utils/filelock.py`（从 `task_list.py` 提升）、
+> `Tool.is_irreversible` 声明位、`orchestrator` 统一拦截、`/undo`、`/tasks`（两节 + 写入子命令）、
+> `TrackGoal` 工具、serve `tasks.exec`/`actions.exec`（`agent/serve/rpc_tasks.py`）、
+> `[actions]`/`[tasks]` 配置，以及 `budget.py` 登记 `task` 源权重（不登记就落 default 被误裁）。
+> 单测 374 例（账本 30 / 编排接入 31 / 绕道硬拦 18 / 台账 35 / 入口层 45 / 驱动器 39 /
+> `/undo` 21 / `/tasks` 34 / `TrackGoal` 31 / RPC 32 / 一键走查脚本 4 / 实机修复回归 54）。
+> “不经模型”的那一半已用 `scripts/smoke_w3_spine.py` 实机跑绿（40/40，2026-10-21）；
+> 到点真执行与驱动器推进步骤已于 **2026-10-22** 用 `scripts/livecheck_w3.py` 实机跑穿
+> （12/12，真 LLM 写文件→入账→按目标撤销→文件消失），那一次跑出四条断链（子代理不继承
+> 宿主规则、受阻谎报已完成、后台改动不入账、`[actions]` 对后台无效）已全部修掉并各带回归，见
+> [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)；
+> 同日接桌面面板时又补了一刀（「批准」得真能放行 → `approve_step` 签限定范围租约），
+> 带 12 例回归；剩下桌面实机渲染那一段需到 jarvis-desktop 那边人工看。
+> 实机走查后补的两处（延时窗口被等价路径绕开、`/undo --task` 归属链路断）各带回归用例，见
+> [w3-delay-window-bypass-fix](../fixlogs/w3-delay-window-bypass-fix.md)。
+>
+> **四处与本节原文的设计偏离**（实施时核实后改的，逐条理由见交付复盘）：
+> 1. **新增 `is_irreversible` 声明位，不复用 `is_destructive`** —— 后者含"删除/覆盖"，
+>    `FileWrite` 也为 True 但可回滚；挂在它上面 = 每次存文件干等 30 秒。
+> 2. **`/tasks` 扩成两节，不新建命令** —— slash 表只有一份，同义入口让人先猜哪个是活的。
+> 3. **到点不回调完整管线，而是执行账本里冻结的那一份 args** —— 无 UI 时重过管线会被
+>    fail-closed 拒成 DENY，把用户刚批准的动作自己拦掉。
+> 4. **所有 wait 必带 `deadline_at`** —— 感知逐源默认全关，事件永不到来会让任务永久 blocked；
+>    超时转 `blocked_timeout` 并经 W1 闸门问用户，绝不静默挂起。
+>
+> 另有三处口径修正：台账落 `~/.jarvis/goals/`（避开 `~/.jarvis/tasks/<team>/` 串目录）；
+> 重启后遗留窗口**作废而非补发**；`SendMessageTool` **不声明不可逆**（本机文件信箱，
+> 没"出了本机收不回"的属性）。架构口径与实施细节以
+> [18-W3兑现层](../architecture/18-W3兑现层.md) 为准。
+
 ### 4.1 任务脊柱（让"替我盯着"成立）
 
 现状：`ScheduleTask` 只有 `trigger_at + content`，是闹钟不是任务。
-新增 `agent/core/tasks/spine.py`，落盘 `~/.jarvis/tasks/<id>.json`：
+新增 `agent/core/tasks/spine.py`，落盘 `~/.jarvis/goals/<id>.json`
+（**落地修正**：原文写 `~/.jarvis/tasks/<id>.json`，但 `~/.jarvis/tasks/<team>/` 已被协作
+`TaskList` 当团队目录用，同层放目标文件会在团队恰好叫 `goals` 时串目录）：
 
 ```json
 {"id":"…","goal":"把本周会议纪要与待办整理成一页周报并发给团队",
@@ -297,40 +353,89 @@ class PerceptEvent:
 
 - **条件等待 `wait`**：支持 `time` / `file_exists` / `percept_event`（订阅 W2 的事件，
   例如"等对方的附件到了再归档"）。
+  ✅ 已实现，并一律带 `deadline_at`；判定只走时间比较与本地 `stat`（`percept_event`
+  由驱动器订阅回调写回 `spec["hit_at"]`），**不调 LLM、不起进程**。
 - **断点续跑**：daemon 重启后恢复；失败按退避重试；阻塞超过 N 天主动来问用户（走 W1 预算）。
+  ✅ 已实现：`resume()` 复位遗留 `running` 并计一次失败，退避时刻经 `TaskStep.next_run_at`
+  **落盘**（只记内存里会被重启绕过），本期退避为**固定间隔**不翻倍。
 - 与既有零件的关系：`TaskList`（多 Agent 协作）= 一次查询内的并行子任务；
   spine = **跨会话、跨天**的目标台账，两者用 `parent_task_id` 关联，不重复造轮子。
+  ✅ 已实现：两套存储互不写入，文件锁复用 `agent/utils/filelock.py`（同一套不造第二套）。
 - 用户面：桌面右栏"任务中心"已存在，将其数据源从"本次会话任务"扩展为 spine 视图。
+  ✅ **入口三件套已交付**（2026-10-21 收尾切片；2026-10-26 补 `/tasks approve`）：
+    终端 `/tasks add|show|approve|pause|resume|cancel|advance|delete`、
+  模型侧 `TrackGoal` 工具、serve `tasks.exec` / `actions.exec` RPC，三者只调同一层
+  `agent/core/tasks/spine_ops.py`（语义拆不走两个口径，见
+  [18-W3兑现层 §5.4](../architecture/18-W3兑现层.md)）。
+  ✅ **桌面面板数据源已切换（2026-10-22，兄弟仓 jarvis-desktop）**：右栏「跨会话目标」与
+  「副作用账本」两个区块直接消费 `tasks.exec` / `actions.exec` 快照，含两拍确认、
+  `cancel_hold` 一拍撤回，以及「批准并重试」按钮（走 `tasks.exec approve`）；
+  那一侧 524 例 vitest 全绿，**只剩桌面实机渲染待人工看**。本仓不重复维护那边的实现细节，
+  口径以 jarvis-desktop 仓文档为准。
 
 ### 4.2 可撤销行动（让"敢放手"成立）
 
 新增 `agent/core/actions/journal.py`，追加写 `~/.jarvis/actions.jsonl`：
 
-| 类别 | 例子 | 处理 |
+| 类别 | 例子 | 处理（✅ 已落地的口径） |
 |---|---|---|
-| 可逆 | 文件写入/删除、移动重命名、系统设置变更、安装软件 | 执行前生成 undo_spec（文件走既有 shadow-git 快照；设置导出旧值；安装记卸载命令） |
-| 不可逆 | 发邮件、发消息、提交代码、对外 API 写操作 | 强制 `dry_run` 预览 → 二次确认（语音/桌面）→ **延时发送窗口**（默认 30s 内可撤回） |
+| 可回滚 | 文件写入/删除、移动重命名（系统设置变更、安装软件本期**未入账**） | 执行后引用**宿主本轮已打的那个** shadow-git 检查点（`undo_spec.kind=checkpoint` + cid）；**不新建快照**（会吃掉每会话 20 条配额、反噬 `/rewind`）；没检查点则宁可不记，也不记一条撤不动的假可撤销 |
+| 不可逆 | 发邮件（`SendEmailTool` 已声明）、对外 API 写；`is_irreversible` 默认 False（fail-closed），应急可用 `[actions].irreversible_tools` 按名补 | 权限管线正常判定（DENY 永不放宽）→ 本轮不执行，**预览 + 入 30s 待发窗口** → 到点按冻结 args 真执行；窗口内 `/undo cancel` 可拦；重启后遗留窗口一律作废 |
 
-- 新增 `/undo`（撤销上一步）与"撤销该任务的全部副作用"（按 `task_id` 批量补偿）。
-- 与审计的关系：既有操作审计是**事后记录**，账本是**可执行的补偿计划**，两者共用一条记录。
+- 新增 `/undo`（撤上一步）/`<id 前缀>`/`list`/`cancel [id]`/`--task <id>`（按目标批量补偿）。
+  四条路径共同守住两条如实性：**撤不动的照样列出来并给原因**；文件类回退是**整轮**粒度，
+  所以展示影响面、问过用户才落手。
+- 与审计的关系：既有操作审计是**事后记录**，账本是**可执行的补偿计划**，两者共用同一次调用、
+  各写自己的文件（互不代替）。
 
 ### 4.3 涉及文件
 
 | 文件 | 改动 |
 |---|---|
-| `agent/core/tasks/spine.py`（新增） | 任务模型 + 持久化 + 条件等待 + 续跑 + 退避 |
-| `agent/core/actions/journal.py`（新增） | 副作用账本 + undo_spec + 不可逆延时窗口 |
-| `agent/tools/collaboration/task_*.py` | 与 spine 关联（`parent_task_id`） |
-| `agent/commands/*` | `/undo` `/tasks` 命令 |
-| `agent/core/daemon/*` | daemon 启动时恢复 spine 与未决窗口 |
-| `tests/core/test_task_spine.py`、`test_action_journal.py`（新增） | 条件等待命中、重启续跑、撤销/不可逆拒撤销 |
+| `agent/core/tasks/spine.py`（新增） | 任务模型 + 持久化（临时文件 + `os.replace` + 跨进程锁）+ 三种条件等待 + deadline |
+| `agent/core/tasks/spine_ops.py`（新增） | 建/管目标的**共用业务层**：`split_steps` / `parse_wait` / `wait_from_spec` / `create_goal` / `control_goal` / `find_goal` / `snapshot`，三个入口只调这一层 |
+| `agent/core/tasks/driver.py`（新增） | 后台一条线程：到期唤醒 + 总线订阅 + `run_subagent` 推进 + 退避/询问 + 崩溃复位 |
+| `agent/core/tasks/cli_host.py`（新增） | `CliSpineHost`：REPL 侧 W3 装配体（遗留作废 + 驱动器起停），与 `CliReminderHost` 同构 |
+| `agent/core/actions/journal.py`（新增） | 副作用账本 + `undo_spec`（只有 `checkpoint`/`none` 两种形态）+ 延时窗口 + `resume_pending` |
+| `agent/utils/filelock.py`（新增） | `ensure_dir` + `file_lock`：从 `collaboration/task_list.py` 提升，脊柱与协作任务共用一套锁 |
+| `agent/core/tool.py` + `agent/core/orchestrator.py` | `is_irreversible`/`describe_irreversible` 声明位；`_run_one` 在权限判定与钩子之后 hold，必回**非 error** 的 `tool_result` |
+| `agent/tools/extensions/email_tool.py` | `SendEmailTool` 声明不可逆并给含收件人的预览文案；`SendMessageTool` 经核实**不声明** |
+| `agent/commands/handlers/undo_commands.py`（新增）+ `router.py` + `ui/slash_completer.py` | `/undo` 四条路径上命令表与补全面 |
+| `agent/commands/handlers/collab_commands.py` | `/tasks` 扩成两节（协作 `TaskList` + 跨会话 spine），并把只读命令重写为子命令分发（`add`/`show`/`pause`/`resume`/`cancel`/`advance`/`delete`/`help`） |
+| `agent/tools/track_goal.py`（新增） | `TrackGoal` 工具：模型侧一句话建/管目标，8 个 action，**只有 `delete` 要确认** |
+| `agent/serve/rpc_tasks.py`（新增） + `protocol.py` + `server.py` | serve `tasks.exec` / `actions.exec`（协议指令 53 → **55 条**），写操作未带 `confirm=true` 只回预览；`tasks.exec` 后补 `approve` 动词（指令条数不变，一拍生效），签限定范围租约放行被 ASK 拦住的步骤 |
+| `agent/prompts/system.py` + `agent/prompts/text_blocks.py` | 根基础提示补 `TrackGoal` 用法行；新增按工具注册表条件注入的目标脊柱口径段；`system.py` 因超 800 行拆出逐字静态正文 `text_blocks.py`（行为不变，4 例护栏锁） |
+| `agent/serve/hub.py` + `agent/main.py` | 两个宿主的装配与起停；遗留窗口作废逐条播报 |
+| `agent/core/daemon/proactive.py` + `agent/core/policy/budget.py` | 闸门实现上提为 `apply_notify_gate`（`gate_notify` 变薄包装）；登记 `task` 源权重 0.9 |
+| `agent/core/checkpoint.py` | 新增 `manager_from_settings` 工厂（三处宿主各写一份构造 → 收拢）；实机修复切片再加 `kind` 分族配额（`create(reason, *, kind="turn")` + `task_max_checkpoints`，任务级不挤占 `/rewind`） |
+| `agent/core/tasks/approval_ops.py`（新增，167 行） | 阻塞与授权从 `driver.py` 拆出：`_block`/`_ask`/`request_approval`/`APPROVAL_HOLD_S`/`blocked_hold()`；`TaskDriver(ApprovalOpsMixin)` 继承后调用点一字不改（守 800 行上限） |
+| `agent/collaboration/subagent.py` + `agent/core/tasks/spawn.py` | 子代理继承宿主 `permissions_file` 规则与 `settings`（不再写死空 `RuleSet()`）；步骤跑前打 `kind="task"` 检查点并把 cid / 拒绝清单交给编排器与驱动器 |
+| `tests/core/test_task_spine.py`、`test_task_driver.py`、`test_action_journal.py`、`test_orchestrator_irreversible.py`、`tests/commands/test_undo_commands.py`、`test_tasks_command.py`、`tests/core/test_spine_ops.py`、`tests/tools/test_track_goal.py`、`tests/serve/test_serve_tasks_rpc.py`、`tests/test_w3_smoke_script.py`、`tests/core/test_orchestrator_denials.py`、`test_driver_approval_blocked.py`、`test_checkpoint_task_quota.py`、`test_w3_step_side_effects.py`、`tests/collaboration/test_subagent_permission_rules.py`（均新增） | 共 **374 例**（含走查后补的绕道硬拦与归属接线用例、收尾切片的入口层 45 + 工具 31 + RPC 32、实机修复回归 54）：条件等待命中、重启续跑、等待/退避期 LLM 零调用、hold 必回非 error 结果、撤销/不可逆拒撤销、受阻不落 done、有产出却夹着被拒→落 done 并附说明 |
+| 兄弟仓 `jarvis-desktop/src/shared/tasks-contracts.ts`、`stores/taskActions.ts`、`stores/tasksStore.ts`、`components/SpineTaskPanel.tsx`、`EffectJournalPanel.tsx`、`styles/task-center.css`、`i18n-tasks.ts`（均新增） | ✅ 右栏「任务中心」两个区块：契约镜像（宽容解析，字段缺失不炸渲染）+ 动作工厂（与 `perceptActions` 同范式注入 `backendStore`，`refreshTasks` 一次并发拉两份快照）+ 目标台账面板 + 副作用账本面板；文案按业务域拆出 `i18n-tasks.ts`；结构治理同批——`backendStore.ts` 越 800 行上限拆出 `stores/butlerActions.ts`（719 行），`test/renderer/dispatcher.test.ts` 越限按事件域拆成两个文件 + 共用夹具 `dispatcherFixtures.ts`；测试 `test/renderer/tasks.test.tsx`（30 例） |
+| `scripts/smoke_w3_spine.py`（新增，619 行） | 一键实机走查：三个入口 + 延时窗口 + 绕道硬拦 + 两条 RPC 共 40 项，不经 LLM、台账/账本只写临时目录（`--no-serve` 可跳过 WS 段） |
+| `scripts/livecheck_w3.py`（新增，398 行） | 一键实机自检：真 LLM 跑穿“到点自动执行 + 副作用入账 + 按目标撤销”共 12 项；只改内存 Settings 不落盘用户配置，跑完自清理（`--wait` 控等待时长） |
 
 ### 4.4 验收
 
 - [ ] 关掉终端再打开，任务仍在跑；到点/条件满足自动推进下一步。
-- [ ] 条件等待命中前不重复调 LLM（无轮询烧钱）。
-- [ ] 任意任务的副作用可一条命令回滚（不可逆项明确报告"此项无法撤销，已发往 X"）。
-- [ ] 不可逆动作在延时窗口内确实未发出，可撤回。
+  ——单测已锁（`test_resume_resets_stale_running` + 重启后继续推进）；后半句
+  “到点自动推进”已于 2026-10-22 实机跑穿（blocked→running→done 全程无人干预），
+  前半句“换个进程再打开”仍只有单测（实机自检不重启 serve）。
+- [x] 条件等待命中前不重复调 LLM（无轮询烧钱）。
+  ——单测直接断言等待期/退避期 spawn 计数为 0（`TestNoPollingBurn`）；实机已证：
+  等待那 40 余秒只读到一次状态查询，驱动器靠到期时刻唤醒，不烧轮询。
+- [x] 任意任务的副作用可一条命令回滚（不可逆项明确报告"此项无法撤销，已发往 X"）。
+  ——`/undo --task` + checkpoint `undo_spec`，拒撤项带原因（有单测；回退粒度是**整轮**）；
+  实机已证：后台步骤写的文件进了账本、`journal_ids` 回填、`actions.exec undo_task`
+  两拍把工作区真撤回去（文件消失）。
+- [x] 不可逆动作在延时窗口内确实未发出，可撤回。
+  ——`test_orchestrator_irreversible` 断言“被 hold 时工具一次都没被调用”+ `/undo cancel`；
+  2026-10-21 已实机跑过发件窗口一段。
+
+> ⚠️ **四条验收中已有三条拿到实机证据**（2026-10-22，`scripts/livecheck_w3.py` 12/12），
+> 只有“换个进程仍继续跑”仍只有单测；桌面壳那一段**程序已接完并通过自动化测试**（兄弟仓
+> 524 例 vitest 全绿），但渲染效果还没在真机上看过，所以本节不全打钩；
+> 逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
 
 ---
 
@@ -417,7 +522,18 @@ class PerceptEvent:
   ——**代码已交付（随 v2.2.5）**：三条中“单源故障隔离”有单测锁定（连败自动停用
   + 异常不外溢）；“四类事件各产出恰好一条聚合提醒”与“常驻 CPU < 1%”**尚未实测**，
   不在此打钩；逐项跑法与判据见 [W2 实机走查清单](../test/percept-w2-testing.md)。
-- [ ] W3：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
+- [ ] **W3**：重启续跑 + 条件等待不烧轮询 + 副作用可回滚 + 不可逆有延时窗口
+  ——**后端代码已交付（未随版本号发布）**：四条均有单测锁定（共 374 例，见
+  [18-W3兑现层](../architecture/18-W3兑现层.md) 第九节），“不经模型”那一半另有
+  `scripts/smoke_w3_spine.py` 实机跑绿（40/40）；**到点真执行与驱动推进已于
+  2026-10-22 用 `scripts/livecheck_w3.py` 实机跑穿**（12/12，当场抓出并修掉四条断链）；
+  同日接完兄弟仓 jarvis-desktop 右栏两个区块（那边 524 例 vitest 全绿）；
+  只剩重启续跑待实机验证、桌面渲染待人工看，
+  故此处不打钩，逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
+  交付当时的四处设计偏离与被测试打出的四个真实缺陷见
+  [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)；
+  补齐建目标三个入口与 serve RPC 的收尾切片见
+  [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md)。
 - [ ] W4：按轮挂 ≤12 工具时建响应 < 1s + 语音说"帮我查一下 XX"能异步拿到结果 + 记忆带时效与出处
 
 ---
@@ -430,7 +546,7 @@ class PerceptEvent:
 | 2 | 是否允许常驻后台事件源默认开启？ | 隐私与体验的权衡；建议"安装后首次询问 + 逐源开关" | ✅ **已定（2026-10）：逐源默认关 + 首次启动询问**，且两项均**已落地**（W2 第 6 步：桌面「感知源」开关分区；第 7 步：从未表态时投递一次引导）。与 3.1 的"默认全关"口径一致；`window`（前台窗口）是唯一有明显隐私属性的源，必须独立开关且状态可见 |
 | 3 | 邮件集成方式：IMAP 只读轮询/IDLE，还是走既有邮件工具的 API 通道？ | 决定 W2 的实现复杂度与权限提示频率 | ✅ **已定（2026-10）：IMAP IDLE 长连接 + 断线自动降级轮询**（标准库 `imaplib`，零新依赖）。**修正**：原选项"走既有邮件工具的 API 通道"不成立——现仓只有 `SendEmailTool` 走 SMTP **能发不能收**，`[email]` 表无任何 IMAP 字段；`collaboration/mailbox.py` 的"未读邮件"是 multi-agent 文件信箱，与真实邮箱无关。故需新增 `[email].imap_*` 字段，并沿用"读不回传明文授权码、写留空=保持原值"的既有安全范式 |
 | 4 | 重要度评分是否引入本地小模型？ | 纯规则省资源但笨；小模型更准但增依赖与常驻占用 | ⏳ **暂不定，不阻塞 W2**：总线与 W1 先跑纯规则/阈值，实测出现"规则判不准"的漏报误报后再评估 |
-| 5 | ~~W1 效果语义 `dry_run` 是否同时用于工具层（而不只是通知层）？~~ 已定：随策略引擎降级合并退出 W1，工具层真拦截与副作用账本归 W3.2 | 影响与既有五层权限管线的耦合面 | ✅ 已定（见上，随 W1 降级合并退出） |
+| 5 | ~~W1 效果语义 `dry_run` 是否同时用于工具层（而不只是通知层）？~~ 已定：随策略引擎降级合并退出 W1，工具层真拦截与副作用账本归 W3.2 | 影响与既有五层权限管线的耦合面 | ✅ 已定（见上，随 W1 降级合并退出）。**W3.2 落地口径**：工具层**不引入 `dry_run` 语义**——权限管线本身已经在做真拦截，再加一层只会重复；不可逆动作走“预览 + 30s 延时窗口 + 冻结参数重放”，可回滚的本地写走“引用本轮检查点 + `/undo`”（见 4.2） |
 
 ---
 

@@ -327,6 +327,9 @@ async def run_subagent(
     workdir: str,
     permission_mode: PermissionMode = PermissionMode.YOLO,
     parent_ui: Any = None,
+    extra: dict[str, Any] | None = None,
+    permission_rules: Any = None,
+    settings: Any = None,
 ) -> SubagentResult:
     """执行一个子 agent。
 
@@ -340,6 +343,13 @@ async def run_subagent(
         workdir: 工作目录（继承主 agent 的）。
         permission_mode: 权限模式（默认 YOLO，子 agent 自主操作不需逐个确认）。
         parent_ui: 主 agent 的 UI 对象（用于打印子 agent 的进度提示）。None 则静默。
+        extra: 写进子 ctx.extra 的宿主数据。任务脊柱靠它传 ``task_id``（副作用归属）
+            与 ``effect_ids`` 列表（账本 id 回扣），否则驱动器无法把一步的副作用
+            回填到 ``TaskStep.journal_ids``，``/undo --task`` 端到端就取不到条目。
+        permission_rules: 宿主的声明式权限规则（``permissions_file`` 读出来的那个
+            RuleSet）；None 用空集。不传就会“前台已放行、后台仍被拒”。
+        settings: 宿主配置，原样递给子 ctx。编排器据此读 ``[actions]`` 的窗口长度
+            与记账开关；不传就会退成默认值，让用户的配置对后台步骤无效。
 
     Returns:
         SubagentResult: 子 agent 的执行结果。
@@ -349,7 +359,14 @@ async def run_subagent(
 
     # 1. 构建子 agent 的工具集 + 权限校验器 + 编排器
     sub_registry = _build_sub_registry(agent_def.allowed_tools)
-    sub_checker = PermissionChecker(rules=RuleSet(), mode=permission_mode)
+    # 规则集由宿主传入时就连上用户的声明式权限规则（permissions_file）：
+    # 以前这里写死空 RuleSet，结果是“前台已配好放行的目录，后台值守步骤照样
+    # 被拒”——同一个工具在两个入口权限口径不一致，用户无从理解。mode 仍由
+    # 调用方定（任务脊柱传 DEFAULT），所以“继承规则”不等于“放宽模式”。
+    # @author aceFelix
+    if permission_rules is None:
+        permission_rules = RuleSet()
+    sub_checker = PermissionChecker(rules=permission_rules, mode=permission_mode)
     from agent.core.error_recovery import ToolRecoveryExecutor
     sub_recovery = ToolRecoveryExecutor(global_enabled=True)
     sub_orchestrator = ToolOrchestrator(
@@ -381,6 +398,13 @@ async def run_subagent(
         messages=sub_messages,
         permission_mode=permission_mode.value,
         ui=parent_ui,  # 复用主 UI 打印子 agent 的工具调用提示
+        # 只浅拷贝：effect_ids 必须是宿主传进来的同一个列表对象，子代理往里
+        # 追加的 id 跑完才读得到（拷贝就会把回扣链断在这一行）
+        extra=dict(extra or {}),
+        # settings 不传的话，编排器读 ``[actions]`` 全部退成默认值：用户把延时窗口
+        # 改成 90 秒、或把记账关掉，后台步骤照旧按 30 秒记账。同一个工具两个
+        # 入口口径不一致，与 permission_rules 是同一类错。
+        settings=settings,
     )
 
     # 5. 跑！

@@ -6,8 +6,9 @@
 待批清单——测试必须与用户机器状态无关。
 
 tests/policy/conftest.py 的 policy_paths 夹具仍供该目录做细粒度定制；
-本 autouse 夹具兜底全部套件。阶段 9（W2 感知层）的总线单例同样在本
-夹具里复位，避免跨用例共享订阅方/去重键/轮询线程。
+本 autouse 夹具兜底全部套件。阶段 9（W2 感知层）的总线单例、阶段 10（W3
+兑现层）的副作用账本/目标台账/延时窗口/驱动器句柄同样在本夹具里复位，
+避免跨用例共享订阅方、去重键、轮询线程与待发动作。
 
 @author aceFelix
 """
@@ -50,6 +51,17 @@ def _isolate_policy_singletons(tmp_path):
     percept._settings = None
     percept._bus_singleton = None
 
+    # W3 兑现层也是进程级单例：副作用账本 / 目标台账 / 延时窗口 / 驱动器句柄。
+    # 不复位会跨用例共享待发动作与台账目录，更会把流水写进用户真实 ~/.jarvis
+    actions = importlib.import_module("agent.core.actions.journal")
+    spine_mod = importlib.import_module("agent.core.tasks.spine")
+    driver_mod = importlib.import_module("agent.core.tasks.driver")
+    actions.configure_journal(
+        enabled=True, path=tmp_path / "actions.jsonl", clear_window=True,
+    )
+    spine_mod.configure_spine_store(tmp_path / "goals")
+    driver_mod.set_driver(None)
+
     yield
 
     lease_mod._store_singleton = None
@@ -64,3 +76,9 @@ def _isolate_policy_singletons(tmp_path):
     if bus is not None:  # 用例遗留的轮询线程必须停干净，否则跨用例串味
         bus.stop()
         bus.shutdown_sources()
+    # 延时窗口里遗留的定时器（threading.Timer / call_later）必须摘干净，
+    # 不然上一个用例会在下一个用例中途真执行一次回调
+    actions.get_window().clear()
+    actions._journal = None
+    spine_mod._store = None
+    driver_mod._driver = None

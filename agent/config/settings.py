@@ -330,7 +330,18 @@ class Settings:
     notify_daily_max: int = 10             # 每日主动播报上限
     notify_quiet_hours: str = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）
     notify_aggregate_window_s: int = 300   # 同源事件聚合窗口（秒）
-    notify_min_salience: float = 0.3       # 重要度门槛（低于此值只入库不播）
+    notify_min_salience: float = 0.3       # 重要度门槛（低于此值直接抑制、只留痕，**不入队也不补播**）
+    # 静默时段/额度用尽时，**用户自设提醒**（权重表键 `schedule`）的送达通道。
+    # 默认只降级不延后：气泡与系统通知照投、TTS 不朗读——“10 分钟后提醒我喝水”
+    # 这种话整条押到下一次有别的通知才播，等于丢了（冲刷靠新请求触发）。
+    # 可选值："screen"=上屏不出声 / "email"=另发一封邮件（收件人见
+    # notify_quiet_email_to）/ "sms"=留位，尚未接通道，配了会警告并忽略。
+    # 空列表 = 关掉降级，退回“入库待补播”的老行为（简报/感知事件本来就走这条）。
+    # @author aceFelix
+    notify_reminder_channels: list = field(
+        default_factory=lambda: ["screen"]
+    )
+    notify_quiet_email_to: str = ""        # 邮件通道收件人（留空 = 用 [email].default_recipient）
 
     # W2 感知层（阶段 9，见 core/percept/）：统一事件总线 + 逐源采集。
     # 隐私口径已拍板（PLAN 第 8 节决策 2）：总开关与**逐源开关全部默认关**，
@@ -379,9 +390,32 @@ class Settings:
     percept_vision_auto_stop_minutes: int = 0   # >0 空闲自动关摄像头（代价：关闭期间检测不到回来）
     percept_vision_interval_s: int = 5          # 总线排空本源的节拍（秒）
 
+    # W3 兑现层（阶段 10，见 core/actions/journal.py 与 core/tasks/spine.py）：
+    # 副作用账本 + 不可逆动作延时窗口 + 跨会话任务脊柱。
+    # 两个默认值取向不同是有意的：账本**默认开**，它是"敢放手"的前提，关掉等于
+    # 把已经发生的副作用记不住，/undo 就无从补偿；任务脊柱**默认关**，它会自主调
+    # LLM 花钱、还会自己动手执行，必须用户显式授权（同 W2 逐源默认关的口径）。
+    # @author aceFelix
+    actions_journal_enabled: bool = True        # 副作用账本总开关（关=不记账也不延时）
+    actions_undo_window_s: int = 30             # 不可逆动作延时窗口（秒）；0=不拦直接执行
+    actions_track_local_writes: bool = True     # 本地破坏性写是否记一条可回滚条目
+    actions_irreversible_tools: list = field(default_factory=list)  # 额外当不可逆处理的工具名
+    actions_hold_blocks_equivalent: bool = True  # 待发窗口未结案时，等价外发命令不再自动放行
+
+    tasks_enabled: bool = False                 # 任务脊柱驱动器总开关（关=只读台账不自走）
+    tasks_blocked_ask_days: int = 3             # 阻塞超此天数主动问一次（走 W1 预算闸门）
+    tasks_step_max_attempts: int = 3            # 单步失败重试上限
+    tasks_retry_backoff_s: int = 60             # 重试退避间隔（秒）；本期固定间隔不翻倍
+    tasks_wait_deadline_hours: int = 72         # 条件等待最长时限（超时转 blocked_timeout 来问）
+    # 后台值守每推一步打一个 shadow git 检查点（改动可回退）；该配额与
+    # [checkpoint].max_per_session 分开计，避免把 /rewind 的消息级回溯挤没
+    tasks_checkpoint_max: int = 8
+
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
-    # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
+    # 纯聊天检测：短消息 + 无动作意图 + 不含文件名/路径形态 → 不发任何工具（0 token）。
+    # 结构判据是 2026-10-22 加的：只枚举口语说法补不全，误判会让本轮 0 工具、
+    # 模型改吐文本态 DSML（见 docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md）。
     tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）
     tools_chat_detection: bool = True      # 纯聊天零工具检测
 

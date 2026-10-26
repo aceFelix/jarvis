@@ -218,6 +218,67 @@ python -m pytest tests/ -q   # 2222 passed
 提示词与工具清单不一致是 DSML 泄漏的诱因之一；若要根治需按轮生成提示词，但会牺牲 prompt
 缓存命中率，需单独评估。
 
+## 四次补漏（2026-10-22）：「把 a.txt 改成 alpha2」仍被误判，词表补到头了
+
+**现象**：W3 体验走查的场景 1（`/away` 后「把 a.txt 改成 alpha2」）根本没走到 ASK 与
+待批清单，终端直接回显 DSML 裸码后就结束：
+
+```text
+我先确认一下 `a.txt` 的情况。
+
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="Glob">…</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+```
+
+**取证**：读会话存档 `~/.jarvis/sessions/把-atxt-改成-alph-2.json`（model=deepseek-flash），
+`text` 字段里就是那串原文；本地直接跑判定函数（不花 token）：
+
+```python
+is_chat_only(_ctx_with(_user("把 a.txt 改成 alpha2")))   # → True（本轮 0 工具）
+is_chat_only(_ctx_with(_user("重命名 a.txt")))             # → True
+is_chat_only(_ctx_with(_user("把 report.md 删掉")))        # → False（只因「删」字命中）
+```
+
+**根因**：与「三次补漏」同类，但词表已补不动了。那句话 17 字，旧词表**一个都没命中**：
+书面词有「修改/删除/编辑」，而用户说的是**「改成」**；工作区词表只收了名词（目录/项目/
+代码），没说「把一个文件怎么看」这种口语动词组合。只要判定依赖“枚举自然语言说法”，
+这类漏判就会无限复发。前三次都在堆词，方不对。
+
+**修复**（[tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py)）：
+不再只堆词，而是加一道**不依赖词表的结构判据**，闭掉整类：
+
+| 判据 | 内容 | 取向 |
+|---|---|---|
+| `_FILE_TOKEN_RE` | `[A-Za-z0-9_汉字-]+\.[A-Za-z][A-Za-z0-9]{0,7}` —— `a.txt`、`纪要.md`、`weekly.txt` | 宽松（允许汉字在左侧） |
+| `_PATH_TOKEN_RE` | `[A-Za-z0-9_.\-~][/\\][A-Za-z0-9_.\-]` —— `e:/lab/a.txt`、`C:\work`、`~/.jarvis` | 收紧（**两侧只认 ASCII**，否则「今天/明天」「和/或」这类散文全被当任务） |
+| `ACTION_KEYWORDS` 补类 | 改成、改为、改名、重命名、换成、变成、挪到、移到、复制到、追加、清空、存成、保存、生成、新建、删掉、去掉、回退、撤销、看下、看看 | 口语动词一类，结构判据之外的第二层 |
+
+方向仍是“宁多发不可漏发”：误伤一句问候的代价是几百 token，漏判的代价是整轮卡死。
+上一轮加的 `rescue_text` 本身不改——本次界面上能裸码而不是静默结束，恰好说明它按契约
+工作了（宁可看到裸码也不能丢信息）。
+
+**测试**（[tests/test_tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/test_tool_dispatch.py)，新增 3 例）：
+
+- `test_change_verb_on_filename_is_not_chat_only` —— 用户原话与同类短句均不得判纯聊天；
+- `test_structural_file_token_works_without_keyword` —— 结构判据独立生效，并钉住两个
+  **不应命中**的反例（`3.14`、`今天/明天`）；写这一例是因为第一版路径正则把汉字也收在两侧，
+  实跑当场被「今天/明天」打回，才改成只认 ASCII 邻右；
+- `test_pure_chat_not_overtriggered_by_structural_rule` —— 真问候仍为零工具。
+
+```powershell
+python -m pytest tests/test_tool_dispatch.py tests/test_query_loop_stream.py -q   # 全绿
+python -m pytest -q                                                               # 3208 passed
+```
+
+**仍未根治的诱因**（记下未做）：`chat_detection` 命中 0 工具时，系统提示词里仍列着可用
+工具，“提示词说能用 / 清单里没有”这个不一致依旧存在（上轮已记）。彻底做法是按轮生成提示词，
+代价是牺牲 prompt 缓存命中率；本次只把入口误判率压下去，没碰提示词。
+
+**给测试者的一句话**：同一个会话历史里已经存了 DSML 原文，会被当“文本态调用的示范”
+回灌给模型——修完请**另起新会话**重测场景 1；真要彻底关掉这条判定用
+`[tools] chat_detection = false`（或 `JARVIS_TOOLS_CHAT_DETECTION=0`）。
+
 ## 边界
 
 - DSML 块之后若还有正文（罕见，泄漏轮通常以调用结尾），会被一并吞入缓存不显示——可接受；

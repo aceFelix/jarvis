@@ -203,3 +203,9 @@ Completion 渲染」内联代码，统一抽为 `slash_completer._build_completi
 
 > 尚未处理的超限文件（本次未触碰，列入待拆清单）：`agent/ui/workbench/engine.py` 1240、
 > `agent/cli_anything/market.py` 898、`agent/prompts/system.py` 810、`agent/serve/server.py` 807。
+>
+> 后续进展（阶段 10 收尾切片，2026-10-21）：`agent/prompts/system.py` 已拆为
+> `system.py` 247 + `agent/prompts/text_blocks.py` 619
+> （逐字发给模型的静态提示词正文外提，文本哈希逐个比对不变）；`serve/server.py` 现为 749
+> （RPC 处理器已按域拆成 mixin）。仍超限待拆的是 `ui/workbench/engine.py` 1252 与
+> `cli_anything/market.py` 898。

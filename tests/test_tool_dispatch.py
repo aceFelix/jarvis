@@ -19,6 +19,7 @@ from agent.core.tool import Tool, ToolRegistry
 from agent.core.tool_dispatch import (
     ACTION_KEYWORDS,
     CHAT_ONLY_MAX_CHARS,
+    _looks_fileish,
     build_tool_defs,
     is_chat_only,
 )
@@ -87,6 +88,38 @@ def test_workspace_mention_question_is_not_chat_only():
     """回归 2026-09-30 桌面端复现句：工作区/环境指代问句曾被误判为纯聊天。"""
     for text in ("jarvis当前目录是一个什么项目", "这个仓库的结构", "看下配置文件"):
         assert is_chat_only(_ctx_with(_user(text))) is False, text
+
+
+def test_change_verb_on_filename_is_not_chat_only():
+    """回归 2026-10-22：「把 a.txt 改成 alpha2」曾被判纯聊天 → 本轮 0 工具 →
+    模型照旧吐 DSML → 被空 valid_names 过滤 → 界面上只剩裸码与一句前言。
+
+    两条互补判据分别验证：口语动词已进词表，文件名/路径走结构判据。
+    """
+    for text in (
+        "把 a.txt 改成 alpha2",   # 用户原话（17 字，旧词表一个都没命中）
+        "重命名 a.txt",            # 口语动词 + 文件名
+        "把纪要.md 合并",           # 汉字文件名
+        "看下 e:/lab/a.txt",       # 路径形态
+    ):
+        assert is_chat_only(_ctx_with(_user(text))) is False, text
+
+
+def test_structural_file_token_works_without_keyword():
+    """结构判据独立于词表：`名字.扩展名` 与路径分隔符都算，但不误伤数字与汉字。"""
+    assert _looks_fileish("a.txt") is True
+    assert _looks_fileish("e:/lab/a.txt") is True
+    assert _looks_fileish("C:\\work\\a.md") is True
+    assert _looks_fileish("~/.jarvis") is True   # 主目录写法也是路径
+    # 反向：点后接数字不算扩展名，汉字夹斜杠不算路径
+    assert _looks_fileish("3.14") is False
+    assert _looks_fileish("今天/明天") is False
+
+
+def test_pure_chat_not_overtriggered_by_structural_rule():
+    """加了结构判据后，真问候仍得判为纯聊天（零工具省 token 的本意还在）。"""
+    for text in ("你好", "谢谢", "嗯嗯好的", "1+1"):
+        assert is_chat_only(_ctx_with(_user(text))) is True
 
 
 def test_keyword_match_is_case_insensitive():

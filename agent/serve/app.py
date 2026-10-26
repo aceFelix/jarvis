@@ -163,6 +163,16 @@ def run_serve(settings: Settings) -> int:
 
     @author aceFelix
     """
+    # W1 判断层配置注入：桌面壳（jarvis-desktop/backend.ts）spawn 的是
+    # ``python -m agent.serve``，不经过 ``main()``，以前没人调 init_policy，
+    # 导致 policy 模块里的 settings 快照一直是 None：quiet_hours / daily_max /
+    # aggregate_window_s / min_salience / away_idle_minutes 五个字段全用硬编码
+    # 缺省，用户在 settings.toml 里改了什么都不生效（连 notify_budget_enabled
+    # = false 也关不掉闸）。注入放在最前面：它跟 websockets 在不在无关，
+    # 且缺依赖提前退出时也不能丢（下游读 budget/stats 仍要是同一份配置）。
+    from agent.core.policy import init_policy
+
+    init_policy(settings)
     # websockets 是可选依赖（与手机协同桥接同一口径），缺失时明确报错退出
     from agent.bridge import server as _bridge_server
 
