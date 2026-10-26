@@ -16,6 +16,9 @@
 - **W2 感知层接线（阶段 9 第 4 步）**：``percept_enabled`` 打开时装配事件总线
   （``register_sources`` + 订阅 + ``start``），感知事件经 ``ProactiveEngine.gate_notify``
   ——与简报同一个闸门——投出去；人脸离开/进入画面同时驱动 W1 的 away 推断。
+- **W3 任务脊柱接线（阶段 10）**：``tasks_enabled`` 打开时装配后台驱动器
+  （``core/tasks/driver.py``），目标推进一步的结论与“卡住了”的询问同样经
+  ``gate_notify`` 投成 ``proactive_notify`` 事件；未打开时不起线程，但台账仍可读。
 
 与老 daemon 常驻语义的差异：serve 进程随桌面壳启停，播报仅在运行期间
 生效。补救链：Scheduler 自带错过补偿（一次性任务 ≤1 小时）+ 本模块的
@@ -39,6 +42,16 @@ from agent.core.daemon.proactive import ProactiveConfig, ProactiveEngine
 from agent.core.daemon.scheduler import Scheduler, ScheduleTask
 from agent.core.policy import get_budget  # W1 打扰预算（阶段 8）@author aceFelix
 from agent.serve import protocol
+from agent.serve.quiet_delivery import (
+    QUIET_CHANNEL_EMAIL,
+    QUIET_CHANNEL_SCREEN,
+    REMINDER_NOTIFY_KIND,
+    REMINDER_NOTIFY_SOURCE,
+    REMINDER_NOTIFY_TITLE,
+    REMINDER_URGENCY,
+    parse_channels,
+    send_quiet_email,
+)
 
 # 补播窗口（分钟）已改由 settings.briefing_catchup_window_min 配置（默认 120），
 # 便于随时调整“错过多久以内才补播”，不再作为模块常量硬编码。
@@ -88,6 +101,20 @@ PERCEPT_ASK_TEXT = (
     "想试试：标题栏「管家服务」→「感知源」，拨总开关与想开的源（改完当场生效，\n"
     "不必重启）。不想用：什么都不用做，我会一直保持关闭。这条提示只出现一次。"
 )
+
+# ---- W3 任务脊柱接线口径（阶段 10）----
+
+#: 后台目标播报的桌面渲染 kind。与感知事件同理：壳侧 dispatcher 对未知 kind
+#: 走默认渲染（全文上屏 + 系统通知），contracts.ts 的 kind 是开放联合，
+#: 因此本期不动桌面壳也能看到内容（专门的任务面板属下一切片）。
+TASK_NOTIFY_KIND = "task"
+TASK_NOTIFY_TITLE = "任务脊柱"
+
+# 用户自设提醒的送达口径（源名/kind/标题/紧迫度）与静默通道、邮件正文构造、
+# 副作用入账，统一放在 `quiet_delivery.py`（本节只负责“过闸 + 按通道投递”的编排）：
+# 拆出去是因为 hub 已经承担事件队列 + 感知总线 + 任务脊柱接线，不拆分就撞破
+# 800 行上限。机制背景见 docs/architecture/16-W1判断层.md 第四节。
+# 2026-10-22 前 hub._on_fire 对提醒是直接 `_emit`，静默时段与日额度对它全部无效。
 
 
 class ProactiveHub:
@@ -152,6 +179,8 @@ class ProactiveHub:
         # 进队列——那时无在线客户端，事件泵会把它丢掉（同 init 事件改按连接首推的
         # 原因）。由 serve 在每条连接建立时 drain_percept_ask() 取出。
         self._percept_ask: dict[str, str] | None = None
+        # W3 任务脊柱驱动器（未启用/装配失败时为 None；台账读侧不依赖它）
+        self._task_driver: Any = None
 
     # ---- 对外只读访问（registry_hook 注册提醒/截止日期工具用） ----
 
@@ -186,6 +215,8 @@ class ProactiveHub:
         self._engine.start()
         # W2 感知层：总开关打开才装配总线（关着时不起线程、不注册采集器）
         self._start_percept()
+        # W3 任务脊柱：排在感知之后装配（``percept_event`` 类等待要订阅已装配的总线）
+        self._start_tasks()
         # 补播判定仅在进程启动时做一次，不持久化（重启不重复补）
         if self.missed_briefing_minutes() is not None:
             self._catchup_timer = threading.Timer(
@@ -209,7 +240,9 @@ class ProactiveHub:
         if self._catchup_timer is not None:
             self._catchup_timer.cancel()
             self._catchup_timer = None
-        # 先断感知源（否则引擎已停、总线还在往队列投事件），再停引擎与调度器
+        # 先断后台推进器（否则引擎已停、驱动器还在往队列投目标结果），
+        # 再断感知源（否则引擎已停、总线还在往队列投事件），最后停引擎与调度器
+        self._stop_tasks()
         self._stop_percept()
         self._engine.stop()
         self._scheduler.stop()
@@ -256,13 +289,13 @@ class ProactiveHub:
         """定时任务到期回调（Scheduler 后台线程触发）。
 
         ProactiveEngine 注册的任务转引擎自处理（生成简报/检查截止日期）；
-        用户提醒任务投 proactive_notify 事件（老语义：托盘通知 + TTS 播报，
-        桌面壳语义：聊天气泡 + 系统通知）。
+        用户提醒走 `_deliver_reminder`（过同一个 W1 闸门，2026-10-22 前这里是
+        直接 `_emit`，静默时段与日额度对提醒全部无效）。
         """
         if self._engine.is_proactive_task(task):
             self._engine.handle_task_fire(task)
             return
-        self._emit(kind="reminder", title="贾维斯提醒", text=task.content, task_id=task.id)
+        self._deliver_reminder(task)
 
     def _on_notify(self, message: str) -> None:
         """主动感知引擎通知回调（每日简报 / 截止日期提醒共用出口）。
@@ -273,14 +306,95 @@ class ProactiveHub:
         kind = "deadline" if message.startswith(_DEADLINE_PREFIX) else "briefing"
         self._emit(kind=kind, title="贾维斯主动提醒", text=message)
 
+    def _deliver_reminder(self, task: ScheduleTask) -> None:
+        """用户自设提醒的送达：过 W1 打扰预算，静默时按通道降级而非延后。
+
+        为什么要降级而不是入库等补播：冲刷靠“下一条通知请求”触发，夜里没动静
+        就可能永不补播，而 `ScheduleTask.escalate_count` 那套升级重发只有字段、
+        没人递增——对用户明说要过的提醒，静默时段不该等于把它弄丢。
+
+        三种结果：正常放行（上屏 + 朗读）/ 降级投递（按 `reminder_channels`
+        决定上屏与发信，不出声）/ queue、suppress（闸门已入库或合并掉，不投递）。
+
+        @author aceFelix
+        """
+        channels = self._reminder_channels()
+        action = self._engine.gate_notify_action(
+            REMINDER_NOTIFY_SOURCE, task.content,
+            dedup_key=f"{REMINDER_NOTIFY_SOURCE}:{task.id}",
+            urgency=REMINDER_URGENCY,
+            # 没配任何已实现通道 = 不降级，退回“入库待补播”的老行为
+            silent_delivery=bool(channels),
+        )
+        if not action.should_emit:
+            return
+        if action.speak:
+            self._emit(
+                kind=REMINDER_NOTIFY_KIND, title=REMINDER_NOTIFY_TITLE,
+                text=action.text, task_id=task.id,
+            )
+            return
+        # 降级投递：气泡与系统通知照投（不占日额度、不朗读），邮件另发
+        if QUIET_CHANNEL_SCREEN in channels:
+            self._emit(
+                kind=REMINDER_NOTIFY_KIND, title=REMINDER_NOTIFY_TITLE,
+                text=action.text, task_id=task.id, speak=False,
+            )
+        if QUIET_CHANNEL_EMAIL in channels:
+            self._send_quiet_email(task)
+
+    def _reminder_channels(self) -> set[str]:
+        """读静默降级通道（只认已实现的，未实现的警告一次并忽略）。
+
+        结果缓存在实例上：提醒到期是高频回调，每条都重解析并刷一遍“sms 未接入”
+        的警告就是新的打扰；而这几个字段没有热更新入口（面板不管预算），
+        改了本来就要重启宿主，缓存不会读到陈值。
+        """
+        cached = getattr(self, "_quiet_channels", None)
+        if cached is not None:
+            return cached
+        out, unknown = parse_channels(
+            getattr(self._settings, "notify_reminder_channels", None)
+        )
+        if unknown:
+            logger.warning(
+                "静默降级通道 %s 尚未接入，已忽略（可用：%s）",
+                ",".join(sorted(set(unknown))),
+                ",".join(sorted({QUIET_CHANNEL_SCREEN, QUIET_CHANNEL_EMAIL})),
+            )
+        self._quiet_channels = out
+        return out
+
+    def _send_quiet_email(self, task: ScheduleTask) -> None:
+        """静默降级邮件的**起线程入口**：SMTP 是阻塞 IO，不能占调度器回调线程。
+
+        发送与入账在 `quiet_delivery.send_quiet_email`（与 TTS 朗读同一个处置口径：
+        `hub` 只管起线程，不做业务）。
+
+        @author aceFelix
+        """
+        threading.Thread(
+            target=send_quiet_email,
+            args=(self._settings, task),
+            name="quiet-email",
+            daemon=True,
+        ).start()
+
     def _emit(
-        self, *, kind: str, title: str, text: str, task_id: str = "", speak: bool = True
+        self, *, kind: str, title: str, text: str, task_id: str = "",
+        speak: bool = True, silent: bool | None = None,
     ) -> None:
         """投递 proactive_notify 事件进 serve 事件队列（线程安全）。
 
-        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人；
-        事件通道不受这个开关影响（气泡与系统通知照旧）。
+        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人。
+
+        `silent` 是“系统通知也别出声”的意图（Windows toast 自带提示音，不透传
+        则桌面壳那边仍会响一声，静默时段就白设了），缺省**跟随 `speak`**：
+        降级投递两个声音都要关。首次引导只躲 TTS 长文朗读、却要 toast 醒目
+        （否则用户根本没看到引导），所以那边显式传 `silent=False`。
+        壳侧 `dispatcher.ts` → `notify.ts` 据此给 Electron `Notification` 传 silent。
         """
+        quiet_toast = not speak if silent is None else silent
         self._event_queue.put_nowait(
             {
                 "type": protocol.EVT_PROACTIVE_NOTIFY,
@@ -289,6 +403,7 @@ class ProactiveHub:
                     "title": title,
                     "text": text,
                     "task_id": task_id,
+                    "silent": quiet_toast,
                 },
             }
         )
@@ -363,6 +478,69 @@ class ProactiveHub:
         except Exception as e:
             logger.warning("感知总线停机异常: %s", e)
 
+    # ---- W3 任务脊柱接线（阶段 10：后台目标 → 同一个 W1 闸门 → 事件流） ----
+
+    def _start_tasks(self) -> None:
+        """装配任务脊柱驱动器（``tasks_enabled`` 关着时不起线程）。
+
+        与感知层同一口径：装配失败只降级为“不自动推进”，不得拖垮 serve 启动；
+        台账读写不靠驱动器（``/tasks`` 与下一切片的 ``tasks.*`` 读侧在禁用态照旧能列）。
+
+        为什么先 ``resume()`` 再 ``start()``：上次进程遗留的 ``running`` 步骤必须先复位，
+        否则驱动线程一上来就认为“那步还在跑”，台账永久停在假的活动态。
+
+        @author aceFelix
+        """
+        if not bool(getattr(self._settings, "tasks_enabled", False)):
+            return
+        try:
+            from agent.core.tasks.driver import build_driver, make_gate_notifier
+
+            def _emit_task(text: str) -> None:
+                self._emit(kind=TASK_NOTIFY_KIND, title=TASK_NOTIFY_TITLE, text=text)
+
+            self._task_driver = build_driver(
+                self._settings,
+                # 目标播报与简报/感知事件走同一个闸门（同一份实现），不另开
+                # 一条“后台可以随便说”的路
+                notifier=make_gate_notifier(_emit_task),
+                session_name="serve",
+                workdir=str(getattr(self._settings, "workdir", "") or ""),
+                bus_getter=lambda: self._bus,
+            )
+            reset = self._task_driver.resume()
+            started = self._task_driver.start()
+            logger.info(
+                "任务脊柱已装配：驱动线程%s，复位上次中断步骤 %d 个",
+                "已起" if started else "未起（缺可用 provider）",
+                reset,
+            )
+        except Exception as e:  # noqa: BLE001 - 脊柱是增强能力，失败不影响 serve 启动
+            logger.warning("任务脊柱装配失败，本次不自动推进目标: %s", e)
+            self._task_driver = None
+
+    def _stop_tasks(self) -> None:
+        """停驱动线程并清除进程级句柄（幂等；没装配过就是空操作）。
+
+        必须把全局句柄也清掉：驱动器持有 notifier，而 notifier 闭包持有本 hub，
+        留着它就是一个指向已停 hub 的投递入口（与感知侧“先退订再停”同理）。
+
+        @author aceFelix
+        """
+        driver, self._task_driver = self._task_driver, None
+        if driver is None:
+            return
+        try:
+            driver.stop()
+        except Exception as e:  # noqa: BLE001 - 停机失败不影响后面的引擎回收
+            logger.warning("任务脊柱停机异常: %s", e)
+        try:
+            from agent.core.tasks.driver import set_driver
+
+            set_driver(None)
+        except Exception:
+            pass
+
     def _arm_percept_ask(self) -> None:
         """按判据决定是否装一条“待投递的首次引导”（不在此刻投递）。
 
@@ -407,6 +585,8 @@ class ProactiveHub:
             title=pending["title"],
             text=pending["text"],
             speak=False,
+            # 引导靠“看得到”：不躲系统通知的提示音，只躲那段长文的 TTS 朗读
+            silent=False,
         )
         try:
             from agent.core.percept.consent import mark_asked

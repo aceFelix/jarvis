@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent.core.tool import ToolRegistry
@@ -112,4 +114,68 @@ class TestScheduleSectionConditional:
         assert "ScheduleReminder" in p
         assert "ListSchedule" in p
         assert "CancelSchedule" in p
+
+
+class _FakeTrackGoalTool:
+    """最小化的 TrackGoal 替身，仅用于验证目标脊柱段条件注入。"""
+
+    name = "TrackGoal"
+    description = "把要等条件的事落成跨会话目标台账"
+    input_schema = {"type": "object", "properties": {}}
+    deferred = False
+
+    async def call(self, args, ctx):  # pragma: no cover - 不实际调用
+        raise NotImplementedError
+
+
+class TestPromptTextBlocksSplit:
+    """静态提示词正文拆到 ``text_blocks.py`` 后的等价护栏。
+
+    拆分动机是单文件 800 行上限（阶段 10 收尾切片），属行为不变的重构：
+    提示词逐字节进 LLM 前缀缓存，所以下面四条分别钉住“同一对象”“内容还在”
+    “注入条件未坏”“行数不回弹”。
+    @author aceFelix
+    """
+
+    BLOCKS = (
+        "_BASE_PROMPT",
+        "_NO_THINKING_SECTION",
+        "_SCHEDULE_SECTION",
+        "_PLATFORM_WINDOWS",
+        "_PLATFORM_MACOS",
+        "_PLATFORM_LINUX",
+        "_GOAL_SPINE_SECTION",
+    )
+
+    def test_system_reexports_the_same_objects(self):
+        """旧引用不碎：``system`` 里的同名常量就是 ``text_blocks`` 里那一个对象。"""
+        from agent.prompts import system, text_blocks
+
+        for name in self.BLOCKS:
+            assert getattr(system, name) is getattr(text_blocks, name), name
+
+    def test_moved_content_still_reaches_the_prompt(self, prompt):
+        """搬走的是正文不是逻辑：人设行与平台段仍然逐字出现在拼装结果里。"""
+        assert "你是Jarvis" in prompt
+        assert "# 平台操作规范" in prompt
+        assert "# 思考规范（思维链）" in prompt
+
+    def test_goal_section_still_conditional(self):
+        """拆文件没改变注入口径：没注册 TrackGoal 就不告模型有这台工具。"""
+        without = build_system_prompt(".", ToolRegistry())
+        assert "# 跨会话目标" not in without
+
+        reg = ToolRegistry()
+        reg.register(_FakeTrackGoalTool())
+        with_tool = build_system_prompt(".", reg)
+        assert "# 跨会话目标" in with_tool
+
+    def test_both_prompt_files_within_line_cap(self):
+        """行数上限护栏：两个提示词文件都不得回到 800 行以上。"""
+        from agent.prompts import system, text_blocks
+
+        for mod in (system, text_blocks):
+            path = Path(mod.__file__)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            assert len(lines) <= 800, f"{path.name}: {len(lines)} 行"
 

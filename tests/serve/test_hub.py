@@ -153,8 +153,21 @@ class TestAssembly:
 
 class TestFireRouting:
     def test_user_reminder_emits_event(self, hub):
-        """用户提醒任务到期 → proactive_notify（kind=reminder、task_id 正确）。"""
+        """用户提醒任务到期 → 过闸后投 proactive_notify（kind=reminder、task_id 正确）。
+
+        预算桩成“恒放行”：2026-10-22 起提醒不再绕过闸门，若还用真实
+        `~/.jarvis/notify_state.json`，这条断言就会看时钟与历史积压抽奖
+        （静默时段会拿不到事件、积压冲刷会把 text 拼成摘要）。
+        """
+        from agent.core.policy.budget import NotifyAction
+
+        class _AlwaysEmit:
+            def gate(self, text, source, *, dedup_key="", urgency=0.5,
+                     silent_delivery=False):
+                return NotifyAction("emit", text, "测试桩")
+
         h, eq = hub
+        h._engine._budget = _AlwaysEmit()
         task = h.scheduler.add_task(
             content="开会", trigger_at=datetime.now() - timedelta(seconds=1)
         )

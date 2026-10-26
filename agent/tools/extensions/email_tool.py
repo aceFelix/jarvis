@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import smtplib
@@ -96,6 +97,16 @@ class SendEmailTool(Tool):
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
         """SMTP 连接不建议并发，返回 False。"""
         return False
+
+    def is_irreversible(self, args: dict[str, Any]) -> bool:
+        """邮件交给 SMTP 服务器就收不回来，进 W3.2 延时窗口。本仓第一个声明位。
+
+        判定口径是"事实能不能收回"而不是"代码里有没有对应删除接口"：多数邮箱
+        厂商的"撤回已发邮件"对已投递到对方服务器的信无效，所以不给假的补偿计划。
+        需要更长冷静期可在 ``[actions].undo_window_s`` 上调，不必改代码。
+        @author aceFelix
+        """
+        return True
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
         """发送邮件默认需要用户确认。"""
@@ -257,3 +268,38 @@ class SendEmailTool(Tool):
         if attached_names:
             result += f"\n  附件: {', '.join(attached_names)}"
         return ToolResult(data=result)
+
+
+def send_email_now(settings: Any, args: dict[str, Any]) -> str:
+    """不经模型、不跑 check_permissions，直接发一封邮件（同步）。
+
+    为什么要有这个入口：桌面「管家服务→邮件发送」表单与静默时段的提醒改道都是
+    “用户已经表过态”的确定性动作，不该再走一遍 ASK；两处各自 `asyncio.run(
+    SendEmailTool().call(...))` 就是两份实现，将来改参数校验只会改一处。
+    配置校验（enabled / smtp_user / 授权码 / 收件人 / 主题 / 正文）全部复用工具，
+    不在此重写。
+
+    Args:
+        settings: Settings 快照（取 workdir 与邮件配置）。
+        args: 工具入参，至少要有 ``subject`` 与 ``body``；``to`` 留空则用
+            ``[email].default_recipient``。
+
+    Returns: 工具输出的发送摘要（含实际收件人）。
+
+    Raises: ValueError，文案即工具给出的错误原文（未启用/缺配置/认证失败等）。
+
+    ⚠ 本函数是**阻塞网络 IO**（SMTP timeout 30s）且内部用 `asyncio.run`：
+    调用方必须在自己的工作线程里跑（serve 侧统一走 `asyncio.to_thread`），
+    在事件循环线程直接调会冻住整个服务。
+
+    @author aceFelix
+    """
+    ctx = ToolContext(
+        workdir=str(getattr(settings, "workdir", "") or ""),
+        messages=[],
+        settings=settings,
+    )
+    res = asyncio.run(SendEmailTool().call(dict(args), ctx))
+    if res.is_error:
+        raise ValueError(str(res.data))
+    return str(res.data)

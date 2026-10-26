@@ -33,7 +33,11 @@ agent/
 │   ├── images.py     # 图片/剪贴板助手（/image /paste 加载与去重）
 │   ├── logging.py    # 日志
 │   ├── audit/        # 工具审计日志
-│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日/截止日期/日历）
+│   ├── actions/      # W3.2 副作用账本（EffectRecord + jsonl 事件流 + 不可逆延时窗口）
+│   ├── tasks/        # W3.1 任务脊柱（spine 台账 / spine_ops 建管目标共用层 / driver 后台驱动 / approval_ops 阻塞与授权 / spawn 执行通路 / cli_host REPL 装配）
+│   ├── policy/       # W1 运行时层（授权租约 / 打扰预算 / away 与待批 / 空转检测）
+│   ├── percept/      # W2 统一事件总线（bus + 一源一文件 + status + consent + speech）
+│   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日/截止日期/日历/简报）
 │   ├── extensions/    # 外部扩展机制（MCP客户端/插件/Skill加载）
 │   ├── memory/        # 记忆持久化（上下文压缩/恢复/文件状态/存储）
 │   └── sandbox/       # 安全沙箱（风险评分/隔离执行/文件守护/审计日志）
@@ -133,16 +137,20 @@ agent/
 │    voice_state.py / notifications.py 已随 2026-08 托盘模式下线；
 │    autostart.py 随三栏 GUI 于 2026-10 退役。主动感知服务在 agent/core/daemon/）
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
-│   ├── settings.py    # Settings 数据类 + TOML 加载 + 字段映射
+│   ├── settings.py    # Settings 数据类 + TOML 加载
+│   ├── settings_domains.py # 声明式域表（TOML 段→扁平字段：checkpoint/policy/actions/tasks/percept）
+│   ├── percept_settings.py / toml_writer.py # 面板可改的 [percept] 白名单 + 单节外科式落盘
 │   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
 │   ├── keyring_store.py # API Key 加密存储（系统凭据管理器）
 │   ├── model_registry.py # 模型 TOML 持久化（save/load）
 │   └── migrations.py  # 配置迁移
-├── prompts/           # 系统提示组装（动态思维模式/语音模式）
+├── prompts/           # 系统提示组装（system.py 拼装 / text_blocks.py 逐字静态正文）
 └── utils/             # 通用工具
-    └── mask.py        # API Key 脱敏
+    ├── mask.py        # API Key 脱敏
+    ├── filelock.py    # ensure_dir + file_lock（`O_CREAT|O_EXCL` 跨进程锁；协作 TaskList 与任务脊柱共用）
+    └── query_lock.py  # 会话 query 串行锁（桌面/手机/微信同会话互斥）
 
-tests/                 # 测试套件（2034 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱）
+tests/                 # 测试套件（3205 个测试，覆盖 LLM/Config/Tools/Core/Voice/Daemon/权限/沙箱/感知/策略/命令/UI/serve，含 W3 任务脊柱与副作用账本 374 例）
 ├── llm/               # Provider 注册表、思考配置、流式解析、配置加载测试
 ├── memory/            # 会话存盘、崩溃恢复、上下文压缩测试
 ├── collaboration/     # 多 Agent 协作测试
@@ -160,6 +168,12 @@ tests/                 # 测试套件（2034 个测试，覆盖 LLM/Config/Tools
 ├── test_p23_proactive.py  # 主动感知提醒测试
 └── test_p38_sandbox.py    # 安全沙箱测试
 
+scripts/               # 开发/运维辅助脚本（不属于运行时包）
+├── check_md_links.py      # 文档链接门禁：死链 0 且目标已入 git 索引
+├── smoke_w3_spine.py      # W3 一键实机走查：三个入口 + 延时窗口 + 绕道硬拦 + 两条 RPC（40 项，不经 LLM）
+├── livecheck_w3.py        # W3 实机自检：真 LLM 跑穿“到点自动执行 + 副作用入账 + 按目标撤销”（12 项）
+└── smoke_profile_bridge.py / smoke_refine_provider.py # 单链路冒烟脚本
+
 .github/workflows/     # GitHub Actions CI（自动测试 + 语法检查）
 └── ci.yml             # push/PR 触发，Python 3.11-3.14 矩阵
 
@@ -171,7 +185,11 @@ npm/                   # npm 分发包（让 Node.js 用户通过 npm install -g
 
 ## 测试与 CI
 
-项目配备 **2034 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护等核心模块。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
+项目配备 **3193 个单元/集成测试**，覆盖 LLM Provider、工具注册、配置加载、权限系统、上下文管理（含 tool_use ↔ tool_result 配对不变量）、会话管理、记忆持久化、安全沙箱、后台守护，以及管家形态三层：W1 打扰预算与租约（`tests/policy/`）、W2 事件总线与各源（`tests/core/test_percept_*.py`、`tests/serve/test_hub_percept.py`）、W3 副作用账本与任务脊柱（`tests/core/test_action_journal.py`、`test_orchestrator_irreversible.py`、`test_task_spine.py`、`test_spine_ops.py`、`test_task_driver.py`、`tests/commands/test_undo_commands.py`、`test_tasks_command.py`、`tests/tools/test_track_goal.py`、`tests/serve/test_serve_tasks_rpc.py`、`tests/test_w3_smoke_script.py`，以及 2026-10-22 实机修复后的 `test_orchestrator_denials.py`、`test_driver_approval_blocked.py`、`test_checkpoint_task_quota.py`、`tests/collaboration/test_subagent_permission_rules.py`、`test_w3_step_side_effects.py`）。核心运行时（query_loop/orchestrator/记忆/权限/LLM Provider）覆盖率 **94%**。
+
+> 测试总数会变，引用时以 `pytest -q --collect-only` 实报为准；改完全量跑
+> `./.venv/Scripts/python.exe -m pytest -q` 与 `scripts/check_md_links.py`（后者要求
+> 文档链接目标已入 git 索引，新增文件未 `git add` 前必报红）。
 
 ```bash
 # 运行全部测试
@@ -180,6 +198,13 @@ pytest tests/ -v
 # 查看覆盖率
 coverage run --source=agent -m pytest tests/ -q
 coverage report
+
+# W3 兑现层一键实机走查（不经 LLM、只写临时目录，~2 秒）
+./.venv/Scripts/python.exe scripts/smoke_w3_spine.py
+
+# W3 到点自动执行的实机自检（**要花一次 LLM**，不改用户配置，~1-2 分钟）
+export DEEPSEEK_API_KEY=...
+./.venv/Scripts/python.exe scripts/livecheck_w3.py --wait 30
 ```
 
 每次 push 或 PR 到 `main` 分支，**GitHub Actions 自动跑全量测试**（Python 3.11 / 3.12 / 3.13 / 3.14 矩阵），不通过不允许合并。

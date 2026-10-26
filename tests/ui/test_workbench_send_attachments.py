@@ -19,6 +19,7 @@ import queue
 import pytest
 
 from agent.config.settings import Settings
+from agent.core.context import ToolContext
 from agent.core.message import ImageContent, Message, TextContent, ToolResultContent
 from agent.ui.workbench.engine import ChatEngine, _messages_to_render
 
@@ -54,7 +55,9 @@ def engine_with_fake_loop(monkeypatch):
     engine = ChatEngine(settings, event_queue, queue.Queue())
     loop = _FakeLoop()
     engine._query_loop = loop
-    engine._ctx = object()
+    # 轮次上下文用真 ToolContext 而不是 object()：_handle_send 轮前会把本轮
+    # 检查点 cid 与会话名写进 ctx.extra（W3.2 副作用账本要用），空对象没有 extra
+    engine._ctx = ToolContext(workdir="", messages=[])
     engine._messages = []
     monkeypatch.setattr(engine, "_after_turn", lambda: None)
     return engine, loop, event_queue

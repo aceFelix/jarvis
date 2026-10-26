@@ -251,3 +251,86 @@ def test_flush_reorders_pending_by_time(policy_paths):
     b.gate("最早发生", "deadline", dedup_key="a", now=NIGHT.replace(minute=50))
     a = b.gate("白天", "system", dedup_key="s", urgency=0.9, now=NEXT_MORNING)
     assert a.text.index("较晚发生") < a.text.index("最早发生")
+
+
+# ---------- 时刻写法容错（2026-10-22：用户写 "23:00-7:00" 曾被静默判为不启用） ----------
+
+def test_single_digit_hour_still_enables_quiet(policy_paths):
+    """少写一个 0 的写法必须照样生效。
+
+    旧实现用 `time.fromisoformat` 解析，`"7:00"` 抛 ValueError 后直接
+    `return False`——整条静默时段默默失效，用户改了配置没反应且日志零字。
+    """
+    b = _budget(policy_paths, quiet_hours="23:00-7:00")
+    a = b.gate("深夜提醒", "deadline", urgency=0.8, now=NIGHT)
+    assert a.kind == "queue", "23:30 在 23:00-7:00 内，不该播"
+    assert b.stats()["pending"] == 1
+
+
+def test_parse_clock_accepts_and_rejects():
+    """时刻解析：容错个位数小时与空格，但格式/范围非法仍算非法。"""
+    from datetime import time
+
+    from agent.core.policy.budget import parse_clock
+
+    assert parse_clock("7:00") == time(7, 0)
+    assert parse_clock(" 23:00 ") == time(23, 0)
+    assert parse_clock("07:00:30") == time(7, 0, 30)
+    assert parse_clock("") is None
+    assert parse_clock("24:00") is None
+    assert parse_clock("7:60") is None
+    assert parse_clock("半夜") is None
+
+
+def test_bad_quiet_hours_warns_instead_of_silently_disabling(policy_paths, caplog):
+    """写法真不可用时：静默确实不生效，但必须留一行警告。"""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="jarvis.policy"):
+        b = _budget(policy_paths, quiet_hours="23:00-半夜")
+    assert b.gate("夜间", "briefing", urgency=0.9, now=NIGHT).kind == "emit"
+    assert "quiet_hours" in caplog.text
+
+
+# ---------- 降级投递（2026-10-22：用户自设提醒不该整条延后） ----------
+
+def test_silent_delivery_downgrades_quiet_hours(policy_paths):
+    """静默时段 + silent_delivery → emit 且 speak=False：不入队、不占日额度。"""
+    b = _budget(policy_paths)
+    a = b.gate("喝水", "schedule", dedup_key="schedule:t1", urgency=0.9,
+               now=NIGHT, silent_delivery=True)
+    assert a.kind == "emit" and a.speak is False
+    assert "只上屏不朗读" in a.reason
+    assert b.stats()["pending"] == 0
+    assert b.stats()["count"] == 0        # 上屏不算一次打扰
+
+
+def test_silent_delivery_downgrades_daily_cap(policy_paths):
+    """额度用尽同样降级上屏，而不是入库等下一条请求来冲刷。"""
+    b = _budget(policy_paths, daily_max=1)
+    first = b.gate("第一条", "schedule", dedup_key="k1", urgency=0.9, now=MORNING)
+    assert first.speak is True
+    a = b.gate("第二条", "schedule", dedup_key="k2", urgency=0.9, now=MORNING,
+               silent_delivery=True)
+    assert a.kind == "emit" and a.speak is False
+    assert b.pending_count() == 0
+    assert b.stats()["count"] == 1        # 降级那条不占额度
+
+
+def test_silent_delivery_still_merges_duplicates(policy_paths):
+    """同一条提醒在聚合窗口内重复降级只上屏一次（否则升级重发会反复刷屏）。"""
+    b = _budget(policy_paths, aggregate_window_s=600)
+    first = b.gate("喝水", "schedule", dedup_key="schedule:t1", urgency=0.9,
+                   now=NIGHT, silent_delivery=True)
+    again = b.gate("喝水", "schedule", dedup_key="schedule:t1", urgency=0.9,
+                   now=NIGHT.replace(minute=35), silent_delivery=True)
+    assert first.kind == "emit" and again.kind == "suppress"
+    assert "窗口内合并" in again.reason
+
+
+def test_without_silent_delivery_quiet_hours_still_queues(policy_paths):
+    """不传该参数时行为一字不变：简报/感知事件仍是入库待补播。"""
+    b = _budget(policy_paths)
+    a = b.gate("简报", "briefing", dedup_key="bk", urgency=0.9, now=NIGHT)
+    assert a.kind == "queue" and a.speak is True
+    assert b.pending_count() == 1

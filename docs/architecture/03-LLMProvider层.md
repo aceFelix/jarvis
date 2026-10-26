@@ -188,7 +188,7 @@ DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke n
 | OpenAI 兼容 | `openai_provider.stream()` 的 `delta.content` | deepseek(v1) / dashscope 兼容 / moonshot / 智谱兼容 / openai / siliconflow / google 等 |
 | Anthropic | `anthropic_provider.stream()` 的 `text_delta` | deepseek `/anthropic` 端点（deepseek-flash）/ minimax `/anthropic` 等 Anthropic 兼容端点 |
 
-⚠ 2026-09-30 三次补漏：
+⚠ 补漏记录（2026-09-30 三次 + 2026-10-22 一次）：
 
 1. **只接了 OpenAI 路径**：原先假设「Anthropic 原生 Provider 自带结构化工具块」，实机发现
    DeepSeek 的 `/anthropic` 兼容端点在「前言 + 调用」同轮时同样会把 DSML 当 `text` block
@@ -199,7 +199,11 @@ DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke n
 3. **兜底静默吞信息**：码点修好后桌面端变为「思考完就停止」——`_is_chat_only` 把「当前目录
    是一个什么项目」误判为纯聊天→本轮 0 工具→模型仍吐 DSML→被空 `valid_names` 全部过滤。
    已补全关键词表并加入 `rescue_text` 回退（见 [query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py)
-   的 `_is_chat_only`）。
+   的 `_is_chat_only`，现已拆到 [tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py)）。
+4. **词表补到头了**（2026-10-22）：「把 a.txt 改成 alpha2」又被误判——书面词有「修改」
+   而用户说的是「改成」。只要判定靠枚举自然语言说法就会无限复发，故新增**不依赖词表的
+   结构判据** `_looks_fileish()`（文件名 `名字.扩展名` / 路径形态），并补一类口语动词；
+   误判方向仍取“宁多发不可漏发”。详见 fixlog「四次补漏」。
 
 Zai / DashScope 原生 SDK 走各自的工具块协议，暂未接入，若复现按同一 guard 三行接入即可。
 详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)。

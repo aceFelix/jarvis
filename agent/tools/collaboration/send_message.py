@@ -97,6 +97,18 @@ class SendMessageTool(Tool):
     def is_read_only(self, args: dict[str, Any]) -> bool:
         return False
 
+    def is_irreversible(self, args: dict[str, Any]) -> bool:
+        """刻意**不**声明为不可逆：本工具写的是本机文件信箱，不是外部世界。
+
+        判据是“副作用是否已离开本机”：SendMessage 落盘 ~/.jarvis/teams/<team>/
+        inboxes/ 下的 JSON，收件人是自己的 agent。把它拖进 W3.2 的 30 秒延时窗口
+        只会让团队协议往返（permission_request/response、shutdown）成倍变慢，
+        换不来任何真实保护。将来若接上真实外发通道（邮件/IM 网关），那时才该
+        改本方法。
+        @author aceFelix
+        """
+        return False
+
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
         return True
 

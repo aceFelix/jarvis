@@ -346,6 +346,24 @@ def _claim_available_task(self, parent_ui) -> bool:
 
 并发安全依赖 `TaskList.update` 的文件锁；claim 后若返回 `None` 说明已被别人领走。
 
+> 🔧 **锁实现的位置（2026-10 阶段 10）**：`ensure_dir` / `file_lock`（`O_CREAT|O_EXCL`
+> 原子创建 + 指数退避）已从本文件**提升至
+> [agent/utils/filelock.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/utils/filelock.py)**，
+> 与 W3.1 任务脊柱共用一把锁（`task_list.py` 仍以原名 `_ensure_dir` / `_file_lock` 引入，
+> 调用点与测试打桩入口不变）。**不再各写一套锁**：两套实现只会改坏一边。
+
+### 与 W3 任务脊柱的区别（三个“任务”别拧成一个）
+
+| 概念 | 存活期 | 存储 |
+|---|---|---|
+| `ScheduleTask`（`daemon/scheduler.py`） | 到点说一句话 | `~/.jarvis/schedule.json` |
+| `TaskList`（本节） | **一次查询内**的并行子任务 | `~/.jarvis/tasks/<team>/` |
+| `TaskGoal`（[18-W3兑现层](18-W3兑现层.md)） | **跨会话、跨天**的目标台账 | `~/.jarvis/goals/<id>.json` |
+
+两套存储**互不写入**（脊柱不会往团队目录里插文件），只在展示层汇合：`/tasks`
+现在是两节（协作 `TaskList` + 跨会话 spine）；驱动器推进脊柱步骤时复用
+`run_subagent`，因此也会走本节的子代理与邮箱机制。
+
 ## 七、计划/权限审批
 
 teammate 的 system prompt 中明确要求：在 PLAN/ASK 权限模式下，执行写操作前必须先向 `team-lead` 发送 `plan_approval_request`，收到 `plan_approval_response` 批准后才能执行。

@@ -264,6 +264,29 @@ audit = true               # 记录沙箱审计日志（~/.jarvis/sandbox_audit.
 max_snapshots = 20         # 文件快照最大保留数
 excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
 
+[policy.notify_budget]
+# W1 打扰预算（阶段 8）：主动播报“该不该现在打扰你”的确定性闸门（代码见 agent/core/policy/budget.py）。
+# 裁决结果与积压队列全部落在 ~/.jarvis/notify_state.json（count / pending / last_emit / last_flush），
+# 它是“为什么这条没出声”的唯一可核对证据。
+# 闸门顺序是定的：①积压冲刷 → ④重要度门槛 → ②静默时段 → ③同源聚合窗口 → ⑤日预算。
+# 顺序上看两点：低分事件在上一步就被抑制了，不会半夜排队等补播；而补播不占 daily_max。
+# @author aceFelix
+enabled = true             # 总开关（false = 提醒不经预算直接播）
+daily_max = 10             # **每日**主动播报上限（超出是“入库待补播”，不是丢）
+quiet_hours = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）：提醒类按下方
+                           # reminder_channels 走**降级投递**（只上屏不朗读、不入队不占额度）；
+                           # 未配已实现通道时，其余播报才是入库待补播
+aggregate_window_s = 300   # 同源事件聚合窗口（秒）：窗口内同 key 只播一次，其余合并计数；
+                           # 它同时也是冲刷冷却（多久允许补播一次），测日预算时先置 0 免得被聚合掉
+min_salience = 0.3         # 重要度门槛（评分=来源权重×时效紧迫度×相关性×历史接受率）；
+                           # 低于此值**直接抑制**（只留痕、不入队、不补播）
+# 静默时段/额度用尽时，**用户自设提醒**的送达通道（简报与感知事件不受本项影响，
+# 它们仍按原口径入库待补播）。默认只降级不延后：气泡与系统通知照投、TTS 不朗读。
+# 写成空列表 [] = 退回“入库等补播”（冲刷靠下一条通知触发，夜里没动静就可能久等）。
+# “sms” 是留位：尚未接短信服务商，配了会警告并忽略，不会假装已发。
+reminder_channels = ["screen"]   # 可多选："screen" 上屏不出声 / "email" 另发一封邮件
+quiet_email_to = ""             # email 通道的收件人；留空 = 用 [email].default_recipient
+
 [percept]
 # W2 感知层（阶段 9）：统一事件总线 + 逐源采集（代码见 agent/core/percept/）。
 # 隐私口径：总开关与逐源开关**全部默认关**，未显式打开的源一个字节都不采；
@@ -315,3 +338,32 @@ vision_fps = 2             # 帧率：常驻成本按它线性增长，在场判
 vision_gesture_enabled = true       # false = 只做在场检测，不跑手势识别（更省 CPU）
 vision_auto_stop_minutes = 0        # >0 空闲自动关摄像头（更省隐私，代价：关闭期间检测不到“回来了”）
 vision_interval_s = 5               # 总线排空本源的节拍（秒）
+
+[actions]
+# W3.2 副作用账本（阶段 10）：把工具调用记成"可执行的补偿计划"，
+# 代码见 agent/core/actions/journal.py，用户面命令 /undo。
+# 账本存 ~/.jarvis/actions.jsonl（事件流追加写；含收件人等敏感字段，只落本机）。
+# 口径：外发类不可逆动作（SendEmail 等）确认后再进延时窗口，到点才真执行；
+# 本地破坏性写入照常执行，但引用本轮 shadow git 检查点，/undo 可整轮回退。
+# 提醒一句：延时窗口只"延后"执行，不豁免权限判定与 W1 闸门。
+# @author aceFelix
+journal_enabled = true     # 总开关（false = 不记账也不延时，/undo 无从下手）
+undo_window_s = 30         # 不可逆动作延时窗口（秒）；0 = 不拦、直接执行
+track_local_writes = true  # 是否给本地破坏性写入记一条可回滚条目
+irreversible_tools = []    # 应急口子：确实要多保护的工具才填（拿只读工具演示窗口是错的测法）
+hold_blocks_equivalent = true  # 待发窗口未结案时，网络外发类命令不再自动放行（改问人）
+
+[tasks]
+# W3.1 任务脊柱（阶段 10）：跨会话/跨天的目标台账 + 条件等待 + 断点续跑，
+# 代码见 agent/core/tasks/spine.py；台账存 ~/.jarvis/goals/<id>.json（一个目标一份）。
+# 默认关：驱动器会自主调 LLM 花钱并自己动手执行，必须用户显式授权（同 W2 口径）。
+# 推进由 Subagent 在后台跑，结果经 W1 打扰预算闸门播报，不抢桌面会话的 query 锁。
+# @author aceFelix
+enabled = false            # 驱动器总开关（false = 只读台账，不自动推进）
+blocked_ask_days = 3       # 阻塞超此天数主动问一次（走 W1 预算闸门）
+step_max_attempts = 3      # 单步失败重试上限
+retry_backoff_s = 60       # 重试退避间隔（秒）；本期固定间隔，不按失败次数翻倍
+wait_deadline_hours = 72   # 条件等待最长时限（超时转 blocked_timeout 来问，绝不静默挂起）
+                           # 只对 file_exists / percept_event 兜底；time 类自带确定时刻，不补 deadline
+checkpoint_max = 8         # 后台每推一步先打一个 shadow git 检查点（改动可回退）；
+                           # 该配额与 [checkpoint].max_per_session 分族计数，不会把 /rewind 的消息级回退挤没

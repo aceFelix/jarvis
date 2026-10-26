@@ -124,6 +124,17 @@ percept.status.get  [event_limit?: int（≤ 50）]  {enabled, assembled, bus_ru
 percept.config.set  一个或多个 [percept] 白名单   同 percept.status.get 快照 +
                     字段（开关 bool / 名单 list /   {hot_applied, applied}（改完
                     分钟 int）                     由宿主重装配总线，无需重启）
+tasks.exec          action: str（status/create/   {ok, action, message?, goals?,
+                    show/pause/resume/cancel/      goal?, driver_running,
+                    advance/delete）, [goal,       tasks_config}（桌面「任务中心」：
+                    steps, wait, deadline_hours,   跨会话目标的查看与管控；wait 可
+                    limit, goal_id, confirm]        传 dict 或 "time:+2h" 字符串）
+actions.exec        action: str（status/list/     {ok, action, message?, counts?,
+                    undo/cancel_hold/undo_task）,   held?, held_labels?, recent?,
+                    [id, goal_id, limit, confirm]   actions_config?, preview?,
+                                                    items?}（副作用账本；undo 与
+                                                    undo_task 未带 confirm 只回
+                                                    影响面预览，不回滚）
 ==================  ==========================  =============================
 
 事件一览（event → payload 说明）：
@@ -288,6 +299,16 @@ CMD_EXTENSIONS = "extensions.exec"
 CMD_PERCEPT_STATUS_GET = "percept.status.get"
 CMD_PERCEPT_CONFIG_SET = "percept.config.set"
 
+# tasks.exec / actions.exec（W3 兑现层，阶段 10 收尾切片 2026-10-21）：桌面「任务中心」
+# 与「可撤销行动」面板。一条指令承载多个动词（同 extensions.exec 的理由：避免
+# 一动作一指令把协议常量撑爆）。业务语义与终端 /tasks 子命令、/undo、TrackGoal
+# 工具同源于 agent/core/tasks/spine_ops.py 与 agent/core/actions/journal.py，
+# handler 实现在 agent/serve/rpc_tasks.py。安全口径：整轮回滚与删目标必须
+# confirm=true（未带只回影响面预览），而 cancel_hold 撤的是未执行的预约，不需确认。
+# @author aceFelix
+CMD_TASKS_EXEC = "tasks.exec"
+CMD_ACTIONS_EXEC = "actions.exec"
+
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MESSAGE,
@@ -343,6 +364,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_EXTENSIONS,
     CMD_PERCEPT_STATUS_GET,
     CMD_PERCEPT_CONFIG_SET,
+    CMD_TASKS_EXEC,
+    CMD_ACTIONS_EXEC,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

@@ -43,6 +43,7 @@ from agent.serve import protocol
 from agent.serve.rpc_email import EmailRpcMixin
 from agent.serve.rpc_extensions import ExtensionsRpcMixin
 from agent.serve.rpc_percept import PerceptRpcMixin
+from agent.serve.rpc_tasks import TasksRpcMixin
 from agent.ui.workbench.api import WorkbenchAPI
 from agent.ui.workbench.metrics import collect_metrics
 from agent.ui.workbench.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
@@ -56,7 +57,7 @@ _MAX_FILE_CHARS = 200_000
 
 
 class DesktopBridgeServer(
-    PerceptRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
+    PerceptRpcMixin, TasksRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
 ):
     """桌面壳 API 服务器：BridgeServer 传输层 + ChatEngine 指令路由。
 
@@ -212,6 +213,12 @@ class DesktopBridgeServer(
         # @author aceFelix
         self._register_rpc(protocol.CMD_PERCEPT_STATUS_GET, self._rpc_percept_status_get)
         self._register_rpc(protocol.CMD_PERCEPT_CONFIG_SET, self._rpc_percept_config_set)
+        # tasks.exec / actions.exec（W3 阶段 10 收尾切片，2026-10-21）：桌面「任务中心」与
+        # 「可撤销行动」面板。台账与账本都是本机 JSON 文件（快速本地 IO），走同步
+        # _register_rpc；handler 实现在 rpc_tasks.TasksRpcMixin。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_TASKS_EXEC, self._rpc_tasks_exec)
+        self._register_rpc(protocol.CMD_ACTIONS_EXEC, self._rpc_actions_exec)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。

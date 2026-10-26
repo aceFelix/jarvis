@@ -13,6 +13,8 @@
   落盘函数因此 patch 在 agent.serve.rpc_email 而不是 server 模块）
 - percept.status.get / percept.config.set RPC：状态快照口径、白名单校验、
   先落盘后生效、宿主重装配（hot_applied）、hub 缺失时降级
+- tasks.exec / actions.exec RPC（W3 阶段 10 收尾切片）：目标台账建/查/管控、
+  副作用账本快照与撤回，以及“整轮回滚与删目标必须 confirm=true”的两拍口径
 
 @author aceFelix
 """
@@ -128,9 +130,12 @@ def test_desktop_commands_count():
     2026-10 W2 感知层第 5 步：+percept.status.get / percept.config.set（51→53，
     桌面「感知源」面板的在采什么/采到了什么与逐源开关，改完由宿主重装配总线，
     见 agent/serve/rpc_percept.py）。
+    2026-10-21 W3 阶段 10 收尾切片：+tasks.exec / actions.exec（53→55，桌面
+    「任务中心」与「可撤销行动」面板；两条通用指令各承载多个动词，理由同
+    extensions.exec，业务实现见 agent/serve/rpc_tasks.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 53
+    assert len(protocol.DESKTOP_COMMANDS) == 55
 
 
 def test_all_registered_rpcs_declared():

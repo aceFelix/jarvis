@@ -682,6 +682,12 @@ class ChatEngine:
         # @author aceFelix
         ckpt_mgr = checkpoint_ops.make_manager(self)
         ckpt_id = ckpt_mgr.create(reason=composed) if ckpt_mgr.available() else None
+        # 把本轮 cid 与会话名交给副作用账本（W3.2）：cid 到轮末才挂上用户消息，
+        # 工具调用时只能经 extra 拿到；本轮没检查点时必须写空串而不是留着上轮的
+        # 值，否则 /undo 会把"回到本轮前"做成"多退一轮"。@author aceFelix
+        if self._ctx is not None:
+            self._ctx.extra["checkpoint_cid"] = ckpt_id or ""
+            self._ctx.extra["session_name"] = getattr(self, "_session_name", "") or ""
         _pre_msg_len = len(self._messages)
         # 记录当前任务句柄：abort_current_reply 从其他线程取消它实现"停止回复"
         self._send_task = asyncio.current_task()

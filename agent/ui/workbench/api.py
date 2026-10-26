@@ -369,9 +369,9 @@ class WorkbenchAPI:
         配置校验（enabled / smtp_user / 授权码 / 收件人 / 主题 / 正文）全部复用
         工具，失败以 ValueError 抛出（服务端回执 ok=false，前端表单内联显示原文）。
 
-        注意：本方法是**同步**的，内部用 asyncio.run 驱动工具的 async call——
-        调用方（serve/server.py）必须放进 asyncio.to_thread 的工作线程执行
-        （SMTP 是阻塞网络 IO，timeout 30s，直接跑会冻住事件循环掐断流式事件）。
+        注意：本方法是**同步**的，内部经 `send_email_now` 用 asyncio.run 驱动工具
+        的 async call——调用方（serve/server.py）必须放进 asyncio.to_thread 的工作
+        线程执行（SMTP 是阻塞网络 IO，timeout 30s，直接跑会冻住事件循环掐断流式事件）。
 
         Args:
             params: 表单字段 ``{to?, cc?, bcc?, subject, body}``（首期不含附件）。
@@ -381,11 +381,10 @@ class WorkbenchAPI:
 
         @author aceFelix
         """
-        import asyncio
+        from agent.tools.extensions.email_tool import send_email_now
 
-        from agent.core.context import ToolContext
-        from agent.tools.extensions.email_tool import SendEmailTool
-
+        # 只洗字段（取表单那几个键 + 去首尾空白）；主题/正文非空与收件人
+        # 回退 default_recipient 都是工具自己的校验，不在此重写一份。
         args: dict[str, Any] = {
             "to": str(params.get("to") or "").strip(),
             "cc": str(params.get("cc") or "").strip(),
@@ -393,15 +392,7 @@ class WorkbenchAPI:
             "subject": str(params.get("subject") or "").strip(),
             "body": str(params.get("body") or "").strip(),
         }
-        ctx = ToolContext(
-            workdir=str(self._settings.workdir or ""),
-            messages=[],
-            settings=self._settings,
-        )
-        res = asyncio.run(SendEmailTool().call(args, ctx))
-        if res.is_error:
-            raise ValueError(str(res.data))
-        return {"ok": True, "message": str(res.data)}
+        return {"ok": True, "message": send_email_now(self._settings, args)}
 
     # ---- 跨设备协同（手机 PWA / 微信 ClawBot，2026-10） ----
 
