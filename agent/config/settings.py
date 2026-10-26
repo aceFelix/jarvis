@@ -330,7 +330,18 @@ class Settings:
     notify_daily_max: int = 10             # 每日主动播报上限
     notify_quiet_hours: str = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）
     notify_aggregate_window_s: int = 300   # 同源事件聚合窗口（秒）
-    notify_min_salience: float = 0.3       # 重要度门槛（低于此值只入库不播）
+    notify_min_salience: float = 0.3       # 重要度门槛（低于此值直接抑制、只留痕，**不入队也不补播**）
+    # 静默时段/额度用尽时，**用户自设提醒**（权重表键 `schedule`）的送达通道。
+    # 默认只降级不延后：气泡与系统通知照投、TTS 不朗读——“10 分钟后提醒我喝水”
+    # 这种话整条押到下一次有别的通知才播，等于丢了（冲刷靠新请求触发）。
+    # 可选值："screen"=上屏不出声 / "email"=另发一封邮件（收件人见
+    # notify_quiet_email_to）/ "sms"=留位，尚未接通道，配了会警告并忽略。
+    # 空列表 = 关掉降级，退回“入库待补播”的老行为（简报/感知事件本来就走这条）。
+    # @author aceFelix
+    notify_reminder_channels: list = field(
+        default_factory=lambda: ["screen"]
+    )
+    notify_quiet_email_to: str = ""        # 邮件通道收件人（留空 = 用 [email].default_recipient）
 
     # W2 感知层（阶段 9，见 core/percept/）：统一事件总线 + 逐源采集。
     # 隐私口径已拍板（PLAN 第 8 节决策 2）：总开关与**逐源开关全部默认关**，
@@ -402,7 +413,9 @@ class Settings:
 
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
-    # 纯聊天检测：短消息 + 无动作意图 → 不发任何工具（0 token）。
+    # 纯聊天检测：短消息 + 无动作意图 + 不含文件名/路径形态 → 不发任何工具（0 token）。
+    # 结构判据是 2026-10-22 加的：只枚举口语说法补不全，误判会让本轮 0 工具、
+    # 模型改吐文本态 DSML（见 docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md）。
     tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）
     tools_chat_detection: bool = True      # 纯聊天零工具检测
 

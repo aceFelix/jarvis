@@ -71,6 +71,72 @@ _CALENDAR_NOTE = "__proactive_calendar__"
 _PROFILE_MAINT_NOTE = "__proactive_profile_maintenance__"
 
 
+def notify_gate_action(
+    source: str,
+    text: str,
+    *,
+    dedup_key: str = "",
+    urgency: float = 0.6,
+    budget: Any = None,
+    silent_delivery: bool = False,
+) -> Any:
+    """W1 打扰闸门的**完整裁决**版入口：返回 ``NotifyAction`` 本身。
+
+    与 ``apply_notify_gate`` 的分工：后者只回答“该不该播、播什么”，丢掉了
+    “为什么不播”与 speak 降级标记；桌面提醒路径需要知道“这是一次只上屏不朗读的
+    降级投递”才能把 `speak=False` 传给事件出口，所以它走本函数。
+
+    Args:
+        source: 播报源名（预算权重表的键，用户自设提醒是 ``schedule``）。
+        text: 拟播报文本。
+        dedup_key: 聚合去重键。
+        urgency: 时效紧迫度。
+        budget: ``NotifyBudget`` 实例；None = 不设预算闸（仅保留 away 拦截）。
+        silent_delivery: 静默/超额时不入库而是**降级投递**（气泡照投、不朗读）。
+            只给用户明确要过的提醒用——整条延后是错的，而冲刷靠下一条请求触发。
+
+    Returns: ``NotifyAction``（kind: emit/queue/suppress，emit 时看 speak 决定是否朗读）。
+
+    @author aceFelix
+    """
+    import logging
+
+    from agent.core.policy.budget import NotifyAction
+
+    logger = logging.getLogger("jarvis.proactive")
+    # away 分流：人不在，会出声的播报暂缓入库（TTS 不对空房间说话）
+    try:
+        from agent.core.policy import get_policy_state
+
+        away, _ = get_policy_state().is_away()
+    except Exception:
+        away = False
+    if budget is not None:
+        try:
+            action = budget.gate(
+                text, source, dedup_key=dedup_key, urgency=urgency,
+                silent_delivery=silent_delivery,
+            )
+            # away 只拦“会出声”的那类：降级投递本就不发声，气泡上屏无害
+            # 且信息不丢（旧行为下提醒会在 away 期间被整条暂存，静默时段叠加时
+            # 用户两头都看不到）。
+            if away and action.kind == "emit" and action.speak:
+                action = NotifyAction("queue", text, "无人值守，暂缓入库")
+            if not action.should_emit:
+                logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
+            elif not action.speak:
+                logger.info("降级投递[%s]: %s", source, action.reason)
+            return action
+        except Exception as e:
+            logger.warning("打扰预算异常，降级直接播报: %s", e)
+            # 不落到末尾那句“未设预算闸”上：reason 会说谎，排查时会把人带偏
+            return NotifyAction("emit", text, "预算异常，降级直接播报")
+    elif away:
+        logger.info("无人值守，跳过播报[%s]", source)
+        return NotifyAction("queue", text, "无人值守，跳过播报")
+    return NotifyAction("emit", text, "未设预算闸，直接播报")
+
+
 def apply_notify_gate(
     source: str,
     text: str,
@@ -79,15 +145,19 @@ def apply_notify_gate(
     urgency: float = 0.6,
     budget: Any = None,
 ) -> str | None:
-    """W1 打扰闸门的**唯一实现**：返回该播的文本，None = 不播。
+    """W1 打扰闸门的文本入口：返回该播的文本，None = 不播。
 
-    为什么是模块函数而不是 ``ProactiveEngine`` 的私有方法：闸门只依赖“预算单例 +
-    在场状态”，跟“引擎有没有注册定时任务”无关。W3 任务脊柱的后台推进跑在
-    没有 ``ProactiveEngine`` 的宿主里（CLI REPL 就没有一个），它也要过同一道闸；
-    放在模块层就不必为“另一个宿主也要闸门”再抄一份实现（口径分叉比没有闸门更危险）。
+    本函数是 ``notify_gate_action`` 的薄包装（只把裁决压成 text|None）：闸门
+    只依赖“预算单例 + 在场状态”，跟“引擎有没有注册定时任务”无关。W3 任务
+    脊柱的后台推进跑在没有 ``ProactiveEngine`` 的宿主里（CLI REPL 就没有一个），
+    它也要过同一道闸；放在模块层就不必为“另一个宿主也要闸门”再抄一份实现
+    （口径分叉比没有闸门更危险）。
 
     ``ProactiveEngine.gate_notify`` 仍是本函数的薄包装，保持既有调用点与
     “预算未注入时只在 away 情况下静默丢弃”的行为不变。
+
+    ⚠ 需要区分“出声播”与“只上屏不朗读”的调用方（桌面提醒）请用
+    ``notify_gate_action``，本函数会把 speak=False 的降级投递当成普通播出。
 
     Args:
         source: 播报源名（预算权重表的键，如 ``briefing`` / ``percept:mail`` / ``task``）。
@@ -98,36 +168,10 @@ def apply_notify_gate(
 
     @author aceFelix
     """
-    import logging
-
-    logger = logging.getLogger("jarvis.proactive")
-    # away 分流：人不在，播报全部暂缓入库（TTS 不对空房间说话）
-    try:
-        from agent.core.policy import get_policy_state
-
-        away, _ = get_policy_state().is_away()
-    except Exception:
-        away = False
-    if budget is not None:
-        try:
-            action = budget.gate(text, source, dedup_key=dedup_key,
-                                 urgency=urgency)
-            if away and action.kind == "emit":
-                # 再入库一份：gate 可能已聚合/冲刷，保守起见 away 一律降为
-                # queue 语义（不入 pending 也不丢信息）
-                from agent.core.policy.budget import NotifyAction
-
-                action = NotifyAction("queue", text, "无人值守，暂缓入库")
-            if not action.should_emit:
-                logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
-                return None
-            return action.text
-        except Exception as e:
-            logger.warning("打扰预算异常，降级直接播报: %s", e)
-    elif away:
-        logger.info("无人值守，跳过播报[%s]", source)
-        return None
-    return text
+    action = notify_gate_action(
+        source, text, dedup_key=dedup_key, urgency=urgency, budget=budget,
+    )
+    return action.text if action.should_emit else None
 
 
 class ProactiveEngine:
@@ -356,6 +400,23 @@ class ProactiveEngine:
         """
         return apply_notify_gate(
             source, text, dedup_key=dedup_key, urgency=urgency, budget=self._budget,
+        )
+
+    def gate_notify_action(self, source: str, text: str, *, dedup_key: str = "",
+                           urgency: float = 0.6,
+                           silent_delivery: bool = False) -> Any:
+        """完整裁决版闸门入口（返回 ``NotifyAction``，带 kind 与 speak）。
+
+        为什么不只给 ``gate_notify``：那个入口把裁决压成了 text|None，丢掉了
+        “为什么不播”与“只上屏不朗读”两种信息。桌面提醒需要据此分别处理
+        （见 ``serve/hub._deliver_reminder``），而“所有打扰都过同一个闸”
+        这条不变量靠共用本实现维持，不允许提醒路径自己另判一次静默时段。
+
+        @author aceFelix
+        """
+        return notify_gate_action(
+            source, text, dedup_key=dedup_key, urgency=urgency,
+            budget=self._budget, silent_delivery=silent_delivery,
         )
 
     def _dispatch_notify(self, source: str, text: str, *, dedup_key: str = "",

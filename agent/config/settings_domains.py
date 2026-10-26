@@ -246,6 +246,9 @@ SUB_TABLES: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         ("quiet_hours", "notify_quiet_hours"),
         ("aggregate_window_s", "notify_aggregate_window_s"),
         ("min_salience", "notify_min_salience"),
+        # 提醒类静默降级通道（2026-10-22）：数组直接搬运，与 [percept] 的列表字段同口径
+        ("reminder_channels", "notify_reminder_channels"),
+        ("quiet_email_to", "notify_quiet_email_to"),
     )),
 )
 

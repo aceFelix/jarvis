@@ -28,13 +28,67 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, time as dtime
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger("jarvis.policy")
+
 _DEFAULT_PATH = Path.home() / ".jarvis" / "notify_state.json"
+
+#: 时间写法容错用：允许 `H:MM` / `HH:MM`（可选秒）。`time.fromisoformat` 只认
+#: 两位小时，用户写 `"23:00-7:00"` 会抛 ValueError，旧实现抓到后直接
+#: `return False`——静默时段整个默默失效，是“配置写了不生效”最阴的一种。
+_HM_RE = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?")
+
+
+def parse_clock(raw: str) -> dtime | None:
+    """解析一个时刻写法，失败返回 None（不抛）。
+
+    先试标准 ISO（`23:00` / `07:00` / `07:00:30`），不行再走容错分支接
+    个位数小时（`7:00`）。用户手写配置时少写一个 0 是常态，不能因此把
+    整条静默时段作废。
+
+    Args:
+        raw: 形如 ``HH:MM`` 或 ``H:MM`` 的原始串（允许首尾空格）。
+
+    Returns: 解析出的 ``time``；空串/格式非法/超出 24 小时制返回 None。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return dtime.fromisoformat(s)
+    except ValueError:
+        pass
+    m = _HM_RE.fullmatch(s)
+    if not m:
+        return None
+    hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    if hour > 23 or minute > 59 or second > 59:
+        return None
+    return dtime(hour, minute, second)
+
+
+def parse_quiet_range(raw: str) -> tuple[dtime, dtime] | None:
+    """解析静默时段区间，返回 None = 不启用或写法不可用。
+
+    形式 ``"HH:MM-HH:MM"``，支持跨午夜（start > end 即视为跨过 00:00）。
+    任一端解析失败都返回 None，**由调用方负责报出去**（不能静默当“没启用”）。
+    """
+    rng = (raw or "").strip()
+    if not rng or "-" not in rng:
+        return None
+    start_s, end_s = rng.split("-", 1)
+    start, end = parse_clock(start_s), parse_clock(end_s)
+    if start is None or end is None:
+        return None
+    return start, end
+
 
 # 内置来源权重表（未登记的源用 default）
 _DEFAULT_SOURCE_WEIGHTS = {
@@ -74,11 +128,21 @@ _FLUSH_MAX_LINES = 5
 
 @dataclass
 class NotifyAction:
-    """一次通知请求的闸门裁决。kind: emit（照播）/ queue（入库暂缓）/ suppress（丢弃）。"""
+    """一次通知请求的闸门裁决。
+
+    Attributes:
+        kind: ``emit``（照播）/ ``queue``（入库暂缓）/ ``suppress``（丢弃）。
+        text: 要播出的文本（queue/suppress 时是原文，仅用于展示与排查）。
+        reason: 人话解释（落日志与面板提示，用户问“为何不说话”时拿它回答）。
+        speak: 仅对 kind=emit 有意义。False = **降级投递**：气泡与系统通知照投，
+            但不 TTS 朗读。用于“用户明确要过的提醒”这类不该整条延后、
+            但静默时段/额度用尽时确实不该出声的情形。
+    """
 
     kind: str
     text: str
     reason: str
+    speak: bool = True
 
     @property
     def should_emit(self) -> bool:
@@ -113,6 +177,14 @@ class NotifyBudget:
         self._weights = dict(_DEFAULT_SOURCE_WEIGHTS)
         if source_weights:
             self._weights.update(source_weights)
+        # 静默时段写了但解析不出来 → 必须说一声。以前这种写法会被当成
+        # “没启用”，用户改了配置没反应且日志里一个字都没有。
+        quiet = (self.config.quiet_hours or "").strip()
+        if quiet and parse_quiet_range(quiet) is None:
+            logger.warning(
+                "quiet_hours 写法不可用（%r），静默时段未生效；"
+                '应为 "HH:MM-HH:MM"，如 "23:00-07:00"', quiet,
+            )
 
     # ---- 评分 ----
 
@@ -148,12 +220,18 @@ class NotifyBudget:
         urgency: float = 0.5,
         relevance: float = 1.0,
         now: datetime | None = None,
+        silent_delivery: bool = False,
     ) -> NotifyAction:
         """裁决一条通知请求：立即播报 / 入库暂缓 / 静默丢弃。
 
         顺序：①非静默时段且已到冲刷时机→先聚合冲刷积压；②静默时段入库；
         ③窗口内同源重复合并；④低于 salience 门槛**直接抑制**（不入队等补
         播）；⑤超日预算入库。
+
+        ``silent_delivery=True`` 会把②与⑤的“入库待补播”改成**降级投递**
+        （emit + speak=False，气泡照上屏、不朗读、不入队也不占额度）：用户
+        明确要过的提醒整条延后是错的行为（而冲刷靠下一条请求触发，夜里没
+        动静就可能永不补）。调用方只有桌面 hub 的提醒路径会传 True。
 
         冲刷与当前请求**合一返回**：旧实现在冲刷分支直接 `return`，把触发
         冲刷的那条事件整条丢掉（既没播也没入队），而冲刷本身又无冷却，
@@ -177,7 +255,10 @@ class NotifyBudget:
         ):
             digest = self._flush_pending(state, now)
 
-        current = self._gate_current(state, text, source, key, urgency, relevance, now)
+        current = self._gate_current(
+            state, text, source, key, urgency, relevance, now,
+            silent_delivery=silent_delivery,
+        )
         self._save(state)   # 统一落盘：两个 helper 只改 state，不各自写文件
         if digest is None:
             return current
@@ -190,6 +271,7 @@ class NotifyBudget:
     def _gate_current(
         self, state: dict, text: str, source: str, key: str,
         urgency: float, relevance: float, now: datetime,
+        *, silent_delivery: bool = False,
     ) -> NotifyAction:
         """当前这条请求自身的裁决（④→②→③→⑤），只改 state，不落盘。
 
@@ -211,29 +293,67 @@ class NotifyBudget:
         # ② 静默时段：够重要但当时不能说 → 入库待补播（这类积压是“该说但
         #    当时不能说”，值得补播；不够重要的在上一步已经被拦掉了）
         if self._in_quiet(now):
-            self._append_pending(state, text, source, key, now)
-            return NotifyAction("queue", text, f"静默时段（{self.config.quiet_hours}）暂缓入库")
+            if not silent_delivery:
+                self._append_pending(state, text, source, key, now)
+                return NotifyAction("queue", text, f"静默时段（{self.config.quiet_hours}）暂缓入库")
+            # 降级投递：气泡照投、不朗读。不占 daily_max（上屏不算一次打扰），
+            # 但仍记 last_emit，否则同一条提醒反复升级会反复上屏。
+            dup = self._merge_recent(state, key, now)
+            if dup is not None:
+                return NotifyAction("suppress", text, dup)
+            self._mark_emitted(state, key, now)
+            return NotifyAction(
+                "emit", text,
+                f"静默时段（{self.config.quiet_hours}）降级：只上屏不朗读",
+                speak=False,
+            )
 
         # ③ 聚合窗口：同源窗口内已播过 → 合并抑制
-        recent = state.get("last_emit", {}).get(key)
-        if recent:
-            try:
-                gap = (now - datetime.fromisoformat(recent["ts"])).total_seconds()
-                if 0 <= gap < self.config.aggregate_window_s:
-                    recent["merged"] = recent.get("merged", 1) + 1
-                    return NotifyAction("suppress", text, f"{int(gap)}s 前已播同源事件，窗口内合并")
-            except ValueError:
-                pass
+        merged_reason = self._merge_recent(state, key, now)
+        if merged_reason is not None:
+            return NotifyAction("suppress", text, merged_reason)
 
         # ⑤ 日预算：够重要但额度用尽 → 入库等冲刷（冲刷不占额度，否则永远出不来）
         if state["count"] >= self.config.daily_max:
-            self._append_pending(state, text, source, key, now)
-            return NotifyAction("queue", text, f"已达每日上限 {self.config.daily_max}，入库待补播")
+            if not silent_delivery:
+                self._append_pending(state, text, source, key, now)
+                return NotifyAction("queue", text, f"已达每日上限 {self.config.daily_max}，入库待补播")
+            # 同上：提醒类降级上屏，不出声也不占额度
+            self._mark_emitted(state, key, now)
+            return NotifyAction(
+                "emit", text,
+                f"已达每日上限 {self.config.daily_max}，降级：只上屏不朗读",
+                speak=False,
+            )
 
         # 放行：计数 + 记 last_emit
         state["count"] += 1
-        state.setdefault("last_emit", {})[key] = {"ts": now.isoformat(timespec="seconds"), "merged": 1}
+        self._mark_emitted(state, key, now)
         return NotifyAction("emit", text, f"预算放行（今日 {state['count']}/{self.config.daily_max}，重要度 {score:.2f}）")
+
+    def _merge_recent(self, state: dict, key: str, now: datetime) -> str | None:
+        """同源事件在聚合窗口内已播过 → 返回合并理由，否则 None（并计数）。
+
+        抽出来是因为②的降级投递与③的正常路径都要查同一条窗口规则，
+        写两处就会分叉（一处合并、一处不合并，升级重发就能绕过去）。
+        """
+        recent = state.get("last_emit", {}).get(key)
+        if not recent:
+            return None
+        try:
+            gap = (now - datetime.fromisoformat(recent["ts"])).total_seconds()
+        except ValueError:
+            return None
+        if 0 <= gap < self.config.aggregate_window_s:
+            recent["merged"] = recent.get("merged", 1) + 1
+            return f"{int(gap)}s 前已播同源事件，窗口内合并"
+        return None
+
+    def _mark_emitted(self, state: dict, key: str, now: datetime) -> None:
+        """记一次上屏时刻（聚合窗口的依据）；降级投递不计入 daily_max。"""
+        state.setdefault("last_emit", {})[key] = {
+            "ts": now.isoformat(timespec="seconds"), "merged": 1,
+        }
 
     def pending_count(self) -> int:
         return len(self._load().get("pending", []))
@@ -297,15 +417,10 @@ class NotifyBudget:
 
     def _in_quiet(self, now: datetime) -> bool:
         """当前是否处于静默时段（支持跨午夜区间，如 23:00-07:00）。"""
-        rng = (self.config.quiet_hours or "").strip()
-        if not rng or "-" not in rng:
+        rng = parse_quiet_range(self.config.quiet_hours)
+        if rng is None:
             return False
-        try:
-            start_s, end_s = rng.split("-", 1)
-            start = dtime.fromisoformat(start_s.strip())
-            end = dtime.fromisoformat(end_s.strip())
-        except ValueError:
-            return False
+        start, end = rng
         cur = now.time()
         if start <= end:
             return start <= cur < end

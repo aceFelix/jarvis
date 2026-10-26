@@ -42,9 +42,12 @@ class _StubBudget:
         self.calls: list[dict] = []
 
     def gate(self, text: str, source: str, *, dedup_key: str = "",
-             urgency: float = 0.5) -> NotifyAction:
+             urgency: float = 0.5, silent_delivery: bool = False) -> NotifyAction:
+        # 签名与真实 NotifyBudget.gate 保持一致（多一个 silent_delivery）：
+        # 桩少一个参数时，hub 传参会被“预算异常降级直接播”吞掉，测试反而变红。
         self.calls.append({"text": text, "source": source,
-                           "dedup_key": dedup_key, "urgency": urgency})
+                           "dedup_key": dedup_key, "urgency": urgency,
+                           "silent_delivery": silent_delivery})
         return NotifyAction(self.kind, text, "测试桩")
 
 

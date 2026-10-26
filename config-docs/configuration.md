@@ -146,9 +146,16 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `[policy] away_idle_minutes` | `0` | 0 = 仅认手动 `/away`；>0 启用空闲推断自动 away |
 | `[policy.notify_budget] enabled` | `true` | 打扰预算闸门（false = 提醒不经预算直接播） |
 | `[policy.notify_budget] daily_max` | `10` | 每日主动播报上限 |
-| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用） |
+| `[policy.notify_budget] quiet_hours` | `"23:00-07:00"` | 静默时段（支持跨午夜；空串 = 不启用）。提醒类在其中走 `reminder_channels` 的**降级投递**（只上屏不朗读、不入队不占额度）；未配已实现通道时其余播报入库待补播 |
 | `[policy.notify_budget] aggregate_window_s` | `300` | 同源事件聚合窗口（秒） |
-| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值只入库不播） |
+| `[policy.notify_budget] min_salience` | `0.3` | 重要度门槛（低于此值**直接抑制**：只留痕、不入队也不补播；闸门顺序里门槛排在静默入库之前，2026-10-19 修正） |
+| `[policy.notify_budget] reminder_channels` | `["screen"]` | 静默时段/额度用尽时**用户自设提醒**的送达通道：`screen`=上屏不出声、`email`=另发一封、`sms`=留位未接入（警告并忽略）；空列表=退回入库待补播 |
+| `[policy.notify_budget] quiet_email_to` | `""` | 邮件通道的收件人，留空用 `[email].default_recipient` |
+
+> 提醒与简报/感知事件的差别是有意的：`escalate_count` 那套升级重发只有字段、无人递增，
+> 而冲刷靠“下一条通知请求”触发——对用户明说要过的提醒，整条延后就等于丢了，
+> 所以默认降级为“气泡照投、不朗读”而不是入库排队。机制见
+> [16-W1 判断层](../docs/architecture/16-W1判断层.md) 第四节。
 
 相关命令：`/away` `/back` `/pending` `/lease`（见 [命令参考](../docs/guide/commands.md#权限控制)）。
 

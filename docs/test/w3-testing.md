@@ -210,6 +210,7 @@ rules:
 | 4.2b | 写错等待条件时不会落脏数据：`/tasks add "随便一个目标" --wait time:2000-01-01T08:00`（过去的时刻）或 `--wait blah`（没前缀） | 直接报错并回用法，**`~/.jarvis/goals/` 里不新增文件**（先解析后写盘，不是先建再回滚） |
 | 4.2c | 模型侧入口：窗口 A 说「用 TrackGoal 替我盯着：等 w3-later.txt 出现后，在当前目录建 w3-spine2.txt，内容写 spine2-ok」 | 模型调 `TrackGoal(action="create")` 并回一个目标；卡片/返回文本里**带驱动线程状态**（没人推时会直说“当前没有驱动线程”） |
 | 4.2d | 附：手工往台账写一个固定 id 的目标（方便后续 `grep`，写法见附录 A） | 与 4.2 同形，只是 id 固定为 `w3probe1` |
+| 4.2e | **受阻后怎么批（2026-10-26 补）**：到点推进时 `FileWrite` 会被拦（无 UI 环境 ASK → DENY），播报「卡在第 1 步…需要授权：FileWrite 被拒…」；此时**不要敲 `y`**（那只是一句普通对话，会发给模型） | 敲 `/tasks approve <id 前缀>` 后：回「已签发租约 [id]：FileWrite @ <目标目录>，有效期 30 分钟；这一步已退回待执行，驱动器会立刻重试」，几秒内该步变 `done` 且文件真落盘；`~/.jarvis/leases.json` 能找到刚签的那条。什么都不做的话**一小时后它自己再试一次，还是会被拦**（没人签租约） |
 
 附录 A 给了一个能直接粘贴的手工写台账脚本（固定 id `w3probe1`）；
 下文用 `w3probe1` 作目标名的步骤（§4.6b / §4.6c / §4.7 / 阶段六收尾）拿它跑最顺手。
@@ -275,11 +276,34 @@ rules:
 | 6.4 | `tests/core/test_system_prompt.py::TestPromptTextBlocksSplit` | 4 例通过：`system.py` 里的同名常量与 `text_blocks.py` 里是**同一个对象**、人设行/平台段/思考段仍逐字进提示、目标段仍按 `TrackGoal` 注册与否条件注入、两个提示词文件都≤ 800 行 |
 | 6.5 | 走查收尾 | 删掉 `~/.jarvis/goals/` 下的探针目标（含 `w3probe1.json` 与本轮建的随机 id 目标）与 `w3-probe*.txt`、`w3-spine*.txt`、`w3-advance.txt`，并把 `undo_window_s` 改回 `30` |
 
+### 6b. 静默时段的提醒降级投递（2026-10-22 补）
+
+这一节验的是：用户亲口设的提醒**终于开始过闸**（以前 `_on_fire` 直接投事件，
+`quiet_hours` / `daily_max` 对它全部无效），同一条提醒命中静默时**不延后、只不出声**。
+`reminder_channels` 改了**必须重启桌面壳**（预算单例只在首次 `get_budget()` 建立）。
+
+> ⚠ 本项要**两个仓一起更新**：后端（jarvis）把裁决与 `silent` 写进 payload，
+> 桌面壳（jarvis-desktop）把 `silent` 透传给 Electron `Notification`。只更后端时，
+> 气泡与通知照弹、TTS 不朗，但 **Windows toast 仍会响一声**（那不算静默）。
+> 壳侧走查项在 jarvis-desktop 的 `docs/development.md` 第 5 节「静默时段降级投递」。
+
+| # | 操作 | 看到这样算过 |
+|---|---|---|
+| 6b.1 | `quiet_hours` 改成盖住当前时刻的窗口（如 `"00:00-23:59"`），通道保持默认 `["screen"]`，重启桌面壳；对贾维斯说「1 分钟后提醒我喝水」 | **气泡弹了、系统通知也弹了，但屋里没一点声音**（TTS 不朗读、toast 不带提示音） |
+| 6b.2 | 另开窗口看 `~/.jarvis/notify_state.json` | 这条提醒**不在** `pending` 里、`count` **没 +1**（降级投递不占日额度）；`last_emit` 里多一个 `"schedule:<task_id>"` 键 |
+| 6b.3 | 再设一条不同内容的提醒（新 task_id），到点仍在静默窗口内 | 仍上屏不出声；**不会被上一条聚合掉**——`dedup_key` 带 task.id 就是为了让两条不同的提醒各自送达 |
+| 6b.4 | 同一条提醒在聚合窗口内反复升级（手动把 `escalate_count` 那类重发接上时才会遇到） | 第二次回 `suppress`（「窗口内合并」），不重复刷屏 |
+| 6b.5 | 改 `reminder_channels = ["screen", "email"]`（`[email]` 已配好）并重启 | 除气泡外收到一封信；`~/.jarvis/actions.jsonl` 新增一条 `"tool":"SendEmail"`、`"reversible":false`、`"state":"applied"`；`/undo list` 里它报「已离开本机，无法撤回」而不是给个无效按钮 |
+| 6b.6 | 故意写 `reminder_channels = ["sms"]` 并重启 | `jarvis.log` 出现**一次**「静默降级通道 sms 尚未接入，已忽略」；未实现通道**不会假装降级**（不弹也不发，行为落到 6b.7） |
+| 6b.7 | 改 `reminder_channels = []` 并重启 | 退回老行为：不投气泡，`pending` 多一条、reason 为「静默时段（…）暂缓入库」 |
+| 6b.8 | 对照组：仍在静默窗口内，把 `[daemon] briefing_time` 设在两分钟后 | 简报**既不出声也不上屏**（入库等补播）——与提醒的差别是设计如此，不是 bug |
+
 ## 7. 常见问题
 
 | 现象 | 原因与处置 |
 |---|---|
 | `/undo list` 说账本为空，但工具确实写过文件 | 本轮没打上检查点（没装 git / `checkpoint_enabled=false` / `workdir` 异常）。**这是设计行为**：宁可不记，也不记一条撤不动的假可撤销 |
+| 静默时段里设的提醒**没出声但弹了气泡** | 这是 2026-10-22 的**降级投递**（见 §6b）：提醒开始过闸了，但不再整条延后。要它同时发信：`reminder_channels = ["screen", "email"]`；要老行为（入库等补播）：`reminder_channels = []`。降级那条**不占** `daily_max`、也不进 `pending`，所以拿 `notify_state.json` 当“它到底说过没”的唯一证据时会找不到——这是故意的 |
 | `/undo` 报「本轮检查点已被配额修剪」 | 每会话只留 20 个检查点，超出按最老修剪。回退窗口比想象短，需要更早的状态用 `/rewind` |
 | 到点了邮件没发也没有播报 | ① 该进程已退出（遗留项会被作废，见阶段一）；② `abort_event` 被置位（你中断过本轮）；③ 到点执行失败 → `actions.jsonl` 里该条是 `failed` 并带 `error` |
 | 脊柱目标一直不动 | 看 `/tasks` 的「后台驱动线程」：未起就是 `tasks_enabled=false` 或 LLM 配置不可用；在跑但不动就是等待条件没满足（该行会写等什么与最迟时刻） |
@@ -291,8 +315,9 @@ rules:
 | RPC 返回 `need_confirm` 但以为报了错 | `delete` / `undo` / `undo_task` 未带 `confirm=true` 就只回预览，两拍确认是默认行为（避免桌面一个误点就抹掉台账） |
 | 一键走查有项红了 | 脚本会把该项的「期望」打在下一行；`advance`/定局/硬拦这几项红了多半是 `spine_ops.py` 或权限判定被改动，先 `git diff` 定位再判是不是回退 |
 | 走查脚本要不要手动清理 | 不用：台账/账本都在系统临时目录里，跑完随目录删掉（`tests/test_w3_smoke_script.py` 里钉了这条） |
-| 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。三条解法：配一条带路径 spec 的 allow 规则（见 §0.6）、在桌面面板点「批准并重试」（走 `tasks.exec approve`，签限定范围租约）、或终端 `/lease grant` 手工拿租约。**这不是回退**：旧代码同场景播报的是「已完成」 |
+| 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。三条解法：配一条带路径 spec 的 allow 规则（见 §0.6）、在桌面面板点「批准并重试」（走 `tasks.exec approve`，签限定范围租约）、或终端 `/lease <工具名> [路径glob] [分钟]` 手工签一条租约（`/lease` **没有 `grant` 子命令**，签发就是带工具名那种形式；TTL 缺省 120 分钟，`/lease list` 查、`/lease revoke <id>` 撤）。补一句：`/back` 本期只呈批不重放，签完租约被拦那次调用不会自己跑起来，要重新发起一次或走桌面「批准并重试」。**这不是回退**：旧代码同场景播报的是「已完成」 |
 | 播报「已完成」但工作区里没那个文件 | 本轮修掉的谎报缺陷（D2）。先跑 `scripts/livecheck_w3.py`，它有一项判据专盯「结论与实际产出一致」 |
+| 走查场景 1 还没走到 ASK，终端就回显 `<｜｜DSML｜｜ …>` 裸码、只说一句前言就结束 | **不是无人值守的 bug**，是上游的 `chat_detection` 误判：短问句（如「把 a.txt 改成 alpha2」）被判纯聊天 → 本轮 0 工具 → 模型照旧吐文本态调用 → 被空 `valid_names` 过滤。2026-10-22 已加结构判据（文件名/路径形态）修掉这一类；测时请**另起新会话**（旧存档里的 DSML 原文会被当示范回灌），真要绕开判定用 `[tools] chat_detection = false`。见 [deepseek-dsml-toolcall-leak-fix.md](../fixlogs/deepseek-dsml-toolcall-leak-fix.md) 「四次补漏」 |
 
 ## 附录 A：手工往台账写一个固定 id 的目标
 

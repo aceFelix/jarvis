@@ -15,12 +15,15 @@
   系统提示的名字摘要里 —— 省 token 的关键。
 - **纯聊天零工具**：短问句 + 无动作意图 + 历史无工具调用 → 本轮一个工具都不发
   （0 token）。误判的代价是「模型想调工具却拿不到 schema」，所以关键词表
-  **宁全勿缺**，详见 docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md。
+  **宁全勿缺**，且补一道**不依赖词表的结构判据**（文件名/路径形态），详见
+  docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md。
 
 @author aceFelix
 """
 
 from __future__ import annotations
+
+import re
 
 from agent.core.context import ToolContext
 from agent.core.tool import ToolRegistry
@@ -53,10 +56,46 @@ ACTION_KEYWORDS: tuple[str, ...] = (
     "commit", "branch", "readme", "build", "deploy",
     # 环境指代词 —— 短问句指向当前环境，往往需要读现实数据而非背书
     "当前", "现在", "这个", "这里", "这是", "本地", "机器", "我的",
+    # 口语化的改动/重命名动词 —— 2026-10-22 复盘：「把 a.txt 改成 alpha2」被判纯
+    # 聊天。表里当时只有书面词「修改/删除/编辑」，用户实际说的是「改成/删掉」。
+    # 这一类靠补词补不全，故下面另有 _looks_fileish 结构判据兜底。
+    "改成", "改为", "改名", "重命名", "换成", "变成", "挪到", "移到",
+    "移动到", "复制到", "追加", "清空", "存成", "保存", "生成", "新建",
+    "建个", "删掉", "去掉", "贴到", "粘到", "回退", "撤销", "看下", "看看",
 )
 
 # 纯聊天判定的消息长度上限（字符数）。超过即认为任务复杂，必须发工具。
 CHAT_ONLY_MAX_CHARS = 20
+
+# 结构判据：出现「文件名形态」或「路径形态」的 token 就不是闲聊。词表永远补不全
+# （动词、名词、缩写、方言轮着来），但「要动真实文件」这件事在字面上是有形状的：
+# `名字.扩展名` 或 `段/段`、`C:\`。两条正则取向不同是有意区分的：
+# - 扩展名判据允许汉字在左侧（「纪要.md」是真文件名，点后接 ASCII 字母本身就是强信号）；
+# - 斜杠判据只认 ASCII 邻右，因为「今天/明天」「和/或」这类散文写法在汉字夹斜杠里
+#   太常见，放进去就是把每个问句都当任务。
+# @author aceFelix
+_FILE_TOKEN_RE = re.compile(
+    r"[A-Za-z0-9_\u4e00-\u9fff\-]+\.[A-Za-z][A-Za-z0-9]{0,7}"
+)
+_PATH_TOKEN_RE = re.compile(
+    r"[A-Za-z0-9_.\-~][/\\][A-Za-z0-9_.\-]"
+)
+
+
+def _looks_fileish(text: str) -> bool:
+    """文本里是否含文件名或路径形态的 token（结构判据，不依赖关键词表）。
+
+    命中例：``a.txt``、``纪要.md``、``e:/jarvis-lab``、``C:\\work``、``~/.jarvis``。
+    不命中例：``3.14``（点后是数字）、``今天/明天``（汉字夹斜杠不当路径）。
+    误判方向是「多发一次工具」，代价是几百 token；漏判的代价是整轮卡死，
+    所以扩展名那条取宽松侧。
+
+    Args:
+        text: 已 strip 的最后一条 user 消息文本。
+
+    Returns: True 表示本轮极可能要读写真实文件，不可零工具。
+    """
+    return bool(_FILE_TOKEN_RE.search(text) or _PATH_TOKEN_RE.search(text))
 
 
 def is_chat_only(ctx: ToolContext) -> bool:
@@ -65,6 +104,7 @@ def is_chat_only(ctx: ToolContext) -> bool:
     条件（全部满足才返回 True）：
     - 最后一条 user 消息 <= CHAT_ONLY_MAX_CHARS 字
     - 不含 ACTION_KEYWORDS 里的任一关键词
+    - 不含文件名/路径形态的 token（`_looks_fileish` 结构判据）
     - 对话历史中无工具调用记录（有则说明已在办正事）
 
     Args:
@@ -97,6 +137,10 @@ def is_chat_only(ctx: ToolContext) -> bool:
     for kw in ACTION_KEYWORDS:
         if kw in text_lower:
             return False
+
+    # 关键词没命中也不等于纯聊天：带文件名/路径的句子必然要动工具（2026-10-22 复盘）
+    if _looks_fileish(text):
+        return False
 
     return True
 

@@ -42,6 +42,16 @@ from agent.core.daemon.proactive import ProactiveConfig, ProactiveEngine
 from agent.core.daemon.scheduler import Scheduler, ScheduleTask
 from agent.core.policy import get_budget  # W1 打扰预算（阶段 8）@author aceFelix
 from agent.serve import protocol
+from agent.serve.quiet_delivery import (
+    QUIET_CHANNEL_EMAIL,
+    QUIET_CHANNEL_SCREEN,
+    REMINDER_NOTIFY_KIND,
+    REMINDER_NOTIFY_SOURCE,
+    REMINDER_NOTIFY_TITLE,
+    REMINDER_URGENCY,
+    parse_channels,
+    send_quiet_email,
+)
 
 # 补播窗口（分钟）已改由 settings.briefing_catchup_window_min 配置（默认 120），
 # 便于随时调整“错过多久以内才补播”，不再作为模块常量硬编码。
@@ -99,6 +109,12 @@ PERCEPT_ASK_TEXT = (
 #: 因此本期不动桌面壳也能看到内容（专门的任务面板属下一切片）。
 TASK_NOTIFY_KIND = "task"
 TASK_NOTIFY_TITLE = "任务脊柱"
+
+# 用户自设提醒的送达口径（源名/kind/标题/紧迫度）与静默通道、邮件正文构造、
+# 副作用入账，统一放在 `quiet_delivery.py`（本节只负责“过闸 + 按通道投递”的编排）：
+# 拆出去是因为 hub 已经承担事件队列 + 感知总线 + 任务脊柱接线，不拆分就撞破
+# 800 行上限。机制背景见 docs/architecture/16-W1判断层.md 第四节。
+# 2026-10-22 前 hub._on_fire 对提醒是直接 `_emit`，静默时段与日额度对它全部无效。
 
 
 class ProactiveHub:
@@ -273,13 +289,13 @@ class ProactiveHub:
         """定时任务到期回调（Scheduler 后台线程触发）。
 
         ProactiveEngine 注册的任务转引擎自处理（生成简报/检查截止日期）；
-        用户提醒任务投 proactive_notify 事件（老语义：托盘通知 + TTS 播报，
-        桌面壳语义：聊天气泡 + 系统通知）。
+        用户提醒走 `_deliver_reminder`（过同一个 W1 闸门，2026-10-22 前这里是
+        直接 `_emit`，静默时段与日额度对提醒全部无效）。
         """
         if self._engine.is_proactive_task(task):
             self._engine.handle_task_fire(task)
             return
-        self._emit(kind="reminder", title="贾维斯提醒", text=task.content, task_id=task.id)
+        self._deliver_reminder(task)
 
     def _on_notify(self, message: str) -> None:
         """主动感知引擎通知回调（每日简报 / 截止日期提醒共用出口）。
@@ -290,14 +306,95 @@ class ProactiveHub:
         kind = "deadline" if message.startswith(_DEADLINE_PREFIX) else "briefing"
         self._emit(kind=kind, title="贾维斯主动提醒", text=message)
 
+    def _deliver_reminder(self, task: ScheduleTask) -> None:
+        """用户自设提醒的送达：过 W1 打扰预算，静默时按通道降级而非延后。
+
+        为什么要降级而不是入库等补播：冲刷靠“下一条通知请求”触发，夜里没动静
+        就可能永不补播，而 `ScheduleTask.escalate_count` 那套升级重发只有字段、
+        没人递增——对用户明说要过的提醒，静默时段不该等于把它弄丢。
+
+        三种结果：正常放行（上屏 + 朗读）/ 降级投递（按 `reminder_channels`
+        决定上屏与发信，不出声）/ queue、suppress（闸门已入库或合并掉，不投递）。
+
+        @author aceFelix
+        """
+        channels = self._reminder_channels()
+        action = self._engine.gate_notify_action(
+            REMINDER_NOTIFY_SOURCE, task.content,
+            dedup_key=f"{REMINDER_NOTIFY_SOURCE}:{task.id}",
+            urgency=REMINDER_URGENCY,
+            # 没配任何已实现通道 = 不降级，退回“入库待补播”的老行为
+            silent_delivery=bool(channels),
+        )
+        if not action.should_emit:
+            return
+        if action.speak:
+            self._emit(
+                kind=REMINDER_NOTIFY_KIND, title=REMINDER_NOTIFY_TITLE,
+                text=action.text, task_id=task.id,
+            )
+            return
+        # 降级投递：气泡与系统通知照投（不占日额度、不朗读），邮件另发
+        if QUIET_CHANNEL_SCREEN in channels:
+            self._emit(
+                kind=REMINDER_NOTIFY_KIND, title=REMINDER_NOTIFY_TITLE,
+                text=action.text, task_id=task.id, speak=False,
+            )
+        if QUIET_CHANNEL_EMAIL in channels:
+            self._send_quiet_email(task)
+
+    def _reminder_channels(self) -> set[str]:
+        """读静默降级通道（只认已实现的，未实现的警告一次并忽略）。
+
+        结果缓存在实例上：提醒到期是高频回调，每条都重解析并刷一遍“sms 未接入”
+        的警告就是新的打扰；而这几个字段没有热更新入口（面板不管预算），
+        改了本来就要重启宿主，缓存不会读到陈值。
+        """
+        cached = getattr(self, "_quiet_channels", None)
+        if cached is not None:
+            return cached
+        out, unknown = parse_channels(
+            getattr(self._settings, "notify_reminder_channels", None)
+        )
+        if unknown:
+            logger.warning(
+                "静默降级通道 %s 尚未接入，已忽略（可用：%s）",
+                ",".join(sorted(set(unknown))),
+                ",".join(sorted({QUIET_CHANNEL_SCREEN, QUIET_CHANNEL_EMAIL})),
+            )
+        self._quiet_channels = out
+        return out
+
+    def _send_quiet_email(self, task: ScheduleTask) -> None:
+        """静默降级邮件的**起线程入口**：SMTP 是阻塞 IO，不能占调度器回调线程。
+
+        发送与入账在 `quiet_delivery.send_quiet_email`（与 TTS 朗读同一个处置口径：
+        `hub` 只管起线程，不做业务）。
+
+        @author aceFelix
+        """
+        threading.Thread(
+            target=send_quiet_email,
+            args=(self._settings, task),
+            name="quiet-email",
+            daemon=True,
+        ).start()
+
     def _emit(
-        self, *, kind: str, title: str, text: str, task_id: str = "", speak: bool = True
+        self, *, kind: str, title: str, text: str, task_id: str = "",
+        speak: bool = True, silent: bool | None = None,
     ) -> None:
         """投递 proactive_notify 事件进 serve 事件队列（线程安全）。
 
-        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人；
-        事件通道不受这个开关影响（气泡与系统通知照旧）。
+        `speak=False` 只上屏不朗读：首次引导那类长文本用听的效果差且开机扰人。
+
+        `silent` 是“系统通知也别出声”的意图（Windows toast 自带提示音，不透传
+        则桌面壳那边仍会响一声，静默时段就白设了），缺省**跟随 `speak`**：
+        降级投递两个声音都要关。首次引导只躲 TTS 长文朗读、却要 toast 醒目
+        （否则用户根本没看到引导），所以那边显式传 `silent=False`。
+        壳侧 `dispatcher.ts` → `notify.ts` 据此给 Electron `Notification` 传 silent。
         """
+        quiet_toast = not speak if silent is None else silent
         self._event_queue.put_nowait(
             {
                 "type": protocol.EVT_PROACTIVE_NOTIFY,
@@ -306,6 +403,7 @@ class ProactiveHub:
                     "title": title,
                     "text": text,
                     "task_id": task_id,
+                    "silent": quiet_toast,
                 },
             }
         )
@@ -487,6 +585,8 @@ class ProactiveHub:
             title=pending["title"],
             text=pending["text"],
             speak=False,
+            # 引导靠“看得到”：不躲系统通知的提示音，只躲那段长文的 TTS 朗读
+            silent=False,
         )
         try:
             from agent.core.percept.consent import mark_asked

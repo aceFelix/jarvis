@@ -42,7 +42,13 @@ def handle_back(ctx: "CommandContext", stripped: str) -> bool:
             f"  {i}. [{it.get('ts', '')}] {it.get('tool', '')} "
             f"({it.get('args', '')}) — {it.get('reason', '')}"
         )
-    lines.append("（本期仅呈批不自动重放，重放执行属阶段 10 W3）")
+    # 只呈批不重放：待批清单是 W1 的 ASK 记录，不是可重放队列（阶段 10 交付的是
+    # 任务脊柱的受阻步重试，不是这里的重放）。2026-10-26 人工实测：旧文案写着
+    # “重放执行属阶段 10 W3”，而 W3 早已交付且仍不支持重放，等于预告了一个不存在的功能。
+    lines.append(
+        "（只呈批不自动重放：回来说一遍即可；不想再被反问就用 "
+        "/lease <工具> [路径] [分钟] 或 permissions.yaml 的 allow 规则放行）"
+    )
     ctx.ui.info("\n".join(lines))
     return True
 

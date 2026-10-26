@@ -83,6 +83,30 @@ def test_parse_wait_rejects_past_time():
     assert wait is None and "已过期" in err
 
 
+def test_parse_wait_relative_without_unit_asks_for_unit():
+    """``time:+600`` 要报“带单位”，不能报“已过期（1970-01-01…）”。
+
+    2026-10-26 人工实测：漏写单位的相对时间会掉进 ``parse_iso``，被当成 epoch
+    600 秒，用户看到的是一句 1970 年的过期提示，完全不知道是自己少写了 s/m/h。
+    """
+    for raw in ("time:+600", "time:+", "time:-600"):
+        wait, err = ops.parse_wait(raw)
+        assert wait is None
+        assert "要带单位" in err, f"{raw} 的报错没有指向单位：{err}"
+        assert "1970" not in err
+
+
+def test_parse_wait_relative_units_all_work():
+    """带单位的四种粒度都要能算出来（报错修了，别把好写法弄坏）。"""
+    now = time.time()
+    for raw, seconds in (("time:+90s", 90), ("time:+10m", 600), ("time:+2h", 7200), ("time:+1d", 86400)):
+        wait, err = ops.parse_wait(raw, now=now)
+        assert err == "" and wait is not None, f"{raw} 解析失败：{err}"
+        from agent.core.tasks.spine import parse_iso
+
+        assert pytest.approx(parse_iso(wait.spec["at"]), abs=2) == now + seconds
+
+
 def test_parse_wait_file_both_modes_have_deadline():
     """file/gone 两类必须带兜底时限，否则目标会永远挂着等一个不来的文件。"""
     wait, err = ops.parse_wait("file:C:/tmp/a.txt", deadline_hours=3)

@@ -123,6 +123,9 @@ def parse_wait(raw: str, *, deadline_hours: float = 72.0, now: float | None = No
         return None, f"等待条件 {head} 缺参数：{text}"
 
     if head == "time":
+        hint = _hint_relative_unit(rest)
+        if hint:
+            return None, hint
         at = _resolve_time(rest, current)
         if not at:
             return None, f"时间解析不出来：{rest}（可用 +90s/+2h 或 2026-10-21T18:30）"
@@ -177,6 +180,9 @@ def wait_from_spec(spec: dict[str, Any] | None, *, deadline_hours: float = 72.0,
         raw = str(spec.get("at") or spec.get("time") or "").strip()
         if not raw:
             return None, "time 类等待必须给 at（+90s 或 ISO 时刻）"
+        hint = _hint_relative_unit(raw)
+        if hint:
+            return None, hint
         at = _resolve_time(raw, current)
         if not at:
             return None, f"时间解析不出来：{raw}"
@@ -203,6 +209,24 @@ def wait_from_spec(spec: dict[str, Any] | None, *, deadline_hours: float = 72.0,
         return TaskWait(kind=WAIT_PERCEPT_EVENT, spec={"source": source, "kind": ev}, deadline_at=deadline), ""
 
     return None, f"未知等待类型：{kind}（支持 time / file_exists / percept_event）"
+
+
+def _hint_relative_unit(raw: str) -> str:
+    """相对时间写法缺单位时给一句人话；格式对或不是相对写法则返回空串。
+
+    2026-10-26 人工实测：``--wait time:+600`` 会掉进 ``parse_iso`` 被当成 epoch
+    600 秒，用户看到的是「等待时间已过期（1970-01-01T08:10:00）」——
+    完全看不出是自己漏了单位。宁可报一句“要带单位”，也不能把 1970 年甩给用户。
+
+    @author aceFelix
+    """
+    text = str(raw or "").strip()
+    if text[:1] in ("+", "-") and not _RELATIVE_RE.match(text):
+        return (
+            f"相对时间要带单位：{text} → 写成 +90s / +10m / +2h / +1d"
+            "（也可以给绝对时刻，如 2026-10-21T18:30）"
+        )
+    return ""
 
 
 def _resolve_time(raw: str, current: float) -> float:

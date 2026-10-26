@@ -316,11 +316,14 @@ registry.all_deferred()  # deferred=True 的延迟工具池（需 ToolSearch 发
 
 分组与抑制策略集中在
 [`tool_dispatch.build_tool_defs()`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py)：
-纯聊天（短问候且无动作意图关键词、历史里无 `tool_use`）本轮 0 工具下发；判定取保守策略
+纯聊天（短问句且无动作意图关键词、不含文件名/路径形态、历史里无 `tool_use`）本轮 0 工具下发；判定取保守策略
 ——“宁可多发不可漏发”，误判为纯聊天会让模型发的文本态工具调用被全量过滤，表现为
 “思考完就停止”（见
 [`docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)）。
 关键词表与上限（`ACTION_KEYWORDS` / `CHAT_ONLY_MAX_CHARS`）均为模块级常量，便于按案例调整；
+但只靠枚举自然语言说法会无限复发误判（2026-10-22 第四次），因此另有结构判据
+`_looks_fileish()`：出现 `名字.扩展名`（`_FILE_TOKEN_RE`，汉字文件名也算）或路径形态
+（`_PATH_TOKEN_RE`，两侧只认 ASCII，避开「今天/明天」）即不得零工具。
 回归测试：`tests/test_tool_dispatch.py`。
 
 **为什么可选依赖静默跳过**：用户可能只装核心包，不应该因为缺 playwright 就无法启动。

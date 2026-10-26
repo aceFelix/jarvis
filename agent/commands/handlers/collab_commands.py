@@ -121,7 +121,7 @@ def _show_goal_spine(ui) -> None:
 
     @author aceFelix
     """
-    from agent.core.tasks.spine import STEP_BLOCKED, get_spine_store, iso_of
+    from agent.core.tasks.spine import BLOCK_WAIT, STEP_BLOCKED, get_spine_store, iso_of
 
     try:
         goals = get_spine_store().open_goals(limit=20)
@@ -141,8 +141,14 @@ def _show_goal_spine(ui) -> None:
             continue
         idx = g.steps.index(step) + 1
         if step.state == STEP_BLOCKED:
-            # 阻塞行里要带上“在等什么、最迟什么时候”：这两样才是用户决定
-            # “继续等 / 换做法 / 先搁下”的依据，只报一个 waiting 什么也定不了
+            # 等待中的步骤不叫“卡住”（2026-10-26 实测）：重启后驱动会把等条件的步骤
+            # 标成 blocked(waiting)，若沿用“卡在第 N 步”，用户只会以为出了毛病。
+            if step.block_reason == BLOCK_WAIT and step.wait is not None:
+                deadline = iso_of(step.wait.deadline_at) or "未设限"
+                ui.info(f"    ○ 第 {idx} 步在等：{step.wait.kind}（最迟 {deadline}）")
+                continue
+            # 真阻塞（超时/等授权）才用“卡在”：这两样才是用户决定
+            # “继续等 / 换做法 / 先搁下”的依据
             tail = ""
             if step.wait is not None:
                 tail = (
@@ -177,6 +183,7 @@ _TASKS_USAGE = (
     "/tasks add <目标>[;步骤2 …] [--wait <条件>] [--deadline <小时>]",
     "        等待条件：time:+90s · time:2026-10-21T18:30 · file:<路径> · gone:<路径> · event:<source>/<kind>",
     "/tasks show <目标id>          逐步展开（含在等什么、上次失败原因、副作用 id）",
+    "/tasks approve <目标id>        批准一个卡在「需要授权」的步骤（签限定范围租约并立刻重试）",
     "/tasks pause|resume|cancel <目标id>",
     "/tasks advance <目标id>        跳过等待条件立刻推进（测试用，不改步骤内容）",
     "/tasks delete <目标id>         从台账删除（本期无软删归档）",
@@ -215,7 +222,39 @@ def _parse_tasks_args(rest: list[str]) -> tuple[str, str, float]:
             continue
         text_parts.append(token)
         i += 1
-    return " ".join(text_parts).strip(), wait_spec, deadline_hours
+    return _strip_wrapping_quotes(" ".join(text_parts)), wait_spec, deadline_hours
+
+
+#: 整体包住文本时会剥掉的一层引号（半角 + 全角）：``/tasks add "目标"`` 是文档
+#: 与使用习惯的主流写法，而这里拿到的是字面引号（REPL 不是 shell，自己不拆引号）。
+_QUOTE_PAIRS = (
+    ('"', '"'),
+    ("'", "'"),
+    ("\u201c", "\u201d"),
+    ("\u2018", "\u2019"),
+    ("\u300c", "\u300d"),
+)
+
+
+def _strip_wrapping_quotes(text: str) -> str:
+    """剥掉**整体包住**目标文本的一层成对引号（只剥一层，内层同引号不动）。
+
+    2026-10-26 人工实测：照走查清单的 ``/tasks add "在工作目录里创建文件…"`` 敲，
+    目标名与步骤文本都带上了字面引号，播报里变成 ``目标「"在工作目录…」``，
+    而子代理收到的任务描述也脏着。判据用“内层不得再出现同名引号”：
+    ``"a" 与 "b"`` 这种用户真的在用引号的句子必须原样保留，不能被削成 ``a" 与 "b``。
+
+    @author aceFelix
+    """
+    s = (text or "").strip()
+    if len(s) < 2:
+        return s
+    for left, right in _QUOTE_PAIRS:
+        if s[0] == left and s[-1] == right:
+            inner = s[1:-1].strip()
+            if inner and left not in inner and right not in inner:
+                return inner
+    return s
 
 
 def _to_hours(raw: str) -> float:
@@ -285,6 +324,50 @@ def _tasks_show(ui, goal_id: str) -> None:
     ids = [j for s in goal.steps for j in s.journal_ids]
     if ids:
         ui.info(f"  本目标产生的副作用：{len(ids)} 项（/undo --task {goal.id} 可批量回收）")
+
+
+def _tasks_approve(ui, goal_id: str) -> None:
+    """``/tasks approve <id>``——批准一个卡在「需要授权」的步骤并让它立刻重试。
+
+    为什么终端必须有这一条（2026-10-26 人工实测暴露）：受阻播报里写着“批准后
+    这一步会立刻重试”，但终端没有任何地方能“批准”——`request_approval` 的注释
+    写着“供终端命令与桌面面板调用”，实际只有桌面 `tasks.exec approve` 在调。
+    用户只能对着播报敲 `y`，而那只是普通对话输入。
+
+    与桌面**共用同一条后端**（``driver.approve_step``）：签一条只收窄范围的租约
+    （本步被拒工具 + 目标目录 + 30 分钟）再把步骤退回待执行——光复位步骤不够，
+    重试走同一条无 UI 的默认判定，同一个 ASK 会再落成 DENY。
+
+    @author aceFelix
+    """
+    from agent.core.tasks.driver import get_driver
+    from agent.core.tasks.spine import BLOCK_APPROVAL, STEP_BLOCKED, get_spine_store
+
+    if not goal_id:
+        ui.warn("用法: /tasks approve <目标id>（/tasks 可列出卡住的目标）")
+        return
+    goal = _find_goal(get_spine_store(), goal_id)
+    if goal is None:
+        ui.warn(f"没找到目标：{goal_id}")
+        return
+    step = goal.current_step()
+    if step is None or step.state != STEP_BLOCKED or step.block_reason != BLOCK_APPROVAL:
+        state = step.block_reason if step is not None else goal.status
+        ui.warn(
+            f"目标〔{goal.id}〕当前没有在等授权的步骤（{state}）；/tasks show 看明细"
+        )
+        return
+    driver = get_driver()
+    if driver is None:
+        ui.warn(
+            "后台驱动线程未起（settings.tasks_enabled=false 或本轮未装配）："
+            "批准了也没人重试。先开开关重启，或用 /lease 签租约后 /tasks advance 手动推一步"
+        )
+        return
+    ok, msg = driver.approve_step(goal.id, step.id)
+    # 回执里有 ``[lease-id]``：Rich 会把方括号当样式标签吞掉（2026-10-26 实测：
+    # 终端显示成“已签发租约 ：”，租约号凭空消失），所以这里必须转义。
+    (ui.info if ok else ui.warn)(_esc(msg))
 
 
 def _tasks_control(ui, goal_id: str, action: str) -> None:
@@ -357,6 +440,8 @@ async def handle_tasks(ctx: "CommandContext", stripped: str) -> bool:
         _tasks_show(ctx.ui, parts[2] if len(parts) > 2 else "")
     elif sub in ("pause", "resume", "cancel", "advance", "delete"):
         _tasks_control(ctx.ui, parts[2] if len(parts) > 2 else "", sub)
+    elif sub == "approve":
+        _tasks_approve(ctx.ui, parts[2] if len(parts) > 2 else "")
     elif sub in ("help", "-h", "--help"):
         for line in _TASKS_USAGE:
             ctx.ui.info(line)

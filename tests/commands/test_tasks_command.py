@@ -24,6 +24,7 @@ import pytest
 from agent.commands.handlers.collab_commands import handle_tasks
 from agent.core.tasks import driver as driver_mod
 from agent.core.tasks.spine import (
+    BLOCK_APPROVAL,
     BLOCK_TIMEOUT,
     BLOCK_WAIT,
     GOAL_CANCELLED,
@@ -161,9 +162,11 @@ class TestSpineSection:
         )]))
         ui = _FakeUI()
         blob = _run(_ctx(ui, _FakeTaskList()))
-        # 阻塞行里必须带着“等什么 + 最迟什么时候”，否则用户无法决定继续等还是换做法
-        assert "卡在第 1 步" in blob and "waiting" in blob
-        assert "等 file_exists" in blob
+        # 等待条件要用“在等”而不是“卡在”（2026-10-26 实测：重启后驱动会把
+        # 等条件的步骤标成 blocked(waiting)，叫“卡住”会让用户以为出了毛病），
+        # 但“等什么 + 最迟什么时候”两个要素不能丢。
+        assert "第 1 步在等" in blob and "waiting" not in blob
+        assert "file_exists" in blob
         assert iso_of(deadline)[:5] in blob
 
     def test_not_yet_started_wait_shows_condition(self, store):
@@ -348,7 +351,7 @@ class TestWriteSubcommands:
     def test_help_lists_all_subcommands(self, store):
         ui = _FakeUI()
         blob, _ = self._run2(ui, "/tasks help")
-        for frag in ("add", "show", "pause", "advance", "delete"):
+        for frag in ("add", "show", "approve", "pause", "advance", "delete"):
             assert frag in blob
 
     def test_plain_tasks_still_read_only(self, store):
@@ -357,3 +360,46 @@ class TestWriteSubcommands:
         blob = _run(_ctx(ui, _FakeTaskList()), "/tasks")
         assert "任务列表为空" in blob and "跨会话任务脊柱" in blob
         assert store.list_goals(None, limit=10) == []   # 只读：一条目标也不建
+
+
+class TestQuotesAndApprove:
+    """全文包围的引号与“批准受阻步骤”（2026-10-26 人工实测后补）。
+
+    两个都来自同一个现场问题：用户照走查清单敲 ``/tasks add "目标"``，播报里
+    目标名带着字面引号；接着受阻塞住，播报说“批准后这一步会立刻重试”，
+    而终端当时没有任何地方能“批准”——敲个 ``y`` 只会被当成普通对话发给模型。
+    """
+
+    def _run2(self, ui, text: str) -> tuple[str, str]:
+        ctx = _ctx(ui, _FakeTaskList())
+        assert asyncio.run(handle_tasks(ctx, text)) is True
+        return "\n".join(ui.infos), "\n".join(ui.warns)
+
+    def test_add_strips_wrapping_quotes(self, store):
+        """整体包住的引号要剥：否则目标名与步骤文本都脏着，还会传给子代理。"""
+        self._run2(_FakeUI(), '/tasks add "在工作目录里创建文件 a.txt" --wait time:+90s')
+        goal = store.list_goals(None, limit=10)[0]
+        assert goal.goal == "在工作目录里创建文件 a.txt"
+        assert goal.steps[0].desc == "在工作目录里创建文件 a.txt"
+
+    def test_add_keeps_quotes_used_inside_text(self, store):
+        """真的在用引号的句子原样保留：只剥“整体包住”的那一层。"""
+        self._run2(_FakeUI(), '/tasks add "a.txt" 与 "b.txt" 都改成 c')
+        assert store.list_goals(None, limit=10)[0].goal == '"a.txt" 与 "b.txt" 都改成 c'
+
+    def test_approve_refuses_when_step_is_not_waiting_for_approval(self, store):
+        self._run2(_FakeUI(), "/tasks add 目标庚")
+        gid = store.list_goals(None, limit=10)[0].id
+        _, warns = self._run2(_FakeUI(), f"/tasks approve {gid[:6]}")
+        assert "没有在等授权的步骤" in warns
+
+    def test_approve_without_driver_does_not_pretend(self, store, monkeypatch):
+        """驱动线程未起时批准了也没人重试，必须如实说并给手动路径。"""
+        monkeypatch.setattr(driver_mod, "_driver", None)
+        store.save(_goal([TaskStep(
+            desc="写文件", state=STEP_BLOCKED, block_reason=BLOCK_APPROVAL,
+            denied_tools=["FileWrite"],
+        )]))
+        gid = store.list_goals(None, limit=10)[0].id
+        _, warns = self._run2(_FakeUI(), f"/tasks approve {gid[:6]}")
+        assert "驱动线程未起" in warns and "advance" in warns

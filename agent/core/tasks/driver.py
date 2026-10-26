@@ -406,10 +406,14 @@ class TaskDriver(ApprovalOpsMixin):
             # 不落盘就只能盲放行（全部工具全部路径）或按钮只能假装生效。
             step.denied_tools = [str(d.get("tool") or "?") for d in outcome.denials[:8]]
             # 接回已写好却从来没人调的那条询问通路（BLOCK_APPROVAL → _ask →
-            # request_approval）；mark=False 让落盘统一走下面的收尾
+            # request_approval）；mark=False 让落盘统一走下面的收尾。
+            # 文案必须带上“去哪批准”（2026-10-26 人工实测）：原句只说“批准后
+            # 这一步会立刻重试”，用户就对着播报敲 `y` —— 而 `_ask` 只发通知、
+            # 不等待输入，那句 y 只能被当成普通对话发给模型。
             self._block(
                 goal, step, BLOCK_APPROVAL,
-                f"需要授权：{step.last_error}。批准后这一步会立刻重试。",
+                f"需要授权：{step.last_error}。终端敲 /tasks approve {goal.id[:4]}，"
+                "或桌面右栏该目标行点「批准并重试」；批完这一步会立刻重试。",
                 mark=False,
             )
         elif outcome.success:

@@ -279,6 +279,20 @@ class ActionJournal:
         rows = sorted(self._load().values(), key=lambda r: r.ts)
         return [r for r in rows if r.task_id and r.task_id == task_id]
 
+    def same_checkpoint(self, cid: str) -> list[EffectRecord]:
+        """同一个检查点（同一轮）下的全部记录，按发生顺序。
+
+        文件类撤销回滚的是**整个检查点**，这一批的效果会一起消失。不把它们一并标记
+        就会出现“同轮 A 已撤销、B 还写着可撤销”的矛盾（2026-10-26 实测：用户的
+        `/undo list` 里 69cb6e79a538 已撤销，同轮的 5d4b253534ef 仍显示可撤销）。
+
+        @author aceFelix
+        """
+        if not cid:
+            return []
+        rows = sorted(self._load().values(), key=lambda r: r.ts)
+        return [r for r in rows if str((r.undo_spec or {}).get("cid") or "") == cid]
+
     def counts(self) -> dict[str, int]:
         """各状态计数（诊断与走查清单据此核对，不返回明细避免泄露内容）。"""
         out = {s: 0 for s in ALL_STATES}
@@ -547,7 +561,18 @@ def undo_record(
         return False, "本轮检查点已被配额修剪，无法回退工作区"
     ok, note = mgr.restore(cid)
     if ok:
+        # 整轮回滚：同一检查点下其它条目的效果也一起被撤了，只标被点的那一条，
+        # `/undo list` 会继续对同轮其它条目显示“可撤销”——用户以为还有一层能撤
+        # （2026-10-26 实测）。这里一并标记，回执里说清连带了几项。
+        siblings = [
+            r for r in journal.same_checkpoint(cid)
+            if r.id != rec.id and r.state == STATE_APPLIED
+        ]
+        for other in siblings:
+            journal.set_state(other.id, STATE_UNDONE)
         journal.set_state(rec.id, STATE_UNDONE)
+        if siblings:
+            note = f"{note}（整轮回滚：同轮另 {len(siblings)} 项一并记为已撤销）"
         return True, note
     journal.set_state(rec.id, STATE_FAILED, error=note)
     return False, note

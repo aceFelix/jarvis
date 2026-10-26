@@ -264,6 +264,29 @@ audit = true               # 记录沙箱审计日志（~/.jarvis/sandbox_audit.
 max_snapshots = 20         # 文件快照最大保留数
 excluded_commands = []     # 不走沙箱的命令（如 ["docker", "wsl"]）
 
+[policy.notify_budget]
+# W1 打扰预算（阶段 8）：主动播报“该不该现在打扰你”的确定性闸门（代码见 agent/core/policy/budget.py）。
+# 裁决结果与积压队列全部落在 ~/.jarvis/notify_state.json（count / pending / last_emit / last_flush），
+# 它是“为什么这条没出声”的唯一可核对证据。
+# 闸门顺序是定的：①积压冲刷 → ④重要度门槛 → ②静默时段 → ③同源聚合窗口 → ⑤日预算。
+# 顺序上看两点：低分事件在上一步就被抑制了，不会半夜排队等补播；而补播不占 daily_max。
+# @author aceFelix
+enabled = true             # 总开关（false = 提醒不经预算直接播）
+daily_max = 10             # **每日**主动播报上限（超出是“入库待补播”，不是丢）
+quiet_hours = "23:00-07:00"  # 静默时段（支持跨午夜；空串=不启用）：提醒类按下方
+                           # reminder_channels 走**降级投递**（只上屏不朗读、不入队不占额度）；
+                           # 未配已实现通道时，其余播报才是入库待补播
+aggregate_window_s = 300   # 同源事件聚合窗口（秒）：窗口内同 key 只播一次，其余合并计数；
+                           # 它同时也是冲刷冷却（多久允许补播一次），测日预算时先置 0 免得被聚合掉
+min_salience = 0.3         # 重要度门槛（评分=来源权重×时效紧迫度×相关性×历史接受率）；
+                           # 低于此值**直接抑制**（只留痕、不入队、不补播）
+# 静默时段/额度用尽时，**用户自设提醒**的送达通道（简报与感知事件不受本项影响，
+# 它们仍按原口径入库待补播）。默认只降级不延后：气泡与系统通知照投、TTS 不朗读。
+# 写成空列表 [] = 退回“入库等补播”（冲刷靠下一条通知触发，夜里没动静就可能久等）。
+# “sms” 是留位：尚未接短信服务商，配了会警告并忽略，不会假装已发。
+reminder_channels = ["screen"]   # 可多选："screen" 上屏不出声 / "email" 另发一封邮件
+quiet_email_to = ""             # email 通道的收件人；留空 = 用 [email].default_recipient
+
 [percept]
 # W2 感知层（阶段 9）：统一事件总线 + 逐源采集（代码见 agent/core/percept/）。
 # 隐私口径：总开关与逐源开关**全部默认关**，未显式打开的源一个字节都不采；

@@ -480,7 +480,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 | 阶段 | 内容 | 关键落点 | 验收要点 |
 |---|---|---|---|
-| **阶段 8（W1）** 判断层 | 管线规则放宽 + 授权租约 + 打扰预算 + 无人值守 | 新增 `agent/core/policy/{lease,budget}.py`；声明式规则并入五层管线（`permissions/checker.py` 放宽语义 + `path_match.py`）；`ProactiveEngine.on_notify` 前插预算过滤 | 同一操作在"有租约/无租约/away"下三态确定且可解释；静默时段只入库；权限零回归（初版独立策略引擎已降级合并入管线） |
+| **阶段 8（W1）** 判断层 | 管线规则放宽 + 授权租约 + 打扰预算 + 无人值守 | 新增 `agent/core/policy/{lease,budget}.py`；声明式规则并入五层管线（`permissions/checker.py` 放宽语义 + `path_match.py`）；`ProactiveEngine.on_notify` 前插预算过滤 | 同一操作在"有租约/无租约/away"下三态确定且可解释；静默时段只入库（**2026-10-22 补充**：用户自设提醒不再不过闸，但命中静默/超额时走**降级投递**——上屏不发声，见 `reminder_channels`）；权限零回归（初版独立策略引擎已降级合并入管线） |
 | **阶段 9（W2）** 感知层 | 统一事件总线（前台窗口 / 文件 / 仓库 / 邮件 / 日历 / 系统） | 新增 `agent/core/percept/`（bus + 一源一文件）；`Scheduler` 降级为事件源之一；**默认全关 + 逐源开关** | 四类事件各产出**恰好一条**聚合提醒；常驻 CPU 增量 < 1%；单源故障隔离 |
 | **阶段 10（W3）** 兑现层 | 持久任务脊柱（条件等待/断点续跑）+ 可撤销行动账本 | ✅ **后端已交付**：`agent/core/tasks/{spine,spine_ops,spawn,driver,cli_host}.py`（台账 `~/.jarvis/goals/<id>.json`）、`agent/core/actions/journal.py`（`~/.jarvis/actions.jsonl`）、`Tool.is_irreversible` 声明位 + orchestrator 统一拦截（预约未结案期间网络外发命令取消自动放行，堵等价通路绕道）、`/undo`（含 `--task` 批量）、**建目标的三个入口**：`/tasks add|show|pause|resume|cancel|advance|delete`、`TrackGoal` 工具（`agent/tools/track_goal.py`）、serve `tasks.exec`/`actions.exec`（`agent/serve/rpc_tasks.py`）——三者同源于 `spine_ops.py`；`[actions]`/`[tasks]` 两组配置；桌面「任务中心」面板属 jarvis-desktop 仓 | 重启续跑；条件等待不烧轮询；副作用可一键回滚；不可逆动作有延时窗口且绕道会被问（均有单测锁定 309 例，**实机复测尚未跑穿**，见 [w3-testing.md](../test/w3-testing.md) 与 [走查后的补记](../fixlogs/w3-journal-spine-delivery.md)） |
 | **阶段 11（W4）** 体验补齐 | 口手分离（语音真能干活）+ 结构化长期记忆 | `realtime_tools.select_tools_for_turn()`（tool-RAG，≤12 个）；"要动手"意图转后台 Agent 异步回报；新增 `agent/core/memory/facts.py` | 按轮挂 ≤12 工具建响应 < 1s；语音说"帮我查一下 XX"能异步拿结果；记忆带时效与出处 |
@@ -553,7 +553,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | **低功耗常驻** | 7×24 运行不能占大量 CPU/内存 | 分层唤醒：轻量监听 + 需要时再启动完整 Agent；本地规则先判不每次调 LLM |
 | **隐私保护** | 摄像头/麦克风/屏幕常驻引发顾虑 | 本地优先、状态可见（"正在观察：前台窗口"）、逐源开关、敏感操作确认、采集范围可导出查看 |
 | **跨应用自动化可靠性** | GUI 自动化易受界面变化影响 | 语义（UIA）优先 + 视觉兜底 + 可学习工作流回放 |
-| **主动与打扰的平衡** | 过于主动会打扰用户 | 打扰预算 + 重要度评分 + 静默时段 + 聚合 + 用户可配主动等级（阶段 8） |
+| **主动与打扰的平衡** | 过于主动会打扰用户 | 打扰预算 + 重要度评分 + 静默时段 + 聚合 + 静默降级通道（提醒上屏不发声、可选改邮件） + 用户可配主动等级（阶段 8） |
 | **多设备协同** | 设备间状态同步与任务接力 | 本地优先的端到端加密同步协议（Tailscale 类私有网络打底） |
 | **离线能力** | 没网时仍需基础功能 | 本地模型 + 本地语音（sherpa-onnx/FunASR）+ 本地工具执行 |
 | **不可逆动作的风险** | 发邮件/提交代码/系统设置无法撤销 | 强制预览 + 二次确认 + 延时发送窗口 + 副作用账本（阶段 10 **已落地**：`is_irreversible` 声明位 + 30s 窗口 + `/undo`；dry_run 未单独做，预览即窗口入口） |

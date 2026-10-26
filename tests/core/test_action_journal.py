@@ -396,6 +396,41 @@ class TestUndoRecord:
         after = book.get(rec.id)
         assert after.state == STATE_FAILED and after.error == "工作区被占用"
 
+    def test_round_rollback_marks_same_checkpoint_siblings(self, book, monkeypatch):
+        """整轮回滚要把同检查点的其它条目一并标 undone。
+
+        2026-10-26 实测：`/undo` 只标被点的那条，同轮的 `FileEdit` 仍显“可撤销”，
+        用户会以为还有一层能单独撤——实际它的效果已随检查点一起被抹掉了。
+        """
+        first = EffectRecord(
+            tool="FileWrite", state=STATE_APPLIED, reversible=True,
+            undo_spec={"kind": UNDO_CHECKPOINT, "cid": "round1"},
+        )
+        sibling = EffectRecord(
+            tool="FileEdit", state=STATE_APPLIED, reversible=True,
+            undo_spec={"kind": UNDO_CHECKPOINT, "cid": "round1"},
+        )
+        outsider = EffectRecord(
+            tool="FileWrite", state=STATE_APPLIED, reversible=True,
+            undo_spec={"kind": UNDO_CHECKPOINT, "cid": "round2"},
+        )
+        for r in (first, sibling, outsider):
+            book.record(r)
+        fake = type("M", (), {
+            "available": lambda self: True,
+            "has_checkpoint": lambda self, cid: True,
+            "restore": lambda self, cid: (True, "工作区已恢复到该消息发出之前"),
+        })()
+        monkeypatch.setattr(journal_mod, "manager_for", lambda *a, **k: fake)
+
+        ok, note = undo_record(first, journal=book)
+
+        assert ok is True, note
+        assert "另 1 项" in note, note
+        assert book.get(first.id).state == STATE_UNDONE
+        assert book.get(sibling.id).state == STATE_UNDONE      # 同轮连带
+        assert book.get(outsider.id).state == STATE_APPLIED    # 别的轮次不动
+
 
 class TestUndoTask:
     """按任务目标批量补偿。"""
