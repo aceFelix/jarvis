@@ -102,9 +102,9 @@ def test_keys_are_unique():
     assert len(SPEC_BY_KEY) == len(CONFIG_SPECS)
 
 
-def test_only_two_tiers_in_the_writable_table():
-    """可改表里只允许 auto / confirm；forbidden 只登记名字与理由。"""
-    assert {s.tier for s in CONFIG_SPECS} == {TIER_AUTO, TIER_CONFIRM}
+def test_tiers_stay_within_the_three_declared_levels():
+    """表里的分级只能是三档之一（没有第四种写法，也没有手滑写错的字符串）。"""
+    assert {s.tier for s in CONFIG_SPECS} <= {TIER_AUTO, TIER_CONFIRM, TIER_FORBIDDEN}
 
 
 @pytest.mark.parametrize("spec", CONFIG_SPECS, ids=lambda s: s.key)
@@ -145,10 +145,38 @@ def test_interrupt_and_scope_items_require_confirm():
 # ---- 禁改项 ----
 
 
-def test_forbidden_names_never_appear_in_writable_table():
-    """禁改项不许同时出现在可改表里（否则权限层之前就被列出来了）。"""
-    for key in FORBIDDEN_SPECS:
-        assert get_spec(key) is None
+def test_forbidden_items_never_show_up_in_the_model_facing_list():
+    """禁改项**不能出现在 ``list_specs()`` 的结果里**。
+
+    这是 P2 调整后的口径（阶段 12）：原先要求"禁改项根本不进表"，但那样面板就
+    无从派生——像 `log_events`（本地留痕）那样"人该能改、模型不能改"的项
+    就没有位置。改成允许它带着元数据进表，但**硬约束两条**：
+
+    1. 模型的可见列表（``list_specs()``）里一个都不能有——名字都不给，
+       否则只会招来反复试探；
+    2. 每个 ``tier=forbidden`` 的项都必须有自己的拒绝理由（下一条用例钉住）。
+
+    真正拦住模型的仍然是权限层：`ConfigSet.check_permissions` 先查
+    ``forbidden_reason()``、再查 tier，`call()` 里还有一道兜底。
+    """
+    listed = {s.key for s in list_specs()}
+    forbidden_specs = {s.key for s in CONFIG_SPECS if s.tier == TIER_FORBIDDEN}
+    assert forbidden_specs.isdisjoint(listed)
+    # 纯名字登记的禁改项（沙箱/凭据）不进表也没关系，但同样不得出现在列表里
+    assert set(FORBIDDEN_SPECS).isdisjoint(listed)
+
+
+def test_every_forbidden_spec_carries_a_reason():
+    """带 ``tier=forbidden`` 进表的项，必须在禁改表里有自己的理由。
+
+    理由有两处用途：`check_permissions` 回落执、以及模型向用户解释"为什么不改"。
+    缺理由会得到一句空拒绝，用户得不到正确改法。
+    """
+    for spec in CONFIG_SPECS:
+        if spec.tier == TIER_FORBIDDEN:
+            reason = forbidden_reason(spec.key)
+            assert reason, f"{spec.key} 标了 forbidden 却没有理由"
+            assert not reason.startswith(("同上", "见上", "同前"))
 
 
 @pytest.mark.parametrize(
@@ -177,11 +205,6 @@ def test_every_forbidden_reason_stands_on_its_own():
 def test_forbidden_reason_is_empty_for_writable_keys():
     assert forbidden_reason("tts_volume") == ""
     assert forbidden_reason("") == ""
-
-
-def test_tier_forbidden_constant_is_not_used_as_spec_tier():
-    """``TIER_FORBIDDEN`` 是给权限层判断用的，不该出现在可改表里。"""
-    assert TIER_FORBIDDEN not in {s.tier for s in CONFIG_SPECS}
 
 
 # ---- 校验 ----

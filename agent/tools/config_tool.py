@@ -10,10 +10,12 @@
 1. **分级即权限**：``tier=confirm`` 直接映射成权限管线的 ASK（改前问一句），
    ``tier=forbidden`` 直接 DENY。不在这里自造一套确认流程——W1 那套管线已经
    处理了「无人值守/沙箱/租约」各种边界，另起一套必然两处口径不一致。
-2. **先校全部，再落盘**：多键补丁里有任何一个校验失败就整批不动。否则会出现
-   "改了一半"的配置，而用户不知道到底是哪几项生效了。
+2. **先校全部，再落盘**：交给 `config_ops.apply_config_patch`（与终端命令同一份）。
 3. **不假装生效**：``apply_mode`` 需要重装配/重注册时，调宿主登记的钩子；
    没登记钩子（如终端 REPL 场景）就如实说"已保存，下次启动生效"。
+
+本模块只负责**工具契约**（schema / 权限 / 结果包装），真正的读写六步在
+`agent/config/config_ops.py`——那里同时被 `/config set` 调用（阶段 12 P2）。
 
 @author aceFelix
 """
@@ -22,34 +24,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.config.config_ops import (
+    ENTRY_MODEL,
+    apply_config_patch,
+    render_spec_list,
+)
 from agent.config.config_specs import (
-    APPLY_LIVE,
-    APPLY_POLICY,
     TIER_AUTO,
     TIER_CONFIRM,
-    ConfigSpec,
     forbidden_reason,
     get_spec,
-    human_value,
-    list_specs,
-    notify_changed,
-    read_value,
-    run_apply_hooks,
-    save_value,
-    validate_value,
-)
-from agent.core.actions.journal import (
-    STATE_APPLIED,
-    UNDO_CONFIG,
-    EffectRecord,
-    get_journal,
 )
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
-
-#: 一句人话里最多列几项（超出的截断，避免回执变成一屏）
-_MAX_ROWS = 12
 
 
 class ConfigListTool(Tool):
@@ -92,19 +80,7 @@ class ConfigListTool(Tool):
             else (TIER_CONFIRM,) if want == "confirm"
             else (TIER_AUTO, TIER_CONFIRM)
         )
-        rows: list[dict[str, Any]] = []
-        for spec in list_specs(tiers=tiers):
-            value = read_value(ctx.settings, spec)
-            rows.append({
-                "key": spec.key,
-                "label": spec.label,
-                "hint": spec.hint,
-                "tier": spec.tier,
-                "apply_mode": spec.apply_mode,
-                "value": value,
-                "value_text": human_value(spec, value),
-            })
-        return ToolResult.ok(_render_list(rows))
+        return ToolResult.ok(render_spec_list(ctx.settings, tiers=tiers))
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         return "查看可改配置"
@@ -170,74 +146,15 @@ class ConfigSetTool(Tool):
         return PermissionResult.allow("表达层配置，可直接调整")
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        patch: dict[str, Any] = dict(args.get("patch") or {})
-        reason = str(args.get("reason") or "").strip()
-        if ctx.settings is None:
-            return ToolResult.error("当前上下文没有配置实例，改不了配置")
-
-        # ① 先把整批校验干净（含 forbidden 兜底：权限层被绕过时这里也不放行）
-        pairs: list[tuple[ConfigSpec, Any, Any]] = []   # (spec, 新值, 原值)
-        for key, raw in patch.items():
-            k = str(key)
-            why = forbidden_reason(k)
-            if why:
-                return ToolResult.error(f"{k} 不能由模型改：{why}")
-            spec = get_spec(k)
-            if spec is None:
-                return ToolResult.error(f"不认识的配置项 {k}；先用 ConfigList 查可用键")
-            try:
-                value = validate_value(spec, raw)
-            except ValueError as e:
-                return ToolResult.error(str(e))
-            pairs.append((spec, value, read_value(ctx.settings, spec)))
-
-        # ② 去掉"本来就是这个值"的项。不剔掉的话回执会写成"开 → 开"，还会在账本里
-        # 记一条原值等于新值的变更——用户看回退列表时会发现一条"撤了等于没撤"。
-        same = [sp for sp, new, old in pairs if new == old]
-        pairs = [p for p in pairs if p[1] != p[2]]
-        if not pairs:
-            labels = "、".join(sp.label for sp in same)
-            return ToolResult.ok(f"这几项本来就是这个值，不用改：{labels}")
-
-        # ③ 落盘（任一失败就把已写的按原值回写，不留半改状态）
-        failed = _save_batch(pairs)
-        if failed is not None:
-            return ToolResult.error(f"写入 settings.toml 失败（{failed}），运行时未改动")
-
-        # ④ 改运行时 + 按 apply_mode 分派生效
-        for spec, value, _old in pairs:
-            setattr(ctx.settings, spec.attr, value)
-        apply_notes = _apply_modes(pairs, ctx.settings)
-
-        # ④ 广播变更：桌面面板只在连上时拉过一次 settings.get，不广播就会一直显示
-        # 旧值——用户会以为没生效，更糟的是他顺手拖一下滑杆就把旧值写回去了。
-        # 放在生效之后：监听器万一要读状态，拿到的已是新值。
-        notify_changed({spec.key: value for spec, value, _old in pairs})
-
-        # ⑤ 记副作用账本（原值存进 undo_spec.before，/undo 据此回写）
-        before = {spec.key: old for spec, _new, old in pairs}
-        rec = EffectRecord(
-            tool="ConfigSet",
-            args={"patch": {k: v for k, v in patch.items()}, "reason": reason},
-            preview=_render_changes(pairs),
-            reversible=True,
-            undo_spec={"kind": UNDO_CONFIG, "before": before},
-            state=STATE_APPLIED,
-            workdir=ctx.workdir,
-            permission_mode=ctx.permission_mode,
+        outcome = apply_config_patch(
+            ctx.settings,
+            dict(args.get("patch") or {}),
+            workdir=str(getattr(ctx, "workdir", "") or ""),
+            permission_mode=str(getattr(ctx, "permission_mode", "default") or "default"),
+            reason=str(args.get("reason") or "").strip(),
+            entry=ENTRY_MODEL,
         )
-        recorded = get_journal().record(rec)
-
-        rows = _render_changes(pairs)
-        tail = [f"已改 {len(pairs)} 项：", rows]
-        if same:
-            tail.append("另 " + "、".join(sp.label for sp in same) + " 本来就是这个值，未动")
-        tail.extend(apply_notes)
-        tail.append(
-            f"回退：/undo（账本 {rec.id[:8]}）" if recorded
-            else "注意：副作用账本已关闭，本次改动无法用 /undo 回退"
-        )
-        return ToolResult.ok("\n".join(tail))
+        return ToolResult.ok(outcome.text) if outcome.ok else ToolResult.error(outcome.text)
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         patch = (args or {}).get("patch") or {}
@@ -261,83 +178,3 @@ def _label_of(key: str) -> str:
     """取某个协议键的中文名（不认识的就用键名本身）。"""
     spec = get_spec(key)
     return spec.label if spec is not None and spec.label else key
-
-
-def _save_batch(pairs: list[tuple[ConfigSpec, Any, Any]]) -> str | None:
-    """逐项落盘；任一项失败则把已写的按原值回写，返回失败项标签（成功返回 None）。"""
-    written: list[tuple[ConfigSpec, Any]] = []
-    for spec, value, old in pairs:
-        if not save_value(spec, value):
-            for done, before in written:
-                save_value(done, before)
-            return spec.label or spec.key
-        written.append((spec, old))
-    return None
-
-
-def _apply_modes(pairs: list[tuple[ConfigSpec, Any, Any]], settings: Any = None) -> list[str]:
-    """按 apply_mode 去重后逐个生效，返回给人看的说明行。
-
-    两种生效途径，区分依据是“要不要宿主”：
-
-    - ``policy``：打扰预算单例是**进程内**的，重建它就等于生效，终端 REPL 也做得到，
-      所以在这里直接做——不需要宿主登记钩子。顺带一句：单例重建不会丢当日计数，
-      ``NotifyBudget`` 的计数是落 ``notify_state.json`` 的。
-    - ``percept`` / ``reschedule``：改的是**宿主装配出来的东西**，只有宿主知道怎么
-      重新装配。宿主登记了钩子就当场生效；没登记（CLI）就如实说“重启后生效”——
-      绝不能让用户以为已经生效了。
-    """
-    notes: list[str] = []
-    seen: set[str] = set()
-    for spec, _value, _old in pairs:
-        if spec.apply_mode == APPLY_LIVE or spec.apply_mode in seen:
-            continue
-        seen.add(spec.apply_mode)
-        if spec.apply_mode == APPLY_POLICY:
-            notes.append(_rebuild_policy(settings))
-            continue
-        ok, lines = run_apply_hooks(spec.apply_mode)
-        if ok:
-            notes.extend(lines or ["已当场生效"])
-        elif lines:
-            # 钩子在但没成功：它自己的说明就是最准的原因（比如总开关关着、
-            # 根本没有总线可重装配）。此时**不能**再拼一句“宿主未接线”——
-            # 那是另一回事，两句放一起会让人去查本来就没坏的接线。
-            notes.extend(f"已保存；{line}" for line in lines)
-        else:
-            notes.append("已保存；当前宿主没有接生效回调（终端场景），重启后端后生效")
-    return notes
-
-
-def _rebuild_policy(settings: Any) -> str:
-    """重建打扰预算单例（``init_policy`` 顺手把 ``_budget_singleton`` 置空）。"""
-    try:
-        from agent.core.policy import init_policy
-
-        init_policy(settings)
-    except Exception as e:  # noqa: BLE001 - 生效失败要如实回执，不能谎报成功
-        return f"已保存；打扰预算重建失败（{type(e).__name__}），重启后端后生效"
-    return "打扰预算已按新参数当场重建（当日计数不清零）"
-
-
-def _render_changes(pairs: list[tuple[ConfigSpec, Any, Any]]) -> str:
-    """把"原值 → 新值"渲染成给人看的几行。"""
-    rows = [
-        f"- {sp.label}：{human_value(sp, old)} → {human_value(sp, new)}"
-        for sp, new, old in pairs
-    ]
-    if len(rows) > _MAX_ROWS:
-        rows = rows[:_MAX_ROWS] + [f"- …另 {len(pairs) - _MAX_ROWS} 项"]
-    return "\n".join(rows)
-
-
-def _render_list(rows: list[dict[str, Any]]) -> str:
-    """配置清单的可读渲染（模型与终端都看这一份）。"""
-    if not rows:
-        return "没有可调整的配置项"
-    lines = [f"可调整的配置（{len(rows)} 项）："]
-    for row in rows:
-        flag = "需确认" if row["tier"] == TIER_CONFIRM else "可直接改"
-        lines.append(f"- {row['key']}｜{row['label']}：{row['value_text']}"
-                     f"（{flag}）—— {row['hint']}")
-    return "\n".join(lines)

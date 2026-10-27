@@ -50,6 +50,8 @@ def _print_help(ui: RichCLI) -> None:
         "  /doctor      系统诊断（环境/配置/日志/迁移状态）\n"
         "  /update      检查并升级 jarvis 到最新版本（重启生效）\n"
         "  /config show 查看当前生效的完整配置（含 MCP 状态）\n"
+        "  /config list 列出可以改的配置项（协议键/当前值/要不要确认）\n"
+        "  /config set 改一项配置（需确认的项先给预览，再加 --yes 执行）\n"
         "  /save [name] 保存当前会话\n"
         "  /load [前缀]  前缀匹配加载会话（支持模糊输入）\n"
         "  /loads       列出并选择已保存会话\n"

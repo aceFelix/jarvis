@@ -1,8 +1,23 @@
-"""配置查看命令处理器。
+"""配置命令处理器。
 
-U-05 改进项：`jarvis config show` / `/config show` ——
-展示当前生效的完整配置（含多层合并结果），包含 LLM、语音、权限、
-工具、MCP 状态、自定义模型、环境变量覆盖。
+两类能力：
+
+1. `jarvis config show` / `/config show`（U-05）——查看当前生效的完整配置
+   （含多层合并结果）：LLM、语音、权限、工具、MCP 状态、自定义模型、环境变量覆盖。
+2. `/config list` / `/config set`（阶段 12 P2）——与模型侧的 `ConfigList` /
+   `ConfigSet` 走**同一条写入路径**（`agent/config/config_ops.py`），只是入口不同：
+   人手敲的命令不需要经过权限管线审批，但需要自己拥有最终决定权。
+
+两个入口的边界分工：
+
+| 入口 | 谁在改 | 禁改项 | `confirm` 项怎么过 |
+|---|---|---|---|
+| `ConfigSet`（模型） | 模型提议 | 权限层 DENY | W1 管线的 ASK 弹框 |
+| `/config set`（人） | 人自己 | 同样拒绝（护栏是配置本身的属性）| **两段式**：先看预览，再加 `--yes` |
+
+为什么终端用两段式而不是交互 prompt：REPL 的主循环不接受嵌套输入，而且
+“先看一眼原值 → 新值再决定”比一个 y/N 弹框更有信息量。这与 `/memory sync`
+预览 + `yes` 确认同一体例。
 
 @author aceFelix
 """
@@ -12,6 +27,21 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from agent.config.config_ops import (
+    ENTRY_TERMINAL,
+    apply_config_patch,
+    parse_cli_value,
+    render_cli_value,
+    render_spec_list,
+)
+from agent.config.config_specs import (
+    TIER_CONFIRM,
+    forbidden_reason,
+    get_spec,
+    human_value,
+    read_value,
+    validate_value,
+)
 from agent.ui.markdown_renderer import render_table, render_panel
 from agent.utils.mask import mask_key as _mask_key
 
@@ -233,10 +263,134 @@ def _show_config(
     _show_env_overrides(ui)
 
 
-def handle_config_show(ctx: "CommandContext", stripped: str) -> bool:
-    """处理 /config show：展示当前生效的完整配置。
+def _esc(text: str) -> str:
+    """Rich 标记转义。
+
+    配置值可能带方括号（路径里的 ``[x]``、名单项），而 `ui.info` 走 Rich、markup
+    默认开启——不转义会把方括号当样式标签吞掉，形成"终端少字、桌面正常"的假象
+    （同 ask_user 方括号吞字案）。rich 缺失时原样返回。
 
     @author aceFelix
     """
-    _show_config(ctx.ui, ctx.settings, ctx.provider, ctx.mcp_client)
+    try:
+        from rich.markup import escape
+
+        return escape(str(text))
+    except Exception:  # noqa: BLE001 - 无 rich 就退化成纯文本
+        return str(text)
+
+
+_CONFIG_USAGE = (
+    "用法：\n"
+    "  /config                     查看当前生效的完整配置\n"
+    "  /config show                同上\n"
+    "  /config list                列出可以改哪些项（协议键 / 当前值 / 要不要确认）\n"
+    "  /config set <键> <值>        改一项（需确认的项会先给预览）\n"
+    "  /config set <键> <值> --yes  确认执行\n"
+    "  清空名单类：/config set <键> \"\""
+)
+
+
+def _handle_list(ctx: "CommandContext") -> None:
+    """/config list：与模型侧 ConfigList 同一份渲染（含当前值与否需要确认）。"""
+    if ctx.settings is None:
+        ctx.ui.warn("当前没有配置实例")
+        return
+    ctx.ui.info(_esc(render_spec_list(ctx.settings)))
+    ctx.ui.info("用法：/config set <键> <值>（需确认的项会先给预览，再加 --yes 执行）")
+
+
+def _handle_set(ctx: "CommandContext", body: str) -> None:
+    """/config set <键> <值> [--yes]：两段式改动，与模型侧同一条写入路径。"""
+    if ctx.settings is None:
+        ctx.ui.warn("当前没有配置实例")
+        return
+
+    # --yes 先从整串里拿掉：这样名单类的值里带空格也不影响解析
+    confirmed = False
+    for flag in ("--yes", "-y"):
+        if flag in body.split():
+            confirmed = True
+            body = " ".join(tok for tok in body.split() if tok != flag)
+
+    key, _, raw = body.strip().partition(" ")
+    key = key.strip()
+    raw = raw.strip()
+    if not key:
+        ctx.ui.info(_CONFIG_USAGE)
+        return
+
+    why = forbidden_reason(key)
+    if why:
+        # 护栏是配置本身的属性：人能改的边界与模型一样（改这里等于改护栏的实现）
+        ctx.ui.warn(f"{key} 是禁改项：{why}")
+        ctx.ui.info("请直接编辑 ~/.jarvis/settings.toml。")
+        return
+
+    spec = get_spec(key)
+    if spec is None:
+        ctx.ui.warn(f"不认识的配置项 {key}")
+        ctx.ui.info("用 /config list 看可用键。")
+        return
+
+    # 名单类允许清空，但必须显式写一对引号——裸写一个键就清空太容易误伤
+    if not raw:
+        if spec.kind == "list":
+            ctx.ui.info(f"要清空清单请写：/config set {key} \"\"")
+        else:
+            ctx.ui.info(_CONFIG_USAGE)
+        return
+
+    # 先按类型转换再校验：预览里显示的必须是规范化之后的值（而不是原始串）。
+    # `""` → 清空名单这层判断在 parse_cli_value 里（与回显保持逆运算关系）。
+    value = parse_cli_value(spec, raw)
+    try:
+        value = validate_value(spec, value)
+    except ValueError as e:
+        ctx.ui.warn(str(e))
+        return
+
+    old = read_value(ctx.settings, spec)
+    if spec.tier == TIER_CONFIRM and not confirmed:
+        ctx.ui.info(
+            f"这是一项需要确认的配置：{_esc(spec.label)}\n"
+            f"  {_esc(human_value(spec, old))} → {_esc(human_value(spec, value))}\n"
+            f"  为什么要问：{_esc(spec.hint)}\n"
+            f"确认请再执行：/config set {key} {_esc(render_cli_value(spec, value))} --yes"
+        )
+        return
+
+    outcome = apply_config_patch(
+        ctx.settings,
+        {key: value},
+        workdir=str(getattr(getattr(ctx, "ctx", None), "workdir", "") or ""),
+        permission_mode=str(getattr(ctx.settings, "permission_mode", "default") or "default"),
+        reason="terminal /config set",
+        entry=ENTRY_TERMINAL,
+    )
+    if outcome.ok:
+        ctx.ui.info(_esc(outcome.text))
+    else:
+        ctx.ui.warn(_esc(outcome.text))
+
+
+def handle_config_show(ctx: "CommandContext", stripped: str) -> bool:
+    """处理 /config [show|list|set …]：一个入口三种能力。
+
+    ``/config`` 与 ``/config show`` 保持原行为（全量自查面板）；其余子命令分派到
+    上面两个处理函数；不认识的子命令给用法而不是默默打印一屏配置。
+
+    @author aceFelix
+    """
+    parts = stripped.split(maxsplit=2)
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    if sub == "list":
+        _handle_list(ctx)
+    elif sub == "set":
+        _handle_set(ctx, parts[2] if len(parts) > 2 else "")
+    elif sub in ("", "show"):
+        _show_config(ctx.ui, ctx.settings, ctx.provider, ctx.mcp_client)
+    else:
+        ctx.ui.warn(f"不认识的子命令 {sub}")
+        ctx.ui.info(_CONFIG_USAGE)
     return True

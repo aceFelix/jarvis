@@ -232,13 +232,16 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; .venv\Scripts\python.exe -m p
 cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run typecheck; npm run build
 ```
 
-基线（2026-10-26，含阶段 12 自配置层 + 配置变更广播的新增用例）：jarvis **3377 passed**；
+基线（2026-10-27，含阶段 12 P1 自配置层 + P2 面板派生与终端入口）：jarvis **3472 passed**；
 桌面 **535 passed** + typecheck + build 全绿；
 死链门禁 `python scripts/check_md_links.py` → dead 0 / untracked 0。
 
 > 阶段 11 收尾时的基线是 3263；阶段 12 P1 新增 105 例（真源表 / 两个工具 / 宿主
-> 生效钩子 / 提示词段四份测试）；手测发现的「面板不跟新值」又补了 9 例后端
-> （变更监听器 3 + 工具广播 4 + 宿主事件 2）与 7 例桌面（`dispatcherSettings.test.ts`）。
+> 生效钩子 / 提示词段四份测试）；手测发现的「面板不跟新值」补了 9 例后端
+> （变更监听器 3 + 工具广播 4 + 宿主事件 2）与 7 例桌面（`dispatcherSettings.test.ts`）；
+> P2 面板派生又补 58 例（派生一致性守卫 49 + 列表类 3 + 改写的分级不变量 6）；
+> P2 终端入口再补 37 例（`test_config_set_command.py`：值解析/回显互逆 / 两段式 /
+> 禁改 / 用法边界），这段重构本身零回归（搬家前的工具测试全绿）。
 > 数字只管看"有没有少例"，不必较真——**绿比数字重要**。
 
 ## 6. 收尾

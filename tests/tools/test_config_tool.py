@@ -412,6 +412,40 @@ def test_broken_listener_does_not_fail_the_tool(ctx):
     assert ctx.settings.tts_volume == 30
 
 
+# ---- 列表类配置（P2 新对模型开放的那批）----
+
+
+def test_list_item_is_broadcast_and_applied(ctx):
+    """名单类（守望目录）能改：落盘 + 改运行时 + 广播 + 回执用人话。"""
+    seen: list[dict] = []
+    register_change_listener(seen.append)
+    res = _run(
+        ConfigSetTool(),
+        {"patch": {"window_exclude_apps": ["1Password", " KeePass "]}},
+        ctx,
+    )
+    assert res.is_error is False
+    assert ctx.settings.percept_window_exclude_apps == ["1Password", "KeePass"]  # strip 过
+    assert seen[0] == {"window_exclude_apps": ["1Password", "KeePass"]}
+    # 回执不能吐 Python 列表的方括号与引号（用户要看的是"排除了哪几个"）
+    assert "1Password、KeePass" in res.data
+    assert "[" not in res.data.split("：", 1)[-1] or "[]" in res.data
+
+
+def test_list_item_rejects_non_strings(ctx):
+    """名单里混进数字要拒——否则会把 `1` 当目录名写进配置。"""
+    res = _run(ConfigSetTool(), {"patch": {"vcs_repos": ["E:/repo", 1]}}, ctx)
+    assert res.is_error is True and "字符串" in res.data
+
+
+def test_empty_list_reads_back_as_empty_not_tuple(ctx):
+    """读回来的空名单必须是 []（面板前端只认数组，拿到 () 会渲染成空白单元格）。"""
+    from agent.config.config_specs import get_spec, read_value
+
+    spec = get_spec("file_watch_dirs")
+    assert isinstance(read_value(ctx.settings, spec), list)
+
+
 # ---- ConfigList ----
 
 

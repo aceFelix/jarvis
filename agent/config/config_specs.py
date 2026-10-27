@@ -42,6 +42,14 @@ TIER_AUTO = "auto"            # 模型可直接改（纯表达层）
 TIER_CONFIRM = "confirm"      # 模型必须先问一句（涉及打断时机 / 工作范围）
 TIER_FORBIDDEN = "forbidden"  # 一律拒绝（权限与凭据本身）
 
+# ---- 哪些面板给我留了位置（视图层元数据，与 tier 正交）----
+#
+# tier 管的是"模型能不能改"，panels 管的是"哪个界面能改"——两件事必须分开：
+# `log_events` 面板能改（人是主人），模型不能改（`forbidden`）；反过来
+# `quiet_hours` 模型能改（confirm），面板却不给位置（打扰预算只在协议里调）。
+PANEL_DESKTOP = "desktop-settings"   # 桌面「[SET] 设置面板」（settings.get/set）
+PANEL_PERCEPT = "percept-panel"      # 「管家服务 → 感知源」（percept.config.set）
+
 # ---- 改完怎么生效 ----
 APPLY_LIVE = "live"            # 现读即生效（tts 每次播报现读 settings）
 APPLY_POLICY = "policy"        # 打扰预算单例是懒建的进程内快照 → 须重建单例
@@ -57,7 +65,7 @@ QUIET_HOURS_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$"
 
 @dataclass(frozen=True)
 class ConfigSpec:
-    """单个可改配置项的元数据（协议键 = 模型/终端/面板统一使用的名字）。
+    """单个可改配置项的元数据（协议键 = 模型/终端统一使用的名字）。
 
     Attributes:
         key: 协议键（``ConfigSet`` 的入参名）。
@@ -68,7 +76,10 @@ class ConfigSpec:
         label: 中文标题（面板、播报、回执共用，避免三处文案各写一份）。
         hint: 一句人话——"改它会发生什么"，模型据此向用户解释。
         tier: auto / confirm / forbidden。
-        apply_mode: live / percept / reschedule / restart。
+        apply_mode: live / policy / percept / reschedule / restart。
+        panels: 哪些面板能改它（``PANEL_DESKTOP`` / ``PANEL_PERCEPT``）；
+            空集合 = 只能通过模型工具或手改 TOML。面板与协议方案都从本表
+            派生，所以这一列是"两边可改项"的唯一出处。
         lo / hi: 数值范围（含边界）。
         default: 出厂缺省（读侧属性缺失时回退；None 表示按类型零值）。
     """
@@ -82,89 +93,135 @@ class ConfigSpec:
     hint: str
     tier: str = TIER_AUTO
     apply_mode: str = APPLY_LIVE
+    panels: frozenset[str] = frozenset()
     lo: float | None = None
     hi: float | None = None
     default: Any = None
 
+
+#: 两个面板的可改集（表里每项直接引用，不要另写一份键名列表——那就是第四份漂移）
+_DESKTOP = frozenset({PANEL_DESKTOP})
+_PERCEPT = frozenset({PANEL_PERCEPT})
 
 #: 可改配置项（顺序即 ``ConfigList`` 的展示顺序：先表达层，再确认层）
 CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     # ---- 声音表达层（auto，live）----
     ConfigSpec(
         "tts_volume", "tts", "volume", "tts_volume", "int",
-        "播报音量", "系统朗读时有多大声音（0 静音 / 100 最大）", lo=0, hi=100, default=50,
+        "播报音量", "系统朗读时有多大声音（0 静音 / 100 最大）",
+        panels=_DESKTOP, lo=0, hi=100, default=50,
     ),
     ConfigSpec(
         "tts_speech_rate", "tts", "speech_rate", "tts_speech_rate", "float",
-        "语速倍率", "朗读速度，1.0 是常速，越大越快", lo=0.5, hi=2.0, default=1.0,
+        "语速倍率", "朗读速度，1.0 是常速，越大越快",
+        panels=_DESKTOP, lo=0.5, hi=2.0, default=1.0,
     ),
     ConfigSpec(
         "proactive_tts_enabled", "daemon", "proactive_tts_enabled",
         "proactive_tts_enabled", "bool",
-        "主动播报是否出声", "关掉后主动提醒只上屏、不朗读（静默但不丢消息）", default=True,
+        "主动播报是否出声", "关掉后主动提醒只上屏、不朗读（静默但不丢消息）",
+        panels=_DESKTOP, default=True,
     ),
     # ---- 简报 / 截止日期（auto，reschedule）----
     ConfigSpec(
         "briefing_enabled", "daemon", "briefing_enabled", "briefing_enabled", "bool",
         "每日简报开关", "每天固定时间播一次今日概览（提醒/节假日/截止/日程）",
-        apply_mode=APPLY_RESCHEDULE, default=False,
+        apply_mode=APPLY_RESCHEDULE, panels=_DESKTOP, default=False,
     ),
     ConfigSpec(
         "briefing_time", "daemon", "briefing_time", "briefing_time", "time",
         "简报时间", "每日简报在几点播（HH:MM，24 小时制）",
-        apply_mode=APPLY_RESCHEDULE, default="08:30",
+        apply_mode=APPLY_RESCHEDULE, panels=_DESKTOP, default="08:30",
     ),
     ConfigSpec(
         "deadline_enabled", "deadline", "enabled", "deadline_enabled", "bool",
         "截止日期提醒开关", "是否每天检查截止日期并提醒（7/3/1/0 天分级）",
-        apply_mode=APPLY_RESCHEDULE, default=False,
+        apply_mode=APPLY_RESCHEDULE, panels=_DESKTOP, default=False,
     ),
     ConfigSpec(
         "deadline_check_time", "deadline", "check_time", "deadline_check_time", "time",
         "截止日期检查时间", "每天几点检查一遍活跃截止日期（HH:MM）",
-        apply_mode=APPLY_RESCHEDULE, default="09:00",
+        apply_mode=APPLY_RESCHEDULE, panels=_DESKTOP, default="09:00",
     ),
     # ---- 感知层逐源（auto，percept）----
     ConfigSpec(
         "window_enabled", "percept", "window_enabled", "percept_window_enabled", "bool",
         "前台窗口感知", "记「切到哪个应用」；标题脱敏、密码类应用零事件",
-        apply_mode=APPLY_PERCEPT,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT,
     ),
     ConfigSpec(
         "file_enabled", "percept", "file_enabled", "percept_file_enabled", "bool",
         "目录堆积感知", "盯白名单目录的新增文件（需先配守望目录）",
-        apply_mode=APPLY_PERCEPT,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT,
     ),
     ConfigSpec(
         "vcs_enabled", "percept", "vcs_enabled", "percept_vcs_enabled", "bool",
         "仓库状况感知", "只跑 git status / stash list 两条只读命令",
-        apply_mode=APPLY_PERCEPT,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT,
     ),
     ConfigSpec(
         "mail_enabled", "percept", "mail_enabled", "percept_mail_enabled", "bool",
         "重要来信感知", "IMAP 只读取信封头（需先配邮箱）",
-        apply_mode=APPLY_PERCEPT,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT,
     ),
     ConfigSpec(
         "vision_enabled", "percept", "vision_enabled", "percept_vision_enabled", "bool",
         "摄像头在场感知", "唯一会碰摄像头的源，画面不出本机",
-        apply_mode=APPLY_PERCEPT, default=False,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=False,
     ),
     ConfigSpec(
         "calendar_enabled", "percept", "calendar_enabled", "percept_calendar_enabled",
         "bool", "日历事件感知", "日程进入提前窗口时报一次（后端取 [calendar] 段）",
-        apply_mode=APPLY_PERCEPT, default=False,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=False,
     ),
     ConfigSpec(
         "system_enabled", "percept", "system_enabled", "percept_system_enabled", "bool",
         "系统资源感知", "CPU/内存/磁盘阈值告警（阈值取 [monitor] 那一组）",
-        apply_mode=APPLY_PERCEPT, default=False,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=False,
     ),
     ConfigSpec(
         "window_linger_minutes", "percept", "window_linger_minutes",
         "percept_window_linger_minutes", "int",
         "停留提醒阈值（分钟）", "同一应用停留超过这么久才提一句，0 = 不提",
-        apply_mode=APPLY_PERCEPT, lo=0, hi=1440, default=0,
+        apply_mode=APPLY_PERCEPT, panels=_PERCEPT, lo=0, hi=1440, default=0,
+    ),
+    # ---- 感知层：面板早就能改、但 P1 真源表里没登记的那 6 项（P2 补齐）----
+    #
+    # 补上来才可能让感知面板从本表派生；同时把它们对模型的口径一次说清：
+    # 名单类与摄像头时长改的是“看什么/看多久”，归 confirm；留痕开关归 forbidden。
+    ConfigSpec(
+        "file_watch_dirs", "percept", "file_watch_dirs", "percept_file_watch_dirs", "list",
+        "守望目录", "目录堆积只盯这几个绝对路径；空 = 一个目录也不盯",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=(),
+    ),
+    ConfigSpec(
+        "vcs_repos", "percept", "vcs_repos", "percept_vcs_repos", "list",
+        "登记仓库", "仓库状况只查这几个仓（绝对路径）；空 = 一个也不查",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=(),
+    ),
+    ConfigSpec(
+        "mail_watch_senders", "percept", "mail_watch_senders",
+        "percept_mail_watch_senders", "list",
+        "发件人白名单", "重要来信只报这几个发件人；空 = 不筛发件人",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=(),
+    ),
+    ConfigSpec(
+        "window_exclude_apps", "percept", "window_exclude_apps",
+        "percept_window_exclude_apps", "list",
+        "排除应用", "列在这里的应用全程不记（密码管理器等）",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=(),
+    ),
+    ConfigSpec(
+        "vision_auto_stop_minutes", "percept", "vision_auto_stop_minutes",
+        "percept_vision_auto_stop_minutes", "int",
+        "摄像头空闲自动关闭（分钟）", "没人也没动静这么久就松开摄像头，0 = 不自动关闭",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT,
+        lo=0, hi=1440, default=0,
+    ),
+    ConfigSpec(
+        "log_events", "percept", "log_events", "percept_log_events", "bool",
+        "感知事件本地留痕", "把采到的事件写进本地 jsonl（面板的事件页读它）",
+        tier=TIER_FORBIDDEN, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=True,
     ),
     # ---- 需要确认的（confirm）：涉及"何时能打断用户"或"干什么活" ----
     ConfigSpec(
@@ -191,7 +248,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ConfigSpec(
         "percept_enabled", "percept", "enabled", "percept_enabled", "bool",
         "感知层总开关", "总开关关掉则所有感知源一起停（逐源开关全部失效）",
-        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, default=False,
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, panels=_PERCEPT, default=False,
     ),
     ConfigSpec(
         "tasks_enabled", "tasks", "enabled", "tasks_enabled", "bool",
@@ -217,6 +274,7 @@ FORBIDDEN_SPECS: dict[str, str] = {
     "sandbox_enabled": "沙箱是权限护栏本身，模型改它等于给自己提权",
     "sandbox_auto_allow_medium": "决定中等风险命令能否不经人确认就执行，模型改它等于给自己提权",
     "sandbox_excluded_commands": "豁免名单能让指定命令绕过沙箱，模型改它等于给自己开后门",
+    "log_events": "本地留痕是感知行为的唯一审计线，模型关它等于让自己的采集不留证据",
     "api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
     "email_smtp_password": "邮箱密码是凭据，只能由人填，模型不碰",
     "email_imap_password": "邮箱密码是凭据，只能由人填，模型不碰",
@@ -325,14 +383,62 @@ _KIND_ZERO: dict[str, Any] = {
     "bool": False, "int": 0, "float": 0.0, "time": "", "quiet": "", "list": [],
 }
 
+# ---- 列表项护栏（模型与面板共用一份）----
+#: 列表最多多少项（防止把 settings.toml 写成几万行的巨型数组）
+LIST_MAX_ITEMS = 50
+#: 单项最长字符数
+LIST_MAX_ITEM_CHARS = 500
+
+
+def clean_list(value: Any, *, name: str = "列表项") -> list[str]:
+    """列表规范化：非列表拒绝，逐项转字符串 + strip + 丢空 + 按序去重 + 上限校验。
+
+    模型侧（``validate_value``）与感知面板侧（``validate_percept_config``）
+    共用这一份：同一份配置俩入口各写一套清洗规则，迟早一处放行一处拒。
+
+    Raises:
+        ValueError: 非列表 / 含非字符串 / 单项过长 / 项数超限。
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{name} 必须为字符串数组")
+    out: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            raise ValueError(f"{name} 只能包含字符串")
+        item = raw.strip()
+        if not item or item in out:
+            continue
+        if len(item) > LIST_MAX_ITEM_CHARS:
+            raise ValueError(f"{name} 单项过长（上限 {LIST_MAX_ITEM_CHARS} 字符）")
+        out.append(item)
+    if len(out) > LIST_MAX_ITEMS:
+        raise ValueError(f"{name} 最多 {LIST_MAX_ITEMS} 项")
+    return out
+
 
 def read_value(settings: Any, spec: ConfigSpec) -> Any:
     """读运行时当前值（属性缺失时回退出厂缺省，而不是一律给零值）。
 
     ``log_events`` 这类"默认开"的字段如果按零值回 False，用户会看到
     "我明明没关它" —— 与 ``percept_settings.read_percept_config`` 同口径。
+
+    list 类型有两个坑，都在这里钉住：
+
+    - 缺省可能是不可变空元组（dataclass 不容可变缺省），**必须转回 list**，
+      否则面板拿到 `()` 而前端 `toStringList` 只认数组；
+    - 一律返回**新列表**，不能把 `_KIND_ZERO["list"]` 这个共享对象递出去——
+      调用方 append 一下就会污染全局零值。
+
+    读侧刻意不做``clean_list``那套上限校验：手改的 TOML 里写了 60 条名单
+    也该如实显示（读不该报错），清洗是写入侧的事。
     """
     value = getattr(settings, spec.attr, None) if settings is not None else None
+    if spec.kind == "list":
+        if value is None:
+            return list(spec.default if spec.default is not None else ())
+        return [str(v).strip() for v in value if str(v).strip()]
     if value is None:
         return spec.default if spec.default is not None else _KIND_ZERO[spec.kind]
     if spec.kind == "bool":
@@ -341,8 +447,6 @@ def read_value(settings: Any, spec: ConfigSpec) -> Any:
         return int(value)
     if spec.kind == "float":
         return float(value)
-    if spec.kind == "list":
-        return [str(v) for v in (value or ())]
     return str(value)
 
 
@@ -373,9 +477,7 @@ def validate_value(spec: ConfigSpec, value: Any) -> Any:
             raise ValueError(f"{spec.key} 必须是 HH:MM-HH:MM（如 23:00-07:00；留空=不设静默）")
         return value
     if spec.kind == "list":
-        if not isinstance(value, (list, tuple)):
-            raise ValueError(f"{spec.key} 必须是列表")
-        return [str(v).strip() for v in value if str(v).strip()]
+        return clean_list(value, name=spec.key)
     raise ValueError(f"{spec.key} 的类型 {spec.kind} 尚未支持")
 
 
@@ -413,7 +515,11 @@ def apply_value(settings: Any, spec: ConfigSpec, value: Any) -> None:
 
 
 def human_value(spec: ConfigSpec, value: Any) -> str:
-    """值的人话表示（回执与播报用：布尔写"开/关"，空串写"未设"）。"""
+    """值的人话表示（回执与播报用：布尔写"开/关"，空串写"未设"）。
+
+    列表类必须单独处理：`str(['E:/a'])` 会在回执里括出 Python 列表的方括号与引号，
+    用户看到的是一条"程序内部的字符串"而不是"守望哪几个目录"。
+    """
     if spec.kind == "bool":
         return "开" if value else "关"
     if spec.kind == "quiet":
@@ -422,9 +528,21 @@ def human_value(spec: ConfigSpec, value: Any) -> str:
         return str(value) or "未设"
     if spec.kind == "float":
         return f"{float(value):g}"
+    if spec.kind == "list":
+        items = [str(v) for v in (value or ())]
+        return "、".join(items) if items else "（空）"
     return str(value)
 
 
 def list_specs(*, tiers: tuple[str, ...] = (TIER_AUTO, TIER_CONFIRM)) -> tuple[ConfigSpec, ...]:
     """按分级列出可展示的 spec（默认不含 forbidden——连名字都不给）。"""
     return tuple(s for s in CONFIG_SPECS if s.tier in tiers)
+
+
+def panel_specs(panel: str) -> tuple[ConfigSpec, ...]:
+    """某个面板能改的全部 spec（顺序即表内顺序）。
+
+    面板与协议白名单都从这里派生：新增一项只改真源表一处，面板自动跟上，
+    不必再去另一份键名列表里补一遍。
+    """
+    return tuple(s for s in CONFIG_SPECS if panel in s.panels)
