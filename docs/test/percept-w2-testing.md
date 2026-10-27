@@ -232,7 +232,7 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; .venv\Scripts\python.exe -m p
 cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run typecheck; npm run build
 ```
 
-基线（2026-10-27，含阶段 12 P1 自配置层 + P2 面板派生与终端入口）：jarvis **3472 passed**；
+基线（2026-10-27，含阶段 12 P1–P4 自配置层全量）：jarvis **3632 passed**；
 桌面 **535 passed** + typecheck + build 全绿；
 死链门禁 `python scripts/check_md_links.py` → dead 0 / untracked 0。
 
@@ -240,8 +240,17 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run
 > 生效钩子 / 提示词段四份测试）；手测发现的「面板不跟新值」补了 9 例后端
 > （变更监听器 3 + 工具广播 4 + 宿主事件 2）与 7 例桌面（`dispatcherSettings.test.ts`）；
 > P2 面板派生又补 58 例（派生一致性守卫 49 + 列表类 3 + 改写的分级不变量 6）；
-> P2 终端入口再补 37 例（`test_config_set_command.py`：值解析/回显互逆 / 两段式 /
-> 禁改 / 用法边界），这段重构本身零回归（搬家前的工具测试全绿）。
+> P2 终端入口再补 37 例（`test_config_set_command.py`）；
+> P3 偏好账本补 49 例（条件匹配 / auto 域边界 / 闸门施放 / 工具与命令 47 + 提示词 2）；
+> P3 提炼与多决策点再补 28 例（共同上下文 / 候选不生效 / accept 转正 / 拒后不重提）；
+> P4 首启三问再补 32 例（判定 / 台账 / 三问 / /init 分流 / 提议门槛）；
+> P4 实测评测又补 7 例（多程序 `when_app` / 回执带当前前台 / 幽灵条件拦截）；
+> P4 首启改在线模型目录后再补 16 例（`test_model_catalog.py` 12 + 首启流程改造 4）；
+> P4 实测追问“怎么只有一个模型”后补 4 例：拉取失败必须带**具体原因**回给用户；
+> P4 修 `/init` 配完连不上后补 6 例：保存必须热生效到当前会话；
+> P4 第二轮实测后补 18 例：热生效的比较基准必须用旧端点快照（否则复用旧 provider）、
+> 厂商默认地址单一来源（`agent/config/vendors.py` + `test_vendors.py`）、
+> DeepSeek 推断补 `/v1`、编辑时 base_url 留空不覆盖用户地址。
 > 数字只管看"有没有少例"，不必较真——**绿比数字重要**。
 
 ## 6. 收尾

@@ -48,3 +48,6 @@ sessions/
 
 # ---- 文档 ----
 docs/publish
+
+# ---- PowerShell 模块分析缓存（LOCALAPPDATA 缺失时会被写进当前目录，排除误入库）----
+Microsoft/Windows/PowerShell/ModuleAnalysisCache

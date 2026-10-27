@@ -93,25 +93,19 @@ def _infer_model_vendor(model_name: str, cfg: dict[str, Any] | None = None) -> s
 def _infer_base_url(vendor: str, api_format: str) -> str:
     """根据厂商和接口协议推断默认 Base URL。
 
-    DashScope / 智谱 ZhipuAi SDK 模式由 SDK 内部管理 endpoint，无需 base_url。
-    其他未知厂商返回空字符串，由用户手动填写。
+    **不在这里维护第二张表**：厂商 → 默认地址的单一来源是
+    ``agent/config/vendors.py``（首启 `/init` 也用同一份）。历史上两处各写一份，
+    立刻漂移成「DeepSeek 少了 `/v1`、小米 MiMo 只在一边有」——首启配的能连通，
+    用 `/models` 添加的同厂商模型连不通。
+
+    DashScope / 智谱 ZhipuAi SDK 模式由 SDK 内部管理 endpoint，返回空串；
+    未知厂商同样返回空串，由用户手动填写。
 
     @author aceFelix
     """
-    if api_format in ("dashscope", "zai"):
-        return ""
-    urls = {
-        "deepseek": "https://api.deepseek.com",
-        "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "zhipu": "https://open.bigmodel.cn/api/paas/v4",
-        "moonshot": "https://api.moonshot.cn/v1",
-        "minimax": "https://api.minimax.chat/v1",
-        "siliconflow": "https://api.siliconflow.cn/v1",
-        "google": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "openai": "https://api.openai.com/v1",
-        "anthropic": "https://api.anthropic.com",
-    }
-    return urls.get(vendor, "")
+    from agent.config.vendors import default_base_url
+
+    return default_base_url(vendor, api_format)
 
 
 def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
@@ -440,6 +434,8 @@ def _build_switched_provider(
     settings: Settings,
     provider: object,
     model_name: str,
+    *,
+    baseline: Settings | None = None,
 ) -> tuple[object, str, Settings]:
     """按目标模型构造 provider（REPL /model 与工作台热切换共用）。
 
@@ -456,6 +452,12 @@ def _build_switched_provider(
             复用到内置端点的 provider。
         provider: 当前 provider（复用判定用）。
         model_name: 目标模型名。
+        baseline: **运行中 provider 实际是用哪份配置建的**。与 settings 分开是为了
+            `/init` 那条路：它先把新值写回 ``ctx.settings``（原地改，别的模块
+            持有同一引用），再调这里切模型。若拿被改过的 settings 当比较基准，
+            「差异」早被自己抹掉了 → 永远判定无需重建 → 复用启动时那个旧
+            provider，于是「✓ 连接成功」之后下一句话仍打旧端点/旧 key。
+            None 表示沿用 settings（调用方保证 settings 就是运行中那份快照）。
 
     Returns:
         ``(provider, model_desc, used_settings)``：新 provider（可能是入参本身）、
@@ -466,6 +468,8 @@ def _build_switched_provider(
     """
     new_provider = provider
     new_is_custom = model_name in settings.custom_models
+    # 比较基准：运行中 provider 的端点，而不是「刚写进去的新值」
+    base = baseline if baseline is not None else settings
 
     # 延迟导入 _build_provider，避免 model_manager 与 bootstrap 模块循环引用
     from agent.bootstrap import _build_provider
@@ -475,14 +479,14 @@ def _build_switched_provider(
         cfg = settings.custom_models[model_name]
         # 兼容旧字段名 provider_type
         api_fmt = cfg.get("api_format") or cfg.get("provider_type", "openai")
-        current_ptype = settings.api_format.lower()
+        current_ptype = base.api_format.lower()
         needs_new_provider = False
 
         if api_fmt.lower() != current_ptype:
             needs_new_provider = True
-        elif cfg.get("base_url") and cfg["base_url"] != settings.base_url:
+        elif cfg.get("base_url") and cfg["base_url"] != base.base_url:
             needs_new_provider = True
-        elif cfg.get("api_key") and cfg["api_key"] != settings.api_key:
+        elif cfg.get("api_key") and cfg["api_key"] != base.api_key:
             needs_new_provider = True
 
         mtype = cfg.get("model_type", "multimodal")
@@ -539,18 +543,25 @@ def _switch_model(
     orchestrator: object,
     system_prompt: str,
     model_name: str,
+    *,
+    baseline: Settings | None = None,
 ) -> tuple[object, object, str] | None:
     """切换模型并返回新的 (provider, loop, model_name)。
 
     如果自定义模型指定了不同的 api_format/base_url/api_key，会重建 provider
     （见 _build_switched_provider）。Returns None 表示无需切换。
+
+    Args:
+        baseline: 运行中 provider 的端点快照；`/init` 那种「先改 settings 再切」
+            的调用方必须传，否则差异被自己抹掉、复用旧 provider。详见
+            `_build_switched_provider`。
     """
     old_model = getattr(provider, '_model', '')
     if model_name == old_model:
         return None
 
     new_provider, model_desc, _used_settings = _build_switched_provider(
-        settings, provider, model_name
+        settings, provider, model_name, baseline=baseline
     )
     # 记录当前模型名，供下次 _switch_model 判断是否需要重置
     new_provider._model = model_name

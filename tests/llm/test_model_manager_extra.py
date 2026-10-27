@@ -197,7 +197,9 @@ class TestAddCustomModelFlow:
         assert cfg["provider"] == "deepseek"
         assert cfg["api_format"] == "openai"
         assert cfg["model_type"] == "text"
-        assert cfg["base_url"] == "https://api.deepseek.com"  # Base URL 空自动推断
+        # Base URL 留空 → 按厂商推断，必须与首启表同一个地址（含 `/v1`）。
+        # 旧实现少了 `/v1`，导致 `/models` 加的 DeepSeek 模型连不通。
+        assert cfg["base_url"] == "https://api.deepseek.com/v1"
         save_mock.assert_called_once()
         assert any("已添加" in c[1] for c in ui.calls if c[0] == "info")
 
@@ -465,6 +467,46 @@ class TestBuildSwitchedProvider:
         assert used is settings
         assert provider.model_type == "text"  # 同厂商不同模型可能 text/multimodal
         assert desc == "纯文本（DeepSeek）"  # 文本模型带禁用视觉提示
+        build_mock.assert_not_called()
+
+    def test_baseline_triggers_rebuild_when_settings_already_updated(self, monkeypatch) -> None:
+        """回归（真机）：`/init` 先把新值原地写回 settings 再切模型。
+
+        这时 settings 与 cfg **永远相等**，若拿它当比较基准，就一直判定
+        “无需重建”而复用启动时那个旧 provider（旧 base_url / 旧 key），
+        用户看到“✓ 连接成功”后下一句话仍报 Connection error。
+        baseline 传入运行中 provider 的旧端点后，差异才看得见。
+        """
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        # 已被 /init 原地更新的 settings：与 cfg 完全一致
+        settings = _custom_model_settings(base_url="https://api.deepseek.com/v1",
+                                          api_key="new-key")
+        settings.custom_models["deepseek-chat"]["base_url"] = "https://api.deepseek.com/v1"
+        settings.custom_models["deepseek-chat"]["api_key"] = "new-key"
+        # 运行中 provider 的旧端点（启动时 base_url 为空 → 实际连的 SDK 默认地址）
+        baseline = _make_settings(api_format="openai", base_url="", api_key="old-key")
+
+        new_provider, _desc, used = _build_switched_provider(
+            settings, provider, "deepseek-chat", baseline=baseline
+        )
+        build_mock.assert_called_once()          # 有差异 → 必须重建
+        assert new_provider is not provider
+        assert used.base_url == "https://api.deepseek.com/v1"
+        assert used.api_key == "new-key"
+
+    def test_baseline_same_endpoint_still_reuses(self, monkeypatch) -> None:
+        """基线与目标一致时仍然复用（baseline 不破坏原有省重建的行为）。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        settings = _custom_model_settings()
+        baseline = _make_settings(api_format="openai", base_url="https://api.deepseek.com",
+                                  api_key="base-key")
+        new_provider, _desc, used = _build_switched_provider(
+            settings, provider, "deepseek-chat", baseline=baseline
+        )
+        assert new_provider is provider
+        assert used is settings
         build_mock.assert_not_called()
 
     def test_custom_rebuild_returns_new_snapshot(self, monkeypatch) -> None:

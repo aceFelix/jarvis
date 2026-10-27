@@ -119,6 +119,22 @@ def _probe_windows() -> tuple[str, str]:
         raise OSError(f"前台窗口探测不可用: {e}") from e
 
 
+def current_foreground_app() -> str:
+    """取当前前台进程名（给上下文偏好判定用，不产生感知事件）。
+
+    与 ``WindowSource.collect()`` 的区别：这里只为 "此刻在用什么程序" 这个判据
+    服务，不改切窗基线、不入总线、不报故障——采集失败退化成空串（不知道）。
+    否则一道偏好判定失败会连坐感知源停用，代价比收益大。
+
+    @author aceFelix
+    """
+    try:
+        name, _title = _probe_windows()
+        return name or ""
+    except Exception:  # noqa: BLE001 - 无 GUI 会话/无依赖都退化成"不知道"
+        return ""
+
+
 def redact_title(title: str, *, max_chars: int = 40, full: bool = False) -> str:
     """标题脱敏：先剥凭据片段，再按长度截断。
 

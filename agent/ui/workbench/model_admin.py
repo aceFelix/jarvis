@@ -269,7 +269,12 @@ def edit_model(
     model_type = (model_type or defaults["model_type"]).strip() or defaults["model_type"]
     if model_type not in VALID_MODEL_TYPES:
         raise ValueError(f"不支持的模型类型 model_type: {model_type}")
-    base_url = (base_url or "").strip() or _infer_base_url(vendor, api_format)
+    # 留空 = 保持原地址（桌面壳编辑表单不回显完整 url，空值不能解释为
+    # “改回厂商默认”）；原本也没有才按厂商 + 接口类型推断。
+    # 不这样做会把用户手填的自建地址默默换成厂商默认端点。
+    base_url = ((base_url or "").strip()
+                or str(cfg.get("base_url", "") or "")
+                or _infer_base_url(vendor, api_format))
     # 留空 = 保持原 Key（不回显密钥 → 空值不能解释为清空）
     api_key = (api_key or "").strip() or str(cfg.get("api_key", "") or "")
 

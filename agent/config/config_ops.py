@@ -153,7 +153,14 @@ def apply_config_patch(
     before = {spec.key: old for spec, _new, old in pairs}
     rec = EffectRecord(
         tool="ConfigSet",
-        args={"patch": dict(patch), "reason": reason, "entry": entry},
+        args={
+            "patch": dict(patch),
+            "reason": reason,
+            "entry": entry,
+            # 当时的上下文：偏好提炼的唯一原料。不记的话"你总是 22 点后调低音量"
+            # 无从得出，只能靠猜——而靠猜造偏好正是用户最不想要的魔法。
+            "context": _snapshot_context(),
+        },
         preview=_render_changes(pairs),
         reversible=True,
         undo_spec={"kind": UNDO_CONFIG, "before": before},
@@ -231,6 +238,24 @@ def render_cli_value(spec: ConfigSpec, value: Any) -> str:
 
 
 # ---- 内部 helpers ----
+
+
+def _snapshot_context() -> dict[str, Any]:
+    """拍一张"改配置那一刻的上下文"（app + hour）给提炼用。
+
+    故意做重事：不调 `current_context()` 里的前台窗口探测以外的东西，且拿不到就
+    留空——空上下文的记录不会被提炼成偏好（`_common_when` 返回 None），这比
+    "猜一个条件"安全得多。
+
+    @author aceFelix
+    """
+    try:
+        from agent.config import prefs
+
+        ctx = prefs.current_context()
+        return {"app": ctx.get("app") or "", "hour": int(ctx.get("hour", -1))}
+    except Exception:  # noqa: BLE001 - 记账本不该让改配置失败
+        return {}
 
 
 def _forbidden_text(key: str, why: str, entry: str) -> str:

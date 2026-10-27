@@ -72,6 +72,22 @@ _REMINDER_PREFIX = "先生，提醒您："
 
 logger = logging.getLogger("jarvis.serve.hub")
 
+
+def _pref_effective(key: str, base: Any) -> tuple[Any, str]:
+    """取"这个上下文下该项该是多少"；取不到/出任何错一律用原值。
+
+    单独抽一层是为了让"偏好挂了"与"偏好没命中"在调用点长一个样：
+    两者都是原值 + 空原因，不会因为账本坏了让播报从有声变无声。
+
+    @author aceFelix
+    """
+    try:
+        from agent.config import prefs
+
+        return prefs.effective(key, base)
+    except Exception:  # noqa: BLE001 - 偏好求值失败不得影响播报
+        return base, ""
+
 # ---- W2 感知层接线口径（阶段 9 第 4 步）----
 
 #: 感知事件播报的桌面渲染 kind。桌面壳 dispatcher 对未知 kind 走默认渲染
@@ -737,12 +753,19 @@ class ProactiveHub:
                 if len(cleaned) > _TTS_TEXT_LIMIT:
                     speak_text += _TTS_MORE_SUFFIX
             s = self._settings
+            # 上下文偏好：音量/语速可能被"晚上小点声"这类带条件的约定覆盖。
+            # 在这里求值（而不是改 Settings）——偏好只管这次播报，不污染全局配置。
+            volume, volume_reason = _pref_effective("tts_volume", s.tts_volume)
+            rate, rate_reason = _pref_effective("tts_speech_rate", s.tts_speech_rate)
+            for reason in (volume_reason, rate_reason):
+                if reason:
+                    logger.info("偏好生效[%s]", reason)
             tts = CosyVoiceTTS(
                 api_key=_voice_api_key(s),
                 model=s.tts_model,
                 voice=s.tts_voice,
-                volume=s.tts_volume,
-                speech_rate=s.tts_speech_rate,
+                volume=volume,
+                speech_rate=rate,
                 pitch_rate=s.tts_pitch_rate,
             )
             # 串行朗读：多条播报先后到期时排队播，避免 pyaudio 叠音

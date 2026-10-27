@@ -180,7 +180,7 @@ def test_edit_rename_keeps_blank_api_key(isolated_home):
     )
 
     assert result["name"] == "new-model"
-    assert result["base_url"] == "https://api.deepseek.com"  # 留空沿用旧值
+    assert result["base_url"] == "https://api.deepseek.com"  # 留空 = 保持原地址
     assert "old-model" not in settings.custom_models
     assert settings.custom_models["new-model"]["api_key"] == "sk-keep"
     text = (isolated_home / ".jarvis" / "models.toml").read_text(encoding="utf-8")
@@ -189,10 +189,25 @@ def test_edit_rename_keeps_blank_api_key(isolated_home):
 
 
 def test_edit_blank_base_url_inferred(isolated_home):
-    """base_url 留空 → 按厂商 + 接口类型推断（与 /models 添加同口径）。"""
+    """base_url 留空且原本也没有 → 按厂商 + 接口类型推断（与 /models 同口径）。"""
     settings = Settings(custom_models={"a-model": _custom("a-model", base_url="")})
     result = model_admin.edit_model(settings, _FakeEngine(), None, "a-model")
-    assert result["base_url"] == "https://api.deepseek.com"
+    # 必须与首启表同一个地址（DeepSeek 的兼容端点在 `/v1`）
+    assert result["base_url"] == "https://api.deepseek.com/v1"
+
+
+def test_edit_blank_base_url_keeps_custom_endpoint(isolated_home):
+    """回归：用户手填的自建地址不能被「厂商默认值」默默换掉。
+
+    桌面壳编辑表单不回显完整 url，留空 = 不改；旧实现直接走厂商推断，
+    把 `http://localhost:8000/v1` 这种地址覆写成 `api.deepseek.com`。
+    """
+    settings = Settings(custom_models={
+        "local-model": _custom("local-model", base_url="http://localhost:8000/v1"),
+    })
+    result = model_admin.edit_model(settings, _FakeEngine(), None, "local-model",
+                                    model_type="text")
+    assert result["base_url"] == "http://localhost:8000/v1"
 
 
 def test_edit_current_model_enqueues_force_switch(isolated_home):
@@ -269,7 +284,7 @@ def test_add_model_infers_base_url_and_syncs_memory(isolated_home):
         settings, "added-model", vendor="deepseek", api_format="openai"
     )
 
-    assert result["base_url"] == "https://api.deepseek.com"
+    assert result["base_url"] == "https://api.deepseek.com/v1"  # 与首启表同一地址
     assert settings.custom_models["added-model"]["api_format"] == "openai"
     text = (isolated_home / ".jarvis" / "models.toml").read_text(encoding="utf-8")
     assert '[llm.custom_models."added-model"]' in text

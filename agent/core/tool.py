@@ -237,6 +237,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.todo import TodoWriteTool
     from agent.tools.track_goal import TrackGoalTool
     from agent.tools.config_tool import ConfigListTool, ConfigSetTool
+    from agent.tools.pref_tool import PreferenceTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_tool import SendEmailTool
@@ -256,6 +257,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     # 阶段 12 自配置层：模型只能改白名单里的体验类项，安全类直接 DENY @author aceFelix
     registry.register(ConfigListTool())
     registry.register(ConfigSetTool())
+    # 阶段 12 P3 偏好账本：带条件的"以后…"（只能落 auto 域）@author aceFelix
+    registry.register(PreferenceTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())

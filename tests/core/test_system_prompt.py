@@ -229,3 +229,20 @@ class TestSelfConfigSection:
 
         assert "# 调自己的配置" in build_system_prompt(".", build_default_registry())
 
+    def test_section_distinguishes_one_off_from_conditional(self):
+        """阶段 12 P3：一次性 vs 带条件必须写清楚，否则模型会把"以后写代码时"
+        存成全局改配置（明天不在写代码也不出声）。"""
+        from agent.prompts.text_blocks import _SELF_CONFIG_SECTION as block
+
+        assert "Preference" in block
+        assert "带条件" in block and "以后" in block
+        # 两条路各自该用哪个工具，必须点名
+        assert "ConfigSet" in block
+
+    def test_preference_tool_is_in_default_registry(self):
+        from agent.core.tool import build_default_registry
+
+        reg = build_default_registry()
+        assert reg.get("Preference") is not None
+        assert reg.get("ConfigSet") is not None
+

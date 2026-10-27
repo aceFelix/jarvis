@@ -1,7 +1,15 @@
 """jarvis init —— 交互式首次配置引导。
 
-U-01 改进项：选厂商 → 输入 Key → 测试连接 → 保存配置。
-替代手改 settings.toml，降低上手门槛。
+两种粒度（阶段 12 P4 区分）：
+
+- ``/init``（默认）= **首启三问**：厂商 / API Key / 模型，其余全默认。
+  模型清单**实时向厂商拉取**（`agent/llm/model_catalog.py`），不由内置表替用户决定；
+  拉不到才用内置兑底并明说，也可以手动输入型号。工作目录默认当前目录。
+- ``/init full`` = 完整引导（厂商列表 → 自定义 base_url → 模型名 → 模型类型 →
+  API Key → 连接测试）。换厂商、接自建兼容服务、改多模态时用它。
+
+两者共用同一套写盘（`_save_config` → `models_config.save_init_model`），
+不各写一份。
 
 @author aceFelix
 """
@@ -18,101 +26,11 @@ if TYPE_CHECKING:
     from agent.ui.cli import RichCLI
 
 
-# ── 厂商列表（与 /models 的 _MODEL_VENDOR_OPTIONS + _VENDOR_LABELS 保持一致）──
-# key 作为 vendor 值写入配置，与 _MODEL_VENDOR_OPTIONS 共用。
-# 注意：zai 是接口类型（智谱原生 SDK），不是厂商，不单独列在厂商列表里。
-# 用户选择 zhipu 后，save_config 会根据 api_format 决定是否走 zai SDK。
-
-_VENDORS = [
-    {
-        "key": "dashscope", "name": "阿里云 DashScope（通义千问）",
-        "desc": "国内首选，qwen3.7-plus 多模态视觉",
-        "default_model": "qwen3.7-plus",
-        "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容（推荐）",
-    },
-    {
-        "key": "deepseek", "name": "DeepSeek",
-        "desc": "高性价比，推理能力强",
-        "default_model": "deepseek-chat",
-        "default_base_url": "https://api.deepseek.com/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "openai", "name": "OpenAI（GPT-5.5 / GPT-5.4）",
-        "desc": "综合能力最强，生态最成熟",
-        "default_model": "gpt-4o",
-        "default_base_url": "https://api.openai.com/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 原生",
-    },
-    {
-        "key": "zhipu", "name": "智谱 AI（GLM 系列）",
-        "desc": "国产大模型，GLM-4.7/GLM-5.2 系列",
-        "default_model": "glm-5.2",
-        "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容（推荐，支持 thinking）",
-    },
-    {
-        "key": "anthropic", "name": "Anthropic（Claude 系列）",
-        "desc": "擅长长文本、复杂推理、代码生成",
-        "default_model": "claude-sonnet-4-20250514",
-        "default_base_url": "",
-        "api_format": "anthropic",
-        "api_format_desc": "Anthropic 原生协议",
-    },
-    {
-        "key": "moonshot", "name": "Moonshot（Kimi）",
-        "desc": "前端首选，Kimi-3 多模态视觉",
-        "default_model": "kimi-k3",
-        "default_base_url": "https://api.moonshot.cn/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "minimax", "name": "MiniMax（ABAB 系列）",
-        "desc": "国内大模型，长上下文支持",
-        "default_model": "minimax-m3",
-        "default_base_url": "https://api.minimax.chat/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "siliconflow", "name": "SiliconFlow（硅基流动）",
-        "desc": "开源模型托管平台，DeepSeek/Qwen/Llama 等",
-        "default_model": "Qwen/Qwen3.7-Plus",
-        "default_base_url": "https://api.siliconflow.cn/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "xiaomimimo", "name": "小米 MiMo",
-        "desc": "小米自研大模型",
-        "default_model": "mimo-v2.5-pro",
-        "default_base_url": "https://api.xiaomimimo.com/v1",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "google", "name": "Google Gemini",
-        "desc": "Google 多模态大模型",
-        "default_model": "gemini-3.5",
-        "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容",
-    },
-    {
-        "key": "custom", "name": "其他 OpenAI 兼容服务",
-        "desc": "手动输入 base_url、model 名和 api_format",
-        "default_model": "",
-        "default_base_url": "",
-        "api_format": "openai",
-        "api_format_desc": "OpenAI 兼容（可修改）",
-    },
-]
+# ── 厂商表 ──
+# 单一来源在 agent/config/vendors.py：`/init` 与 `/models` 的 base_url 推断
+# 原先各写一份，已经漂移过（DeepSeek 少了 `/v1`、小米 MiMo 只在一边有）。
+# 这里只做别名，不再复制内容——否则下一次又是两张表。
+from agent.config.vendors import VENDORS as _VENDORS  # noqa: E402
 
 
 def _pick_vendor(ui: RichCLI) -> dict | None:
@@ -261,10 +179,99 @@ def _save_config(vendor: dict, api_key: str, model_type: str = "text") -> Path:
     )
 
 
-async def handle_init(ctx: CommandContext, stripped: str) -> bool:
-    """处理 /init 命令：交互式首次配置。
+def _apply_to_session(ctx: object, saved_model: str) -> str:
+    """把刚写进 models.toml 的模型配置**热生效到当前会话**。
 
-    也作为 jarvis --init CLI 参数的入口。
+    为什么必须有这一步（真机实测暴露的 bug）：`/init` 只把配置写盘，而当前 REPL
+    的 `ctx.provider` 还是启动时按旧配置建的。于是用户看到“✓ 连接成功”，紧接着
+    说一句话却报 `Connection error`——因为那一句走的还是旧 provider / 旧 key。
+
+    做法与 `/model` 完全一致（不另开一条路）：重读配置 → 把新值搬进现有 settings
+    对象（其它地方持有同一引用，不能换成新对象）→ 复用 `_switch_model` 重建
+    provider/loop。
+
+    Args:
+        ctx: 命令上下文；缺 provider/registry 等字段时退化为“重启后生效”。
+        saved_model: 刚保存的模型名。
+
+    Returns:
+        给用户看的生效状态（已生效 / 需重启的原因）。
+
+    @author aceFelix
+    """
+    settings = getattr(ctx, "settings", None)
+    if settings is None or getattr(ctx, "provider", None) is None:
+        return "重启 jarvis 后生效"
+
+    from agent.config.settings import load_settings
+
+    try:
+        fresh = load_settings(workdir=getattr(settings, "workdir", "") or "")
+    except Exception as e:  # noqa: BLE001 - 重读失败不该把“已保存”变成失败
+        return f"配置已保存，但重新加载失败（{e}）；重启后生效"
+
+    # 运行中 provider 用的那份端点快照：必须在原地更新**之前**留一份。
+    # `_switch_model` 拿它判断「新配置和正在跑的 provider 是否有差异」；
+    # 若直接拿更新后的 settings 去比，差异已经被自己抹平 → 永远判定无需重建 →
+    # 复用启动时那个旧 provider（旧 base_url / 旧 key），下一句话仍会报
+    # Connection error——正是真机那次「✓ 连接成功」紧跟失败的原因。
+    from dataclasses import replace
+
+    baseline = replace(settings)
+
+    # 原地更新：ctx.settings 被多处共享，换对象会让别处继续用旧值
+    for name in ("provider", "api_format", "model", "last_model", "api_key",
+                 "base_url", "custom_models", "models"):
+        if hasattr(fresh, name):
+            try:
+                setattr(settings, name, getattr(fresh, name))
+            except Exception:  # noqa: BLE001 - 个别字段只读就跳过
+                pass
+
+    try:
+        from agent.model_manager import _switch_model
+
+        result = _switch_model(
+            ctx.ui, settings, ctx.provider, ctx.registry, ctx.orchestrator,
+            getattr(ctx, "system_prompt", ""), saved_model, baseline=baseline,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"配置已保存，但切到新模型失败（{e}）；重启后生效"
+
+    if result:
+        ctx.provider, ctx.loop, ctx.model = result
+        return f"已在本会话生效：{settings.provider} / {saved_model}"
+    return "配置已保存；重启 jarvis 后生效"
+
+
+async def handle_init(ctx: CommandContext, stripped: str) -> bool:
+    """处理 /init：默认走首启三问；``/init full`` 走完整引导。
+
+    也作为 jarvis --init / --init full CLI 入口。
+    """
+    tokens = stripped.split()[1:]
+    if tokens and tokens[0].lower() in ("full", "-f", "--full"):
+        return await _handle_full_init(ctx)
+
+    from agent.config.onboarding import run_quick_setup
+
+    if ctx.ui is None:
+        return False
+    # 传 ctx 而不只是 settings：写完盘要能把新配置热生效到当前会话
+    await run_quick_setup(ctx.ui, getattr(ctx, "settings", None), ctx=ctx)
+    return True
+
+
+async def _handle_full_init(ctx: CommandContext) -> bool:
+    """完整引导（原 U-01 流程，一句未改）。
+
+    Args:
+        ctx: 命令上下文（CLI 入口会用一个只带 ui 的假上下文）。
+
+    Returns:
+        恒为 True（与其它命令处理器一致，表示已消费该输入）。
+
+    @author aceFelix
     """
     ui = ctx.ui
     if ui is None:
@@ -313,17 +320,23 @@ async def handle_init(ctx: CommandContext, stripped: str) -> bool:
     # 6. 保存配置
     path = _save_config(vendor, api_key, model_type)
     ui._console.print(f"\n[green]✓ 配置已保存到 {path}[/green]")
+    ui._console.print(f"[dim]{_apply_to_session(ctx, vendor.get('default_model', ''))}[/dim]")
     ui._console.print("\n[bold cyan]现在运行 jarvis 即可开始使用！[/bold cyan]")
 
     return True
 
 
-async def run_init_cli(ui: RichCLI) -> None:
-    """jarvis --init CLI 入口。"""
+async def run_init_cli(ui: RichCLI, *, full: bool = False) -> None:
+    """jarvis --init CLI 入口（默认三问，full=True 走完整引导）。"""
     from dataclasses import dataclass
 
     @dataclass
     class _FakeCtx:
         ui: RichCLI
 
-    await handle_init(_FakeCtx(ui=ui), "")  # type: ignore[arg-type]
+    if full:
+        await _handle_full_init(_FakeCtx(ui=ui))  # type: ignore[arg-type]
+    else:
+        from agent.config.onboarding import run_quick_setup
+
+        await run_quick_setup(ui)

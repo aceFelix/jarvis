@@ -321,8 +321,8 @@ def test_models_add_persists_and_visible_in_list(tmp_path):
         assert reply["data"]["ok"] is True
         result = reply["data"]["result"]
         assert result["name"] == "my-model"
-        # base_url 留空 → 按厂商 + 接口类型推断（与 /models 添加同口径）
-        assert result["base_url"] == "https://api.deepseek.com"
+        # base_url 留空 → 按厂商 + 接口类型推断（与 /init 首启表同一个地址）
+        assert result["base_url"] == "https://api.deepseek.com/v1"
         # 写盘落到重定向后的用户级 models.toml
         text = (tmp_path / ".jarvis" / "models.toml").read_text(encoding="utf-8")
         assert '[llm.custom_models."my-model"]' in text

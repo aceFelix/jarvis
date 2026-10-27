@@ -32,6 +32,21 @@ from agent.serve.quiet_delivery import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_context_prefs(monkeypatch):
+    """本文件测的是打扰预算/away/降级投递的语义，与上下文偏好无关。
+
+    闸门现在会在投递前查一次偏好账本（P3）。不屏掉的话，开发机上真存在一条
+    “在 Code.exe 时不出声”（而跑测试的终端恰好就是 Code.exe）就会让这里的
+    断言随机变红——那不是回归，是测试读到了别人的配置。
+
+    @author aceFelix
+    """
+    monkeypatch.setattr(
+        "agent.core.daemon.proactive._preference_silence_reason", lambda: ""
+    )
+
+
 class _StubBudget:
     """预算替身：记录 hub 交下来的入参，按脚本返回裁决（含 speak 降级标记）。"""
 
