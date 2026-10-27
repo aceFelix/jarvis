@@ -51,3 +51,6 @@ docs/publish
 
 # ---- PowerShell 模块分析缓存（LOCALAPPDATA 缺失时会被写进当前目录，排除误入库）----
 Microsoft/Windows/PowerShell/ModuleAnalysisCache
+
+# ---- 沙箱运行时能力缓存（cap_sids 里是本机 SID，绝不能入库）----
+sandbox-cli/
