@@ -388,6 +388,15 @@ EVT_REWOUND = "rewound"
 # slash_bridge 每执行（或拒绝）一条命令推一次，前端渲染为命令输出卡片。
 # @author aceFelix
 EVT_SLASH_RESULT = "slash_result"
+# 配置变更广播事件（阶段 12）：payload = {"keys": [协议键...], "source": "model"}。
+# 模型通过 ConfigSet 改完配置后由宿主推一次，桌面壳据此重拉 settings.get。
+#
+# 为什么必须有这个事件（2026-10-26 实测）：面板只在 init（连上时）拉一次
+# settings.get，之后从不刷新。模型把音量 100 改成 50、文件与运行时都对，
+# 但滑杆还停在 100——用户以为没生效；更糟的是他这时顺手拖一下滑杆，
+# 面板会把 100 又写回去，静默地覆盖掉模型的改动。
+# @author aceFelix
+EVT_SETTINGS_CHANGED = "settings_changed"
 EVT_PROACTIVE_NOTIFY = "proactive_notify"
 EVT_VOICE_STARTED = "voice_started"
 EVT_VOICE_STOPPED = "voice_stopped"

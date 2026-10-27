@@ -72,6 +72,22 @@ _REMINDER_PREFIX = "先生，提醒您："
 
 logger = logging.getLogger("jarvis.serve.hub")
 
+
+def _pref_effective(key: str, base: Any) -> tuple[Any, str]:
+    """取"这个上下文下该项该是多少"；取不到/出任何错一律用原值。
+
+    单独抽一层是为了让"偏好挂了"与"偏好没命中"在调用点长一个样：
+    两者都是原值 + 空原因，不会因为账本坏了让播报从有声变无声。
+
+    @author aceFelix
+    """
+    try:
+        from agent.config import prefs
+
+        return prefs.effective(key, base)
+    except Exception:  # noqa: BLE001 - 偏好求值失败不得影响播报
+        return base, ""
+
 # ---- W2 感知层接线口径（阶段 9 第 4 步）----
 
 #: 感知事件播报的桌面渲染 kind。桌面壳 dispatcher 对未知 kind 走默认渲染
@@ -279,8 +295,15 @@ class ProactiveHub:
 
         @author aceFelix
         """
+        # 去重账本先取下来再停：新总线是全新实例，不接续的话“同一个键 5 分钟内
+        # 只算一次”会跟着旧实例一起消失——实测现象是面板上连点几次保存，同一条
+        # 告警就被重复入库几次，白白扣掉打扰额度。
+        dedup_state = (self.percept_bus.export_dedup_state()
+                       if self.percept_bus is not None else None)
         self._stop_percept()
         self._start_percept()
+        if dedup_state and self.percept_bus is not None:
+            self.percept_bus.import_dedup_state(dedup_state)
         return dict(self._percept_status)
 
     # ---- 到期/通知回调（复刻老 NotificationMixin 语义，通道换成事件流） ----
@@ -425,6 +448,11 @@ class ProactiveHub:
 
         @author aceFelix
         """
+        # 先把“改配置后怎么生效”的宿主能力挂上去：挂晚了的话，开机第一句
+        # “帮我关掉窗口感知”就会得到一句“需重启生效”。接线细节见 config_hooks。
+        from agent.serve.config_hooks import register_hub_apply_hooks
+
+        register_hub_apply_hooks(self)
         try:
             from agent.core.percept import init_percept, register_sources
 
@@ -725,12 +753,19 @@ class ProactiveHub:
                 if len(cleaned) > _TTS_TEXT_LIMIT:
                     speak_text += _TTS_MORE_SUFFIX
             s = self._settings
+            # 上下文偏好：音量/语速可能被"晚上小点声"这类带条件的约定覆盖。
+            # 在这里求值（而不是改 Settings）——偏好只管这次播报，不污染全局配置。
+            volume, volume_reason = _pref_effective("tts_volume", s.tts_volume)
+            rate, rate_reason = _pref_effective("tts_speech_rate", s.tts_speech_rate)
+            for reason in (volume_reason, rate_reason):
+                if reason:
+                    logger.info("偏好生效[%s]", reason)
             tts = CosyVoiceTTS(
                 api_key=_voice_api_key(s),
                 model=s.tts_model,
                 voice=s.tts_voice,
-                volume=s.tts_volume,
-                speech_rate=s.tts_speech_rate,
+                volume=volume,
+                speech_rate=rate,
                 pitch_rate=s.tts_pitch_rate,
             )
             # 串行朗读：多条播报先后到期时排队播，避免 pyaudio 叠音

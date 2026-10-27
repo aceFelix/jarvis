@@ -18,6 +18,149 @@
 
 查看最终生效配置：`jarvis --config-show` 或 REPL 内 `/config show`。
 
+**首次装好只问三个问题**（阶段 12 P4）：厂商 / API Key / 模型，其余全默认。
+
+```
+$ jarvis                       ← 全新机器直接跑
+① 用哪家厂商   列表选（DashScope / DeepSeek / OpenAI / … / 其他 OpenAI 兼容）
+② API Key      回车可跳（跳过后配置仍会写盘，之后 /init 补）
+③ 选模型       **实时从厂商拉出你账号里可用的模型**，可筛选，也可「手动输入模型名…」
+
+/init                          同样只问三问（想换就会又跑一次）
+/init full                     完整引导：厂商列表 / 自定义 base_url / 模型名 / 模型类型
+```
+
+模型清单**由厂商实时提供**，不是内置的一张“最新模型表”——表会过时，而且你喜欢
+哪个模型不该由我们替你定。拉不到在线列表时会用内置兑底款，**并写出具体原因**
+（`未提供 API Key，未发起在线查询` / 具体异常），你一看就知道该补 key 还是查网络；
+任何时候都可以手动输入型号。
+
+工作目录不单独问：默认当前目录，要换就 `jarvis --workdir <路径>`。
+
+厂商 → 默认接入地址只维护**一张表**（`agent/config/vendors.py`，代码内）：
+`/init` 的首启表、`/models` 添加模型时 base_url 留空的推断都从它取。
+（以前两处各一份，漂移过：DeepSeek 少 `/v1`、小米 MiMo 只在一边有。）
+
+不管的场合也不问：把 jarvis 的输出管道给别人、在 CI/脚本里、已配置好、或者你取消过一次。
+
+终端里也能直接改（与让模型改走**同一条写入路径**，只是入口不同）：
+
+```
+/config list                              列出 27 项可改配置（协议键 / 当前值 / 要不要确认）
+/config set tts_volume 30                 可直接改的项当场改并落盘
+/config set daily_max 20                  需确认的项先给预览（原值 → 新值 + 为什么要问）
+/config set daily_max 20 --yes            看一眼没问题再执行
+/config set window_exclude_apps "" --yes  清空名单类（必须显式写一对引号）
+```
+
+---
+
+## 懒得改？直接对它说（阶段 12 自配置层）
+
+装完就能用的默认值不需要你碰文件。**体验类配置可以直接用人话让它改**：
+
+```
+你：太吵了，音量小一点
+它：播报音量 50 → 30，已当场生效；要撤回就说"撤回"（账本 a1b2c3d4）
+
+你：以后每天 7:15 给我出简报
+它：每日简报已在 07:15 重注册（不用重启）
+
+你：把每天最多提醒次数改成 20
+它：要改每日播报上限——这类设置会影响何时能打断你，确认？
+```
+
+| 它**能**自己改（改前不问） | 改前**必须问你** | 一律**拒绝**（要你自己改） |
+|---|---|---|
+| 音量/语速/主动播报出声、简报与截止日期开关+时间、感知逐源开关、停留阈值 | 静默时段/每日上限/重要度门槛/聚合窗口、感知总开关、任务驱动器、不可逆动作延时窗口 | `[sandbox]` 全部、`api_key*`、邮箱密码 |
+
+- 改完的每一条都进副作用账本（`~/.jarvis/actions.jsonl`），`/undo` 可退回原值；
+- 落盘只是**外科式**改那几行，你在 `settings.toml` 里写的注释与同段其他字段原样保留；
+- **桌面设置面板会跟着变**：它推一条 `settings_changed` 事件，滑杆/开关立即跳到新值
+  （改感知项时感知源面板也一起刷）——不用重开壳，也不会出现“改了但界面没变”；
+- 终端 REPL 场景没有感知总线/调度宿主，涉及重装配的那几项会如实说"重启后生效"，
+  不会假装已经生效。
+
+**三个入口各有分工，但改同一张表**：你让它改（`ConfigSet`）需要走权限确认；
+你自己在终端敲（`/config set`）是两段式（先预览再加 `--yes`）；你在桌面面板上拖滑杆
+则是直接写。三处共用 `agent/config/config_ops.py`，所以“校验、落盘、生效、记账、
+广播”这五步不会因为入口不同而漂移。
+
+目前覆盖 28 项（15 auto + 12 confirm + 1 禁改），完整清单可用「你能改哪些配置」问出来
+（模型可见 27 项；那 1 项禁改的是感知事件本地留痕，面板上可改、模型不可改），
+字段定义见 `agent/config/config_specs.py`；机制与取舍见
+[12-配置系统](../docs/architecture/12-配置系统.md#十四自配置层阶段-12模型侧配置入口)。
+
+---
+
+## 带条件的"以后…"：偏好账本（阶段 12 P3）
+
+说一句「以后我写代码时别念出来」，第二天写代码时它就不出声，不写代码时照旧——
+这种带条件的要求不会写进 `settings.toml`（写进去就是永久生效），而是记在
+`~/.jarvis/prefs.jsonl`：
+
+```
+你：以后我写代码时别念出来
+它：已记住：在 Code.exe / Qoder.exe / idea64.exe 时 → 主动播报是否出声 = 关
+    （当前不命中：当前前台是 mintty.exe，15 点；条件写的是「在 Code.exe / Qoder.exe / idea64.exe 时」；id 1edb29c6）
+
+你：/prefs
+它：已生效的偏好 1 条（新→旧）：
+    - 1edb29c6｜在 Code.exe / Qoder.exe / idea64.exe 时 → 主动播报是否出声 = 关（命中 3 次，－ 此刻不命中）
+      原话：「以后我写代码时别念出来」
+    （当前上下文：前台 mintty.exe，15 点）
+
+你：/prefs forget 1edb
+它：已忘掉：在 Code.exe / Qoder.exe / idea64.exe 时 → 主动播报是否出声 = 关
+```
+
+**回执里的「当前前台是 …」是给你校对条件用的**：写的是 `Code.exe`、而你实际在
+`Qoder.exe` 里工作，只看“命中 0 次”永远想不通；把两边都列出来一眼就看出漏了谁。
+
+| 要点 | 行为 |
+|---|---|
+| 条件维度 | 前台程序（可写多个，逗号分隔，如 `Code.exe,Qoder.exe`）、工作目录、时间段（如 `22-7`，支持跨午夜），三者可叠加 |
+| 怎么生效 | 命中时由**系统在主动播报闸门上自动执行**，不靠模型记住；只降"出声"，气泡与系统通知照旧 |
+| 能记哪些项 | 只能记「可直接改」那一档（音量为类）；护栏类与需确认类一律拒——否则偏好会变成绕过确认的后门 |
+| 没条件怎么办 | 无条件的长效改动请直接说「把音量改成 30」（走 `ConfigSet`，入副作用账本、可 `/undo`）|
+| 怎么取消 | `/prefs` 看 id，`/prefs forget <id>`；`/prefs clear` 清空 |
+| 当前的施放范围 | `proactive_tts_enabled`（主动播报出声）、`tts_volume`（音量）、`tts_speech_rate`（语速）；其他键可记可查，但暂不自动施放 |
+
+### 它会自己看出习惯，但不会自己生效
+
+`/prefs suggest` 会扫一遍最近的改配置记录（连当时的前台程序与小时一起存），
+发现“你已经在同一个场合表达过两次以上”时，给出一条**候选**：
+
+```
+你：/prefs suggest
+它：提炼出 1 条候选（**还没生效**）：
+    - 7a866a84｜22 点 → 播报音量 = 20
+        依据：你在22 点把「播报音量」改成了这个值共 3 次（当时你说：太吵了）
+      接受：/prefs accept 7a86    不要：/prefs forget 7a86
+
+你：/prefs accept 7a86
+它：已接受并生效：22 点 → 播报音量 = 20
+```
+
+三条保守规则（都是为了不“变魔法”）：
+
+- **候选不生效**：必须你接受；拒掉的同一条件不再重提；
+- **没有共同上下文就不提**：9 点改一次、15 点改一次，不编一个“白天音量调低”；
+- **不主动弹通知**：提炼是按需（你敲 `/prefs suggest`），不是每天凌晨定时报——
+  打扰预算存在的意义就是别无关紧要地响。
+
+### 用几天后它会自己提一次
+
+装好至少 5 次启动、且首启满 3 天后，启动时（版本横幅之后）会提**一次**：
+
+```
+我注意到你可能想让我记住这些（**还没生效**，需要你点头）：
+  · 在 Code.exe 时 → 主动播报是否出声 = 关
+  看全部并接受：/prefs    不要就忽略这条，我不会再自动提。
+```
+
+只提一次；忽略后不再提。`~/.jarvis/usage.json` 只记启动次数与这几个开关（无隐私内容）。
+
 ---
 
 ## LLM（写在 `models.toml`）
@@ -34,7 +177,7 @@
 | `last_model` | str | `""` | 上次使用的模型（自动持久化，下次启动恢复） |
 | `api_key` | str | `""` | API Key（推荐用环境变量，避免明文存 TOML） |
 | `dashscope_api_key` | str | `""` | DashScope 专属 Key（实时语音/多模态必须独立配置） |
-| `base_url` | str | `""` | API 端点。空 = 用内置默认（DashScope/DeepSeek 等自动识别） |
+| `base_url` | str | `""` | API 端点。**留空不会按厂商自动补**：`api_format=openai` 落到 SDK 默认（读 `OPENAI_BASE_URL`，否则 `https://api.openai.com/v1`），`anthropic` 落到 `https://api.anthropic.com`；自定义模型请写全（用 `/models`、`/init` 时留空会按厂商表自动填） |
 | `max_tokens` | int | `4096` | 单轮最大输出 token |
 | `temperature` | float | `None` | 采样温度（None = 厂商默认） |
 | `enable_thinking` | bool | `true` | 深度思考（思维链）开关。REPL 内 `/think on/off` 实时切换 |
@@ -199,7 +342,9 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `mail_enabled` / `mail_min_interval_s` / `mail_watch_senders` | `false` / `0` / `[]` | 邮件源（IMAP 只读 IDLE）；白名单非空 = 只报命中的人 |
 | `vision_enabled` / `vision_camera_index` / `vision_fps` | `false` / `0` / `2` | 视觉在场源（**唯一会碰摄像头的源**，需 `pip install "jarvis-agent[vision]"`） |
 | `vision_gesture_enabled` / `vision_auto_stop_minutes` / `vision_interval_s` | `true` / `0` / `5` | 是否跑手势识别；`0` = 不自动关摄像头，`>0` 空闲自动关（代价：关闭期间检测不到“回来了”）；总线排空节拍 |
-| `calendar_enabled` / `system_enabled` / `schedule_enabled` | `false` | 既有能力收编位（本体未装配，开了也不会采，理由见架构文档第七节） |
+| `calendar_enabled` | `false` | 日历源（阶段 11 已接）：日程进入提前窗口时报**一次**；后端与提前量取 `[calendar]` 段的 `backend`/`ics_path`/`ics_url`/`remind_minutes_before`，感知层不另设一份 |
+| `system_enabled` | `false` | 系统资源源（阶段 11 已接）：CPU/内存/磁盘阈值告警，阈值取 `[monitor]` 那一组；`psutil` 缺失时该源自报不可用而不是报错 |
+| `schedule_enabled` | `false` | **留位未接入**：提醒已由提醒通道过 W1 闸门播报（静默时段降级投递），再进总线会重复播报；面板也不给这个开关 |
 
 > 👀 **视觉源与 away**：打开 `vision_enabled` 后，人脸离开画面会触发无人值守（away），
 > 回来时由人脸重新出现解除；而摄像头一旦不再工作（开了 `vision_auto_stop_minutes`、
@@ -276,7 +421,7 @@ RPC 可临时传 `minutes`）签一条限定范围的授权租约，查看与提
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `tools_deferred_loading` | `true` | 工具延迟加载（14 核心 + ToolSearch） |
+| `tools_deferred_loading` | `true` | 工具延迟加载（16 核心 + ToolSearch） |
 | `tools_chat_detection` | `true` | 纯聊天零工具 |
 | `enable_tool_self_healing` | `true` | 工具执行自愈 |
 | `tool_retry_max` | `3` | 最大重试次数 |

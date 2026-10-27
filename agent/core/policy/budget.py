@@ -109,9 +109,9 @@ _DEFAULT_SOURCE_WEIGHTS = {
     "percept:file": 0.6,       # 目录堆积：值得说，但不急
     "percept:window": 0.5,     # 切屏：只让“停留超时”过闸，普通切换只留痕
     "percept:vision": 0.4,     # 在场类：主要喂 away 推断，不直接播报
-    "percept:calendar": 0.7,   # 以下三个是收编位（本期未装配），先登记免得
-    "percept:system": 0.7,     # 将来接上又落回 default 重踩同一个坑
-    "percept:schedule": 0.9,
+    "percept:calendar": 0.7,   # 日程临近：阶段 11 已接总线，值得打断但要排在来信之后
+    "percept:system": 0.7,     # 资源阈值：同上，已接；阈值有自带冷却，不会碎嘴
+    "percept:schedule": 0.9,   # 仍留位：提醒走提醒通道，不并进总线（会重复播报）
     # W3 任务脊柱（源名固定 `task`，见 `core/tasks/driver.py::NOTIFY_SOURCE`）：
     # 后台目标都是用户明确交代的长线任务，权重与 `schedule` 同级。
     # 驱动器递出来的紧迫度固定给 0.45（后台结果不是“突发紧事”），因此

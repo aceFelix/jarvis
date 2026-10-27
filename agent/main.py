@@ -319,6 +319,16 @@ async def repl(settings: Settings) -> int:
 
     ui.banner(provider.name, model, settings.workdir)
 
+    # 阶段 12 P4：用几天后主动提一次「你好像反复在同一个场合改同一项」。
+    # 门槛（启动次数 + 天数）与"只提一次"都由 onboarding 掌控；候选来自 P3 的
+    # 证据式提炼，**不生效**，要用户自己 /prefs accept。@author aceFelix
+    try:
+        from agent.config import onboarding as _onboarding
+
+        _onboarding.maybe_suggest_adjustment(ui)
+    except Exception:  # noqa: BLE001 - 提议失败不能拦住启动
+        pass
+
     # ---- Hook: session_start ----
     try:
         from agent.core.hooks import get_hooks, HookEvent
@@ -773,6 +783,24 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             pass
         return 0
+
+    # 阶段 12 P4：全新机器上直接问三件，不让用户先去读文档跑 /init。
+    # 判定与提问都放在 onboarding 里：非交互（管道/CI）不问，取消过一次就不再问。
+    # 写完盘要重新 load 一次——provider 构建读的是 settings，内存里的还是旧值。
+    # @author aceFelix
+    if not args.serve:
+        from agent.config import onboarding
+
+        onboarding.note_start()
+        if onboarding.should_onboard(settings):
+            from agent.ui.cli import RichCLI as _CLI
+            _ui = _CLI(verbose=False, boot_animation=False)
+            try:
+                asyncio.run(onboarding.run_quick_setup(_ui, settings))
+            except KeyboardInterrupt:
+                pass
+            settings = load_settings(workdir=args.workdir or settings.workdir)
+            settings = settings.with_overrides(**overrides)
 
     # 查看当前生效配置
     if args.config_show:

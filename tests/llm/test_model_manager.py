@@ -56,6 +56,25 @@ class TestInferBaseUrl:
     def test_deepseek(self) -> None:
         assert "deepseek.com" in _infer_base_url("deepseek", "openai")
 
+    def test_deepseek_keeps_v1_suffix(self) -> None:
+        """回归：DeepSeek 的 OpenAI 兼容端点在 `/v1` 上。
+
+        旧实现只给 `https://api.deepseek.com`（少了 `/v1`），与首启表不一致：
+        同一个厂商，`/init` 配的能连通，`/models` 加的同厂商模型连不通。
+        """
+        assert _infer_base_url("deepseek", "openai") == "https://api.deepseek.com/v1"
+
+    def test_xiaomimimo_has_default(self) -> None:
+        """小米 MiMo 以前只存在首启表里，这里推断出来的是空串（要用户手填）。"""
+        assert "xiaomimimo.com" in _infer_base_url("xiaomimimo", "openai")
+
+    def test_same_as_init_table(self) -> None:
+        """两处默认值必须是同一份：这是当初漂移出问题的地方。"""
+        from agent.config.vendors import VENDORS
+
+        for v in VENDORS:
+            assert _infer_base_url(v["key"], v["api_format"]) == v["default_base_url"], v["key"]
+
     def test_zhipu(self) -> None:
         assert "bigmodel.cn" in _infer_base_url("zhipu", "openai")
 

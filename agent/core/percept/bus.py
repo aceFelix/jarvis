@@ -32,7 +32,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from agent.core.percept.event import PerceptEvent, clamp_payload
 
@@ -199,6 +199,53 @@ class PerceptBus:
             if existed:
                 self._last_emit.pop(name, None)
             return existed
+
+    # ---- 去重账本跨重装配迁移 ----
+
+    def export_dedup_state(self) -> dict[str, Any]:
+        """导出去重账本，供同进程内重建总线时接续（``hot_update_percept`` 用）。
+
+        为什么需要：面板改一次配置就 ``stop`` + 重建一次总线，而“同一个去重键 5 分钟
+        内只算一次”和“同源节流”的账本本来挂在实例上——重建即归零。结果是用户改个
+        名单就把刚落下去的事件再报一遍（2026-10-26 实测：连点 4 次保存 → 同一条内存
+        告警入库 4 次，气泡被 W1 那层去重拦住了，但额度白扣、事件流被污染）。
+        去重是**总线职责**而非源职责，所以这份状态跟着总线走、跳重建接续。
+
+        Returns:
+            ``{"seen": {key: (首发 monotonic 秒, 合并条数)}, "last_emit": {源名: 秒}}``。
+            时间基准是 ``time.monotonic()``，**只在同进程内有意义**：跨进程重启时应当
+            归零（新进程的 monotonic 与旧值不可比），所以调用方不该把它写盘。
+
+        @author aceFelix
+        """
+        with self._lock:
+            return {"seen": dict(self._seen), "last_emit": dict(self._last_emit)}
+
+    def import_dedup_state(self, state: Mapping[str, Any] | None) -> int:
+        """接续 :meth:`export_dedup_state` 的账本，返回实际接纳的去重键数。
+
+        只管形状对得上的项，脏项跳过而不抛：这份账本来自上一个实例，格式不对说明
+        版本变了，宁可从空账本重新开始，也不能让装配崩在一条时间戳上。
+
+        @author aceFelix
+        """
+        if not state:
+            return 0
+        accepted = 0
+        with self._lock:
+            for key, val in (state.get("seen") or {}).items():
+                try:
+                    ts, merged = float(val[0]), int(val[1])
+                except (TypeError, ValueError, IndexError, KeyError):
+                    continue
+                self._seen[str(key)] = (ts, max(1, merged))
+                accepted += 1
+            for src, ts in (state.get("last_emit") or {}).items():
+                try:
+                    self._last_emit[str(src)] = float(ts)
+                except (TypeError, ValueError):
+                    continue
+        return accepted
 
     def source_names(self) -> list[str]:
         """已登记的全部源名（稳定顺序，面板与导出用）。"""

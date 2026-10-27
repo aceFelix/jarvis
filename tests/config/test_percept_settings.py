@@ -125,12 +125,20 @@ def test_validate_list_caps_items():
         validate_percept_config({"vcs_repos": many + ["/one/more"]})
 
 
-def test_pending_source_switches_are_not_editable():
-    """未装配的收编位（calendar/system/schedule）不入白名单——不给假可用开关。"""
-    for key in ("calendar_enabled", "system_enabled", "schedule_enabled"):
-        assert key not in FIELD_BY_KEY
-        with pytest.raises(ValueError):
-            validate_percept_config({key: True})
+def test_only_schedule_remains_a_pending_source():
+    """收编位只剩 schedule：calendar/system 已于阶段 11 接入，应当可以开。
+
+    schedule 仍不给开关——它的提醒已经由提醒通道过 W1 闸门播报（阶段 10 改的），
+    再进总线会重复播报（理由见 core/percept/factory.py 的 PENDING_SOURCES）。
+    """
+    for key in ("calendar_enabled", "system_enabled"):
+        assert key in FIELD_BY_KEY, f"{key} 已接入，应当可编辑"
+    assert validate_percept_config({"calendar_enabled": True})["calendar_enabled"] is True
+    assert validate_percept_config({"system_enabled": True})["system_enabled"] is True
+
+    assert "schedule_enabled" not in FIELD_BY_KEY
+    with pytest.raises(ValueError):
+        validate_percept_config({"schedule_enabled": True})
 
 
 # ---- 运行时生效 ----

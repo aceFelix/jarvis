@@ -115,6 +115,35 @@ def test_publish_rejects_event_without_source(tmp_path):
     assert bus.publish(PerceptEvent(source="", kind="k")).stage == "low_salience"
 
 
+def test_dedup_state_survives_a_bus_rebuild(tmp_path):
+    """重建总线（面板改配置触发）必须接续去重账本，否则同一件事会重复入库。
+
+    2026-10-26 实测：连点 4 次「保存」→ 同一条内存告警入库 4 次，额度被白扣。
+    去重是**总线职责**，故它在同进程内跨实例延续；跨进程重启仍归零（新进程的
+    monotonic 与旧值不可比，所以刻意不落盘）。
+    """
+    old = make_bus(tmp_path, dedup_window_s=300)
+    old.publish(ev(), now=1000.0)
+    state = old.export_dedup_state()
+    old.stop()
+
+    fresh = make_bus(tmp_path, dedup_window_s=300)
+    assert fresh.publish(ev(), now=1010.0).stage == "emit"   # 不接续：又会报一次
+
+    rebuilt = make_bus(tmp_path, dedup_window_s=300)
+    assert rebuilt.import_dedup_state(state) == 1
+    assert rebuilt.publish(ev(), now=1020.0).stage == "dedup"  # 接续后：窗口内被吞
+
+
+def test_import_dedup_state_ignores_garbage(tmp_path):
+    """账本来自上个实例，形状不对就跳过：宁可从空账本重来也不能让装配崩掉。"""
+    bus = make_bus(tmp_path)
+    assert bus.import_dedup_state(None) == 0
+    assert bus.import_dedup_state({}) == 0
+    assert bus.import_dedup_state({"seen": {"k": "oops"},
+                                   "last_emit": {"src": None}}) == 0
+
+
 # ---------------------------------------------------------------------------
 # 订阅与分发
 # ---------------------------------------------------------------------------

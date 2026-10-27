@@ -86,6 +86,7 @@ from agent.commands.handlers.wechat_commands import (
     handle_disconnect_wechat,
 )
 from agent.commands.handlers.config_commands import handle_config_show
+from agent.commands.handlers.prefs_commands import handle_prefs  # 阶段 12 P3 偏好账本
 from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
@@ -191,6 +192,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/lease": handle_lease,
     # W3.2 兑现层命令（阶段 10）：副作用账本 /undo @author aceFelix
     "/undo": handle_undo,
+    # 阶段 12 P3 偏好账本（带条件的"以后…"）@author aceFelix
+    "/prefs": handle_prefs,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -223,6 +226,7 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/config", handle_config_show),
     ("/lease ", handle_lease),  # /lease list|revoke|签发带参 @author aceFelix
     ("/undo ", handle_undo),   # /undo list|cancel|<id>|--task <id> @author aceFelix
+    ("/prefs ", handle_prefs),  # /prefs forget <id>|clear @author aceFelix
     ("/tasks ", handle_tasks),  # /tasks add|show|pause|resume|cancel|advance|delete @author aceFelix
 ]
 

@@ -28,6 +28,7 @@ from agent.prompts.text_blocks import (
     _PLATFORM_MACOS,
     _PLATFORM_WINDOWS,
     _SCHEDULE_SECTION,
+    _SELF_CONFIG_SECTION,
 )
 
 
@@ -136,6 +137,19 @@ def _goal_spine_section(registry: ToolRegistry) -> str:
     return _GOAL_SPINE_SECTION
 
 
+def _self_config_section(registry: ToolRegistry) -> str:
+    """自配置段（按需注入）：只有注册了 ConfigSet 才拼进提示。
+
+    子代理的受限工具集里往往没有这两个工具（也不该有——它不该替用户改全局配置），
+    不判断就会让它去调一个手上没有的工具（同 ``_goal_spine_section`` 的坑）。
+
+    @author aceFelix
+    """
+    if "ConfigSet" not in registry:
+        return ""
+    return _SELF_CONFIG_SECTION
+
+
 def build_system_prompt(
     workdir: str,
     registry: ToolRegistry,
@@ -197,6 +211,7 @@ def build_system_prompt(
             _platform_section(),
             _schedule_section(registry),
             _goal_spine_section(registry),
+            _self_config_section(registry),
             _cli_anything_section(registry),
             _tools_section(registry),
         ]

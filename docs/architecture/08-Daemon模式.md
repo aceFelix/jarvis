@@ -13,7 +13,7 @@
 > `agent/ui/workbench/` 引擎层仍保留，为 serve 与桌面壳共用。判断依据与影响面见
 > [`docs/fixlogs/workbench-gui-retired.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/workbench-gui-retired.md)。
 >
-> ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` / `holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
+> ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` 已在 2026-10 由 W2 感知总线收编，`holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
 >
 > ✅ **终端接线（2026-10-14）**：新增 [`core/daemon/cli_reminder.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) 的 `CliReminderHost`，`main.py` 装配 REPL（含 `/voice` 语音）时启动 Scheduler 后台线程并挂载 schedule 四件套，到期经 `RichCLI.notify_reminder()` 在终端上屏 `⏰` 提醒。只接**对话内定时提醒**，不接简报/截止日期/TTS，详见 [`docs/fixlogs/agent-loop-stall-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/agent-loop-stall-fix.md)。
 
@@ -29,14 +29,14 @@
 | [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配） |
 | [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期已接，日历源传 None 未接） |
 | [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
-| [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | 💤 休眠 |
-| [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控 | 💤 休眠 |
+| [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | ✅ 在用（2026-10-26 由 W2 感知源 `percept/source_calendar.py` 接入总线，默认关） |
+| [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控 | ✅ 在用（同日由 `percept/source_system.py` 接入总线，走 `check_now()`，默认关） |
 | [core/daemon/vision_watcher.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/vision_watcher.py) | 视觉守望者 | ✅ 在用（2026-10 由 W2 感知源 `percept/source_vision.py` 接入总线，默认关） |
 | [core/daemon/holidays.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/holidays.py) | 节假日识别 | 💤 休眠 |
 
 > 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
 > ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报，并行用本机 CosyVoice 做待机 TTS 朗读（二期，`proactive_tts_enabled`，忙时跳过）；**仅 `--serve` / 桌面壳运行期间生效**（终端侧 2026-10 另接 `CliReminderHost`，仅文本上屏不播 TTS）。
-> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 轻量采集落地（现经 serve 事件供桌面壳右栏）；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）、`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
+> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 轻量采集落地（现经 serve 事件供桌面壳右栏）；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）已于 2026-10-26 由感知总线收编（面板上 `system_enabled` / `calendar_enabled`，默认关），`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
 
 ## 二、桌面入口（当前形态：jarvis-desktop）
 
@@ -116,15 +116,15 @@ rm ~/Library/LaunchAgents/*JARVIS*.plist
 > VBS 脚本名曾用过 `start_daemon.vbs` → `start_jarvis_window.vbs` → `start_workbench.vbs`
 > 三段更名：复用检查按文件名命中旧脚本会跳过重新生成，故每次换启动目标都靠改名强制刷新。
 
-## 六、主动感知服务清单（三件套已接线，余待二期）
+## 六、主动感知服务清单（三件套已接线；休眠件已由感知总线收编）
 
 | 服务 | 能力 | 配置节 | 状态 |
 |---|---|---|---|
 | Scheduler | 定时/周期/一次性任务，与日程工具联动 | — | ✅ serve 宿主 ProactiveHub + 终端 CliReminderHost 装配 |
-| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` | ✅ 简报/截止已接；日历源传 None 未接 |
+| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` | ✅ 简报/截止已接；日历源传 None 未接（要日程临近播报请开 `[percept] calendar_enabled`） |
 | DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` | ✅ serve 宿主 ProactiveHub 装配 |
-| CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` | 💤 休眠（二期） |
-| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` | 💤 休眠（二期） |
+| CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` + `[percept] calendar_enabled` | ✅ 在用（2026-10-26：W2 感知源接入总线，默认关） |
+| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` + `[percept] system_enabled` | ✅ 在用（同日：W2 感知源接入总线，用 `check_now()`，默认关） |
 | VisionWatcher | mediapipe 本地手势/人脸监控 | `[percept] vision_*` | ✅ 在用（2026-10：W2 感知源接入总线，`vision_enabled` 默认关） |
 | Holidays | 节假日/工作日识别 | — | 💤 休眠 |
 

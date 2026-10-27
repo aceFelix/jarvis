@@ -56,6 +56,20 @@ from agent.core.tasks.spine import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_context_prefs(monkeypatch):
+    """后台驱动测的是"到点了该不该播、该不该等"，与上下文偏好无关。
+
+    闸门会在投递前查一次偏好账本（阶段 12 P3）；不屏掉就会出现"开发机上恰好
+    有一条匹配当前上下文的偏好 → 这里的 speak 断言随机变红"。
+
+    @author aceFelix
+    """
+    monkeypatch.setattr(
+        "agent.core.daemon.proactive._preference_silence_reason", lambda: ""
+    )
+
+
 def _settings(**over) -> SimpleNamespace:
     """``[tasks]`` 字段（缺省与 settings.py 一致）。"""
     base = {

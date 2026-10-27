@@ -71,6 +71,30 @@ _CALENDAR_NOTE = "__proactive_calendar__"
 _PROFILE_MAINT_NOTE = "__proactive_profile_maintenance__"
 
 
+def _preference_silence_reason() -> str:
+    """查一次上下文偏好：该不该把这条播报降级成"只上屏不朗读"。
+
+    Returns: 非空串 = 不朗读的原因（含用户原话），空串 = 没命中偏好。
+
+    为什么在这里施放而不是往提示词里注入一句"用户不喜欢听"：偏好必须是确定性
+    执行的规则。靠模型自觉遵守的"记住"等于只是鼓励了一下，明天它忘了就复发——
+    而用户说不出为什么又变回去了。
+
+    代价必须有界：账本是本地小文件，且本函数只在**已经把播报裁决为要投递**时
+    才被调用（一天十几次量级）；出任何错都当"没命中"，绝不让取偏好失败把播报
+    搞丢。
+
+    @author aceFelix
+    """
+    try:
+        from agent.config import prefs
+
+        value, reason = prefs.effective("proactive_tts_enabled", True)
+        return "" if value else reason
+    except Exception:  # noqa: BLE001 - 偏好求值失败不该影响播报本身
+        return ""
+
+
 def notify_gate_action(
     source: str,
     text: str,
@@ -122,6 +146,9 @@ def notify_gate_action(
             # 用户两头都看不到）。
             if away and action.kind == "emit" and action.speak:
                 action = NotifyAction("queue", text, "无人值守，暂缓入库")
+            # 偏好闸放在预算闸之后：两者的口径都是"降低出声强度而不丢消息"，
+            # 且都是只影响 speak 不影响 kind，叠加时后说的那条原因更具体。
+            action = _apply_preference_silence(action, source, logger)
             if not action.should_emit:
                 logger.info("播报暂缓[%s]: %s（%s）", source, action.reason, text[:40])
             elif not action.speak:
@@ -130,11 +157,32 @@ def notify_gate_action(
         except Exception as e:
             logger.warning("打扰预算异常，降级直接播报: %s", e)
             # 不落到末尾那句“未设预算闸”上：reason 会说谎，排查时会把人带偏
-            return NotifyAction("emit", text, "预算异常，降级直接播报")
+            fallback = NotifyAction("emit", text, "预算异常，降级直接播报")
+            return _apply_preference_silence(fallback, source, logger)
     elif away:
         logger.info("无人值守，跳过播报[%s]", source)
         return NotifyAction("queue", text, "无人值守，跳过播报")
-    return NotifyAction("emit", text, "未设预算闸，直接播报")
+    action = NotifyAction("emit", text, "未设预算闸，直接播报")
+    return _apply_preference_silence(action, source, logger)
+
+
+def _apply_preference_silence(action: Any, source: str, logger: Any) -> Any:
+    """命中"这个场合别念出来"的偏好时，把出声降级（投递不变）。
+
+    只降声不漏事：气泡/通知照旧，只是不朗读。用户说的是"别念出来"，不是
+    "别告诉我"——两个诉求差得很远，搞错了会真丢消息。
+
+    @author aceFelix
+    """
+    from agent.core.policy.budget import NotifyAction
+
+    if not (action.should_emit and action.speak):
+        return action
+    reason = _preference_silence_reason()
+    if not reason:
+        return action
+    logger.info("偏好降级[%s]: %s", source, reason)
+    return NotifyAction("emit", action.text, reason, speak=False)
 
 
 def apply_notify_gate(

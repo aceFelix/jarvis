@@ -107,14 +107,16 @@ def test_master_switch_off_skips_assembly():
         hub.stop()
 
 
-def test_assembly_registers_five_sources_all_off(hub_percept):
-    """开总开关但逐源全关：五个源都登记、都不启用，且不起轮询线程。"""
+def test_assembly_registers_seven_sources_all_off(hub_percept):
+    """开总开关但逐源全关：七个源都登记、都不启用，且不起轮询线程。"""
     hub, _eq, _budget = hub_percept
     bus = hub.percept_bus
     assert bus is not None
-    assert sorted(bus.source_names()) == ["file", "mail", "vcs", "vision", "window"]
+    assert sorted(bus.source_names()) == ["calendar", "file", "mail", "system", "vcs",
+                                          "vision", "window"]
     assert hub.percept_status == {"window": False, "file": False, "vcs": False,
-                                  "mail": False, "vision": False}
+                                  "mail": False, "vision": False,
+                                  "calendar": False, "system": False}
     assert bus.running is False                     # 没有启用源 → 零线程（空载 CPU 0）
 
 
@@ -225,6 +227,27 @@ def test_hot_update_releases_old_sources(hub_percept):
     hub.percept_bus.register_source(_Spy(), enabled=True)
     hub.hot_update_percept()
     assert closed == ["window"]
+
+
+def test_hot_update_keeps_dedup_ledger(hub_percept):
+    """重装配后同一条事件在窗口内不该再入库（2026-10-26 实测缺陷的回归锁）。
+
+    现象：面板连点 4 次「保存」→ 同一条内存告警入库 4 次，白扣打扰额度。
+    根因：去重账本挂在总线实例上，而热重装配换的就是整个实例。
+    """
+    hub, _eq, _budget = hub_percept
+    event = PerceptEvent(
+        source="window", kind="focus_changed",
+        payload={"summary": "切到 Chrome"}, salience_hint=0.5, dedup_key="focus:chrome",
+    )
+    assert hub.percept_bus.publish(event).stage == "emit"
+
+    hub.hot_update_percept()                     # 等价于用户在面板上点一次保存
+    again = PerceptEvent(
+        source="window", kind="focus_changed",
+        payload={"summary": "切到 Chrome"}, salience_hint=0.5, dedup_key="focus:chrome",
+    )
+    assert hub.percept_bus.publish(again).stage == "dedup"   # 账本已接续
 
 
 # ---- 事件投递路径 ----

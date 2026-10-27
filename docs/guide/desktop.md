@@ -197,9 +197,13 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 > 自动关闭、或被视觉工具停掉而“听不见回来”，因此视觉推断的 away 带 **30 分钟有效期**，
 > 到期自动不再压制提醒；手动 `/away` 不被摄像头取消也不过期。
 
-> ⚠️ 本期未开的源：`calendar_enabled` / `system_enabled` / `schedule_enabled` 三个开关是
-> **收编位占位**，背后的日历源与系统监控仍是休眠件，开了也不会采（避免“面板有开关、
-> 背后没人采”的假可用）；用户自己设的定时提醒也不走感知总线（必须准点响）。
+> ✅ **阶段 11 已开**：`calendar_enabled`（日程进入提前窗口时报一次，后端与提前量取
+> `[calendar]` 段）与 `system_enabled`（CPU/内存/磁盘阈值告警，阈值取 `[monitor]` 那一组）
+> 已接进总线，面板上可以拨。
+>
+> ⚠️ **仍未开的只剩 `schedule_enabled`**：用户自己设的定时提醒**已经过 W1 打扰预算
+> 闸门**（静默时段降级投递），再并进感知总线会重复播报，所以刻意不接——它不是
+> “还没做”的缺口，而是“不该做两遍”的取舍。
 
 ### 感知源面板接线进度（第 5、6、7 步：后端、桌面 UI 与首次引导均已落地）
 
@@ -229,12 +233,14 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 > （`proactive_notify` 的 `kind=percept_ask`，不走 TTS），壳侧据此点亮「管家服务」
 > 按钮提示点、进面板即清；面板上拨一次总开关就等于表过态（记 `choice=on/off`）。
 > 面板可改字段只放**开关与名单**（真源 [`percept_settings.py`](../../agent/config/percept_settings.py)）：
-> `dedup_window_s`/`min_salience`/`vision_fps` 这类极客参数与未装配的收编位开关一律不进。
+> `dedup_window_s`/`min_salience`/`vision_fps` 这类极客参数与仍未装配的 `schedule`
+> 开关一律不进。
 
-## 系统资源监控（休眠态）
+## 系统资源监控（阶段 11 起可开）
 
-监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起，
-当前处于休眠态，待由 serve 宿主重新接线。配置项预留：
+监控能力代码完整保留（`agent.core.daemon.monitor`），原由常驻 daemon 拉起。阶段 11 起
+它被感知总线的 `system` 源收编：在 `[percept]` 里开 `system_enabled = true` 即由总线
+按间隔调 `check_now()` 取快照（不起第二条采样线程，阈值与冷却照旧生效）。配置项：
 
 ```toml
 [monitor]

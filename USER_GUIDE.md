@@ -195,7 +195,10 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/mcp` | 查看 MCP 工具连接状态 |
 | `/doctor` | 系统诊断（自愈统计、配置检查） |
 | `/config [show]` | 查看当前生效的完整配置（LLM/语音/MCP/自定义模型等） |
-| `/init` | 交互式首次配置引导 |
+| `/config list` | 列出可以改哪些配置项（协议键/当前值/要不要确认） |
+| `/config set <键> <值>` | 改一项配置；需确认的项先给预览，再加 `--yes` 执行（清空名单写 `""`） |
+| `/prefs` | 查看记住的偏好（带条件的「以后…」）；`/prefs suggest` 提炼候选，`accept <id>` 接受，`forget <id>` 取消 |
+| `/init` | 首启三问（厂商 / API Key / 模型，模型实时从厂商拉取可选）；换厂商或改多模态用 `/init full` |
 | `/server [目录]` | 一键启动开发服务器 |
 | `/connect-phone` `/phone` | 跨设备协同（手机扫码连接当前会话） |
 | `/connect-wechat` `/wechat` | 微信扫码连接 JARVIS（通过 ClawBot 对话） |

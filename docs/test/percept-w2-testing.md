@@ -179,14 +179,51 @@ cd /e/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis
 
 | # | 检查 | 判据 |
 |---|---|---|
-| P1 可改范围 | 总览 2 个开关 + 「感知源」5 个源开关 + 「采集名单」4 个文本域与 2 个分钟阈值 | 共 13 个键；其余 22 个键面板上**没有**（成本与隐私旋钮刻意不暴露） |
+| P1 可改范围 | 总览 2 个开关 + 「感知源」7 个源开关 + 「采集名单」4 个文本域与 2 个分钟阈值 | 共 15 个键；其余 22 个键面板上**没有**（成本与隐私旋钮刻意不暴露） |
 | P2 反斜杠安全 | 在「守望目录」里填 `E:\J.A.R.V.I.S_Work` 保存 | 不写坏 `settings.toml`（后端会正确转义），且 `2.1` 那条自验命令仍解析通过 |
 | P3 假可用防线 | 开某源但不填目录/仓库 | 面板显已启用，不发事件、不报错（"开了没配齐"是配置未完成，不是运行时故障） |
-| P4 收编位 | 看逐源列表 | 日历/系统/定时**只有说明没有开关** |
+| P4 收编位 | 看逐源列表 | 阶段 11 起日历/系统**已有开关**；只剩「定时提醒」**只有说明没有开关**（它已由提醒通道播报，再接会重复） |
 | P5 错误内联 | 杀掉后端进程，再在面板拨开关 | 错误显示在**顶部反馈条**，不进聊天流、不弹系统框 |
 | P6 不做乐观更新 | 后端断开时拨开关 | 开关保持原状（面板显示的是后端此刻的真实状态） |
 | P7 隐私自查 | 「最近事件」子标签 | 事件原样回显，不做前端二次脱敏；**留痕开着时这份列表读的是磁盘尾部**，所以刚改过配置也不会空（D10） |
 | P8 关掉即释放 | 开着 mail/vision 源后关掉 | IMAP 真登出、摄像头真释放（指示灯灭）——重装配路径兑现的承诺 |
+
+## 4.1 阶段五：日历与系统资源收编（2026-10-26 新增）
+
+这两个源都是“底层能力早就写好、只是从没被宿主编好线”的休眠件
+（`core/daemon/calendar_source.py` / `core/daemon/monitor.py`），所以这里既验采集，
+也验**没配齐时不谎报**。
+
+| # | 操作 | 看到这样算过 |
+|---|---|---|
+| S1 面板有开关 | 打开「管家服务 → 感知源」 | 「日历事件」「系统资源」两行**都有开关**；「定时提醒」仍是灰卡（只有说明 + 理由） |
+| S2 系统资源能采 | `[percept]` 开总开关 + `system_enabled = true`，把 `[monitor] memory_threshold` 临时改成 `1.0`（内存必超，**瞬时判定**），重启后端 | 后端起来后第一轮采集（**约 1 分钟内**，本源节拍 60s）「最近事件」出现 `内存使用率 …` 一条；`alert_cooldown` 内**不重复** |
+| S2b 为什么别用 CPU 阈值验首发 | 把 `cpu_threshold` 调低来代替 `memory_threshold` | 会**等两个批次**（约 2 分钟）才出第一条：`monitor._do_check` 要求 CPU **持续 30 秒**超阈才报（防瞬时尖峰），第一次采样只建基准。这不是源坏了 |
+| S3 不留第二条采样线 | 同上，看后端日志 | 没 `SystemMonitor started` 那类自转线程日志（本源只调 `check_now()`）；`感知总线已启动，轮询周期 60.0s` 只一条 |
+| S4 没配齐不谎报 | 开 `calendar_enabled = true`，但 `[calendar] backend` 保持 `auto`、本机无 Outlook、`ics_path` 为空 | 该源显示“已启用”但 `detail` 里自报不可用原因；**不发事件、不报错**，也不会出现「连续失败已自动停用」 |
+| S5 日程只报一次 | 按下方造一份 ICS 并配 `[calendar] ics_path`，日程设在 10 分钟后 | 出现**一条** `source=calendar`，`payload.minutes_until` 落在提前窗口内；本源节拍 **300s**，再等两轮（约 10 分钟）**不重复播报**同一条 |
+| S6 全天/已开始的不报 | ICS 里再加一条全天日程（`DTSTART;VALUE=DATE:`）、一条已经开始 5 分钟的日程 | 两条都不出现在 `events.jsonl` |
+| S7 恢复通知不占额度 | S2 之后把 `[monitor] memory_threshold` 改回 `90.0` 重启（让内存“回落”） | 不弹「内存已恢复」气泡、`events.jsonl` 里**不出现** `recovery` 行；面板该源「观察范围」里的 `last_alert` 仍是上一条告警 |
+| S8 改配置不重报 | 在面板上把任意一个开关**连拨 4 次**（每次保存都会热重装配、换一台新总线） | `events.jsonl` 尾部同一 `source + kind` 在 `dedup_window_s`（300s）内**只应出现一条**。旧行为是连点几次就重复入库几次（白扣打扰额度），复盘见 [热重装配丢去重账本](../fixlogs/percept-dedup-lost-on-hot-rebuild-fix.md) |
+
+造一份最小 ICS（存成 `~/cal-test.ics`）：
+
+```ics
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:percept-test-1
+SUMMARY:感知源走查
+DTSTART:20261026T210000
+DTEND:20261026T213000
+END:VEVENT
+END:VCALENDAR
+```
+
+> 时间要按**本机当前时刻 +10 分钟**改。提前窗口取 `[calendar] remind_minutes_before`
+> （默认 30），所以提前 10 分钟的日程一定落在窗口内。
+> ⚠️ `[calendar] enabled` 是**主动引擎**的日历简报开关，与 `[percept] calendar_enabled`
+> （感知总线）不是同一个：本节只拨后一个。
 
 ## 5. 自动化门禁（手测前后各跑一次）
 
@@ -195,8 +232,26 @@ cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; .venv\Scripts\python.exe -m p
 cd e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis-desktop; npm run test; npm run typecheck; npm run build
 ```
 
-基线：jarvis **2827 passed**；桌面 **492 passed** + typecheck + build 全绿；
+基线（2026-10-27，含阶段 12 P1–P4 自配置层全量）：jarvis **3632 passed**；
+桌面 **535 passed** + typecheck + build 全绿；
 死链门禁 `python scripts/check_md_links.py` → dead 0 / untracked 0。
+
+> 阶段 11 收尾时的基线是 3263；阶段 12 P1 新增 105 例（真源表 / 两个工具 / 宿主
+> 生效钩子 / 提示词段四份测试）；手测发现的「面板不跟新值」补了 9 例后端
+> （变更监听器 3 + 工具广播 4 + 宿主事件 2）与 7 例桌面（`dispatcherSettings.test.ts`）；
+> P2 面板派生又补 58 例（派生一致性守卫 49 + 列表类 3 + 改写的分级不变量 6）；
+> P2 终端入口再补 37 例（`test_config_set_command.py`）；
+> P3 偏好账本补 49 例（条件匹配 / auto 域边界 / 闸门施放 / 工具与命令 47 + 提示词 2）；
+> P3 提炼与多决策点再补 28 例（共同上下文 / 候选不生效 / accept 转正 / 拒后不重提）；
+> P4 首启三问再补 32 例（判定 / 台账 / 三问 / /init 分流 / 提议门槛）；
+> P4 实测评测又补 7 例（多程序 `when_app` / 回执带当前前台 / 幽灵条件拦截）；
+> P4 首启改在线模型目录后再补 16 例（`test_model_catalog.py` 12 + 首启流程改造 4）；
+> P4 实测追问“怎么只有一个模型”后补 4 例：拉取失败必须带**具体原因**回给用户；
+> P4 修 `/init` 配完连不上后补 6 例：保存必须热生效到当前会话；
+> P4 第二轮实测后补 18 例：热生效的比较基准必须用旧端点快照（否则复用旧 provider）、
+> 厂商默认地址单一来源（`agent/config/vendors.py` + `test_vendors.py`）、
+> DeepSeek 推断补 `/v1`、编辑时 base_url 留空不覆盖用户地址。
+> 数字只管看"有没有少例"，不必较真——**绿比数字重要**。
 
 ## 6. 收尾
 

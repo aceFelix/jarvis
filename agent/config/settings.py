@@ -379,9 +379,13 @@ class Settings:
     percept_mail_enabled: bool = False
     percept_mail_min_interval_s: int = 0   # 0=靠 IDLE 事件驱动，不额外节流
     percept_mail_watch_senders: list = field(default_factory=list)  # 发件人白名单（空=全报）
-    percept_calendar_enabled: bool = False
-    percept_system_enabled: bool = False
-    percept_schedule_enabled: bool = False
+    # 收编型源（阶段 11 接入 calendar/system；schedule 仍留位，理由见
+    # core/percept/factory.py 的 PENDING_SOURCES 注释）：底层能力本来就在 daemon/ 里
+    # 休眠，这里只放“要不要采”的开关——后端与阈值一律复用既有字段，
+    # 不另造一份真相（否则面板调的那个值压根不是真实生效值）
+    percept_calendar_enabled: bool = False  # 后端/提前量复用 [calendar] 段
+    percept_system_enabled: bool = False    # 阈值复用 monitor_* 那一组字段
+    percept_schedule_enabled: bool = False  # 留位未接入（会重复播报，详见 factory.py）
     # 视觉在场源（唯一会碰摄像头的源，默认关）：在场事实与手势进总线
     percept_vision_enabled: bool = False
     percept_vision_camera_index: int = 0

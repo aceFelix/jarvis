@@ -61,9 +61,12 @@ ALL_STATES = (
     STATE_HELD, STATE_APPLIED, STATE_UNDONE, STATE_FAILED, STATE_CANCELLED,
 )
 
-# ---- undo_spec 的两种形态 ----
+# ---- undo_spec 的形态 ----
 UNDO_CHECKPOINT = "checkpoint"  # {"kind","cid","workdir"}：回到本轮开始前的工作区
 UNDO_NONE = "none"              # {"kind","reason"}：明确不可撤销，报告里要说清楚
+# {"kind","before":{协议键: 原值}}：配置变更撤销（阶段 12）。配置是文本外科式写入，
+# git 检查点那套工作区回滚术语用不了，故单列一种形态，回写走 config_specs。
+UNDO_CONFIG = "config"
 
 
 def _new_id() -> str:
@@ -149,12 +152,15 @@ class EffectRecord:
 
     @property
     def undoable(self) -> bool:
-        """是否有可执行的补偿计划（checkpoint 类且 cid 有效）。"""
-        return (
-            self.reversible
-            and self.undo_spec.get("kind") == UNDO_CHECKPOINT
-            and bool(self.undo_spec.get("cid"))
-        )
+        """是否有可执行的补偿计划（checkpoint 类带有效 cid，或配置回写类带原值）。"""
+        if not self.reversible:
+            return False
+        kind = self.undo_spec.get("kind")
+        if kind == UNDO_CHECKPOINT:
+            return bool(self.undo_spec.get("cid"))
+        if kind == UNDO_CONFIG:
+            return bool(self.undo_spec.get("before"))
+        return False
 
     def human_time(self) -> str:
         """发生时刻的可读形式（/undo 列表用，本地时区）。"""
@@ -553,6 +559,8 @@ def undo_record(
         return False, describe_undo(rec)
 
     spec = rec.undo_spec
+    if str(spec.get("kind") or "") == UNDO_CONFIG:
+        return _undo_config(rec, spec, settings, journal)
     mgr = manager_for(rec.workdir, settings, session_name or rec.session_id)
     if not mgr.available():
         return False, "文件回滚不可用（未启用 checkpoint 或缺少 git）"
@@ -576,6 +584,43 @@ def undo_record(
         return True, note
     journal.set_state(rec.id, STATE_FAILED, error=note)
     return False, note
+
+
+def _undo_config(
+    rec: EffectRecord,
+    spec: dict[str, Any],
+    settings: Any,
+    journal: ActionJournal,
+) -> tuple[bool, str]:
+    """配置变更的回退：按 ``before`` 快照逐项回写（落盘 + 运行时）。
+
+    与工作区回滚的区别：配置不是文件树快照，而是写死的几行文本，所以回退就是
+    “把原值再写一遍”——没必要也不应该去动 git 检查点。
+
+    @author aceFelix
+    """
+    from agent.config.config_specs import apply_value, get_spec, human_value, save_value
+
+    before = spec.get("before") or {}
+    if not isinstance(before, dict) or not before:
+        return False, "这条配置变更没有记录原值，无法回退"
+    restored: list[str] = []
+    failed: list[str] = []
+    for key, old in before.items():
+        sp = get_spec(str(key))
+        if sp is None:
+            failed.append(f"{key}（已不在可改白名单）")
+            continue
+        if not save_value(sp, old):
+            failed.append(f"{sp.label}（落盘失败）")
+            continue
+        apply_value(settings, sp, old)
+        restored.append(f"{sp.label} → {human_value(sp, old)}")
+    if failed:
+        journal.set_state(rec.id, STATE_FAILED, error="；".join(failed))
+        return False, "配置回退部分失败：" + "；".join(failed)
+    journal.set_state(rec.id, STATE_UNDONE)
+    return True, "配置已回退：" + "；".join(restored)
 
 
 def undo_task(
