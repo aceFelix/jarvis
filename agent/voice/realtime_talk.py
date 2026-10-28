@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 from .realtime_engine import RealtimeEngine
@@ -45,7 +44,7 @@ except ImportError:
 
 # 常量再导出：保持重构前 realtime_talk 的模块级公共面（测试与外部调用方
 # 以 rt_mod.CHUNK_BYTES / rt_mod.ECHO_GUARD_RMS 等方式引用，行为不变）
-from .realtime_engine import (  # noqa: F401
+from .realtime_const import (  # noqa: F401
     CHUNK_BYTES,
     INPUT_RATE,
     MAX_RESPONSE_SECONDS,
@@ -164,7 +163,7 @@ class RealtimeTalk(RealtimeEngine):
             return
 
         # 初始化 PyAudio（音频传输对象，注入引擎鸭子类型接口）
-        from .realtime_engine import INPUT_RATE, OUTPUT_RATE
+        # INPUT_RATE / OUTPUT_RATE 已在模块顶部从 realtime_const 导入，此处不再局部重复导入
         self._pya = pyaudio.PyAudio()
         try:
             mic = self._pya.open(

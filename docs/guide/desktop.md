@@ -20,7 +20,8 @@
 > 窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` 与
 > `assets/`）已删除。退役原因是两套前端重复建设（气泡渲染 / 会话列表 / 模型选择器 /
 > 主题皮肤各自维护，口径漂移靠人工对齐），而非能力缺失——`agent/ui/workbench/` 剩下的
-> 4489 行引擎层止今为 serve 与桌面壳所用。判断依据与影响面见
+> 4618 行引擎层止今为 serve 与桌面壳所用（`engine.py` 已按职责拆成 4 个 mixin 模块，
+> 单文件最大 608 行）。判断依据与影响面见
 > [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)。
 
 > 📌 **架构说明**：原「无窗口 daemon + 托盘遥控」常驻模式（`--daemon`、pystray 托盘菜单、
