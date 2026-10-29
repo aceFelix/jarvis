@@ -408,12 +408,30 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
             composed = "请结合附带的图片回答。"
         self._emitter.emit("user_message", text)
         # 轮前检查点：记录工作区"发消息前"状态，绑定到本轮用户消息，
-        # 供桌面撤回（checkpoint.rewind）连带回滚文件。创建是同步 git
-        # 操作（超时保护在 CheckpointManager 内部），失败静默降级。
+        # 供桌面撤回（checkpoint.rewind）连带回滚文件。
+        #
+        # 【2026-10 性能修复】这里原本是**同步**调用 `ckpt_mgr.create()`，而它第一条
+        # 命令就是 `git add -A`：在 2.4 万文件的工作区上要逐一 stat，Windows 下
+        # 必然吃满 10 秒超时才放弃（超时后返回 None，功能上一无所获）。实机日志
+        # 里连续四轮都是 `检查点 10.057~10.079s`，而终端根本没有这一步——这就是
+        # 「桌面版比终端慢」全部差距的来源。
+        # 现改为扔线程池异步做：快照仍在「发送前」启动（状态正确），但不阻塞发送；
+        # 结果先用 0.4s 宽限快速拿一次（小仓库立刻拿到），拿不到就留给 finally
+        # 在轮末取——那时模型早已答完，这 10 秒被完全藏在思考期里。
         # @author aceFelix
         _t_ckpt0 = time.monotonic()
         ckpt_mgr = checkpoint_ops.make_manager(self)
-        ckpt_id = ckpt_mgr.create(reason=composed) if ckpt_mgr.available() else None
+        ckpt_task: asyncio.Task | None = None
+        ckpt_id: str | None = None
+        if ckpt_mgr.available():
+            ckpt_task = asyncio.ensure_future(
+                asyncio.get_running_loop().run_in_executor(None, ckpt_mgr.create, composed)
+            )
+            try:
+                # shield：超时只放弃等待，不要把快照任务本身取消掉
+                ckpt_id = await asyncio.wait_for(asyncio.shield(ckpt_task), timeout=0.4)
+            except Exception:
+                ckpt_id = None
         _t_ckpt1 = time.monotonic()
         # 把本轮 cid 与会话名交给副作用账本（W3.2）：cid 到轮末才挂上用户消息，
         # 工具调用时只能经 extra 拿到；本轮没检查点时必须写空串而不是留着上轮的
@@ -453,6 +471,14 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
             if locked:
                 self._query_lock.release()
             self._send_task = None
+            # 取异步检查点结果：小仓库在开头 0.4s 内已拿到，走这里的是大仓库
+            # （快照仍在后台跑完）。一律兜底为 None，退回"仅对话回退"。
+            # @author aceFelix
+            if ckpt_id is None and ckpt_task is not None:
+                try:
+                    ckpt_id = await ckpt_task
+                except Exception:
+                    ckpt_id = None
             # 无论本轮成败都绑定检查点（query_loop.run 已把用户消息
             # append 进 _messages），出错轮次同样可撤回。@author aceFelix
             if ckpt_id:

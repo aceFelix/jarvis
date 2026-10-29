@@ -241,6 +241,11 @@ def test_engine_abort_current_reply(monkeypatch):
     info『已停止回复』外抛，且后续指令继续被消费（循环未死）。"""
     settings = Settings()
     settings.enable_mcp = False  # 启动预热不真连用户 MCP server（hermetic）
+    # 检查点默认开启，而 _handle_send 轮前会跑真 git（工作区越大越容易吃满超时）。
+    # 这些用例考察的是取消/收尾时序，与快照无关；不断开的话，轮前多出的一段
+    # 快照宽限会把取消落点挪到别处，测的就不再是原本那条路径了。
+    # @author aceFelix
+    settings.checkpoint_enabled = False
     event_queue: queue.Queue = queue.Queue()
     command_queue: queue.Queue = queue.Queue()
     engine = ChatEngine(settings, event_queue, command_queue)
@@ -328,6 +333,11 @@ def test_abort_during_lock_wait_returns_lock_and_closes_turn(monkeypatch):
     """
     settings = Settings()
     settings.enable_mcp = False  # 启动预热不真连用户 MCP server（hermetic）
+    # 检查点默认开启，而 _handle_send 轮前会跑真 git（工作区越大越容易吃满超时）。
+    # 这些用例考察的是取消/收尾时序，与快照无关；不断开的话，轮前多出的一段
+    # 快照宽限会把取消落点挪到别处，测的就不再是原本那条路径了。
+    # @author aceFelix
+    settings.checkpoint_enabled = False
     event_queue: queue.Queue = queue.Queue()
     command_queue: queue.Queue = queue.Queue()
     engine = ChatEngine(settings, event_queue, command_queue)
