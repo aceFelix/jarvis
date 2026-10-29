@@ -228,12 +228,19 @@ class TestBashExecution:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """超时路径：mock subprocess 使 communicate 永久挂起触发 TimeoutError。"""
+        """超时路径：mock subprocess 使 wait 永久挂起触发超时。"""
 
         class FakeProc:
             returncode = 1
 
-            async def communicate(self):
+            def __init__(self) -> None:
+                # 实现改成「等进程退出 + 读管道」了，假进程要提供这两个流
+                self.stdout = asyncio.StreamReader()
+                self.stdout.feed_eof()
+                self.stderr = asyncio.StreamReader()
+                self.stderr.feed_eof()
+
+            async def wait(self):
                 await asyncio.sleep(100)  # 永不返回 → 触发超时
 
             def kill(self) -> None:

@@ -109,6 +109,29 @@ class TestRiskScorer:
         scorer = RiskScorer()
         assert scorer.score_command("pip freeze") == RiskLevel.LOW
 
+    def test_discard_redirect_is_not_high(self):
+        """`> /dev/null` / `2>&1` 是丢弃输出，不是覆盖文件，不该算 HIGH。
+
+        修复前: _HIGH_PATTERNS 里的 r">\\s*\\S+" 会命中 `> /dev/null` 与 `2>&1`，
+        于是「启动并丢弃输出」这类命令（`firefox.exe URL > /dev/null 2>&1 &`）
+        被抬成 HIGH——连带触发文件快照，还把沙箱的进程回收问题掩到「高风险」
+        的标签之后（实机：加完这层重定向后风险从「中」变「高」）。
+        修复后: 先剔除「丢弃输出 / 复制描述符」，剩下仍带 `>` 的才算 HIGH。
+        """
+        scorer = RiskScorer()
+
+        # 丢弃输出：不是破坏性操作
+        assert (
+            scorer.score_command("firefox.exe https://x > /dev/null 2>&1 &")
+            == RiskLevel.MEDIUM
+        )
+        assert scorer.score_command("echo hi 2>&1") == RiskLevel.MEDIUM
+        assert scorer.score_command("make 2>NUL") == RiskLevel.MEDIUM
+
+        # 真的写进文件：仍然是 HIGH
+        assert scorer.score_command("echo hi > out.txt") == RiskLevel.HIGH
+        assert scorer.score_command("npm run build > build.log 2>&1") == RiskLevel.HIGH
+
     def test_score_tool(self):
         """工具调用评分：Bash/PowerShell 走命令评分，文件类按路径判定。"""
         scorer = RiskScorer()

@@ -92,6 +92,54 @@ class TestToolErrorClassifier:
         err = c.classify("Bash", None, asyncio.TimeoutError("timed out"))
         assert err.category == ToolErrorCategory.TIMEOUT
 
+    def test_chinese_timeout_message_classified_as_timeout(self) -> None:
+        """Bash 的超时文案是中文，必须照样判成 TIMEOUT。
+
+        只匹配英文 `timeout` 会让它落进 UNKNOWN（日志报「未知错误」），
+        再拿 UNKNOWN 策略去重试——把真实原因盖掉，副作用还多做一遍。
+        """
+        c = ToolErrorClassifier()
+        err = c.classify(
+            "Bash", ToolResult.error("命令超时（120秒）: firefox.exe https://www.bilibili.com")
+        )
+        assert err.category == ToolErrorCategory.TIMEOUT
+
+        sandboxed = c.classify("Bash", ToolResult.error("[沙箱] 命令超时（120秒）: foo.exe"))
+        assert sandboxed.category == ToolErrorCategory.TIMEOUT
+
+    def test_config_missing_is_not_unknown(self) -> None:
+        """配置类错误不能判成 UNKNOWN。
+
+        实机（2026-10）：EmailBox 报“收件需要 IMAP，当前缺：imap_host”后，
+        日志里显示的是「EmailBox 遇到 未知错误」并一路重试——真实原因（没配好）
+        被盖掉，用户看到的是一串重试而不知道要改哪一行配置。
+        """
+        c = ToolErrorClassifier()
+        err = c.classify("EmailBox", ToolResult.error("收件需要 IMAP，当前缺：imap_host。"))
+        assert err.category == ToolErrorCategory.CONFIG_INVALID
+        assert err.recoverable is False
+
+        off = c.classify("EmailBox", ToolResult.error("邮件功能未启用。请设置 enabled = true。"))
+        assert off.category == ToolErrorCategory.CONFIG_INVALID
+
+    def test_bare_429_in_path_is_not_rate_limit(self) -> None:
+        """路径里碰巧带 429（如 pytest 临时目录 `pytest-429`）不应算限流。
+
+        裸匹配 `429` 会把任何带这个数字的错误归成 API 限流，不但原因报错，
+        还会拿 RATE_LIMIT 的 3 次重试与 2s 退避去跑一条本来一秒就完的失败。
+        """
+        c = ToolErrorClassifier()
+        err = c.classify(
+            "FileWrite",
+            ToolResult.error(r"No such file or directory: D:\temp\pytest-429\nested\file.txt"),
+        )
+        assert err.category == ToolErrorCategory.NOT_FOUND
+
+        # 真限流仍然要认得出来（带状态语义的写法）
+        for text in ("HTTP status: 429", "429 Too Many Requests", "rate limit exceeded"):
+            assert c.classify("WebFetch", ToolResult.error(text)).category == \
+                ToolErrorCategory.RATE_LIMIT, text
+
 
 class TestToolRecoveryExecutor:
     @pytest.mark.asyncio
@@ -178,8 +226,29 @@ class TestToolRecoveryExecutor:
         assert result.final_result.is_error is True
         assert attempts == 1
 
+    @pytest.mark.asyncio
+    async def test_not_retryable_result_skips_retry(self) -> None:
+        """工具声明 retryable=False 时，自愈层不得重跑这条命令。
 
-# ── 补充：RecoveryTelemetry / 分类器边界 / 自动修复 / 询问用户 ──
+        命令超时的典型后果是副作用重复：前台拉起浏览器被重试一次，就开了
+        两个窗口、两个标签页，而且用户还得再等一整个 timeout。
+        """
+        executor = ToolRecoveryExecutor(global_enabled=True)
+        ui = FakeUI()
+        ctx = FakeContext(ui=ui)
+        attempts = 0
+
+        async def call_fn(args, ctx):
+            nonlocal attempts
+            attempts += 1
+            return ToolResult.error("命令超时（120秒）: firefox.exe x", retryable=False)
+
+        result = await executor.execute("Bash", call_fn, {}, ctx)
+        assert result.final_result.is_error is True
+        assert attempts == 1
+        assert result.original_error.category == ToolErrorCategory.TIMEOUT
+        # 也不能弹「是否重试」阻塞问句
+        assert ui.questions == []
 
 
 class TestRecoveryTelemetry:

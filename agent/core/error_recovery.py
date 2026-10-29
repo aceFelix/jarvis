@@ -284,7 +284,12 @@ class ToolErrorClassifier:
     _RATE_LIMIT_PATTERNS = (
         r"rate limit",
         r"too many requests",
-        r"429",
+        # 429 必须带状态语义才能算限流：裸 `429` 会把任何带这个数字的东西都
+        # 当成限流（实测：pytest 临时目录 `pytest-429` 让一条
+        # “No such file or directory” 被归成“API 限流”，真正原因被盖掉，
+        # 而且拿了 RATE_LIMIT 的 3 次重试与 2s 退避）。
+        r"(?:status|code|http)\s*[:=]?\s*429\b",
+        r"\b429\s*(?:too many|rate)",
         r"throttl",
         r"quota exceeded",
         r"limit exceeded",
@@ -381,13 +386,42 @@ class ToolErrorClassifier:
                 suggestion="可尝试延长超时时间或重试。",
             )
 
-        # 1.5 文本里的 timeout 也优先判为超时（高于网络错误）
-        if self._match_any(text_lower, (r"\btimeout\b", r"\btimed out\b")):
+        # 1.5 文本里的 timeout 也优先判为超时（高于网络错误）。
+        # 中文「超时」必须一并匹配：Bash 工具的中文文案是「命令超时（120秒）」
+        # 与「[沙箱] 命令超时（120秒）」，只匹配英文会让它落进 UNKNOWN——
+        # 日志变成「Bash 遇到 未知错误」并拿 UNKNOWN 策略去重试，把真实原因盖掉。
+        if self._match_any(text_lower, (r"\btimeout\b", r"\btimed out\b", "超时")):
             return ClassifiedError(
                 category=ToolErrorCategory.TIMEOUT,
                 reason="执行超时",
                 recoverable=True,
                 suggestion="可尝试延长超时时间或重试。",
+            )
+
+        # 1.6 配置不全 / 未启用：既不是“未知错误”，也不该重试。
+        # 工具层的配置类文案是直接给用户看的（如 EmailBox 的“收件需要 IMAP…”、
+        # “邮件功能未启用”），落进 UNKNOWN 会让日志变成「遇到未知错误」、
+        # 真实原因反被盖住，还会拿重试次数把同一句话多念几遍。
+        # 放在超时之后：真正的超时文案里不会出现“未配置”。
+        # @author aceFelix
+        if self._match_any(
+            text_lower,
+            (
+                r"未配置",
+                r"配置不完整",
+                r"配置不全",
+                r"还没配置",
+                r"未启用",
+                r"当前缺",
+                r"缺少.*配置",
+                r"需要\s*IMAP",
+            ),
+        ):
+            return ClassifiedError(
+                category=ToolErrorCategory.CONFIG_INVALID,
+                reason="配置不完整",
+                recoverable=False,
+                suggestion="按工具回执里的提示补齐配置后再试；配置不会自动变好，重试无意义。",
             )
 
         # 2. 限流（优先级高于一般网络错误）
@@ -558,6 +592,27 @@ class ToolRecoveryExecutor:
                     attempts=attempts,
                 )
             error = self._classifier.classify(tool_name, result)
+
+        # 工具已声明「本次失败不宜自动重试」：直接交回模型决策，不重跑。
+        # 典型是命令跑满超时——重试只会让同一条命令再等一遍，副作用还会重复一次
+        # （实机：模型用 Bash 前台拉起浏览器，超时被判重试后浏览器被打开两次，
+        # 且总等待翻倍，用户看到的就是「卡死 + 又开了一个窗口」）。
+        # 自愈层只适合「换个参数可能就好」的失败，不适合「刚才那条已经做了一半」。
+        # @author aceFelix
+        if result is not None and not getattr(result, "retryable", True):
+            RecoveryTelemetry().record(
+                tool_name=tool_name,
+                category=error.category,
+                recoverable=error.recoverable,
+                attempts=0,
+                resolved=False,
+                message="工具声明不可重试，直接交回模型",
+            )
+            return RecoveryResult(
+                original_error=error,
+                final_result=result,
+                attempts=attempts,
+            )
 
         # 未启用自愈，直接返回错误
         if not self._global_enabled:

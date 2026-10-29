@@ -86,17 +86,21 @@ class ToolResult:
         images: 附带的图片内容块（可选，多模态）。非空时 orchestrator 会透传到
             ToolResultContent.images，让支持视觉的 LLM 直接看到图片。图片走独立
             通道，不受 data 文本的超长截断影响（例如 ScreenShot 截图回传）。
+        retryable: 本次失败是否适合由自愈层自动重试。默认 True；工具可置 False
+            表示「换参重试再试一次」毫无意义且可能有副作用（如命令跑满超时、
+            已产生外部副作用的失败），此时错误层会直接交回模型决策而不重跑。
     """
 
     data: Any = None
     new_messages: list[Any] = field(default_factory=list)
     is_error: bool = False
     images: list["ImageContent"] = field(default_factory=list)
+    retryable: bool = True
 
     @classmethod
     def ok(cls, data: Any, *, images: list["ImageContent"] | None = None) -> ToolResult:
         return cls(data=data, is_error=False, images=images or [])
 
     @classmethod
-    def error(cls, message: str) -> ToolResult:
-        return cls(data=message, is_error=True)
+    def error(cls, message: str, *, retryable: bool = True) -> ToolResult:
+        return cls(data=message, is_error=True, retryable=retryable)

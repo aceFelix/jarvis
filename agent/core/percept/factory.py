@@ -105,17 +105,22 @@ def build_sources(settings: Any) -> list[tuple[Any, bool]]:
     ))
 
     # IMAP 凭据回退口径：imap_user/imap_password 留空时沿用 SMTP 同一套（163/QQ
-    # 就是一个授权码两边用）；没配齐时 MailSource.configured() 为 False，
-    # 线程压根不起——这是"开了但没配齐"的标准处理（见本模块顶部）。
+    # 就是一个授权码两边用）；imap_host 留空时按 smtp_host 推断（同域前缀互换）。
+    # 没配齐时 MailSource.configured() 为 False，线程压根不起——这是"开了但
+    # 没配齐"的标准处理（见本模块顶部）。
+    # 账号解析只有 resolve_account 一份：以前这里手写了一遍等价逻辑，
+    # 加上主机名推导后两处必然漂移（一处能收、一处不能），故收归到 core/mail。
+    # @author aceFelix
+    from agent.core.mail.imap import resolve_account
+
+    _mail = resolve_account(settings)
     out.append((
         MailSource(
-            host=str(getattr(settings, "email_imap_host", "") or ""),
-            port=int(getattr(settings, "email_imap_port", 993) or 993),
-            user=str(getattr(settings, "email_imap_user", "")
-                     or getattr(settings, "email_smtp_user", "") or ""),
-            password=str(getattr(settings, "email_imap_password", "")
-                         or getattr(settings, "email_smtp_password", "") or ""),
-            mailbox=str(getattr(settings, "email_imap_mailbox", "INBOX") or "INBOX"),
+            host=_mail.host,
+            port=_mail.port,
+            user=_mail.user,
+            password=_mail.password,
+            mailbox=_mail.mailbox,
             # 发件人白名单：非空则只报命中的人（源侧第一道过滤，见 source_mail）
             watch_senders=getattr(settings, "percept_mail_watch_senders", ()) or (),
             interval_s=MAIL_DRAIN_INTERVAL_S,   # 排空节拍固定，真正影响延迟的是 IDLE/轮询

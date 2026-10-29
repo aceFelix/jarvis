@@ -101,11 +101,38 @@ _HIGH_PATTERNS = [
     r"\bservice\s+\w+\s+(stop|restart)\b",    # 服务操作
     r"\bsc\s+(stop|delete|config)\b",         # Windows 服务
     r"\bnet\s+(stop|start)\b",                # Windows 服务
-    r">\s*\S+",                                # 输出重定向（覆盖文件）
     r"\btruncate\b",
     r"\bshred\b",
 ]
 _HIGH_RE = [re.compile(p, re.IGNORECASE) for p in _HIGH_PATTERNS]
+
+# 丢弃输出 / 复制文件描述符的重定向：不改变任何文件内容，**不算高风险**。
+# 把它们剔除后再看还有没有 `>`，才是真正的「写进某个文件」。
+# 为什么必须单独处理：`>\s*\S+` 会把 `> /dev/null` 和 `2>&1` 一并当成"覆盖文件"，
+# 于是 `firefox.exe URL > /dev/null 2>&1 &` 这种只是「启动并丢弃输出」的命令被抬到
+# HIGH（连带触发文件快照），并与沙箱的进程回收叠出「窗口开了又消失」。
+# 实机：修完「后台命令不等返回」后，风险从「中」变「高」就是这个原因。
+_SAFE_REDIRECT_RE = re.compile(
+    r"""
+    \d*>&\d+                                      # 2>&1 复制描述符
+  | &>\s*(?:/dev/null|/dev/stdout|/dev/stderr|NUL|nul)\b
+  | \d?\s*>\s*(?:/dev/null|/dev/stdout|/dev/stderr|NUL|nul)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+# 任意 `> 目标`（在安全重定向被剔除之后仍能命中的，就是写文件）
+_FILE_REDIRECT_RE = re.compile(r">\s*\S+")
+
+
+def _has_file_redirect(command: str) -> bool:
+    """命令里是否有「写进文件」的重定向（丢弃输出不算）。
+
+    与 `_single_is_readonly` 里那条同类正则的分工不同：那个只看「是不是只读」，
+    这里判「是不是高风险」。`> /dev/null` 两边都不该被算作破坏性操作。
+
+    @author aceFelix
+    """
+    return bool(_FILE_REDIRECT_RE.search(_SAFE_REDIRECT_RE.sub(" ", command)))
 
 # ---- 极高风险命令（CRITICAL）—— 系统级破坏 ----
 _CRITICAL_PATTERNS = [
@@ -203,6 +230,10 @@ class RiskScorer:
         for pat in _HIGH_RE:
             if pat.search(command):
                 return RiskLevel.HIGH
+
+        # 写进文件的重定向才是 HIGH；`> /dev/null` / `2>&1` 已在上头剔除
+        if _has_file_redirect(command):
+            return RiskLevel.HIGH
 
         for pat in _MEDIUM_RE:
             if pat.search(command):
