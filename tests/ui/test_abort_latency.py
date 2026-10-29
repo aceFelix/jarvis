@@ -45,7 +45,7 @@ class _SlowThinkingProvider:
     default_model = "slow-1"
 
     async def stream(self, *, model, system, messages, tools, max_tokens=4096,
-                     temperature=None):
+                     temperature=None, known_tool_names=None):
         import asyncio
 
         from agent.llm.base import Stop, ThinkingDelta, Usage

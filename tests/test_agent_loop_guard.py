@@ -238,7 +238,7 @@ class _AbortingProvider:
         self.closed = False
 
     async def stream(self, *, model, system, messages, tools,
-                     max_tokens=4096, temperature=None):
+                     max_tokens=4096, temperature=None, known_tool_names=None):
         """逐个产出思考增量；到达指定序号后置 abort，关闭时记 closed。"""
         self.stream_calls += 1
         try:

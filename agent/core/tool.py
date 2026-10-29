@@ -240,6 +240,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.pref_tool import PreferenceTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
+    from agent.tools.extensions.email_box import EmailBoxTool
     from agent.tools.extensions.email_tool import SendEmailTool
     from agent.tools.web.web import WebFetchTool, WebSearchTool
 
@@ -263,6 +264,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
     registry.register(SendEmailTool())
+    # 收件箱查看/搜索/回复（全程只读，不改邮箱状态）@author aceFelix
+    registry.register(EmailBoxTool())
     registry.register(DevServerTool())
 
     # 阶段二: GUI 工具（可选，依赖 pyautogui/pygetwindow，缺失则跳过）

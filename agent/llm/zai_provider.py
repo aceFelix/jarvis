@@ -144,6 +144,7 @@ class ZaiProvider(LLMProvider):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         """流式调用智谱 SDK，并转换为统一的 LLMEvent 序列。
 

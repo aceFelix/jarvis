@@ -315,7 +315,8 @@ class TestStreamOnce:
             name = "partial"
             default_model = "m"
 
-            async def stream(self, *, model, system, messages, tools, max_tokens=4096, temperature=None):
+            async def stream(self, *, model, system, messages, tools, max_tokens=4096, temperature=None,
+                             known_tool_names=None):
                 yield TextDelta("部分输出")
                 raise ProviderError("中途断流")
 

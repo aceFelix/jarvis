@@ -47,6 +47,7 @@ class MockProvider(LLMProvider):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         # 取最后一条 user 消息作为"指令"
         last_user_text = ""

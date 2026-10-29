@@ -149,12 +149,24 @@ class LLMProvider(abc.ABC):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         """流式调用。必须 yield LLMEvent 序列，以 Stop 结尾。
 
         约定:
         - 出错时 raise ProviderError，不要 yield 半截序列。
         - ToolCall 的 input 一定是完整解析后的 dict（不要发参数 delta）。
+
+        Args:
+            known_tool_names: **库内真实存在**的全部工具名（不含本轮下发的
+                限定）。只供「文本态工具调用兜底」使用：模型可能从系统提示的
+                名字摘要里知道 ``ScreenShot`` 这类延迟工具，没走 ToolSearch
+                就直接把调用写成 DSML 文本。若只按本轮 ``tools`` 校验，这些调用
+                会被全量过滤——既不执行也不报错，用户只看到一堆裸码。
+
+                因此校验口径分两层：``tools`` 决定模型**看得见**什么，
+                ``known_tool_names`` 决定泄漏的调用**能不能被救回来执行**。
+                None 表示退化为只看 ``tools``（旧行为）。
         """
         ...
         # 让 mypy 满意：这是 async generator

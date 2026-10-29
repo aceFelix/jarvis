@@ -122,6 +122,28 @@ def test_pure_chat_not_overtriggered_by_structural_rule():
         assert is_chat_only(_ctx_with(_user(text))) is True
 
 
+def test_look_at_screen_is_not_chat_only():
+    """**核心回归**（2026-10 第五次复发）：想看屏幕的短句不能判纯聊天。
+
+    真实事故：语音里用户说「看一下吧」，词表只有「看下 / 看看」——
+    差一个字就漏判 → 本轮零工具 → 模型吐 DSML 裸码。
+    下面这批是把「差一个字」的各种常见说法钉住。
+    """
+    for text in (
+        "看一下吧", "看一下", "看一眼", "看眼", "看屏幕", "看一下屏幕",
+        "屏幕上有什么", "截个屏", "截个图", "截屏", "屏幕截图",
+    ):
+        assert is_chat_only(_ctx_with(_user(text))) is False, (
+            f"{text!r} 被判成纯聊天，本轮将零工具 -> DSML 裸码"
+        )
+
+
+def test_real_greetings_still_chat_only_after_vision_words():
+    """补完视觉词后，真问候不能被误伤（误伤只是多花 token，但仍要好）。"""
+    for text in ("你好", "谢谢", "嗯嗯", "好啊", "收到"):
+        assert is_chat_only(_ctx_with(_user(text))) is True
+
+
 def test_keyword_match_is_case_insensitive():
     """英文关键词走小写比较，大写同样能识别出工具意图。"""
     assert "open" in ACTION_KEYWORDS
@@ -143,6 +165,18 @@ def _registry_with_core_and_lazy() -> ToolRegistry:
     return reg
 
 
+class _StubToolSearch(Tool):
+    """ToolSearch 的最小替身（真身要 registry 引用，此处只验名字与 deferred）。"""
+
+    name = "ToolSearch"
+    description = "搜索并加载延迟工具"
+    input_schema = {"type": "object", "properties": {"query": {"type": "string"}}}
+    deferred = False
+
+    async def call(self, args, ctx):
+        return None
+
+
 def test_full_mode_sends_everything():
     """deferred_loading=False → 注册表全量下发（排障用的老行为）。"""
     defs = build_tool_defs(_registry_with_core_and_lazy(), None, deferred_loading=False)
@@ -161,10 +195,49 @@ def test_deferred_tool_hidden_until_discovered():
 
 
 def test_chat_detection_returns_no_tools():
-    """纯聊天 + 开启检测 → 返回空列表（本轮 0 token 下发工具）。"""
+    """纯聊天 + 开启检测 → 返回空列表（本轮 0 token 下发工具）。
+
+    注意：真实注册表里总有 ToolSearch，那种情况见
+    `test_chat_turn_still_sends_tool_search`。
+    """
     reg = _registry_with_core_and_lazy()
     ctx = _ctx_with(_user("你好"))
     assert build_tool_defs(reg, ctx) == []
+
+
+def test_chat_turn_still_sends_tool_search():
+    """**核心回归**（2026-10 第五次复发）：纯聊天轮也必须下发 ToolSearch。
+
+    用户原话「看一下吧」（语音模式，4 字）曾被判为纯聊天 → 本轮 tools=[]，
+    既没有 ScreenShot 也没有 ToolSearch（它虽属核心工具，也被「零工具」
+    这一刀一起抹了）。而系统提示里写着「用 ToolSearch 加载延迟工具」并列出
+    ``available-deferred-tools`` ——模型只能凭习惯吐文本态 DSML，
+    随后被 valid_names 全量过滤，用户看到的就是一堆 ``<｜｜DSML｜｜ calls>``。
+
+    ToolSearch 是拿回其它一切工具的唯一入口，它的开销（约 250 token）
+    远小于「误判即整轮卡死」。
+    """
+    reg = _registry_with_core_and_lazy()
+    reg.register(_StubToolSearch())
+    ctx = _ctx_with(_user("你好"))
+
+    defs = build_tool_defs(reg, ctx)
+
+    assert {d.name for d in defs} == {"ToolSearch"}, (
+        "纯聊天轮只能省掉核心工具体，不能把自救入口也省掉"
+    )
+    # 普通核心工具仍被省下（省 token 的本意还在）
+    assert "fake_tool" not in {d.name for d in defs}
+
+
+def test_chat_turn_keeps_already_discovered_tools():
+    """已发现的延迟工具在下一句闲聊里不能丢：否则上一轮 ToolSearch 白搜。"""
+    reg = _registry_with_core_and_lazy()
+    reg.register(_StubToolSearch())
+    ctx = _ctx_with(_user("你好"))
+    ctx.extra["discovered_tools"] = {"lazy_tool"}
+
+    assert {d.name for d in build_tool_defs(reg, ctx)} == {"ToolSearch", "lazy_tool"}
 
 
 def test_chat_detection_can_be_disabled():

@@ -53,6 +53,7 @@ class ScriptedProvider(LLMProvider):
         self.stream_calls = 0
         self.last_messages: list[Message] = []
         self.last_tools: list = []
+        self.last_known_tool_names: set[str] | None = None
         self._thinking = False
 
     async def stream(
@@ -64,11 +65,17 @@ class ScriptedProvider(LLMProvider):
         tools: list,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ):
-        """每次调用消费一个脚本元素。"""
+        """每次调用消费一个脚本元素。
+
+        ``known_tool_names`` 只记录不使用：它供真实 provider 的文本态调用兜底
+        校验用，本桩不接兜底逻辑（测兜底请用 tests/llm 下的 provider 测试）。
+        """
         self.stream_calls += 1
         self.last_messages = list(messages)
         self.last_tools = list(tools)
+        self.last_known_tool_names = known_tool_names
         if not self.scripts:
             yield Stop(reason="stop", usage=Usage())
             return

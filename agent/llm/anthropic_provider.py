@@ -208,6 +208,7 @@ class AnthropicProvider(LLMProvider):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         # 把 agent.core 消息合并进 system
         sys_from_msgs, api_msgs = _messages_to_anthropic(messages)
@@ -295,7 +296,10 @@ class AnthropicProvider(LLMProvider):
                 text_buf = ""
                 # 文本态工具调用兜底守卫：过滤泄漏进 text block 的 DSML/XML，
                 # 流末把泄漏文本转成真实 ToolCall（见 llm/text_tool_calls.py）
-                guard = TextualToolCallGuard(t.name for t in tools)
+                # valid_names = 本轮下发的 ∪ 库内存在的（known_tool_names），
+                # 否则模型凭提示词习惯写出的延迟工具调用会被全部过滤。
+                _valid = set(t.name for t in tools) | set(known_tool_names or ())
+                guard = TextualToolCallGuard(_valid)
 
                 async for event in stream:
                     if event.type == "message_start":

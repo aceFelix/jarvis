@@ -62,10 +62,35 @@ ACTION_KEYWORDS: tuple[str, ...] = (
     "改成", "改为", "改名", "重命名", "换成", "变成", "挪到", "移到",
     "移动到", "复制到", "追加", "清空", "存成", "保存", "生成", "新建",
     "建个", "删掉", "去掉", "贴到", "粘到", "回退", "撤销", "看下", "看看",
+    # 视觉/观察类口语（2026-10 第五次复盘）：用户想看屏幕时说的是「看一下」
+    # 「看一下吧」「截个屏」「看屏幕」，而表里只有「看下/看看」——差一个字就漏。
+    # 这类靠补词仍会漏，故另有 build_tool_defs 的「自救入口」做结构兜底。
+    "看一下", "看一眼", "看眼", "看屏幕", "看一下屏幕", "屏幕上",
+    "截个图", "截屏", "截个屏", "屏幕截图", "画面", "瞅",
 )
 
 # 纯聊天判定的消息长度上限（字符数）。超过即认为任务复杂，必须发工具。
 CHAT_ONLY_MAX_CHARS = 20
+
+# 纯聊天轮里**依然必发**的工具。
+#
+# 2026-10 第五次复盘：`is_chat_only` 命中后原先直接 `return []`，本意是 0 token，
+# 但它制造了一个**不可恢复**的故障态——系统提示里写着「以上为延迟加载工具，用
+# ToolSearch 搜索关键词加载完整定义后即可调用」并列出 ``available-deferred-tools``，
+# 而本轮 tools 里既没有那些延迟工具、也没有 ToolSearch 本身（它虽属核心工具，
+# 也被这一刀一起抹了）。模型只能凭训练习惯吐出文本态 DSML：
+#
+#     <｜｜DSML｜｜ calls>
+#     <｜｜DSML｜｜ invoke name="ScreenShot"></｜｜DSML｜｜ invoke>
+#     </｜｜DSML｜｜ calls>
+#
+# 随后被 `parse_textual_tool_calls` 按 valid_names 全量过滤（集合为空），
+# 最后由 `rescue_text` 补回显——用户看到的就是一堆乱码、工具不执行。
+#
+# 所以纯聊天轮改为「只留工具目录（ToolSearch）+ 上一轮已发现的延迟工具」：
+# 省 token 的大头（核心工具全量 schema）不变，但误判时模型能自己把工具捞回来。
+# @author aceFelix
+_SAFETY_TOOLS: frozenset[str] = frozenset({"ToolSearch"})
 
 # 结构判据：出现「文件名形态」或「路径形态」的 token 就不是闲聊。词表永远补不全
 # （动词、名词、缩写、方言轮着来），但「要动真实文件」这件事在字面上是有形状的：
@@ -167,9 +192,9 @@ def build_tool_defs(
     if not deferred_loading:
         return [_to_def(tool) for tool in registry.all()]
 
-    # 纯聊天检测：短消息 + 无动作意图 → 0 工具
+    # 纯聊天检测：短消息 + 无动作意图 → 只留自救入口，不发核心工具全量 schema
     if chat_detection and ctx is not None and is_chat_only(ctx):
-        return []
+        return _safety_defs(registry, ctx)
 
     # 分组发送：核心工具 + 已发现的延迟工具
     discovered: set[str] = set()
@@ -184,6 +209,33 @@ def build_tool_defs(
     return defs
 
 
+def _safety_defs(registry: ToolRegistry, ctx: ToolContext) -> list[ToolDef]:
+    """纯聊天轮的最小工具集：ToolSearch + 已被发现的延迟工具。
+
+    为什么不返回空列表，见 ``_SAFETY_TOOLS`` 上方的复盘。一句话：空列表让
+    「提示词说能用 ToolSearch / 清单里没有」这个不一致变成硬故障，而模型侧的
+    反应只能是吐文本态 DSML。
+
+    为什么不是把核心工具全带上：那等于取消整个纯聊天优化（省的就是这部分
+    schema）。只留 ToolSearch（约 250 token）就足够让模型自救。
+
+    Args:
+        registry: 工具注册表。
+        ctx: 工具上下文（读 ``extra["discovered_tools"]``）。
+
+    Returns: 纯聊天轮的 ToolDef 列表，至少包含 ToolSearch。
+
+    @author aceFelix
+    """
+    discovered: set[str] = set(ctx.extra.get("discovered_tools", set()))
+    return [
+        _to_def(tool)
+        for tool in registry.all()
+        # 已发现的也要留：否则上一轮 ToolSearch 的成果在下一句闲聊时白丢
+        if tool.name in _SAFETY_TOOLS or tool.name in discovered
+    ]
+
+
 def _to_def(tool) -> ToolDef:
     """单个 Tool → ToolDef（只取模型需要的三样）。"""
     return ToolDef(
@@ -193,4 +245,9 @@ def _to_def(tool) -> ToolDef:
     )
 
 
-__all__ = ["ACTION_KEYWORDS", "CHAT_ONLY_MAX_CHARS", "build_tool_defs", "is_chat_only"]
+__all__ = [
+    "ACTION_KEYWORDS",
+    "CHAT_ONLY_MAX_CHARS",
+    "build_tool_defs",
+    "is_chat_only",
+]

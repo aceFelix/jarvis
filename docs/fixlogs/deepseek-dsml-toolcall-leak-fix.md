@@ -279,6 +279,111 @@ python -m pytest -q                                                             
 回灌给模型——修完请**另起新会话**重测场景 1；真要彻底关掉这条判定用
 `[tools] chat_detection = false`（或 `JARVIS_TOOLS_CHAT_DETECTION=0`）。
 
+# 五次补漏（2026-10-29）：「看一下吧」→ 整轮零工具，又一堆裸码
+
+**现象**：语音模式下：
+
+```
+🧑 你说: 看一下吧。
+（思考过程里模型纠结：“工具列表里 available-deferred-tools 有 ScreenShot”，
+  但“我没看到 ToolSearch 在工具列表里”）
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="ScreenShot">
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+🧑 你说: 你说什么呢，兄弟。
+（又来一遍）
+```
+
+用户原话：「jarvis 这是又犯病了」。
+
+### 根因一：词表又漏了一个字
+
+```
+is_chat_only('看一下吧')   → True      用户原话
+is_chat_only('看一下屏幕') → True      明确要看屏幕
+is_chat_only('看屏幕')     → True
+is_chat_only('截个屏')     → True
+is_chat_only('看看')       → False     ← 词表里有「看看」「看下」
+```
+
+`ACTION_KEYWORDS` 只有「看下 / 看看」，差一个字就漏。和前四次一样。
+
+### 根因二（真正要命的）：`return []` 把 ToolSearch 也一起砍了
+
+`build_tool_defs` 纯聊天命中后直接返回**空列表**。ToolSearch 虽然 `deferred=False`
+（核心工具），也在这刀底下没了。于是本轮请求处于一个**自相矛盾**的状态：
+
+| 位置 | 内容 |
+|---|---|
+| 系统提示词 | “以上为延迟加载工具，用 ToolSearch 搜索关键词加载完整定义后即可调用” + `available-deferred-tools: ScreenShot` |
+| 本轮 tools | **空**——既无 ScreenShot，也无 ToolSearch |
+
+模型唯一能做的就是凭训练习惯把调用写成文本。而这正是模型在思考里反复纠结的地方
+（“工具列表里没有 ToolSearch 定义”“让我尝试直接调 ScreenShot 看看”）。
+
+### 为什么前四次都没修到点上
+
+四次补漏都在**堆词**。但 `return []` 这个设计把“省 token”的手段实现成了
+“**完全无工具**”——后者是一个**不可恢复的故障态**：模型没有自救手段，
+只能泄漏；泄漏又被 `valid_names` 全量过滤；最后由 `rescue_text` 补回裸码。
+只要判定漏一次，整轮就废一次。
+
+### 修复（改成结构性的，不再只是补词）
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | [tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_dispatch.py) | 纯聊天命中不再 `return []`，改为 `_safety_defs()`：只发 **ToolSearch + 已发现的延迟工具** |
+| 2 | 同上 | 词表补视觉类口语：`看一下 / 看一眼 / 看眼 / 看屏幕 / 看一下屏幕 / 屏幕上 / 截个图 / 截屏 / 截个屏 / 屏幕截图 / 画面 / 瞅` |
+| 3 | [base.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/base.py) 及 5 个 provider | `stream()` 新增 `known_tool_names`：**库内真实存在**的全部工具名 |
+| 4 | [openai_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/openai_provider.py) / [anthropic_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py) | 兜底校验取 `本轮tools ∪ known_tool_names` |
+| 5 | [query_loop.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/query_loop.py) | 传 `known_tool_names={t.name for t in registry.all()}` |
+
+两条防线分层，职责不同：
+
+- **`tools` 决定模型「看得见」什么**（省 token 靠它）；
+- **`known_tool_names` 决定泄漏的调用「能不能被救回来执行」**
+  （即使模型没先 ToolSearch，直接写出 `ScreenShot`，也能当次就正常执行）。
+
+修复后的行为：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 纯聊天误判 | 0 工具 → 只能泄漏 → 裸码 | 仅 ToolSearch → 模型自己 `ToolSearch("截图")` 把工具捞回来 |
+| 模型跳过 ToolSearch 直接写 `ScreenShot` | valid_names 空 → 全过滤 → 裸码 | valid_names 含 ScreenShot → **直接执行成功** |
+| 模型瞎编一个不存在的工具 | 过滤 → rescue_text 补裸码 | 仍然过滤（不让它凭空造工具） |
+
+### 测试
+
+- [tests/test_tool_dispatch.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/test_tool_dispatch.py) 新增 3 例：
+  - `test_look_at_screen_is_not_chat_only` —— 「看一下吧」「看屏幕」「截个屏」等 11 种说法都不得判纯聊天；
+  - `test_chat_turn_still_sends_tool_search` —— 纯聊天轮必须留 ToolSearch，但普通核心工具仍被省掉；
+  - `test_chat_turn_keeps_already_discovered_tools` —— 已发现的延迟工具在下一句闲聊里不能丢。
+- [tests/llm/test_openai_provider.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/llm/test_openai_provider.py) 新增 2 例：
+  - `test_undeclared_tool_rescued_by_known_names` —— 本轮 `tools=[]`，但 `known_tool_names` 含 ScreenShot → 必须产生真 ToolCall 且不吐裸码；
+  - `test_unknown_tool_still_filtered` —— 库内也不存在的工具名仍过滤，并靠 rescue_text 补原文。
+- 同步更新测试桩：`tests/_query_loop_fakes.py`、`tests/test_agent_loop_guard.py`、
+  `tests/test_query_loop_stream.py`、`tests/ui/test_abort_latency.py` 的 `stream()` 补 `known_tool_names` 参数。
+
+```powershell
+python -m pytest tests -q   # 3878 passed
+```
+
+### 经验总结
+
+- **“省 token”的实现不能以“进入不可恢复故障态”为代价。** 纯聊天优化的本意只是
+  不发重型 schema，却做成了 0 工具；模型一旦想用工具就没有任何办法。现在留一个
+  约 250 token 的 ToolSearch，就把“误判”从“整轮报废”降级为“多一次搜索”。
+- **同一个 bug 修了五次，说明修错了层级。** 前四次都在词表（数据）上打补丁，
+  而真正的缺陷在 `return []`（结构）上。判断标准：**如果同样的现象换了说法就
+  重现，那被修的一直是症状。**
+- **“看得见什么”和“能不能用”是两个维度。** `tools` 管前者，`known_tool_names`
+  管后者；合并成一个集合会让省 token 与可用性互相绑架。
+- 模型在思考过程里说的抱怨（「我没看到 ToolSearch 在工具列表里」）本身就是
+  根因线索——它比最终输出更早知道系统哪里不一致。
+
+---
+
 ## 边界
 
 - DSML 块之后若还有正文（罕见，泄漏轮通常以调用结尾），会被一并吞入缓存不显示——可接受；

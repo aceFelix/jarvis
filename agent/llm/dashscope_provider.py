@@ -249,6 +249,7 @@ class DashScopeProvider(LLMProvider):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         # 根据 model_type 选择 API：
         # - multimodal → MultiModalConversation.call()（multimodal-generation 端点）

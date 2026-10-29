@@ -664,6 +664,12 @@ class QueryLoop:
             tools=tool_defs,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
+            # 库内**全部**工具名（不只是本轮下发的）：供文本态调用兜底的
+            # valid_names 用。纯聊天轮 / 延迟工具都没下 schema，但模型能从系统
+            # 提示的名字摘要里知道它们，一旦它把调用写成 DSML 文本，只有按全集
+            # 校验才能把调用救回来执行（否则变成一堆裸码）。详见
+            # agent/llm/base.py 的 known_tool_names。@author aceFelix
+            known_tool_names={t.name for t in self._registry.all()},
         )
         try:
             async for event in stream:

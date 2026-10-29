@@ -452,3 +452,77 @@ class TestTextualToolCallFallback:
         texts = "".join(e.text for e in events if isinstance(e, TextDelta))
         assert texts == body
         assert not any(isinstance(e, ToolCall) for e in events)
+
+    @pytest.mark.asyncio
+    async def test_undeclared_tool_rescued_by_known_names(
+        self, provider: OpenAIProvider
+    ) -> None:
+        """**核心回归**（2026-10 第五次复发）：本轮没下发 schema 的工具也能救回来。
+
+        真实事故：用户说「看一下吧」→ 被判纯聊天 → 本轮 tools 里没有
+        ScreenShot（延迟工具）、也没有 ToolSearch。模型仍从系统提示的
+        ``available-deferred-tools`` 知道有 ScreenShot，于是直接写出 DSML。
+        若 valid_names 只看本轮 tools，这个调用会被全量过滤，用户只看到裸码。
+
+        ``known_tool_names``（库内全部工具名）就是为了把它救回来执行。
+        """
+        P = chr(0xFF5C)
+        DO = "<" + P * 2 + "DSML" + P * 2 + " "
+        DC = "</" + P * 2 + "DSML" + P * 2 + " "
+        leak = (
+            DO + "calls>"
+            + DO + 'invoke name="ScreenShot">'
+            + DC + "invoke>"
+            + DC + "calls>"
+        )
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(content=leak, finish_reason="stop",
+                            usage=_MockUsage(prompt_tokens=10, completion_tokens=5))
+            )
+        )
+        msgs = [Message(role="user", content=[TextContent(text="看一下吧")])]
+        events = [
+            e async for e in provider.stream(
+                model="deepseek-chat", system="sys", messages=msgs,
+                tools=[],                      # 本轮一个 schema 都没发
+                max_tokens=100,
+                known_tool_names={"ScreenShot", "Bash"},
+            )
+        ]
+        calls = [e for e in events if isinstance(e, ToolCall)]
+        assert [c.name for c in calls] == ["ScreenShot"], (
+            "库内真实存在的工具，即使本轮没下发 schema 也必须能执行"
+        )
+        texts = "".join(e.text for e in events if isinstance(e, TextDelta))
+        assert "DSML" not in texts, "救回来了就不该再把裸码当正文吐给用户"
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_still_filtered(self, provider: OpenAIProvider) -> None:
+        """库内也不存在的工具名仍要被过滤（否则等于让模型凭空造工具）。"""
+        P = chr(0xFF5C)
+        DO = "<" + P * 2 + "DSML" + P * 2 + " "
+        DC = "</" + P * 2 + "DSML" + P * 2 + " "
+        leak = (
+            DO + "calls>"
+            + DO + 'invoke name="NoSuchTool">'
+            + DC + "invoke>"
+            + DC + "calls>"
+        )
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(content=leak, finish_reason="stop",
+                            usage=_MockUsage(prompt_tokens=10, completion_tokens=5))
+            )
+        )
+        msgs = [Message(role="user", content=[TextContent(text="看一下吧")])]
+        events = [
+            e async for e in provider.stream(
+                model="deepseek-chat", system="sys", messages=msgs,
+                tools=[], max_tokens=100, known_tool_names={"Bash"},
+            )
+        ]
+        assert not any(isinstance(e, ToolCall) for e in events)
+        # 解析不出来就靠 rescue_text 把原文补回显（不丢信息契约）
+        texts = "".join(e.text for e in events if isinstance(e, TextDelta))
+        assert "NoSuchTool" in texts

@@ -292,6 +292,7 @@ class OpenAIProvider(LLMProvider):
         tools: list[ToolDef],
         max_tokens: int = 4096,
         temperature: float | None = None,
+        known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         api_msgs = _messages_to_openai(messages, system, skip_images=(self._model_type == "text"))
         tool_schemas = [
@@ -338,8 +339,10 @@ class OpenAIProvider(LLMProvider):
         # 累积工具调用参数（OpenAI 分片发 arguments）
         tool_acc: dict[int, dict[str, Any]] = {}
         # 文本态工具调用兜底：过滤泄漏进 content 的 DSML/XML，避免裸码回显
-        # @author aceFelix
-        guard = TextualToolCallGuard(t.name for t in tools)
+        # valid_names 取「本轮下发的」∪「库内真实存在的」：参见 base.stream 的
+        # known_tool_names 说明。只取本轮会把模型凭提示词习惯直接写出的延迟工具
+        # 调用全部抹掉（表现为裸码、工具不执行）。@author aceFelix
+        guard = TextualToolCallGuard(set(t.name for t in tools) | set(known_tool_names or ()))
 
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
