@@ -164,6 +164,20 @@ def _messages_to_openai(
 _shared_http_client: Any | None = None
 
 
+def _new_http_pool(*, max_keepalive: int = 10, max_connections: int = 50) -> Any:
+    """新建一个 httpx.AsyncClient（共享池与独占池共用同一套参数）。
+
+    @author aceFelix
+    """
+    import httpx
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(180.0, connect=10.0),
+        limits=httpx.Limits(
+            max_keepalive_connections=max_keepalive, max_connections=max_connections
+        ),
+    )
+
+
 def _get_shared_http_client() -> Any:
     """获取或创建共享的 httpx.AsyncClient。
 
@@ -174,12 +188,26 @@ def _get_shared_http_client() -> Any:
     """
     global _shared_http_client
     if _shared_http_client is None or _shared_http_client.is_closed:
-        import httpx
-        _shared_http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(180.0, connect=10.0),
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=50),
-        )
+        _shared_http_client = _new_http_pool()
     return _shared_http_client
+
+
+async def close_shared_http_client() -> None:
+    """关闭进程级共享连接池（**唯一**允许关它的地方）。
+
+    必须与 ``OpenAIProvider.close()`` 区分开：provider 是短命对象（记忆提炼、
+    连通性测试每次都新建一个），连接池是进程级资源。两者混在一起关，就会
+    出现「一个临时 provider 下班，全员断网」的事故。
+
+    @author aceFelix
+    """
+    global _shared_http_client
+    if _shared_http_client is not None and not _shared_http_client.is_closed:
+        try:
+            await _shared_http_client.aclose()
+        except Exception:
+            pass
+    _shared_http_client = None
 
 
 class OpenAIProvider(LLMProvider):
@@ -197,6 +225,7 @@ class OpenAIProvider(LLMProvider):
         enable_thinking: bool = True,
         thinking_budget: int = 2000,
         model_type: str = "multimodal",
+        dedicated_client: bool = False,
     ) -> None:
         try:
             from openai import AsyncOpenAI  # type: ignore
@@ -223,8 +252,18 @@ class OpenAIProvider(LLMProvider):
             kwargs["api_key"] = api_key
         if base_url:
             kwargs["base_url"] = base_url
-        # P-02: 共享 HTTP 连接池，避免每次切换模型新建 TCP 连接
-        kwargs["http_client"] = _get_shared_http_client()
+        # P-02: 共享 HTTP 连接池，避免每次切换模型新建 TCP 连接。
+        # dedicated_client=True 时为后台任务（记忆画像提炼等）建**独占池**：
+        # 这类任务跑在独立线程、与主对话并发，共用一套连接池时，后台任务的
+        # 流量与关闭都会影响前台可用连接。物理隔开最省心——各自用各自的池，
+        # 退场时只关自己的（见 close()）。
+        # @author aceFelix
+        if dedicated_client:
+            self._own_pool = _new_http_pool(max_keepalive=4, max_connections=8)
+            kwargs["http_client"] = self._own_pool
+        else:
+            self._own_pool = None
+            kwargs["http_client"] = _get_shared_http_client()
         self._client = AsyncOpenAI(**kwargs)
 
     @property
@@ -307,6 +346,22 @@ class OpenAIProvider(LLMProvider):
             for t in tools
         ]
 
+        # 每次请求都记下「这一发到底发给了谁」。
+        # 2026-10 排查「重启后第一句正常、之后必挂」时，缺的正是这份现场：
+        # 只知道报 Connection error，却不知道第二次请求的 base_url / 模型名 /
+        # provider 实例是否被悄悄换掉。用 id(self) 与 id(self._client) 能看出
+        # provider 有没有被重建过（重建后 id 必然变），对定位极关键。
+        # api_key 只留前 6 位，日志可外传不泄密。@author aceFelix
+        from agent.core.logging import get_logger
+        _key_prefix = str(getattr(self._client, "api_key", "") or "")[:6]
+        get_logger().debug(
+            "LLM 请求: model=%s base_url=%r key=%s... provider_id=%s client_id=%s "
+            "msgs=%d tools=%d system_chars=%d thinking=%s effort=%s",
+            model, self._base_url, _key_prefix, id(self), id(self._client),
+            len(api_msgs), len(tool_schemas), len(system),
+            self.is_thinking_enabled(), getattr(self, "_thinking_effort", None),
+        )
+
         request_kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": api_msgs,
@@ -344,6 +399,7 @@ class OpenAIProvider(LLMProvider):
         # 调用全部抹掉（表现为裸码、工具不执行）。@author aceFelix
         guard = TextualToolCallGuard(set(t.name for t in tools) | set(known_tool_names or ()))
 
+        stream = None
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
             final_usage = Usage()
@@ -428,9 +484,45 @@ class OpenAIProvider(LLMProvider):
             from agent.llm.errors import classify
             classified = classify(e)
             raise ProviderError(classified.user_message) from e
+        finally:
+            # 必须显式关闭流（2026-10 关键修复）。
+            # openai 的 AsyncStream 不会因为 async for 跑完就自动关闭：没关的
+            # response 会让底层连接带着未读完的残留数据回到**共享连接池**
+            # （见 _get_shared_http_client），下一次请求复用到这条脏连接就会
+            # RemoteProtocolError 被 SDK 包成「Connection error」。
+            # 结合用户现场「重启后第一句正常、之后每次必挂」完全吻合。
+            # 注：提前 break / 被取消时也走这里，不会漏关。@author aceFelix
+            if stream is not None:
+                try:
+                    await stream.close()
+                except Exception:
+                    # 关闭失败不能影响正常返回，也不能掩盖原始异常
+                    pass
 
     async def close(self) -> None:
-        await self._client.close()
+        """释放 provider 自身（**不会关闭全局共享连接池**）。
+
+        为什么不能关共享池（2026-10 铁证）：P-02 之后所有 OpenAIProvider 共用
+        一个进程级 httpx client（见 ``_get_shared_http_client``）。而
+        ``AsyncOpenAI.close()`` 会把传入的 http_client 一并 ``aclose()``，
+        于是任何一个短命 provider 下班都会把大家的连接池关死。
+
+        实机现场：记忆画像提炼每轮新建一个临时 provider，提炼后走 finally
+        里的 ``provider.close()``；主对话下一次请求就直接
+        ``RuntimeError: Cannot send a request, as the client has been closed``
+        —— 被 openai SDK 包成「Connection error」，只有重启进程才恢复，
+        表现就是「刚启动第一句正常，之后每次必挂」。
+
+        当前规则：**只有独占池（dedicated_client=True）才真正关闭**；
+        共享池的生命周期由 ``close_shared_http_client()`` 在进程退出时统一处理。
+        @author aceFelix
+        """
+        own_pool = getattr(self, "_own_pool", None)
+        if own_pool is not None and not own_pool.is_closed:
+            try:
+                await own_pool.aclose()
+            except Exception:
+                pass
 
 
 # ---- 流式工具调用参数解析（容错版）----

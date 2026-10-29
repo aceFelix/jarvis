@@ -39,7 +39,16 @@ class ClassifiedError:
 
 
 def _extract_raw(exc: Exception) -> str:
-    """从异常中提取原始错误消息。"""
+    """从异常中提取原始错误消息，**含 __cause__ 链**。
+
+    为什么必须往下挖（2026-10 排查教训）：openai SDK 会把底层 httpx 异常
+    包成 ``APIConnectionError("Connection error.")``，而真正的原因——是 DNS
+    解析失败、TLS 握手失败、还是服务端在响应前直接断开——**只存在于 cause 链
+    里**。只取 ``str(exc)`` 的结果是所有连接类故障长得一模一样，界面上全都
+    显示“请检查网络”，而用户那边网络明明是好的。
+
+    @author aceFelix
+    """
     msg = str(exc)
     # OpenAI SDK 的错误带有状态码和详情
     if hasattr(exc, "body") and isinstance(exc.body, dict):
@@ -50,8 +59,23 @@ def _extract_raw(exc: Exception) -> str:
             return f"[{code}] {detail}" if code else detail
     # HTTP 状态码
     if hasattr(exc, "status_code"):
-        return f"HTTP {exc.status_code}: {msg}" if msg else f"HTTP {exc.status_code}"
-    return msg
+        base = f"HTTP {exc.status_code}: {msg}" if msg else f"HTTP {exc.status_code}"
+    else:
+        base = msg
+
+    # 顺着 cause/context 链把底层原因一起带出来
+    chain: list[str] = []
+    cur = exc.__cause__ or exc.__context__
+    depth = 0
+    while cur is not None and depth < 4:
+        text = str(cur).strip()
+        if text and text not in base:
+            chain.append(f"{type(cur).__name__}: {text}")
+        cur = cur.__cause__ or cur.__context__
+        depth += 1
+    if chain:
+        base = f"{base} <- " + " <- ".join(chain)
+    return base
 
 
 def classify(exc: Exception) -> ClassifiedError:
@@ -134,9 +158,39 @@ def classify(exc: Exception) -> ClassifiedError:
             ),
         )
 
-    # ── 网络超时 ──
+    # ── 网络：先分清「真超时」与「连接被对端断开」──
+    # 两者提示差别很大：超时才可能是本地网络/代理；连接被断多半是上游服务端
+    # 或中间网关主动关的，让用户去查 HTTP_PROXY 是纯误导。实机 2026-10：
+    # 用户网络实测完全正常，界面上却一直在让他“检查网络连接”。
+    # @author aceFelix
+    if "timeout" in raw_lower or "timed out" in raw_lower:
+        return ClassifiedError(
+            category=ErrorCategory.NETWORK,
+            raw_message=raw,
+            user_message=_build(
+                raw, "请求超时",
+                "等待 API 响应超时（请求已发出，但模型迟迟未开始返回）。\n"
+                "如果用的是推理型模型，思考耗时较长时会更容易触发。\n"
+                "可先重试一次；连续发生时切到 /model <非推理模型> 试试。"
+            ),
+        )
     if any(kw in raw_lower for kw in (
-        "timeout", "timed out", "connection", "refused",
+        "disconnected", "remote protocol", "server disconnected",
+        "connection reset", "broken pipe", "eof occurred",
+        "incomplete", "peer closed", "stream closed"
+    )):
+        return ClassifiedError(
+            category=ErrorCategory.NETWORK,
+            raw_message=raw,
+            user_message=_build(
+                raw, "连接被中断",
+                "服务端在响应完成前断开了连接。这通常是**上游临时故障**或网关\n"
+                "空闲超时，不是你本地网络的问题（此时查 HTTP_PROXY 没有意义）。\n"
+                "重试一次通常可恢复；若每次都在同一位置断开，请把日志反馈给维护者。"
+            ),
+        )
+    if any(kw in raw_lower for kw in (
+        "timeout", "connection", "refused",
         "network", "resolve"
     )) or status in (502, 503, 504):
         return ClassifiedError(

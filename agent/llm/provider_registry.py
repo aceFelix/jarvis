@@ -84,7 +84,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="openai",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("api.openai.com",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     "dashscope": ProviderMeta(
@@ -92,7 +99,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="dashscope",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("dashscope",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
         thinking_key="dashscope",
     ),
 
@@ -101,7 +115,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="deepseek",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("deepseek",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
         thinking_key="deepseek",
     ),
 
@@ -110,7 +131,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="zhipu",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("open.bigmodel.cn",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
         thinking_key="zhipu",
     ),
 
@@ -119,7 +147,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="moonshot",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("moonshot",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     "minimax": ProviderMeta(
@@ -127,7 +162,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="minimax",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("minimax",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     "xiaomimimo": ProviderMeta(
@@ -135,7 +177,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="xiaomimimo",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("xiaomimimo",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     "google": ProviderMeta(
@@ -143,7 +192,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="google",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("generativelanguage", "googleapis"),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     "siliconflow": ProviderMeta(
@@ -151,7 +207,14 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         name="siliconflow",
         module_path="agent.llm.openai_provider.OpenAIProvider",
         url_patterns=("siliconflow",),
-        init_keys=("api_key", "base_url", "model", "enable_thinking", "thinking_budget", "model_type"),
+        init_keys=(
+            "api_key", "base_url", "model", "enable_thinking", "thinking_budget",
+            "model_type",
+            # 允许后台任务（记忆提炼等）要求创建独占 HTTP 连接池，
+            # 值由 _build_provider 的 dedicated_client 参数决定，不从 settings 取。
+            # @author aceFelix
+            "dedicated_client",
+        ),
     ),
 
     # ── DashScope 原生 SDK ──

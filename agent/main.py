@@ -576,6 +576,15 @@ async def repl(settings: Settings) -> int:
         except BaseException:
             pass
     await provider.close()
+    # 关闭进程级共享 HTTP 连接池。
+    # provider.close() 刻意不碰它（多个 provider 共用同一个池，见
+    # openai_provider.close() 的说明），所以进程退出时必须在这里显式关。
+    # @author aceFelix
+    try:
+        from agent.llm.openai_provider import close_shared_http_client
+        await close_shared_http_client()
+    except Exception:
+        pass
     # 清理 LSP server
     try:
         from agent.lsp.manager import get_lsp_manager

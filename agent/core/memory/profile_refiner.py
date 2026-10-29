@@ -127,18 +127,23 @@ def _build_refine_provider(settings: Any):
             or settings.api_key
         )
 
-        # 独立模型：复制 settings 覆盖 LLM 四元组后走统一工厂
+        # 独立模型：复制 settings 覆盖 LLM 四元组后走统一工厂。
+        # dedicated_client=True 强制给提炼建**独占连接池**：提炼跑在后台线程、
+        # 与主对话并发，共用同一个连接池时，提炼的流量与关闭都会影响前台可用
+        # 连接（2026-10 事故：提炼 close() 直接关死了主对话的连接池，每次重启后
+        # 聊到第十句左右必挂）。物理隔开最省心。@author aceFelix
         s = settings.with_overrides(
             model=refine_model,
             api_format=api_format,
             base_url=base_url,
             api_key=api_key,
         )
-        return _build_provider(s, model_type="text")
+        return _build_provider(s, model_type="text", dedicated_client=True)
 
     if (getattr(settings, "api_format", "") or "").lower() == "mock":
         return None  # 开发模拟环境，无真实 LLM 可用
-    return _build_provider(settings, model_type="text")
+    # 回退主 LLM 也走独占池：即便模型/端点相同，也必须与前台对话的连接池分开
+    return _build_provider(settings, model_type="text", dedicated_client=True)
 
 
 # 厂商 → 专属 API key 环境变量（与 env.py 的厂商专属变量保持一致）

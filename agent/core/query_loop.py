@@ -25,8 +25,15 @@ v0.1 实现最核心的闭环:
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+# LLM 调用失败必须落日志（2026-10 排查教训）：此前这里一个日志都不打，
+# 出事后 jarvis.log 里只留下几个字符「provider_error」，异常原文、底层
+# cause 链全丢了，于是「反复 Connection error」只能靠猜。
+# @author aceFelix
+logger = logging.getLogger(__name__)
 
 from agent.core.context import ToolContext
 from agent.core.message import (
@@ -417,6 +424,9 @@ class QueryLoop:
                 # 网络错误：自动重试一次（1.5s 退避），最多重试 1 次
                 if "网络错误" in error_str and not self._network_retried:
                     self._network_retried = True
+                    # 记下第一次失败的真实原因（含 cause 链）：重试成功后这里
+                    # 是唯一的现场，不记就再也查不到了。
+                    logger.warning("LLM 网络错误，1.5s 后重试一次: %r", e, exc_info=True)
                     await asyncio.sleep(1.5)
                     if ctx.ui:
                         ctx.ui.warn("网络异常，自动重试中...")
@@ -428,6 +438,13 @@ class QueryLoop:
                     continue  # 重试本轮
 
                 # LLM 错误: 通知并结束（不回灌错误给 LLM，避免循环）
+                # exc_info=True 才能把底层 cause 链写进日志：APIConnectionError
+                # 的 str 只有「Connection error.」，真正原因（DNS / TLS / 服务端
+                # 断开 / 代理）只能在 cause 里看到。
+                logger.error(
+                    "LLM 调用失败（stopped_reason=provider_error）: %r", e,
+                    exc_info=True,
+                )
                 if ctx.ui:
                     ctx.ui.error(f"LLM 调用失败: {e}")
                 stats.stopped_reason = "provider_error"

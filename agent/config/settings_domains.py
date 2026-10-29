@@ -89,6 +89,11 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("profile_refine_interval", "profile_refine_interval"),
         ("profile_refine_model", "profile_refine_model"),
         ("profile_refine_provider", "profile_refine_provider"),
+        # 别名：该字段语义就是 api_format（见 Settings.profile_refine_provider），
+        # 用户按直觉写 profile_refine_api_format 时不应被静默丢弃。
+        # 放在 provider 之后：两者都写时 api_format 生效。
+        # @author aceFelix
+        ("profile_refine_api_format", "profile_refine_provider"),
         ("profile_refine_base_url", "profile_refine_base_url"),
         ("profile_refine_api_key", "profile_refine_api_key"),
     )),
@@ -239,6 +244,11 @@ SUB_TABLES: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
     ("memory", "refine", (
         ("model", "profile_refine_model"),
         ("provider", "profile_refine_provider"),
+        # 别名：见 FLAT_DOMAINS 里 [memory].profile_refine_api_format 的说明。
+        # 实际现场 2026-10：用户写 api_format="anthropic" 却被静默忽略，
+        # 协议回退成 openai，请求打到 /anthropic/chat/completions → 404。
+        # @author aceFelix
+        ("api_format", "profile_refine_provider"),
         ("base_url", "profile_refine_base_url"),
         ("api_key", "profile_refine_api_key"),
         ("interval", "profile_refine_interval"),

@@ -51,10 +51,15 @@ class TestResolveApiKeyFromEnv:
 # ─────────────────────────────────────────────────────────────
 
 def _capture_provider(monkeypatch) -> list[Settings]:
-    """替换 bootstrap._build_provider，捕获传入的 settings。"""
+    """替换 bootstrap._build_provider，捕获传入的 settings。
+
+    fake_build 用 ``**kwargs`` 收尾：工厂后续新增构造开关（如
+    ``dedicated_client``）时不会把这里的测试替身打爆。
+    @author aceFelix
+    """
     captured: list[Settings] = []
 
-    def fake_build(s, model_type="multimodal"):
+    def fake_build(s, model_type="multimodal", **kwargs):
         captured.append(s)
         return object()
 

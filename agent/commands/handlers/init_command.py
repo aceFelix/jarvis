@@ -136,6 +136,15 @@ async def _test_connection(vendor: dict, api_key: str) -> tuple[bool, str]:
         kwargs["model_type"] = "text"
         kwargs["enable_thinking"] = False
 
+        # 连通性测试用**独占连接池**：这里只是临时探一下（拿到第一个文本块就
+        # return），用完立刻 close。若与主对话共用共享池，一次 /init 就可能把
+        # 正在使用的连接池一并关掉（与 2026-10 画像提炼事故同源，见
+        # docs/fixlogs/shared-http-pool-close-kills-chat.md）。
+        # 仅声明了该构造开关的 provider 才传（DashScope 原生 SDK / Zai 不接）。
+        # @author aceFelix
+        if "dedicated_client" in getattr(meta, "init_keys", ()):
+            kwargs["dedicated_client"] = True
+
         provider = meta.create(**kwargs)
 
         from agent.core.message import Message, TextContent

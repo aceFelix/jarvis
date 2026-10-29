@@ -29,14 +29,26 @@ def _model_type_for(settings: Settings, model_name: str | None = None) -> str:
     return "multimodal"
 
 
-def _build_provider(settings: Settings, model_type: str = "multimodal"):
+def _build_provider(
+    settings: Settings,
+    model_type: str = "multimodal",
+    *,
+    dedicated_client: bool = False,
+):
     """根据 settings 构造 LLM provider —— 配置表驱动。
 
     A-04 改进：原 if-else 链已被 PROVIDER_REGISTRY 取代。
     新增厂商只需在 provider_registry.py 加一行 ProviderMeta，
     无需修改此函数。
 
-    @author aceFelix
+    Args:
+        settings: 模型域配置
+        model_type: 多模态能力（"text" / "multimodal"）
+        dedicated_client: True 时给 provider 建**独占 HTTP 连接池**。
+            后台任务（记忆画像提炼等）应当传 True：它们跑在独立线程里与
+            主对话并发，共用同一连接池时，后台任务的流量与关闭会直接影响
+            前台可用连接。仅 OpenAI 系 provider 支持，其余自动忽略。
+            @author aceFelix
     """
     from agent.llm.provider_registry import PROVIDER_REGISTRY
 
@@ -48,13 +60,16 @@ def _build_provider(settings: Settings, model_type: str = "multimodal"):
             f"（可选: {', '.join(PROVIDER_REGISTRY.keys())}）"
         )
 
-    # 从 settings 收集构造参数（model_type 是调用方传入的非 settings 字段）
+    # 从 settings 收集构造参数（model_type 与 dedicated_client 是调用方传入的
+    # 非 settings 字段，单独处理）
     kwargs: dict[str, Any] = {}
     # 字符串字段：空字符串 → None（api_key/base_url/model）
     _STR_KEYS = frozenset({"api_key", "base_url", "model"})
     for key in meta.init_keys:
         if key == "model_type":
             kwargs[key] = model_type
+        elif key == "dedicated_client":
+            kwargs[key] = dedicated_client
         else:
             val = getattr(settings, key, None)
             kwargs[key] = val or None if key in _STR_KEYS else val
