@@ -61,17 +61,23 @@ def parse_clock(raw: str) -> dtime | None:
     s = (raw or "").strip()
     if not s:
         return None
+    # 先走「正则 + 手工范围检查」，再退回标准 ISO。
+    # **顺序不能反**：Python 3.14 的 ``time.fromisoformat`` 接受 ISO 的 "24:00"
+    # （合法的“午夜结束”写法）并归一化成 00:00，于是绕过了下面的 hour > 23
+    # ——3.13 下它抛 ValueError 走不到这里，3.14 就把 24:00 当合法值返回了。
+    # 本函数的契约是「超出 24 小时制返回 None」，所以必须自己卡范围。
+    # @author aceFelix
+    m = _HM_RE.fullmatch(s)
+    if m:
+        hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        if hour > 23 or minute > 59 or second > 59:
+            return None
+        return dtime(hour, minute, second)
+    # 非 H:MM[:SS] 形态才交给标准 ISO（如 ``24:00.500`` 这类带小数的写法）
     try:
         return dtime.fromisoformat(s)
     except ValueError:
-        pass
-    m = _HM_RE.fullmatch(s)
-    if not m:
         return None
-    hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
-    if hour > 23 or minute > 59 or second > 59:
-        return None
-    return dtime(hour, minute, second)
 
 
 def parse_quiet_range(raw: str) -> tuple[dtime, dtime] | None:

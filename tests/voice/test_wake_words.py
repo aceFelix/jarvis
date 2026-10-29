@@ -51,6 +51,20 @@ requires_pinyin = pytest.mark.skipif(
     not _HAS_PINYIN, reason='pypinyin 未安装（pip install "jarvis-agent[voice]"）'
 )
 
+#: 真跑 ``voice_loop`` 的用例还需要语音运行时依赖。
+#: 缺 dashscope / pyaudio 时 voice_loop 开头就直接返回「语音功能依赖未安装」，
+#: 状态序列与播报文案都无从产生——那是「本机没装依赖」，不是代码坏了，
+#: 所以必须是 skip 而不是 fail（2026-10 CI 上正是这条漏了报红）。
+_VOICE_MODULES = ("dashscope", "pyaudio")
+_MISSING_VOICE = tuple(
+    m for m in _VOICE_MODULES if importlib.util.find_spec(m) is None
+)
+requires_voice_runtime = pytest.mark.skipif(
+    bool(_MISSING_VOICE),
+    reason=f"语音运行时依赖未安装: {', '.join(_MISSING_VOICE)}"
+    '（pip install "jarvis-agent[voice]"）',
+)
+
 # ---------------------------------------------------------------- 词表样本 ----
 
 #: 用户可能怎么说「贾维斯」——同一批近音字归一化后都是 ``jiaweisi``。
@@ -303,6 +317,7 @@ def _run_voice_loop(monkeypatch, settings, script: list[str]) -> CollectingVoice
     return events
 
 
+@requires_voice_runtime
 class TestStandbyWakeIntegration:
     """真跑 voice_loop：待机 → 唤醒判定 → 回到对话。"""
 

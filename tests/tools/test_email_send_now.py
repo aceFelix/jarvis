@@ -23,11 +23,22 @@ class _Settings:
 
 
 def test_tool_error_becomes_value_error(monkeypatch):
-    """配置未启用等错误由工具给出，本层转成 ValueError 让调用方兜住。"""
-    monkeypatch.setattr(
-        SendEmailTool, "call",
-        lambda self, args, ctx: ToolResult.error("邮件功能未启用"),
-    )
+    """配置未启用等错误由工具给出，本层转成 ValueError 让调用方兜住。
+
+    ⚠ 替身**必须是 async**（2026-10 CI 红出来的坑）：
+    ``send_email_now`` 里是 ``asyncio.run(SendEmailTool().call(...))``，
+    用一个同步 lambda 替身会传成 ``asyncio.run(ToolResult)``。
+
+    Python 3.13 对此抛 ``ValueError("a coroutine was expected, got
+    ToolResult(data='邮件功能未启用', ...)")`` —— 异常类型恰好是 ValueError、
+    消息里又恰好含目标文本（因为它在 ToolResult 的 repr 里），于是下面这条
+    ``pytest.raises`` **碰巧通过**，实际从未验到错误转换逻辑。
+    3.14 把它改成 TypeError，假绿才暴露。
+    """
+    async def _error_call(self, args, ctx):
+        return ToolResult.error("邮件功能未启用")
+
+    monkeypatch.setattr(SendEmailTool, "call", _error_call)
 
     with pytest.raises(ValueError, match="邮件功能未启用"):
         send_email_now(_Settings(), {"subject": "s", "body": "b"})
