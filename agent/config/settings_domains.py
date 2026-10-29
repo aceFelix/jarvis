@@ -42,6 +42,10 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("voice", (
         ("barge_in", "voice_barge_in"),
         ("barge_in_key", "voice_barge_in_key"),
+        # 三张词表：留空则回退 voice_config.py 的内置默认（见 voice/wake_words.py）
+        ("wake_words", "voice_wake_words"),
+        ("exit_words", "voice_exit_words"),
+        ("interrupt_words", "voice_interrupt_words"),
     )),
     # [realtime_talk] 表 → realtime_* 字段 + dashscope_api_key（实时语音必须用
     # DashScope 专属 key，不能与当前 LLM 的 key 混用）

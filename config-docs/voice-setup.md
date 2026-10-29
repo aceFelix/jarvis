@@ -15,7 +15,69 @@
 # 执行只打印下线说明；桌面图形化的实时双工由 jarvis-desktop 承担。
 ```
 
-> 需要 DashScope API Key（`DASHSCOPE_API_KEY` 环境变量或 `dashscope_api_key` 配置项）。
+> 需要阿里云百炼（DashScope）API Key。语音是**独立于 LLM 的另一套凭据**，
+> 怎么配见下面「语音 Key：必须先配的那一项」。
+
+---
+
+## 语音 Key：必须先配的那一项（2026-10）
+
+语音（说话 `TTS` 与听话 `STT`）**固定走阿里云百炼（DashScope）**，而对话模型可以
+是 DeepSeek / OpenAI / Claude 任何一家。所以两者是**两套 key**：
+
+| LLM 选的是 | 语音 key 从哪来 |
+|---|---|
+| 阿里云百炼（DashScope） | **自动复用** LLM 的 key，无需额外配 |
+| DeepSeek / OpenAI / Claude / 其他兼容服务 | **必须单独配一个百炼 key**，否则“能打字不会说话” |
+
+### 怎么配（三选一，等价）
+
+```bash
+# 1. 交互式（推荐）
+/init            # 首启引导，缺语音时会多问一句
+/init voice      # 只配/更换语音 Key（已配好了想换就走这个）
+
+# 2. 配置文件：~/.jarvis/models.toml 顶层（/init 写的就是这里）
+#    dashscope_api_key = "sk-your-bailian-key"
+#    也可写在 ~/.jarvis/settings.toml 的 [realtime_talk] api_key（同一字段）
+
+# 3. 环境变量
+set DASHSCOPE_API_KEY=sk-your-bailian-key        # Windows
+```
+
+Key 在[阿里云百炼控制台](https://bailian.console.aliyun.com/)取。
+
+> **为什么需要 `/init voice`**：首启引导在「已经配好」时会跳过语音那一问（正确——
+> 不该每次启动都问），于是就没有任何交互入口去**更换**了。另一个常见误会：那句
+> “已配置”可能只是环境变量被灌进了配置字段，用户自己都不知道有这回事。
+> `/init voice` 会先把当前用的是哪把 Key、从哪来（脱敏后）说清楚，再让你换。
+
+### 优先级
+
+```
+配置里的 dashscope_api_key  >  环境变量 DASHSCOPE_API_KEY  >  （仅当 LLM 就是百炼时）复用 LLM 的 key
+```
+
+实现只有一份：`agent/config/voice_key.py`，`/voice`、`/talk`、`/init` 三处共用。
+
+### 之前为什么会“配了没声音”
+
+2026-10 之前这条读取路径写过三份，`/voice` 那份有两个缺陷：
+
+1. **只认环境变量**——你把 key 写进配置文件（`dashscope_api_key`）根本不生效；
+2. **无条件回退主 LLM 的 key**——LLM 换成 DeepSeek 后，它拿着 DeepSeek 的 key
+   去连阿里云，必然 401；而报错只说“TTS 连接建立失败”，完全看不出是 key 混用。
+
+两个都已修掉，并把首启引导补上了这一项（复盘见
+[voice-api-key-onboarding-fix.md](../docs/fixlogs/voice-api-key-onboarding-fix.md)）。
+
+### 自查
+
+在 REPL 里敲 `/config` → 语音面板首行 `语音 Key` 会显示脱敏后的值**和它的来源**
+（配置 / 环境变量 / 复用 LLM / 复用配置顶层）。显示“未配置”就是真没配上。
+
+想知道具体是哪把 key（而不是只有 `sk-a...z123` 这种脱敏值能不能对上），直接跑
+`/init voice`：它会先打印当前状态再问你新值，回车即保留现状、不会误改。
 
 ---
 
@@ -54,10 +116,16 @@ turn_detection = "server_vad"                       # 轮次检测：server_vad�
 silence_ms = 500                                    # server_vad 判停静音时长 ms（200~6000）
 tools_mode = "builtin"                              # 工具面：builtin（默认 2 工具低延迟）/ all（Registry+MCP）
 
-# ── 语音打断（注意：barge_in / barge_in_key 必须在 [voice] 表内，写顶层无效）──
+# ── 语音打断 + 词表（注意：这些键必须在 [voice] 表内，写顶层无效）──
 [voice]
 barge_in = false         # 麦克风打断：播报中检测到用户开口自动打断（默认关）
 barge_in_key = true      # 键盘打断：按 ESC
+
+# 三张词表：不写就用内置默认，写了就完全覆盖（不是追加）。
+# 拼音同音容错：「贾维斯」能叫醒“加维思”“贾伟斯”“假维斯”等近音写法。
+wake_words = ["贾维斯", "Jarvis"]     # 待机时怎么叫醒它（第一项显示在待机横幅）
+exit_words = ["退下", "拜拜"]          # 让它退下/待机
+interrupt_words = ["闭嘴", "停"]       # 播报期间打断（需 barge_in = true）
 
 # /voice 单轮聆听上限（顶层字段，默认 300 秒）
 voice_max_seconds = 300.0
@@ -303,15 +371,36 @@ vendor = "dashscope"
 
 - "闭嘴"、"等一下"、"停"、"别说了"
 
-打断后 Jarvis 立即停止说话，切换回聆听状态。
+打断后 Jarvis 立即停止说话，切换回聆听状态。词表可用 `[voice] interrupt_words` 换成你自己的。
 
 ### ESC 键打断
 
 播报中按 `ESC` 立即停止并切回聆听。不依赖 PyAudio，在 daemon 无窗口模式也能用。
 
+### 唤醒词与「喊了没反应」
+
+退下后进入待机，说唤醒词叫醒它。唤醒词在 `[voice] wake_words` 里配，
+不配就用内置默认（「贾维斯」/「贾维思」/「Jarvis」等）。
+
+**它不只认字面写法。** ASR 常把「贾维斯」听成近音字（加维思 / 贾伟斯 / 假维斯 /
+佳维丝 / 嘉维思…），所以匹配时会先转成拼音再比——这些写法都等于 `jiaweisi`，
+一次命中。同时唤醒词会作为 ASR 热词随会话配置下发，让识别模型一开始就更倾向于
+输出对的词（双保险：治本靠热词，兜底靠拼音）。
+
+两个要知道的细节：
+
+1. **两字词不享受拼音容错。** 「贾维」拼音串只有 `jiawei`，而它是「甲维集团」
+   (`jiaweijituan`)、「加个微信」(`jiaweixin`) 这类正常语句的子串，放开必误唤醒。
+   所以拼音层只对 ≥3 个汉字的词生效；短词仍按字面匹配。
+2. **拼音容错需要 `pypinyin`**（`pip install "jarvis-agent[voice]"` 已含）。
+   没装也能用，只是退化为字面匹配，覆盖窄一些，不会报错。
+
+待机时**不会**被日常对话误唤醒——「甲维集团」「加个微信」「价格维持不变」都不算。
+
 ### 退出
 
 说"退下"、"贾维斯退下"、"结束对话"、"再见"、"拜拜"、"没事了"等，或按 `Ctrl+C`。
+退下词表可用 `[voice] exit_words` 自定。
 
 ---
 
@@ -326,6 +415,7 @@ vendor = "dashscope"
 | `音频设备初始化失败` | 检查麦克风/扬声器是否被其他程序占用 |
 | `Authentication failed` | 检查 `dashscope_api_key` 是否正确 |
 | `code=1007 Access denied / account in good standing` | DashScope 鉴权被拒：key 无效，或百炼账号欠费/未开通实时语音模型；确认 `dashscope_api_key`（或 `DASHSCOPE_API_KEY`）与控制台账号状态 |
+| `error_code: Arrearage` / `Access denied, please make sure your account is in good standing` | 同上，但常见于 TTS 单独调用：**语音类模型分属单独计费**，LLM 能用不代表语音能用（用 DeepSeek 做 provider 时文字对话完全正常，只有 `/voice` 与 `/talk` 会整条断） |
 | `WebSocket 连接超时` | 检查网络，DashScope 实时语音需要稳定的公网连接 |
 
 ### 声音断续 / 卡顿
@@ -346,6 +436,29 @@ python -c "import pyaudio; p = pyaudio.PyAudio(); print(p.get_default_input_devi
 ```
 
 检查默认输入设备是否正确。
+
+### 识别失败：先分清是「麦克风」还是「服务端」
+
+2026-10 起回执会区分两种失败，看到哪种就查哪边，不要一律去折腾麦克风：
+
+| 回执 | 含义 | 查什么 |
+|---|---|---|
+| `识别失败: 服务端无响应：录音期间未收到任何识别事件…` | **连接建立成功但服务端一句响应都没给**，与麦克风无关 | 百炼控制台里 `qwen3-asr-flash-realtime` 的额度与开通状态；`cosyvoice-v3-flash` 是另一份额度 |
+| `识别失败: <服务端下发的错误原文>` | 服务端明确拒绝，错误原文即依据 | 按原文提示处理（鉴权 / 限流 / 参数） |
+| 本轮回合正常结束但没识别出文字 | 服务端在工作、只是没听到人说话 | 这才是麦克风 / 设备 / 静音阈值问题 |
+
+判据是**录音期间有没有收到任何服务端事件**（连 VAD 的 `speech_started` 都算）。说了话就一定先有 VAD 事件，所以「零事件」只可能是链路没在工作。
+
+快速自查账户侧（不依赖麦克风）：
+
+```bash
+python -c "import os,dashscope; from dashscope.audio.tts_v2 import SpeechSynthesizer; dashscope.api_key=os.environ['DASHSCOPE_API_KEY']; SpeechSynthesizer(model='cosyvoice-v3-flash', voice='longanlang_v3').call('test')"
+```
+
+报 `Arrearage` 就是额度问题，修代码没用。
+
+> 旧版本在这里会报「配置会话超时，再说一次」——那是代码在等一个服务端从不返回的
+> `session.updated` 事件，已于 2026-10 修复。若仍看到这句话，说明跑的是旧版本。
 
 ---
 

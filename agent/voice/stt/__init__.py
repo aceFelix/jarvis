@@ -64,6 +64,7 @@ def create_stt(
     api_key: str | None = None,
     model: str = "qwen3-asr-flash-realtime",
     language: str = "zh",
+    hotwords: str = "",
 ) -> "QwenASR":
     """创建 STT 后端实例。
 
@@ -76,10 +77,12 @@ def create_stt(
         api_key: DashScope API Key，留空则回退到 DASHSCOPE_API_KEY 环境变量。
         model: 实时识别模型名（透传）。
         language: 识别语言，透传给服务端 transcription_params。
+        hotwords: 热词语料（``、``分隔），随 session.update 作为上下文增强下发，
+            让识别模型倾向于输出这些词。留空即不启用。
 
     Returns:
         QwenASR 实例，提供阻塞式 listen() 录音识别。
 
     @author aceFelix
     """
-    return QwenASR(api_key=api_key, model=model, language=language)
+    return QwenASR(api_key=api_key, model=model, language=language, hotwords=hotwords)

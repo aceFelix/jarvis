@@ -52,14 +52,19 @@ from agent.core.query_loop import QueryLoop
 
 from agent.voice.tts_text import _STANDBY_TAG
 from agent.voice.voice_config import (
-    _EXIT_WORDS,
     _STANDBY_MAX_SECONDS,
     _STANDBY_SILENCE_SECONDS,
     _VOICE_MODE_PROMPT,
-    _WAKE_WORDS,
-    _contains_any,
     _voice_api_key,
     _voice_log,
+)
+# 词表不再写死：从 [voice] 表解析（留空回退内置默认），并用拼音同音匹配把
+# 「加维思」/「贾伟斯」这类 ASR 近音字也算作叫到了（见 wake_words 模块）。
+from agent.voice.wake_words import (
+    build_asr_hotwords,
+    matches,
+    resolve_exit_words,
+    resolve_wake_words,
 )
 from agent.voice.voice_events import (
     LEVEL_WARN,
@@ -224,7 +229,8 @@ async def _voice_loop_round(
         events.on_info("没听清，再说一次", LEVEL_WARN)
         return True
 
-    _exit_detected = _contains_any(user_text, _EXIT_WORDS)
+    exit_words = resolve_exit_words(settings)
+    _exit_detected = matches(user_text, exit_words)
     if _exit_detected:
         events.on_info("🛌 退下意图，让 LLM 告别后进入待机...")
         # 不走独立 TTS（和 standby 麦克风 PyAudio 冲突），
@@ -250,6 +256,14 @@ async def _voice_loop_round(
     )
     # 建 TTS 连接是阻塞网络调用，同样放工作线程，避免饿死宿主指令循环
     stream_ok = await asyncio.to_thread(stream_player.start)
+    if not stream_ok:
+        # 建连失败时不能只坐等“本轮没声音”：文字边等边上了屏，用户只会
+        # 归因为“语音功能坏了”。直白告知并给出可排查方向。@author aceFelix
+        events.on_info(
+            "⚠ TTS 连接建立失败，本轮只显示文字。检查 DASHSCOPE_API_KEY、"
+            "语音额度与网络；若反复出现，重开语音模式重试",
+            LEVEL_WARN,
+        )
 
     def _feed(text: str) -> None:
         """组合 feeder：喂 TTS 合成 + 外抛流式 delta 给宿主上屏。"""
@@ -513,9 +527,20 @@ async def voice_loop(
         _voice_log("[voice_loop] 语音依赖缺失，拒绝进入语音模式: %s", missing)
         return
 
+    # 词表解析一次，整会话复用（待机轮询每几秒跑一轮，不重复读配置）
+    wake_words = resolve_wake_words(settings)
+    # 热词只送「主词」（用户写的第一条）：把多个谐音变体全塞给模型会让它以为
+    # 这些写法都对，反而削弱治本效果；谐音鲁棒性交给拼音匹配那一层。
+    asr_hotwords = build_asr_hotwords(wake_words[:1])
+    # 待机提示里展示的样例词（给人看，不参与判定）
+    wake_hint = wake_words[0] if wake_words else "贾维斯"
+
     stt = create_stt(
         api_key=_voice_api_key(settings),
         model=settings.stt_model,
+        # 唤醒词作为 ASR 上下文增强下发：治本的一层——让模型一开始就倾向于
+        # 输出「贾维斯」，而不是先听成近音字。空词表则不启用。@author aceFelix
+        hotwords=asr_hotwords,
     )
     tts = CosyVoiceTTS(
         api_key=_voice_api_key(settings),
@@ -544,7 +569,9 @@ async def voice_loop(
     _voice_log("[voice_loop] 语音对话循环启动")
     events.on_info(f"   STT: {settings.stt_model}")
     events.on_info(f"   TTS: {settings.tts_model} / {settings.tts_voice}")
-    events.on_info("   说「退下/不聊了/去忙吧」进入待机 · 说「贾维斯」唤醒 · 打断/退出由宿主控制")
+    events.on_info(
+        f"   说「退下/不聊了/去忙吧」进入待机 · 说「{wake_hint}」唤醒 · 打断/退出由宿主控制"
+    )
     events.on_info("=" * 56)
     events.on_state(STATE_DIALOG)
 
@@ -634,7 +661,7 @@ async def voice_loop(
                     break
                 in_dialog = False
                 events.on_state(STATE_STANDBY)
-                events.on_info("💤 待机中，说「贾维斯」唤醒我")
+                events.on_info(f"💤 待机中，说「{wake_hint}」唤醒我")
             else:
                 # 待机阶段：循环短录，等唤醒词
                 text = await _standby_round(settings, stt)
@@ -645,7 +672,7 @@ async def voice_loop(
                 if stt_module._is_stopped():
                     stt_module._reset_stop()
                     continue
-                if text and _contains_any(text, _WAKE_WORDS):
+                if text and matches(text, wake_words):
                     if stop_event and stop_event.is_set():
                         break
                     events.on_state(STATE_DIALOG)

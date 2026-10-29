@@ -14,7 +14,7 @@ from typing import Any
 
 # 复用 stt 模块的 RMS 计算（Python 3.13 无 audioop）
 from agent.voice.stt import _rms
-from agent.voice.voice_config import _INTERRUPT_WORDS, _contains_any
+from agent.voice.wake_words import matches, resolve_interrupt_words
 
 _BARGE_IN_THRESHOLD = 2500     # RMS 阈值，远高于 STT 的 500，避免 TTS 自回声触发
 _BARGE_IN_MIN_SPEAK = 0.4      # 持续发声多少秒视为用户开口（防瞬时噪音误触发）
@@ -167,10 +167,12 @@ class _VoiceBargeInDetector:
     若 PyAudio 冲突则静默放弃当次检测，连续无冲突检测到中断词则触发打断。
     """
 
-    def __init__(self, stt: Any, on_barge) -> None:
+    def __init__(self, stt: Any, on_barge, settings: Any = None) -> None:
         self._stt = stt
         self._on_barge = on_barge
         self._stop = threading.Event()
+        # 打断词表同样可配（[voice] interrupt_words）；不传 settings 则用内置默认
+        self._words = resolve_interrupt_words(settings)
 
     def run(self) -> None:
         """在后台线程中循环短录，检测到中断词则回调。"""
@@ -187,7 +189,7 @@ class _VoiceBargeInDetector:
                     on_open=lambda: None,
                 )
                 text = (result.get("text") or "").strip()
-                if text and _contains_any(text, _INTERRUPT_WORDS):
+                if text and matches(text, self._words):
                     self._on_barge()
                     break
             except Exception:

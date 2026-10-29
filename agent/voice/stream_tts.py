@@ -86,8 +86,10 @@ _FENCE = "```"
 # 首句阈值：缓冲到 20 字就算没有句末标点也送 TTS，让声音尽快出来
 _FIRST_SENTENCE_MIN = 20
 
-# WS 空闲超时：若 LLM 两句话之间间隔超过此值，认为 WS 可能已被 RST
-_WS_IDLE_TIMEOUT = 10.0
+# 注（2026-10）：这里曾有一个 `_WS_IDLE_TIMEOUT = 10.0`，意图是“LLM 两句之间
+# 间隔太久就认为 WS 已被 RST、需要重连”，但它**从未被任何代码引用**（死常量）。
+# 真正需要的是“发现 WS 不可用时不再继续往黑洞里发文本”，已由
+# `_send_sentence` 统一查 `tts.error` → 切降级（整段 speak）实现，因此删除。
 
 
 def _clean_inline(text: str) -> str:
@@ -128,7 +130,13 @@ class StreamTTSPlayer:
         debug_log: bool = False,
     ) -> None:
         if not api_key:
-            raise ValueError("DASHSCOPE_API_KEY 未配置")
+            # 报错必须能直接指向解法：最底层抛的是“没 key”，用户看见的却是
+            # “语音用不了”。给三条实际可执行的配置路径。@author aceFelix
+            raise ValueError(
+                "语音需要阿里云百炼（DashScope）API Key，但未取到可用值。"
+                "三种配法：运行 /init；在 models.toml 顶层写 dashscope_api_key；"
+                "或设环境变量 DASHSCOPE_API_KEY（key 在 bailian.console.aliyun.com 取）"
+            )
         self._tts = CosyVoiceTTS(
             api_key=api_key,
             model=model,
@@ -278,11 +286,16 @@ class StreamTTSPlayer:
                 self._send_sentence(sentence)
 
     def _send_sentence(self, text: str) -> None:
-        """送一句到 CosyVoice WS。同时尝试重连（若上次 WS 已断开）。
+        """送一句到 CosyVoice WS。失败时切降级（剩下的文本改整段播）。
 
         除了 markdown 剥离还要过一道口播归一化（`tts_text` 与本模块的同步
         口径）：路径、`.exe`、`17:20` 这类写法不转换会被逐字符念出来。只在
         整句级别做，不逐 chunk——路径被切在两个 chunk 里时正则只能匹配半条。
+
+        ⚠️ 只捕异常是不够的：WS 已断开时 ``streaming_call`` 未必抛，音频却
+        静默进了黑洞（回调侧 ``on_data`` 发现流已释放就丢）。那种情况下来
+        ``self._tts.error`` 非空、但异常从未出现，于是**文字照常上屏、语音
+        却没了**，且永远不降级。所以发完统一再查一次 error。
         """
         cleaned = normalize_for_speech(_clean_inline(text))
         if not cleaned.strip():
@@ -290,14 +303,18 @@ class StreamTTSPlayer:
 
         try:
             self._tts.feed(cleaned)
+            reason = self._tts.error
+            if reason:
+                raise RuntimeError(reason)
         except Exception as e:
-            # WS 写入失败 → 降级
+            # WS 写入失败 / 音频被丢 → 降级：把已发未涮的文本收回来整段重播
             self._degraded = True
             self._fallback_buf += cleaned
             self._fallback_buf += self._buf  # 把未冲刷的也收了
             self._buf = ""
             if self._debug:
                 self._log(f"WS 写入失败: {e}，降级到整段播放")
+            return
 
         self._sentence_count += 1
         if self._debug:

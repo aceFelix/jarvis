@@ -53,11 +53,25 @@ def _voice_log(fmt: str, *args: object) -> None:
 def _voice_api_key(settings) -> str:
     """获取 DashScope API Key（语音服务专用）。
 
-    语音 STT/TTS 始终走 DashScope，不受当前 LLM 模型切换影响。
-    优先从环境变量 DASHSCOPE_API_KEY 取值。
+    语音 STT/TTS 始终走 DashScope，不受当前 LLM 模型切换影响。具体优先级与
+    “为什么不能无条件回退主 LLM 的 key”写在 ``agent/config/voice_key.py``：
+
+    1. ``settings.dashscope_api_key``（配置里显式写的，含引导写入的）
+    2. 环境变量 ``DASHSCOPE_API_KEY``
+    3. **仅当主 LLM 就是 DashScope 时**复用 ``settings.api_key``
+
+    旧实现只认环境变量再回退主 key，导致两个坑：配置里写的语音 key 不生效；
+    LLM 换成 DeepSeek 后拿着 DeepSeek 的 key 去连阿里云必然 401。@author aceFelix
     """
-    import os
-    return os.environ.get("DASHSCOPE_API_KEY", "") or getattr(settings, "api_key", "") or ""
+    # 延迟导入：语音包不该在导入期就拉起配置包（保持原来的 import os 风格）
+    try:
+        from agent.config.voice_key import resolve
+
+        return resolve(settings)
+    except Exception:  # noqa: BLE001 - 取不到 key 时后续会按“未配置”报错
+        import os
+
+        return os.environ.get("DASHSCOPE_API_KEY", "") or ""
 
 
 # ---- 语音模式 system prompt 追加 ----

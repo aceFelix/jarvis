@@ -39,6 +39,23 @@ _VAD_THRESHOLD = 0.4
 # 避免把上一轮 TTS 刚播完的尾音当成用户开口。
 _VAD_LEAD_IN_SECONDS = 0.4
 
+# 配置确认窗口（秒）。connect() 之后服务端会主动下发 session.created，
+# 自带一份完整的默认会话配置（modalities / input_audio_format / sample_rate /
+# input_audio_transcription / turn_detection 全在），也就是说**不发 update 也已可用**。
+# 而 update_session 之后的 session.updated 确认并非所有模型都会回：
+# qwen3-asr-flash-realtime 实测从不返回该事件（dashscope SDK 的事件分发里也没有
+# session.updated 分支，只有 session.created / session.finished / error / response.*）。
+# 所以这里只在一个短窗口里等「错误事件」，没等到确认不判失败——
+# 若死等 10 秒，每一轮都会以「配置会话超时」收场，从未进入录音循环。
+_SESSION_CONFIRM_TIMEOUT_S = 2.0
+
+# 服务端静默窗口（秒）。录音期间若这么久一个服务端事件都没收到（连服务端 VAD 的
+# input_audio_buffer.speech_started 都没有），说明链路上根本没在识别——提前收尾并
+# 如实报错，而不是让用户干等满 max_seconds（/voice 下是 300 秒）。
+# 注意判据是「零事件」而非「没识别出文字」：用户说了话必然先有 VAD 事件，
+# 因此正常路径不会被这个窗口误伤。
+_SERVER_SILENCE_TIMEOUT_S = 10.0
+
 # Qwen3-ASR 实时识别 WebSocket 端点（注意与 Paraformer 的 /inference 不同）
 _QWEN_REALTIME_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 
@@ -73,6 +90,9 @@ class _QwenASRCallback:
         self._error: str | None = None
         self._final_texts: list[str] = []
         self._last_partial: str = ""
+        # 已收到的服务端事件总数。调用方用它区分「链路上根本没在识别」
+        # （计数不动）与「在识别但没听到人说话」（计数会涨）。
+        self._event_count = 0
 
     # ---- OmniRealtimeCallback 实现（鸭子类型）----
 
@@ -90,6 +110,7 @@ class _QwenASRCallback:
                 return
         if not isinstance(message, dict):
             return
+        self._event_count += 1
         evt_type = message.get("type", "")
 
         if evt_type == "session.created":
@@ -136,6 +157,16 @@ class _QwenASRCallback:
         return self._error
 
     @property
+    def event_count(self) -> int:
+        """已收到的服务端事件总数（含 session.created）。
+
+        录音前后对比该值即可判断链路是否真的在工作：完全不变意味着服务端
+        一句响应都没给（账户额度不足 / 模型未开通 / 服务异常），
+        而正常说话时至少会有 speech_started 等 VAD 事件。
+        """
+        return self._event_count
+
+    @property
     def final_text(self) -> str:
         """完整识别文本 = 所有最终文本拼接。"""
         return "".join(self._final_texts)
@@ -169,10 +200,15 @@ class QwenASR:
         api_key: str | None = None,
         model: str = "qwen3-asr-flash-realtime",
         language: str = "zh",
+        hotwords: str = "",
     ) -> None:
         self._api_key = api_key or os.environ.get("DASHSCOPE_API_KEY", "")
         self._model = model
         self._language = language
+        # 热词（上下文增强）：随 session.update 一起发，让识别模型一开始就倾向于
+        # 输出这些词，而不是先听成近音字。实测 qwen3-asr-flash-realtime 接受
+        # input_audio_transcription.corpus.text（2026-10）。@author aceFelix
+        self._hotwords = (hotwords or "").strip()
 
     def listen(
         self,
@@ -220,6 +256,16 @@ class QwenASR:
         # 2. 配置会话（开启服务端 VAD + ASR 转写）
         try:
             dashscope, _, _, TranscriptionParams, MultiModality = _import_qwen_omni()
+            params = TranscriptionParams(
+                language=self._language,
+                sample_rate=_PCM_RATE,
+                input_audio_format="pcm",
+            )
+            # 热词走 corpus_text：SDK 会把它包成 input_audio_transcription.corpus
+            # 的 {"text": ...} 再随 session.update 下发（见 omni_realtime.py）。
+            # 留空则不设该字段，行为与改造前完全一致。@author aceFelix
+            if self._hotwords:
+                params.corpus_text = self._hotwords
             conv.update_session(
                 output_modalities=[MultiModality.TEXT],
                 enable_turn_detection=True,
@@ -228,11 +274,7 @@ class QwenASR:
                 turn_detection_threshold=_VAD_THRESHOLD,
                 turn_detection_silence_duration_ms=int(silence_seconds * 1000),
                 enable_input_audio_transcription=True,
-                transcription_params=TranscriptionParams(
-                    language=self._language,
-                    sample_rate=_PCM_RATE,
-                    input_audio_format="pcm",
-                ),
+                transcription_params=params,
             )
         except Exception as e:
             try:
@@ -241,13 +283,15 @@ class QwenASR:
                 pass
             return {"text": "", "duration": 0.0, "error": f"配置会话失败: {type(e).__name__}: {e}"}
 
-        if not callback.wait_session_updated(timeout=10.0):
+        # 配置确认只是可选信号：服务端不一定回 session.updated（见
+        # _SESSION_CONFIRM_TIMEOUT_S 注释），因此只等一个短窗口，且**不以超时作为
+        # 失败判据**。真正需要提前报错的只有服务端明确下发的 error 事件。
+        callback.wait_session_updated(timeout=_SESSION_CONFIRM_TIMEOUT_S)
+        if callback.error:
             try:
                 conv.close()
             except Exception:
                 pass
-            return {"text": "", "duration": 0.0, "error": callback.error or "配置会话超时"}
-        if callback.error:
             return {"text": "", "duration": 0.0, "error": callback.error}
         if on_open:
             try:
@@ -277,6 +321,11 @@ class QwenASR:
         t0 = time.time()
         # 首段音频（TTS 回声尾音/环境噪音）只读不送，避免被服务端误判为开口
         lead_in_until = t0 + _VAD_LEAD_IN_SECONDS
+        # 服务端静默监控基线：录音开始时的已收事件数与最近一次收到事件的时刻。
+        # 两者一起用才能区分「在识别但没人说话」与「服务端完全没响应」。
+        events_baseline = callback.event_count
+        last_event_ts = t0
+        server_silent = False
         try:
             while not _is_stopped():
                 elapsed = time.time() - t0
@@ -288,6 +337,15 @@ class QwenASR:
                 # 多数语音助手场景即视为结束。这里靠 max_seconds 兜底，
                 # 同时若已拿到最终文本且无新中间结果，也提前结束。
                 if callback.final_text and not callback.partial_text:
+                    break
+
+                # 服务端静默监测：超过窗口仍一个事件都没来，说明这条链路根本没在识别。
+                # 提前收尾，避免用户对着一个死连接干等满 max_seconds。
+                if callback.event_count != events_baseline:
+                    events_baseline = callback.event_count
+                    last_event_ts = time.time()
+                elif time.time() - last_event_ts >= _SERVER_SILENCE_TIMEOUT_S:
+                    server_silent = True
                     break
 
                 try:
@@ -325,7 +383,11 @@ class QwenASR:
             conv.end_session(timeout=10)
         except Exception:
             pass
-        callback.wait_finished(timeout=10.0)
+        # 只在确认过链路在工作（收到过服务端事件）时才等最终结果。
+        # 全程静默时服务端也不会回 session.finished，再等满 10 秒只是把失败耗时翻倍
+        # （静默窗口 + 这一等 = 双倍等待，用户体感就是「卡死」）。
+        if not server_silent:
+            callback.wait_finished(timeout=10.0)
         try:
             conv.close()
         except Exception:
@@ -334,6 +396,14 @@ class QwenASR:
         result: dict[str, Any] = {"text": callback.final_text, "duration": duration}
         if callback.error:
             result["error"] = callback.error
+        elif server_silent and not callback.final_text:
+            # 录音期间服务端一个事件都没给（连 VAD 的 speech_started 都没有）。
+            # 这不是「没听清」，而是链路上根本没在做识别，必须如实说明，
+            # 否则会被当成偶发失败而反复重试（历史上就报成了「配置会话超时，再说一次」）。
+            result["error"] = (
+                "服务端无响应：录音期间未收到任何识别事件，"
+                "请检查 DashScope 该模型的额度与开通状态（cosyvoice / qwen3-asr 分属单独计费）"
+            )
         return result
 
     def transcribe_file(self, path: str) -> dict[str, Any]:
@@ -363,8 +433,10 @@ class QwenASR:
                     input_audio_format="pcm",
                 ),
             )
-            if not callback.wait_session_updated(timeout=10.0):
-                return {"text": "", "error": "配置会话超时"}
+            # 同 listen()：session.updated 只是可选确认，不作为失败判据
+            callback.wait_session_updated(timeout=_SESSION_CONFIRM_TIMEOUT_S)
+            if callback.error:
+                return {"text": "", "error": callback.error}
 
             # 读文件分块送
             with open(path, "rb") as f:

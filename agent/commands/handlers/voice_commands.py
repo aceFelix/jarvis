@@ -136,29 +136,22 @@ async def _realtime_talk(ui, settings) -> None:
 
     实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
     如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，
-    不能直接用于 DashScope WebSocket 鉴权，因此只认独立的 dashscope_api_key。
+    不能直接用于 DashScope WebSocket 鉴权，因此只认独立的 dashscope_api_key
+    （或当前 LLM 本身就是 DashScope 时复用它的 key）。
 
     @author aceFelix
     """
-    # 防呆 fail-fast（aceFelix）：只认「专属 dashscope_api_key → DASHSCOPE_API_KEY
-    # 环境变量 →（当前厂商就是 dashscope 时）settings.api_key」，不再兜底
-    # 其它厂商的 key——拿别家 key 硬连 DashScope 必被服务端 1007 Access
-    # denied 秒拒，用户只能看到英文报错；不如在这里快速失败给中文指引。
-    api_key = (
-        settings.dashscope_api_key
-        or os.environ.get("DASHSCOPE_API_KEY", "")
-    )
-    if not api_key and getattr(settings, "provider", "") == "dashscope":
-        # 当前 LLM 就是 DashScope 时，api_key 本身即 DashScope key，可直接用
-        api_key = settings.api_key or ""
+    # 统一口径见 agent/config/voice_key.py。这里原本自己写了一份解析，/voice
+    # 又写了另一份、并且写错了（只认环境变量 + 无条件回退主 LLM key，拿别家
+    # key 硬连 DashScope 必被 1007 Access denied 秒拒）。现在三处共用一个实现。
+    from agent.config import voice_key as vk
+
+    api_key = vk.resolve(settings)
     if not api_key:
+        # fail-fast：不启动引擎，直接给中文指引（否则用户只能看到英文 1007）
         ui.error(
-            "实时双工语音依赖阿里云 DashScope 服务，需要 DashScope API Key"
-            "（不能拿 deepseek/openai 等其它厂商的 key 混用）。请任选其一配置：\n"
-            "  1. ~/.jarvis/models.toml 中添加 dashscope_api_key = \"sk-...\""
-            "（旧配置写在 settings.toml 里也仍然生效）\n"
-            "  2. 设置环境变量 DASHSCOPE_API_KEY\n"
-            "并确认百炼账号无欠费、已开通实时语音模型"
+            vk.missing_hint(settings)
+            + "\n并确认百炼账号无欠费、已开通实时语音模型"
             "（qwen-audio-3.0-realtime-flash）。"
         )
         return

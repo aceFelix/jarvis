@@ -52,6 +52,14 @@ _PCM_RATE = 22050
 _PCM_CHANNELS = 1
 _PCM_WIDTH = 2  # 16-bit = 2 bytes
 
+# 每秒字节数（音频时长换算的唯一口径）
+_BYTES_PER_SEC = _PCM_RATE * _PCM_CHANNELS * _PCM_WIDTH
+
+# 输出流环形缓冲深度（帧）。必须显式传入 pa.open，否则 PortAudio 用平台默认值，
+# 收尾排空的“缓冲滞后”就无从估算。1024 帧 ≈ 46ms，足够平滑又不会延迟过高。
+_PCM_FRAMES_PER_BUFFER = 1024
+_OUTPUT_BUFFER_SECONDS = _PCM_FRAMES_PER_BUFFER / _PCM_RATE
+
 # 收尾排空上限（秒）：finish()/speak() 返回前，扬声器缓冲里可能还有未播完的
 # 音频，最多再等这么久，防止异常情况下无上限阻塞。
 _DRAIN_MAX_SECONDS = 20.0
@@ -70,10 +78,16 @@ class _PlaybackCallback:
 
     def __init__(self, *, on_first_data=None) -> None:
         self._stream = None
+        self._stream_lock = threading.Lock()   # 保护 open/release 与 on_data 写入
         self._stop_flag = threading.Event()
         self._on_first_data = on_first_data
         self._first_data_fired = False
-        self._play_start: float | None = None   # 首块音频到达时刻（播放起点）
+        self._play_start: float | None = None   # 首块音频到达时刻（仅统计用）
+        # 收尾排空的依据：最后一次收到音频的时刻与那一块的字节数。
+        # 不能用“首块至今”算——中间 LLM 吐字/网络停顿那段时间声卡是静音的，
+        # 算作“已播时长”会把剩余量严重低估（见 remaining_play_seconds）。
+        self._last_data_time: float | None = None
+        self._last_chunk_bytes: int = 0
         self._error: str | None = None
         self._data_chunks: int = 0
         self._total_bytes: int = 0
@@ -90,12 +104,16 @@ class _PlaybackCallback:
         except ImportError as e:
             self._error = f"pyaudio 未安装: {e}"
             return
-        self._stream = pa.open(
+        stream = pa.open(
             format=pa.get_format_from_width(2),  # paInt16
             channels=_PCM_CHANNELS,
             rate=_PCM_RATE,
             output=True,
+            # 显式定缓冲深度：收尾排空按它估算“还有多久播完”
+            frames_per_buffer=_PCM_FRAMES_PER_BUFFER,
         )
+        with self._stream_lock:
+            self._stream = stream
 
     def on_event(self, message: str) -> None:
         """合成事件回调（句子开始/合成中/结束）。当前仅记录，不处理。"""
@@ -104,7 +122,17 @@ class _PlaybackCallback:
 
     def on_data(self, data: bytes) -> None:
         """收到一块音频数据。用 pyaudio 实时播放。"""
-        if self._stop_flag.is_set() or self._stream is None:
+        if self._stop_flag.is_set():
+            return
+        # 先取本地引用再写：stop() / on_close() 可能在另一个线程把 _stream 置 None
+        # 并 close()，直接 self._stream.write 会撞 None 或已关闭的流。
+        stream = self._stream
+        if stream is None:
+            # 流已释放却还在收音频：WS 关得比合成早，或收到的是上一轮会话的尾巴。
+            # 旧实现这里静默 return，上层完全看不出“音频被丢了”，表现就是
+            # “文字都出来了、语音没了”。这里至少把原因记下来供降级判断。
+            if self._error is None:
+                self._error = "TTS 播放流已关闭，音频被丢弃"
             return
         if not self._first_data_fired:
             self._first_data_fired = True
@@ -114,22 +142,56 @@ class _PlaybackCallback:
                     self._on_first_data()
                 except Exception:
                     pass
-        self._stream.write(data)
+        try:
+            stream.write(data)
+        except Exception as e:
+            self._error = f"TTS 写入扬声器失败: {type(e).__name__}: {e}"
+            return
         self._data_chunks += 1
         self._total_bytes += len(data)
+        self._last_data_time = time.time()
+        self._last_chunk_bytes = len(data)
 
     def remaining_play_seconds(self) -> float:
-        """估算扬声器里还有多久才能把已下发的音频播完。
+        """最后一次收到音频之后，扬声器还需要多久才真正静音。
 
-        ``on_complete`` 只表示服务端把音频发完了，物理播放存在缓冲滞后：
-        自此到扬声器真正静音还有一段时间。以首块音频到达时刻为播放起点，
-        按累计字节数折算总时长，减去已过时间即为剩余。返回 0 表示已播完。
+        ⚠️ **旧实现有数学缺陷**：它算 ``total_bytes/每秒字节 - (now - _play_start)``，
+        把“从首块音频至今”整段时间当成已播时长。可 LLM 吐字是有间隙的
+        （深度思考、工具调用动辄数秒，声卡那段时间是静音的），停顿被算进
+        “已播”，剩余量就被严重低估。实测：累计 3s 音频 + 中间停 6s
+        → 估算 **0.00s**，而真实还有 **1.00s** 没播完。后果是 ``on_close`` /
+        ``_wait_for_playback`` 立即 ``stop_stream()``，把最后一句掐断——
+        表现正是“话说到一半断了”。
+
+        正确口径只看“最后一次写入之后”：``stream.write()`` 阻塞写环形缓冲，
+        缓冲深度只有 ``frames_per_buffer`` 帧，所以最后一块写完后最多再播
+        ``最后一块时长 + 缓冲深度`` 这么点时间，与之前停顿多久无关。
         """
-        if self._total_bytes <= 0 or self._play_start is None:
+        if self._last_data_time is None:
             return 0.0
-        total = self._total_bytes / (_PCM_RATE * _PCM_CHANNELS * _PCM_WIDTH)
-        rem = total - (time.time() - self._play_start)
+        tail = self._last_chunk_bytes / _BYTES_PER_SEC + _OUTPUT_BUFFER_SECONDS
+        rem = (self._last_data_time + tail) - time.time()
         return rem if rem > 0 else 0.0
+
+    def _release_stream(self) -> None:
+        """幂等释放 pyaudio 输出流（stop / on_close 都可能先到）。
+
+        旧实现的致命缺口：**打断时只置 ``_stop_flag``，从不释放流**。
+        ``on_close`` 只有等 SDK 自己回才触发，而打断后 ``finish()`` 提前返回、
+        ``_synthesizer`` 被置 None，再没人能关它——于是每打断一次就泄漏
+        一个输出流（以及一条 DashScope WS 连接）。下一轮在同一 PyAudio 上
+        再开一个流，两个流并存就是“新旧语音混在一起”。
+        """
+        with self._stream_lock:
+            stream = self._stream
+            self._stream = None
+        if stream is None:
+            return
+        for method in ("stop_stream", "close"):
+            try:
+                getattr(stream, method)()
+            except Exception:
+                pass
 
     def on_complete(self) -> None:
         """所有文本合成完成且音频全部返回。"""
@@ -143,27 +205,27 @@ class _PlaybackCallback:
         """WebSocket 连接关闭。排空扬声器缓冲后释放播放流。
 
         WS 关闭通常紧跟合成完成，此刻扬声器缓冲里可能仍有未播完的音频。
-        若立即 stop_stream() 会截断尾音——表现为"贾维斯话没说完，STT 已在
-        录音"。因此先按剩余播放时长排空（被打断时跳过），再停止 / 关闭。
+        若立即 stop_stream() 会截断尾音——表现为“贾维斯话没说完， STT 已在
+        录音”。因此先按剩余播放时长排空（被打断时跳过），再释放。
         """
         if self._stream is not None and not self._stop_flag.is_set():
             rem = self.remaining_play_seconds()
             if rem > 0:
                 time.sleep(min(rem + 0.15, _DRAIN_MAX_SECONDS))
-        if self._stream is not None:
-            try:
-                self._stream.stop_stream()
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
+        self._release_stream()
         self._closed.set()
 
     # ---- 外部控制 ----
 
     def stop(self) -> None:
-        """请求中断播放。回调里检查后停止写入。"""
+        """请求中断播放：置位标志，并**立刻释放输出流**真正闭嘴。
+
+        只置标志只能拦住**后续**写入，已经进环形缓冲的那一段仍会继续出声；
+        把流直接关掉销毁缓冲，才是打断应有的“立即安静”。释放是幂等的，
+        所以后续 ``on_close`` 再调一次也不会出错。
+        """
         self._stop_flag.set()
+        self._release_stream()
 
     @property
     def error(self) -> str | None:
@@ -273,11 +335,22 @@ class CosyVoiceTTS:
             self._wait_for_playback(done, sc_error)
             t.join(timeout=3)
         except Exception as e:
+            try:
+                synth.close()
+            except Exception:
+                pass
             return {**callback.stats, "error": f"合成失败: {type(e).__name__}: {e}"}
+
+        delay = self._safe_get_delay(synth)
+        # 整段播放同样要关 WS：不断开同样会累积连接
+        try:
+            synth.close()
+        except Exception:
+            pass
 
         result = {
             **callback.stats,
-            "first_package_delay_ms": self._safe_get_delay(synth),
+            "first_package_delay_ms": delay,
         }
         if callback.error:
             result["error"] = callback.error
@@ -359,23 +432,57 @@ class CosyVoiceTTS:
             self._wait_for_playback(done, sc_error)
             t.join(timeout=3)
         except Exception as e:
+            self._close_synthesizer()
             return {**self._callback.stats, "error": f"结束合成失败: {type(e).__name__}: {e}"}
+
+        # 首包延迟要在 close 之前取（关闭后 SDK 可能取不到）
+        delay = self._safe_get_delay(self._synthesizer)
+        # 无论正常完成 / 被打断 / WS 异常，都要把 WS 关掉，不留连接
+        self._close_synthesizer()
 
         result = {
             **self._callback.stats,
-            "first_package_delay_ms": self._safe_get_delay(self._synthesizer),
+            "first_package_delay_ms": delay,
         }
         if self._callback.error:
             result["error"] = self._callback.error
-        self._synthesizer = None
         return result
 
     def stop(self) -> None:
-        """中断当前播放/合成。"""
+        """中断当前播放/合成，并**彻底收尾**（释放扬声器流 + 关闭 WS）。
+
+        旧实现只置 ``_stop_flag``：``finish()`` 随即提前返回并把
+        ``_synthesizer`` 置 None，此后再没有对象能关闭这条 DashScope WS——
+        每打断一次泄漏一条连接。攒多之后 ``start_stream()`` 会因配额拒绝，
+        表现就是“用得越久越容易没声音”。这里主动 cancel + close。
+        """
         if self._callback:
             self._callback.stop()
+        self._close_synthesizer(cancel=True)
 
     # ---- 内部 ----
+
+    def _close_synthesizer(self, *, cancel: bool = False) -> None:
+        """关闭并丢弃当前合成器（幂等）。
+
+        Args:
+            cancel: True 时先 ``streaming_cancel()``（告诉服务端本次合成作废，
+                不要再推音频），再 ``close()`` 断开 WS。打断路径用 True，
+                正常收尾用 False。
+        """
+        synth = self._synthesizer
+        self._synthesizer = None
+        if synth is None:
+            return
+        if cancel:
+            try:
+                synth.streaming_cancel()
+            except Exception:
+                pass
+        try:
+            synth.close()
+        except Exception:
+            pass
 
     def _wait_for_playback(self, done: threading.Event, sc_error: list) -> None:
         """等待合成播完（停滞 / 总量双上限），返回前排空扬声器缓冲。
