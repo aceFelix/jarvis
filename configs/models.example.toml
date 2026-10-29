@@ -23,6 +23,20 @@ model = "qwen3.7-plus"
 # configs/*.toml 时本模板就是项目层，last_model 会一路压住用户层的 model）。
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 # api_key = "sk-your-dashscope-key-1"  # 建议用环境变量 DASHSCOPE_API_KEY / OPENAI_API_KEY
+
+# ---- 语音（TTS / STT / 实时双工）专用 Key ----
+# ⚠️ 语音和 LLM 是**两套凭据**：说话与听话固定走阿里云百炼 DashScope，LLM 可以
+#    是 DeepSeek / OpenAI / Claude 任何一家。所以 LLM 用别家时必须在这里单独配一个
+#    百炼 Key，否则“能打字但不会说话”。（2026-10 起首启引导 /init 也会问这一项。）
+#
+# 解析优先级（高 → 低，实现见 agent/config/voice_key.py）：
+#   1. 本文件的 dashscope_api_key（就是你在这里写的那行）
+#   2. 环境变量 DASHSCOPE_API_KEY
+#   3. 仅当主 LLM 本身就是 DashScope 时，复用上面的 api_key
+# 注意第 3 条：LLM 用 DeepSeek 时**不会**把 DeepSeek 的 key 拿去连阿里云（会 401）。
+#
+# 在阿里云百炼控制台取 Key：https://bailian.console.aliyun.com/
+# dashscope_api_key = "sk-your-bailian-key"
 max_tokens = 20480
 # temperature = 0.7
 # enable_thinking: 启用 qwen3.7-plus 原生深度思考（思维链），模型在回复前先输出 reasoning_content。

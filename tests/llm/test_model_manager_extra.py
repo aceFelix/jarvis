@@ -309,6 +309,37 @@ class TestEditCustomModel:
         assert "m1" not in settings.custom_models
         assert "m2" in settings.custom_models
 
+    def test_returns_saved_name_for_caller(self, monkeypatch) -> None:
+        """返回值告诉调用方“存成什么名字了”，供判断要不要重建 provider。"""
+        _patch_form_input(monkeypatch, {
+            "模型厂商": "deepseek", "模型名": "m2", "API Key": "k",
+            "接口类型": "openai", "Base URL": "", "模型类型": "text",
+        })
+        _patch_save_custom_model(monkeypatch, True)
+        settings = _make_settings()
+        settings.custom_models["m1"] = {"provider": "deepseek", "api_format": "openai"}
+        assert _edit_custom_model(StubUI(), settings, "m1") == "m2"  # 改名场景
+
+    def test_cancel_returns_none(self, monkeypatch) -> None:
+        _patch_form_input(monkeypatch, None)
+        settings = _make_settings()
+        settings.custom_models["m1"] = {"provider": "deepseek"}
+        assert _edit_custom_model(StubUI(), settings, "m1") is None
+
+    def test_save_failed_returns_none_and_keeps_old(self, monkeypatch) -> None:
+        """写盘失败不能把旧模型从内存里抹掉（旧顺序是“先删后存”）。"""
+        _patch_form_input(monkeypatch, {
+            "模型厂商": "deepseek", "模型名": "m2", "API Key": "k",
+            "接口类型": "openai", "Base URL": "", "模型类型": "text",
+        })
+        _patch_save_custom_model(monkeypatch, False)
+        ui = StubUI()
+        settings = _make_settings()
+        settings.custom_models["m1"] = {"provider": "deepseek", "api_format": "openai"}
+        assert _edit_custom_model(ui, settings, "m1") is None
+        assert "m1" in settings.custom_models, "保存失败时旧模型必须还在"
+        assert any(c[0] == "warn" for c in ui.calls)
+
 
 class TestEditBuiltinModel:
     """编辑内置模型覆盖配置。"""
@@ -327,12 +358,14 @@ class TestEditBuiltinModel:
         save_mock = _patch_save_custom_model(monkeypatch, True)
         ui = StubUI()
         settings = _make_settings(provider="dashscope", api_format="openai")
-        _edit_builtin_model(ui, settings, "qwen-max")
+        _edit_result = _edit_builtin_model(ui, settings, "qwen-max")
         cfg = settings.custom_models["qwen-max"]
         assert cfg["name"] == "qwen-max"
         assert cfg["provider"] == "dashscope"
         save_mock.assert_called_once()
-        assert any("已添加自定义覆盖配置" in c[1] for c in ui.calls)
+        assert any("自定义覆盖配置" in c[1] for c in ui.calls)
+        # 返回值告诉调用方：改的是当前模型时要立刻重建 provider
+        assert _edit_result == "qwen-max"
 
     def test_existing_override_as_default(self, monkeypatch) -> None:
         """已有覆盖配置时，默认值取自覆盖配置。"""
@@ -586,6 +619,41 @@ class TestSwitchModel:
         provider = StubProvider(model="deepseek-chat")
         result = _switch_model(
             StubUI(), self._settings_with_custom(), provider, None, None, "sys", "deepseek-chat"
+        )
+        assert result is None
+
+    def test_force_rebuilds_even_when_name_matches(self, monkeypatch) -> None:
+        """回归（真机 Connection error）：`/models → 修改配置` 改的就是运行中的模型。
+
+        同名短理会把用户刚改的 base_url / key / 模型类型全挡在门外：提示写着
+        「配置已更新」，下一句话却仍打旧端点。force=True 必须绕开这个短路
+        并按**现配置**重建 provider。
+        """
+        build_mock = _patch_build_provider(monkeypatch)
+        _patch_save_last_model(monkeypatch)
+        provider = StubProvider(model="deepseek-chat")
+        settings = self._settings_with_custom()
+        # 用户刚把该模型的 Base URL 改成新地址（失效的旧地址仍在 settings 顶层）
+        settings.custom_models["deepseek-chat"]["base_url"] = "https://new.example.com"
+
+        result = _switch_model(
+            StubUI(), settings, provider, None, None, "sys", "deepseek-chat", force=True
+        )
+
+        assert result is not None, "同名 + force 必须重建，不能返回 None"
+        new_provider, _loop, name = result
+        assert name == "deepseek-chat"
+        assert new_provider is not provider  # 真的换了 provider
+        build_mock.assert_called_once()
+        built_settings = build_mock.call_args[0][0]
+        assert built_settings.base_url == "https://new.example.com"
+
+    def test_force_off_still_short_circuits(self) -> None:
+        """不带 force 时保持原行为（普通同名选择不白建一次 connection）。"""
+        provider = StubProvider(model="deepseek-chat")
+        result = _switch_model(
+            StubUI(), self._settings_with_custom(), provider, None, None, "sys",
+            "deepseek-chat", force=False,
         )
         assert result is None
 

@@ -7,6 +7,17 @@ P1–P3 之后，"改配置"已经不是问题了——真正的问题是**第�
    ≤ 3 个问题"。模型清单**实时向厂商拉取**（`agent/llm/model_catalog.py`），不内置
    一张会过期的"最新型号表"，也不替用户决定他该用哪个模型。
    工作目录不单独问：默认当前目录（有安全默认值），问券预算留给没有默认值的模型。
+
+   **语音（DashScope）API Key 是“条件第四问”**：说话/听话固定走阿里云百炼，与 LLM
+   厂商无关，所以选 DeepSeek/OpenAI/Claude 的用户必须单独给一个百炼 key——否则装完
+   机器“能打字但不会说话”，而界面上没有任何一处说缺什么。但它**不总问**：
+
+   - LLM 本身选的就是 DashScope → 它的 key 就是百炼 key，直接复用、不问也不写盘；
+   - 配置里已有 `dashscope_api_key`，或环境变量已有 `DASHSCOPE_API_KEY` → 不问；
+
+   于是常见路径（选阿里云百炼）仍然是三问，只有“LLM 用别家且语音还没配”的才多
+   一问，而且可以回车跳过（跳过 = 只有文字）。解析优先级见
+   `agent/config/voice_key.py`。
 2. **用几天后主动提议调整**（`maybe_suggest_adjustment`）：把 P3 提炼出的候选拿出来
    问一次，用户点头才生效。只提一次，且不占打扰预算（终端里一行，不是系统通知）。
 
@@ -35,7 +46,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent.config.settings import Settings
 
-#: 首启只问这三件（顺序即提问顺序）
+#: 首启只问这三件（顺序即提问顺序）。
+#: 语音（DashScope）API Key 是**条件第四问**（见模块说明）：LLM 已在 DashScope 或
+#: 语音已配好的情形一律不问，所以这里仍只列三件，不把这承诺改成四。
 FIRST_RUN_QUESTIONS: tuple[str, str, str] = ("厂商", "API Key", "模型")
 
 #: 「用几天后主动提议」的门槛：至少启动过 5 次、且首启满 3 天
@@ -199,6 +212,88 @@ def should_onboard(settings: "Settings | None", *, path: Path | str | None = Non
 # ---------------------------------------------------------------------------
 
 
+def _ask_voice_key(ui: Any, settings: "Settings | None", *, vendor_key: str,
+                   llm_api_key: str) -> tuple[str, bool]:
+    """条件第四问：语音（DashScope）API Key。能复用 / 已配就不问。
+
+    为什么必须有这一问：说话与听话（TTS / STT）固定走阿里云百炼，**与 LLM 厂商
+    无关**。旧引导只配了 LLM key，选 DeepSeek / OpenAI 的用户装完机器“能打字但
+    不会说话”，而界面上没有任何一处告诉他缺的是哪个 key。
+
+    为什么它不破坏「三问」承诺（三种情况一律不问）：
+
+    1. LLM 本身就是 DashScope → 它的 key 就是百炼 key，`voice_key.resolve()` 的
+       第三条会自动复用。这里**不额外写盘**：同一串 key 存两份，日后改一处忘了
+       另一处，就是下一条“配了不生效”的钉子。
+    2. 配置里已有 ``dashscope_api_key``（含上一轮引导写的）。
+    3. 环境变量已有 ``DASHSCOPE_API_KEY``。
+
+    Args:
+        ui: 终端 UI。
+        settings: 当前配置（用于判断“已经配过了”）。
+        vendor_key: 本次首启刚选的 LLM 厂商 key（**不能读 settings.provider**：
+            此刻新选择还没写盘，settings 里还是旧值）。
+        llm_api_key: 本次首启刚填的 LLM key（用于判断能否复用）。
+
+    Returns:
+        ``(要写入 models.toml 的新 key, 语音是否已可用)``。
+        新 key 为空串表示无需写入；“已可用”分别对应复用 / 已配置（True）
+        与用户跳过（False）——调用方靠它决定结尾要不要提示“语音还没配”。
+
+    @author aceFelix
+    """
+    from agent.config import voice_key as vk
+
+    # ① 已配过就不问（配置优先，环境变量次之——与 voice_key.resolve 同口径）。
+    #    但**不能只说“已配置”**：用户需要知道是哪把 key（脱敏）、从哪来，
+    #    以及想换时去哪换。否则这句提示等于“此项已自动处理”的噪声。@author aceFelix
+    if vk.is_configured(settings):
+        ui.info(
+            f"语音（阿里云百炼）：{vk.describe_detail(settings)}，此项跳过"
+        )
+        if vk.source(settings) != "configured":
+            # 靠复用（LLM 的 key / 顶层 key）时才提醒：这种“配了”是推导出来的，
+            # 用户很可能以为自己从来没配过语音，想单独换的时候会找不到入口。
+            ui.info(
+                "  当前没有独立的语音 Key，是靠上层配置复用出来的。"
+                "想单独指定一个就跑 /init voice"
+            )
+        else:
+            ui.info("  要更换这个 Key：运行 /init voice")
+        return "", True
+
+    # ② LLM 就是 DashScope：同一串 key 就是百炼 key，复用且不写盘
+    if (vendor_key or "").strip().lower() == "dashscope" and (llm_api_key or "").strip():
+        from agent.utils.mask import mask_key
+
+        ui.info(
+            "语音（阿里云百炼）：复用上面这个 key "
+            f"{mask_key(llm_api_key.strip())}——当前 LLM 就是百炼，"
+            "说话/听话走同一账号"
+        )
+        return "", True
+
+    # ③ 真需要单独配一个百炼 key（LLM 用别家 / 刚好没填 LLM key）
+    ui.info(
+        "语音能力（说话与听话）固定走阿里云百炼，与上面的 LLM 厂商无关，"
+        "需要单独一个百炼 API Key（在 bailian.console.aliyun.com 取）"
+    )
+    try:
+        key = ui.ask_user(
+            "语音 API Key（阿里云百炼；回车跳过 = 只有文字，没有语音）"
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return "", False
+    if not key:
+        ui.info(
+            "已跳过语音配置（不影响打字）。之后可运行 /init 补，"
+            "或在 models.toml 顶层写 dashscope_api_key"
+        )
+        return "", False
+    ui.info("语音 API Key：已填写")
+    return key, True
+
+
 async def run_quick_setup(ui: Any, settings: "Settings | None" = None, *,
                           ctx: Any = None,
                           path: Path | str | None = None) -> bool:
@@ -225,9 +320,12 @@ async def run_quick_setup(ui: Any, settings: "Settings | None" = None, *,
     from agent.llm import model_catalog
     from agent.ui.terminal_picker import pick_from_list
 
-    ui._console.print("\n[bold cyan]═══ J.A.R.V.I.S 首次配置（3 个问题）═══[/bold cyan]")
+    ui._console.print("\n[bold cyan]═══ J.A.R.V.I.S 首次配置 ═══[/bold cyan]")
+    # 标题不写死“3 个问题”：语音那一问是条件出现的，写死数字会和实际显示对不上
+    # （实测有人跑完反问“没有第四问啊”——他反而不确定是不是漏了）。
     ui._console.print(
-        "[dim]模型清单由厂商实时提供，不由我们替你选；其余都用默认值，之后随时可改[/dim]\n"
+        "[dim]厂商 / API Key / 模型三问，模型清单由厂商实时提供、不由我们替你选；\n"
+        "语音（阿里云百炼）的 Key 仅在还缺时才多问一句。其余都用默认值，之后随时可改[/dim]\n"
     )
 
     # ① 厂商（含“其他 OpenAI 兼容服务”，自建也能接）
@@ -305,10 +403,34 @@ async def run_quick_setup(ui: Any, settings: "Settings | None" = None, *,
     vendor["default_model"] = model
     ui.info(f"模型：{model or '（未填，稍后 /models 设置）'}")
 
+    llm_key = api_key if isinstance(api_key, str) else ""
+
+    # ④ 语音（阿里云百炼）API Key —— 条件第四问。
+    # 放在这里而不是最前面：前两问（厂商 / LLM key）已经决定了“能不能复用”。
+    voice_key, voice_ready = _ask_voice_key(
+        ui, settings, vendor_key=str(vendor.get("key", "")), llm_api_key=llm_key
+    )
+
     # 其余全默认：api_format / base_url 取厂商默认，model_type 保守给 text
     # （要用图片输入就 /models 改——猜成多模态会让不支持视觉的模型在发图时报错）
-    path_saved = _save_config(vendor, api_key if isinstance(api_key, str) else "", "text")
+    path_saved = _save_config(vendor, llm_key, "text")
     ui._console.print(f"\n[green]✓ 配置已保存到 {path_saved}[/green]")
+
+    # 语音 key 单独写：它与 LLM 的 api_key 是**两套凭据**，但同住 models.toml 顶层
+    # （dashscope_api_key 属 MODEL_TOP_KEYS，写在 settings.toml 会被启动期拆分搬走）
+    if voice_key:
+        from agent.config.models_config import save_dashscope_api_key
+
+        voice_path = save_dashscope_api_key(voice_key)
+        if voice_path:
+            ui._console.print(
+                f"[green]✓ 语音已配置（百炼 Key 写入 {voice_path}）[/green]"
+            )
+        else:
+            ui._console.print(
+                "[yellow]⚠ 语音 Key 写入失败，请手改 models.toml 的 "
+                "dashscope_api_key[/yellow]"
+            )
 
     if api_key:
         ok, msg = await _test_connection(vendor, api_key)
@@ -332,6 +454,12 @@ async def run_quick_setup(ui: Any, settings: "Settings | None" = None, *,
         f"\n[dim]工作目录用当前目录：{workdir}\n"
         "要换：jarvis --workdir <路径>；要换模型：/models[/dim]"
     )
+    # 语音没配时把“怎么补”留在一屏可见的地方：否则用户只会在 /voice 里看到
+    # 一句“TTS 连接建立失败”，完全不知道缺的是百炼 key。@author aceFelix
+    if not voice_ready:
+        from agent.config.voice_key import missing_hint
+
+        ui._console.print(f"[yellow]ℹ {missing_hint(settings)}[/yellow]")
     ui._console.print("\n[bold cyan]可以开始了：直接说你想做什么。[/bold cyan]")
     return True
 

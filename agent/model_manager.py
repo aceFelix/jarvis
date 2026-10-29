@@ -226,14 +226,22 @@ def _pick_model_action(ui: RichCLI, model_name: str, *, allow_delete: bool = Tru
     return pick_from_list(items, title=f"管理「{model_name}」", current="cancel")
 
 
-def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
-    """弹出表单编辑自定义模型配置，保存到 TOML 和内存。"""
+def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> str | None:
+    """弹出表单编辑自定义模型配置，保存到 TOML 和内存。
+
+    Returns:
+        最终保存的模型名（用户可能改了名）；取消、配置无效或保存失败返回 ``None``。
+        返回名字而不是 bool，是因为调用方需要知道“改的是不是运行中的那个模型”
+        以及“改名后应该切到哪个名字”。
+
+    @author aceFelix
+    """
     from agent.ui.terminal_picker import form_input
 
     cfg = settings.custom_models.get(name)
     if not isinstance(cfg, dict):
         ui.warn(f"模型「{name}」配置无效")
-        return
+        return None
 
     fields = [
         {
@@ -264,12 +272,12 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
     result = form_input(title=f"修改「{name}」", fields=fields)
     if result is None:
         ui.info("已取消")
-        return
+        return None
 
     new_name = (result.get("模型名") or "").strip()
     if not new_name:
         ui.warn("模型名不能为空")
-        return
+        return None
 
     new_vendor = result.get("模型厂商", "deepseek") or "deepseek"
     new_api_format = result["接口类型"]
@@ -291,19 +299,21 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
 
     from agent.config.settings import save_custom_model
 
-    # 如果改名了，先删旧名
+    # 先存新名，成功后再删旧名。旧顺序（先删后存）在保存失败时会把用户
+    # 现有模型直接从内存里抹掉——一次写盘失败就丢配置。@author aceFelix
+    if not save_custom_model(new_name, new_config):
+        ui.warn("保存失败")
+        return None
+
+    settings.custom_models[new_name] = new_config
     if new_name != name:
         _remove_custom_model_from_toml(name)
-        del settings.custom_models[name]
-
-    if save_custom_model(new_name, new_config):
-        settings.custom_models[new_name] = new_config
-        ui.info(f"模型「{new_name}」配置已更新")
-    else:
-        ui.warn("保存失败")
+        settings.custom_models.pop(name, None)
+    ui.info(f"模型「{new_name}」配置已更新")
+    return new_name
 
 
-def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
+def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> str | None:
     """编辑内置模型（qwen 系列等）的覆盖配置。
 
     内置模型名固定不可改（来自项目级 configs/models.toml 的 [llm.models]），
@@ -313,6 +323,11 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
 
     默认值取自 settings 顶层字段（即 models.toml 原始的 provider/base_url/api_key），
     若 last_model 曾覆盖到自定义模型，则用 default_* 字段恢复原始值作为默认。
+
+    Returns:
+        保存成功返回模型名（内置模型名不可改）；取消或失败返回 ``None``。
+
+    @author aceFelix
     """
     from agent.ui.terminal_picker import form_input
 
@@ -369,7 +384,7 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
     result = form_input(title=f"修改内置模型「{name}」", fields=fields)
     if result is None:
         ui.info("已取消")
-        return
+        return None
 
     vendor = result.get("模型厂商", "dashscope") or "dashscope"
     api_fmt = result["接口类型"]
@@ -395,9 +410,12 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> None:
     from agent.config.settings import save_custom_model
     if save_custom_model(name, config):
         settings.custom_models[name] = config
-        ui.info(f"内置模型「{name}」已添加自定义覆盖配置（重启或切换后生效）")
-    else:
-        ui.warn("保存失败：无法写入 ~/.jarvis/models.toml")
+        # 不再笼统地说“重启后生效”：若改的正是运行中的模型，/models 会立刻
+        # 按新配置重建 provider（见 handle_models 的 force 分支）。
+        ui.info(f"内置模型「{name}」已保存自定义覆盖配置（改的是当前模型则立刻生效）")
+        return name
+    ui.warn("保存失败：无法写入 ~/.jarvis/models.toml")
+    return None
 
 
 def _delete_custom_model(ui: RichCLI, settings: Settings, name: str) -> None:
@@ -436,6 +454,7 @@ def _build_switched_provider(
     model_name: str,
     *,
     baseline: Settings | None = None,
+    force: bool = False,
 ) -> tuple[object, str, Settings]:
     """按目标模型构造 provider（REPL /model 与工作台热切换共用）。
 
@@ -458,6 +477,11 @@ def _build_switched_provider(
             「差异」早被自己抹掉了 → 永远判定无需重建 → 复用启动时那个旧
             provider，于是「✓ 连接成功」之后下一句话仍打旧端点/旧 key。
             None 表示沿用 settings（调用方保证 settings 就是运行中那份快照）。
+        force: 无条件重建。给``/models → 修改配置``用：编辑的若正是**运行中**
+            那个模型，端点类字段可能一字未变（只改了 model_type）或改在
+            ``baseline`` 看不见的地方，靠差异判断就会静默复用旧 provider。
+            桌面壳走的是 ``model_switch.handle_switch_model(force=True)``，
+            这里对齐它。
 
     Returns:
         ``(provider, model_desc, used_settings)``：新 provider（可能是入参本身）、
@@ -480,13 +504,14 @@ def _build_switched_provider(
         # 兼容旧字段名 provider_type
         api_fmt = cfg.get("api_format") or cfg.get("provider_type", "openai")
         current_ptype = base.api_format.lower()
-        needs_new_provider = False
+        # force 时一律重建：见上方 docstring，编辑运行中的模型不能靠差异判断
+        needs_new_provider = bool(force)
 
-        if api_fmt.lower() != current_ptype:
+        if not needs_new_provider and api_fmt.lower() != current_ptype:
             needs_new_provider = True
-        elif cfg.get("base_url") and cfg["base_url"] != base.base_url:
+        elif not needs_new_provider and cfg.get("base_url") and cfg["base_url"] != base.base_url:
             needs_new_provider = True
-        elif cfg.get("api_key") and cfg["api_key"] != base.api_key:
+        elif not needs_new_provider and cfg.get("api_key") and cfg["api_key"] != base.api_key:
             needs_new_provider = True
 
         mtype = cfg.get("model_type", "multimodal")
@@ -545,6 +570,7 @@ def _switch_model(
     model_name: str,
     *,
     baseline: Settings | None = None,
+    force: bool = False,
 ) -> tuple[object, object, str] | None:
     """切换模型并返回新的 (provider, loop, model_name)。
 
@@ -555,13 +581,17 @@ def _switch_model(
         baseline: 运行中 provider 的端点快照；`/init` 那种「先改 settings 再切」
             的调用方必须传，否则差异被自己抹掉、复用旧 provider。详见
             `_build_switched_provider`。
+        force: 目标与当前同名时仍按**现配置**重建 provider。`/models → 修改
+            配置` 改的往往就是运行中那个模型：不加这一条，“同名即当前”的
+            短理会把用户刚改的 base_url / key / 类型全部挡在门外，于是
+            「配置已更新」之后下一句话仍打旧端点（真机实测的 Connection error）。
     """
     old_model = getattr(provider, '_model', '')
-    if model_name == old_model:
+    if model_name == old_model and not force:
         return None
 
     new_provider, model_desc, _used_settings = _build_switched_provider(
-        settings, provider, model_name, baseline=baseline
+        settings, provider, model_name, baseline=baseline, force=force
     )
     # 记录当前模型名，供下次 _switch_model 判断是否需要重置
     new_provider._model = model_name

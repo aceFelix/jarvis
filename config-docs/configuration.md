@@ -25,10 +25,19 @@ $ jarvis                       ← 全新机器直接跑
 ① 用哪家厂商   列表选（DashScope / DeepSeek / OpenAI / … / 其他 OpenAI 兼容）
 ② API Key      回车可跳（跳过后配置仍会写盘，之后 /init 补）
 ③ 选模型       **实时从厂商拉出你账号里可用的模型**，可筛选，也可「手动输入模型名…」
+④ 语音 API Key **条件第四问**（2026-10 新增）：说话/听话固定走阿里云百炼，与 LLM
+               厂商无关。只有“LLM 用别家且语音还没配”时才会问，且可回车跳过
+               （跳过 → 只有文字）。选阿里云百炼、或已配过的，这一问不出现。
 
-/init                          同样只问三问（想换就会又跑一次）
+/init                          同样只问这几问（想换就会又跑一次）
 /init full                     完整引导：厂商列表 / 自定义 base_url / 模型名 / 模型类型
+/init voice                    只配（或更换）语音的阿里云 Key
 ```
+
+语音 Key 为什么单算一问：语音和对话模型是**两套凭据**（TTS/STT 固定走阿里云百炼，
+LLM 可以是任何一家）。选 DeepSeek / OpenAI 的用户不配它就只能打字、不能说话，
+而旧引导根本不提这件事。解析优先级与排错见 [voice-setup.md](voice-setup.md)，
+实现只有一份：`agent/config/voice_key.py`（`/voice`、`/talk`、`/init` 共用）。
 
 模型清单**由厂商实时提供**，不是内置的一张“最新模型表”——表会过时，而且你喜欢
 哪个模型不该由我们替你定。拉不到在线列表时会用内置兑底款，**并写出具体原因**
@@ -176,7 +185,7 @@ $ jarvis                       ← 全新机器直接跑
 | `model` | str | `""` | 模型名。空 = 用厂商默认。启动时 `last_model` 会覆盖它 |
 | `last_model` | str | `""` | 上次使用的模型（自动持久化，下次启动恢复） |
 | `api_key` | str | `""` | API Key（推荐用环境变量，避免明文存 TOML） |
-| `dashscope_api_key` | str | `""` | DashScope 专属 Key（实时语音/多模态必须独立配置） |
+| `dashscope_api_key` | str | `""` | **语音专用** DashScope Key（TTS/STT/实时双工）。语音与 LLM 是两套凭据：LLM 不是百炼时必须单独配。优先级：本项 > 环境变量 `DASHSCOPE_API_KEY` > （仅当 LLM 就是百炼时）复用 `api_key` |
 | `base_url` | str | `""` | API 端点。**留空不会按厂商自动补**：`api_format=openai` 落到 SDK 默认（读 `OPENAI_BASE_URL`，否则 `https://api.openai.com/v1`），`anthropic` 落到 `https://api.anthropic.com`；自定义模型请写全（用 `/models`、`/init` 时留空会按厂商表自动填） |
 | `max_tokens` | int | `4096` | 单轮最大输出 token |
 | `temperature` | float | `None` | 采样温度（None = 厂商默认） |
@@ -259,6 +268,9 @@ enable_thinking = true
 | `realtime_tools_mode`（`[realtime_talk].tools_mode`） | `"builtin"` | 语音会话工具面：`builtin` 2 内置工具低延迟 / `all` Registry+MCP 全量 |
 | `voice_barge_in` | `false` | 麦克风语音打断（默认关：watcher 会开第二个 PyAudio 实例，与 TTS 并发有崩溃风险） |
 | `voice_barge_in_key` | `true` | 键盘打断（ESC 键） |
+| `voice_wake_words`（`[voice].wake_words`） | 内置词表 | 唤醒词。空格 = 用 `voice_config.py` 内置默认；配了就完全覆盖。除字面匹配外还参与**拼音同音**匹配（「贾维斯」能叫醒「加维思」「贾伟斯」等近音写法），同时作为 ASR 热词下发。拼音层只对 ≥3 个汉字的词生效（避免「贾维」命中「甲维集团」）。依赖 `pypinyin`（`[voice]` 可选依赖），缺失时自动退化为字面匹配。第一项显示在待机横幅 |
+| `voice_exit_words`（`[voice].exit_words`） | 内置词表 | 退下/待机触发词（「退下」/「拜拜」等）；空格 = 内置默认 |
+| `voice_interrupt_words`（`[voice].interrupt_words`） | 内置词表 | TTS 播报期间的打断词（「闭嘴」/「停」等），需 `voice_barge_in = true` 才生效；空格 = 内置默认 |
 
 > 桌面壳 jarvis-desktop 的语音模式为真全双工（浏览器 AEC + `talk.audio`/`talk_audio`
 > 音频桥接），路径内固定 `half_duplex=False`，不受上述配置影响。
@@ -472,6 +484,9 @@ RPC 可临时传 `minutes`）签一条限定范围的授权租约，查看与提
 
 ## 邮件
 
+同一张表服务两块能力：**发**（`SendEmail`，走 SMTP）与**只读收件**（感知层 `mail`
+事件源 + `EmailBox` 工具，走 IMAP）。
+
 ```toml
 email_enabled = true
 email_smtp_host = "smtp.163.com"
@@ -480,15 +495,23 @@ email_smtp_user = "your@163.com"
 email_smtp_password = "授权码"    # 不是登录密码！
 email_sender = "your@163.com"
 email_default_recipient = "target@qq.com"
-# 收件（W2 mail 事件源，需同时开 [percept].mail_enabled）：IMAP 只读，
-# 只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，永不拉正文、不把邮件标成已读。
+# 收件（感知层 mail 事件源 + EmailBox 工具）：IMAP 只读，两处共用这套凭据。
+# 事件源（需同时开 [percept].mail_enabled）只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，
+# 永不拉正文、不把邮件标成已读；
+# EmailBox 工具（读/查/回）由用户或模型显式触发，读正文走 BODY.PEEK，读完仍是未读。
 # imap_user / imap_password 留空则复用 SMTP 同一套（163/QQ 两边同一个授权码）。
+# imap_host 留空则按 smtp_host 推断（smtp.163.com → imap.163.com）；
+# 自定义域名（如 mail.mycorp.com）推不出，必须显式写。
 email_imap_host = "imap.163.com"
 email_imap_port = 993            # 993 = SSL；143 走 STARTTLS
 email_imap_user = "your@163.com"
 email_imap_password = "授权码"
 email_imap_mailbox = "INBOX"
 ```
+
+> `EmailBox` 没有任何写邮箱状态的能力（无标已读 / 归档 / 删除），也没有本地邮件
+> 副本缓存；检索直接查服务器。邮件正文属于不可信外部内容，安全边界见
+> [工具系统](../docs/architecture/05-工具系统.md)「邮件工具」节。
 
 ---
 

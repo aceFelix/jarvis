@@ -66,6 +66,18 @@ barge_in_key = true
 [realtime_talk]
 # /talk 实时双工语音（DashScope qwen-audio-3.0-realtime-flash）。
 # model / voice / ws_url 也可写在此表内，优先级高于同名顶层 realtime_* 字段。
+#
+# api_key → 映射到 settings.dashscope_api_key（**语音专用** Key）。它同时被
+# /voice（TTS+STT）使用，不只 /talk。三种写法等价，写哪一处都行：
+#   1. 本表 api_key
+#   2. models.toml 顶层 dashscope_api_key（/init 引导写的就是这里）
+#   3. 环境变量 DASHSCOPE_API_KEY
+# api_key = "sk-your-bailian-key"
+#
+# 注：语音固定走阿里云百炼，与 LLM 厂商无关；LLM 用 DeepSeek/OpenAI 时必须单独配
+# 这个 Key，否则“能打字但不会说话”。主 LLM 就是百炼时会自动复用它的 key（这一条
+# 不需要写在配置里）。解析优先级见 agent/config/voice_key.py。
+#
 # event_log: 事件时间线日志——把本次会话收到的每条服务端事件按序写入
 # ~/.jarvis/logs/diag.log（component=realtime），用于复盘交互时序（谁在何时打断谁）。
 # 默认关闭。被服务端判为非有效轮次的语音（🔇 前缀）与退出诊断摘要始终显示，不受此开关控制。

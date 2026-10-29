@@ -224,6 +224,11 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/think ", handle_think),
     ("/config ", handle_config_show),
     ("/config", handle_config_show),
+    # /init 的子流程：精确表只认裸 /init，所以带参数时必须在这里兜住。
+    # 漏了这行的后果（2026-10 实测）：`/init voice` 匹配不到任何 handler，
+    # 被当成普通对话发给模型——用户看到的是“敲了命令什么都没发生”。
+    # `/init full` 同样中招过（handler 里早有分流，但路由一直没配前缀）。
+    ("/init ", handle_init),
     ("/lease ", handle_lease),  # /lease list|revoke|签发带参 @author aceFelix
     ("/undo ", handle_undo),   # /undo list|cancel|<id>|--task <id> @author aceFelix
     ("/prefs ", handle_prefs),  # /prefs forget <id>|clear @author aceFelix

@@ -389,6 +389,48 @@ def save_init_model(
     return path
 
 
+def save_dashscope_api_key(api_key: str) -> Path | None:
+    """把**语音专用**的 DashScope API Key 写入用户级 models.toml 顶层。
+
+    为什么写 models.toml 而不是 settings.toml：``dashscope_api_key`` 是
+    ``MODEL_TOP_KEYS`` 的成员，启动期 ``split_model_config`` 会把它从
+    settings.toml 搬进 models.toml。写错文件的效果是「引导里填了，重启后却没了」，
+    所以这里必须写拆分后的最终归属地。
+
+    为什么**同时**写 keyring 和 TOML 明文：``load_settings`` 只从 TOML 顶层读这个
+    字段（``env.py`` 也只会用 ``settings.provider`` 去 keyring 查**主** key），
+    并不回填 dashscope 这一项。所以 keyring 在这里只是额外的安全副本，TOML 才是
+    真正被读取的那份——别"优化"成只写 keyring，那会让语音彻底取不到 key。
+
+    Args:
+        api_key: 明文 key；空串表示不写（返回 ``None``）。
+
+    Returns:
+        写入的文件路径；写入失败或 key 为空返回 ``None``。
+
+    @author aceFelix
+    """
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return None
+
+    path = user_models_path()
+    try:
+        text, eol = _read_or_seed(path)
+        text = upsert_top_scalar(text, "dashscope_api_key", f'"{api_key}"')
+        write_toml_text(path, text, eol)
+    except OSError:
+        return None
+
+    try:
+        from agent.config.keyring_store import store_api_key
+
+        store_api_key("dashscope", api_key)
+    except Exception:
+        pass
+    return path
+
+
 def _ensure_top_scalar(content: str, key: str, literal: str) -> str:
     """仅当顶层键缺失时补写（已有则原样保留，不覆盖用户选择）。"""
     top = content[: _top_end(content)]

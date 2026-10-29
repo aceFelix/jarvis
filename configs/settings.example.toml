@@ -63,9 +63,35 @@ barge_in = false
 # 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。想换键改 voice_loop.py _KeyBargeInWatcher 默认 key。
 barge_in_key = true
 
+# ── 三张词表（不写 = 用内置默认词表，老配置零影响）──
+# 词表解析与匹配见 agent/voice/wake_words.py。
+#
+# wake_words: 待机时怎么称呼它、能把它叫醒。
+#   除字面匹配外还参与**拼音同音**匹配——只配「贾维斯」，ASR 听成
+#   「加维思」「贾伟斯」「假维斯」「佳维丝」也能叫醒（都折成 jiaweisi）。
+#   拼音层只对 ≥3 个汉字的词生效（两字词如「贾维」会命中「甲维集团」，故只走字面）。
+#   同时会作为 ASR 热词下发，让识别模型一开始就倾向于输出这个词。
+#   第一项还会显示在待机提示横幅里。
+#   拼音容错依赖 pypinyin（pip install "jarvis-agent[voice]" 已含）；没装则只做字面匹配。
+# wake_words = ["贾维斯", "Jarvis"]
+# exit_words = ["退下", "拜拜"]        # 让它退下/待机
+# interrupt_words = ["闭嘴", "停"]     # 播报期间打断（需 barge_in = true）
+
 [realtime_talk]
 # /talk 实时双工语音（DashScope qwen-audio-3.0-realtime-flash）。
 # model / voice / ws_url 也可写在此表内，优先级高于同名顶层 realtime_* 字段。
+#
+# api_key → 映射到 settings.dashscope_api_key（**语音专用** Key）。它同时被
+# /voice（TTS+STT）使用，不只 /talk。三种写法等价，写哪一处都行：
+#   1. 本表 api_key
+#   2. models.toml 顶层 dashscope_api_key（/init 引导写的就是这里）
+#   3. 环境变量 DASHSCOPE_API_KEY
+# api_key = "sk-your-bailian-key"
+#
+# 注：语音固定走阿里云百炼，与 LLM 厂商无关；LLM 用 DeepSeek/OpenAI 时必须单独配
+# 这个 Key，否则“能打字但不会说话”。主 LLM 就是百炼时会自动复用它的 key（这一条
+# 不需要写在配置里）。解析优先级见 agent/config/voice_key.py。
+#
 # event_log: 事件时间线日志——把本次会话收到的每条服务端事件按序写入
 # ~/.jarvis/logs/diag.log（component=realtime），用于复盘交互时序（谁在何时打断谁）。
 # 默认关闭。被服务端判为非有效轮次的语音（🔇 前缀）与退出诊断摘要始终显示，不受此开关控制。
@@ -174,9 +200,12 @@ smtp_port = 465
 # smtp_password = "your_authorization_code" # 邮箱授权码
 # sender = "your_163_email@163.com"         # 发件人显示地址（默认与 smtp_user 相同）
 # default_recipient = "your_163_email@163.com" # 默认收件人（用户未指定 to 时使用）
-# 收件（W2 mail 事件源，需同时开 [percept].mail_enabled）：IMAP 只读，
-# 只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，永不拉正文；长连接 IDLE，断线自动降级为轮询。
+# 收件（W2 mail 事件源 + EmailBox 工具）：IMAP 只读，两处共用同一套凭据。
+# 事件源（需同时开 [percept].mail_enabled）只取信封头 FROM/SUBJECT/DATE/MESSAGE-ID，
+# 永不拉正文，长连接 IDLE，断线自动降级为轮询；
+# EmailBox 工具（读/查/回）由用户或模型显式触发，读正文走 BODY.PEEK，读完仍是未读。
 # imap_password 留空则复用 smtp_password（163/QQ 两边同一个授权码）。
+# imap_host 留空则按 smtp_host 推断（smtp.163.com -> imap.163.com；自定义域名推不出，必须显式写）。
 # imap_host = "imap.163.com"
 # imap_port = 993                           # 993=SSL；143 走 STARTTLS
 # imap_user = "your_163_email@163.com"      # 留空则用 smtp_user

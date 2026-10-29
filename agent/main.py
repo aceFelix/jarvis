@@ -640,8 +640,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--init",
-        action="store_true",
-        help="交互式首次配置引导：选厂商→输Key→测试连接→保存",
+        # nargs="?"+const=""：裸 --init 等价于原 store_true；跟一个词才选流程
+        # （"-" 开头的 token 不会被当成值，所以 `jarvis --init --workdir x` 安全）
+        nargs="?",
+        const="",
+        default=None,
+        metavar="[full|voice]",
+        help="交互式配置引导（选厂商→输Key→测连接→保存）；可跟 full 或 voice",
     )
     # 已退役入口（2026-10，aceFelix）：--gui / --talk 原用于拉起 pywebview 三栏
     # 工作台窗口，窗口壳已从本仓库删除（图形化桌面由独立仓库 jarvis-desktop
@@ -773,16 +778,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"无法进入工作目录 {settings.workdir}: {e}", file=sys.stderr)
         return 1
 
-    # 交互式首次配置
-    if args.init:
-        from agent.ui.cli import RichCLI
-        ui = RichCLI(verbose=False, boot_animation=False)
-        from agent.commands.handlers.init_command import run_init_cli
-        try:
-            asyncio.run(run_init_cli(ui))
-        except KeyboardInterrupt:
-            pass
-        return 0
+    # 交互式首次配置（--init [full|voice]）
+    if args.init is not None:
+        from agent.commands.handlers.init_command import run_init_cli_from_args
+
+        return run_init_cli_from_args(args.init)
 
     # 阶段 12 P4：全新机器上直接问三件，不让用户先去读文档跑 /init。
     # 判定与提问都放在 onboarding 里：非交互（管道/CI）不问，取消过一次就不再问。

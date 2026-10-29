@@ -114,6 +114,13 @@ class Settings:
     # barge_in_key（键盘打断）默认启用：TTS 播报期间用 keyboard 库全局钩子监听 ESC，
     # 按下立即停止播报并切回聆听。不占 PyAudio，无 segfault 风险，daemon 无窗口也能捕获。
     voice_barge_in_key: bool = True
+    # 唤醒 / 退下 / 打断三张词表（[voice] wake_words / exit_words / interrupt_words）。
+    # 留空 = 用 voice_config.py 里的内置词表，所以老配置不受影响。
+    # 唤醒词除字面匹配外还参与**拼音同音**匹配：配「贾维斯」即可命中「加维思」
+    # 「贾伟斯」「假维斯」等近音写法（详见 agent/voice/wake_words.py）。
+    voice_wake_words: tuple[str, ...] = ()
+    voice_exit_words: tuple[str, ...] = ()
+    voice_interrupt_words: tuple[str, ...] = ()
 
     # 实时双工语音对话（/talk）
     # endpoint 默认使用 DashScope 公共域名；如使用业务空间专属域名，在此覆盖

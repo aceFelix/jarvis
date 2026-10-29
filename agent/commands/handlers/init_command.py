@@ -1,14 +1,18 @@
 """jarvis init —— 交互式首次配置引导。
 
-两种粒度（阶段 12 P4 区分）：
+三种粒度（阶段 12 P4 区分）：
 
 - ``/init``（默认）= **首启三问**：厂商 / API Key / 模型，其余全默认。
   模型清单**实时向厂商拉取**（`agent/llm/model_catalog.py`），不由内置表替用户决定；
   拉不到才用内置兑底并明说，也可以手动输入型号。工作目录默认当前目录。
+  另外还有一问是**条件出现**的：语音（阿里云百炼）API Key——LLM 选百炼时会自动
+  复用它的 key、已经配过的也不问，只有“LLM 用别家且语音还缺”时才问。
 - ``/init full`` = 完整引导（厂商列表 → 自定义 base_url → 模型名 → 模型类型 →
   API Key → 连接测试）。换厂商、接自建兼容服务、改多模态时用它。
+- ``/init voice`` = 只配语音（阿里云百炼）API Key。因为那一问在“已配置”时会被首启
+  引导跳过（正确的），否则用户想**更换**时就没有任何交互入口了。
 
-两者共用同一套写盘（`_save_config` → `models_config.save_init_model`），
+三者共用同一套写盘（`_save_config` → `models_config.save_init_model`），
 不各写一份。
 
 @author aceFelix
@@ -19,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent.commands.router import CommandContext
@@ -244,6 +248,68 @@ def _apply_to_session(ctx: object, saved_model: str) -> str:
     return "配置已保存；重启 jarvis 后生效"
 
 
+async def _handle_voice_init(ui: Any, settings: Any = None) -> bool:
+    """/init voice —— 只配语音（阿里云百炼）API Key。
+
+    为什么需要单独一个入口（2026-10 实测后补）：语音 Key “已配置”时会被首启引导
+    跳过——这个跳过本身是对的（不该每次启动都问）。但跳过之后，用户想**更换**就
+    没有任何交互入口了；而“已经配了”往往只是环境变量被 ``env.py`` 灌进了配置
+    字段，用户自己可能都不知道有这回事，于是更找不到改的地方。
+
+    Args:
+        ui: 终端 UI。
+        settings: 当前配置；为 ``None``（``jarvis --init voice`` 独立进程）时现读。
+
+    Returns:
+        恒为 True（与其它命令处理器一致，表示已消费该输入）。
+
+    @author aceFelix
+    """
+    from agent.config import voice_key as vk
+    from agent.config.models_config import save_dashscope_api_key, user_models_path
+
+    if settings is None:
+        try:
+            from agent.config.settings import load_settings
+
+            settings = load_settings()
+        except Exception:  # noqa: BLE001 - 读不到就按“未配置”展示
+            settings = None
+
+    ui._console.print("\n[bold cyan]═══ 语音（阿里云百炼）API Key ═══[/bold cyan]\n")
+    ui.info(f"当前：{vk.describe_detail(settings)}")
+
+    if vk.llm_is_dashscope(settings):
+        # 这时语音本来就能用（复用 LLM 的 key）。说清楚“为什么还要单独配”，
+        # 否则用户会以为这是在解决一个不存在的问题。
+        ui.info(
+            "当前 LLM 就是阿里云百炼，语音会直接复用它的 key，不用配也能说话；"
+            "只有想让语音走**另一个账号**时才需要填这里"
+        )
+
+    try:
+        key = ui.ask_user("新语音 API Key（阿里云百炼；回车保留现状）").strip()
+    except (EOFError, KeyboardInterrupt):
+        ui.info("已取消，现状未改动")
+        return True
+
+    if not key:
+        ui.info("未改动")
+        return True
+
+    path = save_dashscope_api_key(key)
+    if path is None:
+        ui.error(f"写入失败，请手改 {user_models_path()} 的 dashscope_api_key")
+        return True
+
+    ui._console.print(f"[green]✓ 已写入 {path}[/green]")
+    ui._console.print(
+        "[dim]它优先于环境变量 DASHSCOPE_API_KEY：配置文件写了就以配置为准。\n"
+        "重开语音模式（/voice 或 /talk）后生效。[/dim]"
+    )
+    return True
+
+
 async def handle_init(ctx: CommandContext, stripped: str) -> bool:
     """处理 /init：默认走首启三问；``/init full`` 走完整引导。
 
@@ -253,10 +319,12 @@ async def handle_init(ctx: CommandContext, stripped: str) -> bool:
     if tokens and tokens[0].lower() in ("full", "-f", "--full"):
         return await _handle_full_init(ctx)
 
-    from agent.config.onboarding import run_quick_setup
-
     if ctx.ui is None:
         return False
+    if tokens and tokens[0].lower() in ("voice", "-v", "--voice"):
+        return await _handle_voice_init(ctx.ui, getattr(ctx, "settings", None))
+
+    from agent.config.onboarding import run_quick_setup
     # 传 ctx 而不只是 settings：写完盘要能把新配置热生效到当前会话
     await run_quick_setup(ctx.ui, getattr(ctx, "settings", None), ctx=ctx)
     return True
@@ -326,15 +394,48 @@ async def _handle_full_init(ctx: CommandContext) -> bool:
     return True
 
 
-async def run_init_cli(ui: RichCLI, *, full: bool = False) -> None:
-    """jarvis --init CLI 入口（默认三问，full=True 走完整引导）。"""
+def run_init_cli_from_args(mode: str = "") -> int:
+    """``jarvis --init [full|voice]`` 的 CLI 入口（main 只负责传参）。
+
+    为什么搬到这里：``agent/main.py`` 已接近（实际是已超过）800 行上限，而 --init
+    的三种粒度本来就是本模块的事——参数解析与 UI 构造没理由继续堆在入口文件里。
+
+    Args:
+        mode: ``--init`` 跟的值。空串 = 裸 ``--init``（默认三问）；认不出的值也
+            回落到默认三问，不报错（用户写错一个词不该把启动拦住）。
+
+    Returns:
+        进程退出码（恒为 0：交互式引导被 Ctrl+C 中断也不算失败）。
+
+    @author aceFelix
+    """
+    from agent.ui.cli import RichCLI
+
+    ui = RichCLI(verbose=False, boot_animation=False)
+    name = (mode or "").strip().lower()
+    try:
+        asyncio.run(run_init_cli(
+            ui,
+            full=name in ("full", "-f", "--full"),
+            voice=name in ("voice", "-v", "--voice"),
+        ))
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+async def run_init_cli(ui: RichCLI, *, full: bool = False,
+                       voice: bool = False) -> None:
+    """jarvis --init CLI 入口（默认三问，full=True 完整引导，voice=True 只配语音）。"""
     from dataclasses import dataclass
 
     @dataclass
     class _FakeCtx:
         ui: RichCLI
 
-    if full:
+    if voice:
+        await _handle_voice_init(ui)
+    elif full:
         await _handle_full_init(_FakeCtx(ui=ui))  # type: ignore[arg-type]
     else:
         from agent.config.onboarding import run_quick_setup

@@ -91,13 +91,27 @@ async def handle_models(ctx: "CommandContext", stripped: str) -> bool:
             is_custom = cname in custom_names
             is_builtin = cname in builtin_names
             action = _pick_model_action(ui, cname, allow_delete=is_custom)
+            saved: str | None = None
             if action == "edit":
+                # 返回最终保存的模型名（用户可能在表单里改了名）
                 if is_builtin:
-                    _edit_builtin_model(ui, settings, cname)
+                    saved = _edit_builtin_model(ui, settings, cname)
                 else:
-                    _edit_custom_model(ui, settings, cname)
+                    saved = _edit_custom_model(ui, settings, cname)
             elif action == "delete":
                 _delete_custom_model(ui, settings, cname)
+            # 改的正是**运行中**那个模型：同名也必须按新配置重建 provider。
+            # 不加 force 的话，“同名即当前”的短理会把用户刚改的 base_url /
+            # key / 模型类型全挡在门外——提示写着「配置已更新」，下一句话却
+            # 仍打旧端点，表现为 Connection error（2026-10 真机实测）。
+            # 桌面壳早就走 model_switch(force=True)，这里补齐同一条口径。
+            if saved and cname == ctx.model:
+                result = _switch_model(
+                    ui, settings, ctx.provider, ctx.registry, ctx.orchestrator,
+                    ctx.system_prompt, saved, force=True,
+                )
+                if result:
+                    ctx.provider, ctx.loop, ctx.model = result
             continue
 
         if picked == _ADD_MARKER:
@@ -113,6 +127,13 @@ async def handle_models(ctx: "CommandContext", stripped: str) -> bool:
             )
             if result:
                 ctx.provider, ctx.loop, ctx.model = result
+        else:
+            # 选中的正是当前模型：不能静默什么都不做（用户会以为“切了”），
+            # 也不该默默重建（没改东西，白白断一次连接）。把下一步告诉用户。
+            ui.info(
+                f"「{picked}」已经是当前模型。想改它的配置："
+                "在列表里按【空格】打开管理菜单 → 修改配置（保存后立即生效）"
+            )
         break
 
     return True

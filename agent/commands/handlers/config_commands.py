@@ -62,14 +62,18 @@ def _bool_icon(val: bool) -> str:
 # ── 各配置分组展示 ──
 
 def _show_llm(ui: RichCLI, settings: Any, provider: Any) -> None:
-    """LLM 配置面板。"""
+    """LLM 配置面板。
+
+    注：``dashscope_api_key`` 不在这里展示——它是**语音**凭据（语音固定走阿里云
+    百炼，与当前 LLM 厂商无关），放在 LLM 面板里会让人以为换 LLM 就要重配它。
+    展示位置在 ``_show_voice``。
+    """
     rows = [
         ["provider", settings.provider or "(自动检测)"],
         ["api_format", settings.api_format],
         ["model", settings.model or "(默认)"],
         ["base_url", settings.base_url or "(自动检测)"],
         ["api_key", _mask_key(settings.api_key)],
-        ["dashscope_api_key", _mask_key(settings.dashscope_api_key)],
         ["max_tokens", str(settings.max_tokens)],
         ["temperature", str(settings.temperature) if settings.temperature is not None else "(默认)"],
         ["enable_thinking", _bool_icon(getattr(provider, '_enable_thinking', settings.enable_thinking))],
@@ -82,9 +86,22 @@ def _show_llm(ui: RichCLI, settings: Any, provider: Any) -> None:
 def _show_voice(ui: RichCLI, settings: Any) -> None:
     """TTS / STT / 实时语音 配置面板。
 
+    首行是**语音凭据**：语音（说话/听话）固定走阿里云百炼，与当前 LLM 厂商无关，
+    所以用户最常问的“我明明配了 key 怎么没声音”必须在这里一眼看得出——除了
+    脱敏后的值，还标出它**从哪来**（配置 / 环境变量 / 复用 LLM 的 key）。
+
     @author aceFelix
     """
+    from agent.config import voice_key as vk
+
+    key = vk.resolve(settings)
+    key_cell = (
+        f"{_mask_key(key)}（{vk.describe(settings)}）" if key
+        else "未配置 —— /init 或 models.toml 的 dashscope_api_key"
+    )
     rows = [
+        # 语音凭据（阿里云百炼 DashScope）
+        ["语音 Key", key_cell],
         # TTS
         ["tts_model", settings.tts_model],
         ["tts_voice", settings.tts_voice],
