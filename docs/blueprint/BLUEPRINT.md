@@ -265,6 +265,8 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 现状 | 已有 `SystemMonitor` 阈值告警 + 600s 冷却 + 磁盘趋势预测 + 异常进程检测 |
 | 缺口 | 电池/温度/启动项/网络连通性巡检；"体检报告"式汇总 |
 | 落点 | `tools/system/maintenance.py` 一组工具 + scheduler 定期执行 |
+| 「加速」口径 | **改名「性能诊断」**：只做**发现 + 解释 + 建议**，执行权永远在用户手里。Win10/11 的「加速球」属产品噱头（进程调度与内存管理已够好），而「一键杀进程」杀掉的可能是跑了两小时的编译、导入到一半的模型、正在保存的文档。**绝不自动结束进程 / 禁用启动项**；SSD 走 TRIM 不做碎片整理 |
+| 升级说明 | 见 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B4 批（磁盘 SMART / 进程热点 Top N / 启动项清单 / 体检报告汇总） |
 
 ### 6.2 清理垃圾
 
@@ -273,6 +275,9 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 成熟方案 | 规则表 + 预览 + 隔离区 + 白名单；参考 **BleachBit 的 CleanerML 规则格式**（声明式、可扩展、社区可维护） |
 | 安全约束 | 只清白名单目录；删除先进隔离区（可恢复）；预览确认后执行；绝不碰项目文件 |
 | 现状 | ☆ 空白（已有回收站纳入的文件工具，但无清理规则体系） |
+| 成熟方案的边界 | **BleachBit 只借格式、不借规则**：CleanerML 是声明式的好范式，但它的规则集面向 Linux（`~/.cache/*`、`/var/tmp`），Windows 系统级垃圾（`Windows.old`、`SoftwareDistribution`、WinSxS）**不在其覆盖内**。Windows 侧真正有效的是系统自带能力：`Dism /StartComponentCleanup`（WinSxS，常省 2–5 GB）、`cleanmgr`、回收站。**通用开源里没有能直接覆盖 Windows 系统级垃圾又安全可编排的清理器，规则表必须自己写** |
+| 落点 | `agent/core/maintenance/`（rules / scanner / cleaner）+ `tools/extensions/maintenance.py` + `/disk` `/clean` 命令 |
+| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，分 **B1 只读诊断**（零风险，先做）/ **B2 可撤销清理**（隔离区 + 快照 + `/undo`）两批；每批独立可用、独立验收 |
 
 ### 6.3 整理文件
 
@@ -288,10 +293,12 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 
 | 项 | 内容 |
 |---|---|
-| 首选 | Windows Defender：`MpCmdRun.exe` + `Get-MpThreatDetection`（系统自带、零依赖、免授权） |
-| 兜底 | ClamAV（开源，可命令行调用）作为第二意见 |
+| 首选 | **Defender PowerShell 模块**：`Get-MpComputerStatus` / `Start-MpScan` / `Get-MpThreatDetection` / `Get-MpThreat` / `Update-MpSignature`（系统自带、零依赖、免授权，且**返回结构化对象**） |
+| 兜底 | `MpCmdRun.exe`（老命令行，输出是非结构化文本，仅在前者不可用时）；ClamAV 限为**手动**第二意见——Windows 上需另装、特征库单独维护，与实时防护有互扫风险，**不进自动流程** |
 | 原则 | **绝不写查杀引擎**——只做"扫描编排 + 结果解读 + 处置建议" |
 | 现状 | ☆ 空白 |
+| 落点 | `agent/core/maintenance/health.py` 的 security 区块 + `SystemHealth` 的 action 分支 |
+| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B3 批。两个硬约束：全盘扫描可跑一小时以上，**必须异步执行 + 进度查询**（复用后台命令句柄），不得阻塞主循环；`Remove-MpThreat` 处置威胁需**管理员 + 强制确认** |
 
 ### 6.5 日常电脑办公
 
@@ -331,16 +338,20 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 
 ### 6.9 优先级与落点
 
-| 事项 | 优先级 | 归属阶段 | 依赖 |
-|---|---|---|---|
-| 监控电脑健康 | 高 | 阶段 8–9（配合事件总线） | 无 |
-| 清理垃圾 | 中 | 阶段 10（需副作用账本才安全） | W3 账本 |
-| 整理文件 | 高 | 阶段 10 | W3 账本 |
-| 杀毒 | 中 | 阶段 9+ | 无（Defender 编排） |
-| 日常办公 | 高 | 持续（工具层补齐） | 无 |
-| 查阅资料 | 中 | 持续 | 无 |
-| 管理线上事务 | 中 | 阶段 10 | W3 账本 |
-| 复杂软件操作 | 高 | 阶段 11+（UIA 语义层） | 无 |
+| 事项 | 优先级 | 归属阶段 | 依赖 | 详细计划 |
+|---|---|---|---|---|
+| 监控电脑健康 | 高 | 阶段 8–9（配合事件总线） | 无 | 系统维护计划 B4 |
+| 性能诊断（原「加速」） | 高 | 阶段 12（并入体检报告一起交） | 无 | 系统维护计划 B4 |
+| 清理垃圾 | 中 | 阶段 10（需副作用账本才安全） | W3 账本 ✅ | 系统维护计划 B1 + B2 |
+| 整理文件 | 高 | 阶段 10 | W3 账本 | [fileops-desktop-upgrade](../plans/fileops-desktop-upgrade.md) |
+| 杀毒 | 中 | 阶段 9+ | 无（Defender 编排） | 系统维护计划 B3 |
+| 日常办公 | 高 | 持续（工具层补齐） | 无 | — |
+| 查阅资料 | 中 | 持续 | 无 | — |
+| 管理线上事务 | 中 | 阶段 10 | W3 账本 | — |
+| 复杂软件操作 | 高 | 阶段 11+（UIA 语义层） | 无 | [PLAN-p1-gui-automation](../roadmap/PLAN-p1-gui-automation.md) |
+
+> 「系统维护计划」即 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，
+> 分批 B1–B4，每批独立可用、独立验收——B1（只读诊断）零风险、不碰任何文件，可随时开工。
 
 > ✅ **前置依赖已清**（2026-10 阶段 10 后端交付）：上表三行“W3 账本”均就位——
 > 不可逆动作有延时窗口、本地破坏性写可按整轮检查点回滚、`/undo --task` 能批量补偿。
@@ -620,7 +631,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 3 | 邮件集成方式：IMAP 只读（IDLE/轮询），还是走既有邮件工具 API 通道？ | 决定 W2 实现复杂度与权限提示频率 | 先只读信封头（发件人/主题/时间） | ✅ 已定（2026-10）：IMAP IDLE 长连接 + 断线降级轮询；只读信封头。注：现仓 `SendEmailTool` 只能发不能收，"既有 API 通道"不成立，需新增 `[email].imap_*` 字段 |
 | 4 | 重要度评分是否引入**本地小模型**？ | 纯规则省资源但笨；小模型更准但增依赖与常驻占用 | 先用规则 + 历史接受率，量到再评估 | ⏳ 暂不定，不阻塞 W2 |
 | 5 | W1 效果语义 `dry_run` 是否同时用于**工具层**（而非仅通知层）？ | 影响与既有五层权限管线的耦合面 | 已定：独立策略引擎降级合并退出 W1，dry_run 随 W3 副作用账本再定 | ✅ 已定（归 W3.2） |
-| 6 | 是否按第 6 节顺序优先做"系统维护"（健康/清理/整理/杀毒）？ | 决定阶段 8 之后的实际排期 | 建议在 W1 之后、W2 并行展开 | ⏳ 待定（开工前可再确认；清理/整理类写操作仍需 W3 账本才安全） |
+| 6 | 是否按第 6 节顺序优先做"系统维护"（健康/清理/整理/杀毒）？ | 决定阶段 8 之后的实际排期 | 建议在 W1 之后、W2 并行展开 | ⏳ 待定（开工前可再确认；清理/整理类写操作仍需 W3 账本才安全）。<br>**2026-10-29 补**：详细计划已成文——[PLAN-system-maintenance](../roadmap/PLAN-system-maintenance.md)，B1 只读诊断零风险可先行，不必等排期决定 |
 
 ---
 
@@ -629,6 +640,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 类型 | 文档 |
 |---|---|
 | **管家形态升级详细计划（W1–W4）** | [roadmap/PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md) |
+| **系统维护（清理 / 查毒 / 性能诊断）详细计划** | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) |
 | W3 兑现层交付复盘（设计偏离 + 真缺陷清单） | [fixlogs/w3-journal-spine-delivery.md](../fixlogs/w3-journal-spine-delivery.md) |
 | W3 驱动器受阻谎报实机复盘（四条断链） | [fixlogs/w3-driver-approval-blocked-report.md](../fixlogs/w3-driver-approval-blocked-report.md) |
 | 实时语音待机/唤醒/计费 | [roadmap/PLAN-future-realtime-voice-upgrade.md](../roadmap/PLAN-future-realtime-voice-upgrade.md) |
@@ -643,7 +655,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ---
 
-**文档版本**：v2.0（合并版）| **最后更新**：2026-10-22 | **维护者**：艾斯（aceFelix）
+**文档版本**：v2.0（合并版）| **最后更新**：2026-10-29 | **维护者**：艾斯（aceFelix）
 
 > v2.0 内的修订（不拆版本号，只记已发生的变化）：2026-10-21 阶段 10（W3）后端交付后，
 > 重写了 2.1 的感知/主动性/安全权限三行与“一句话”结论（顺带补上阶段 9 漏改的总线描述），
@@ -658,6 +670,13 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 > 同日接桌面面板那一刀：发现「批准并重试」原本只是把步骤退回待执行（按钮空转），
 > 现在走 `tasks.exec approve` 签**限定范围租约**（只放本步被拦的工具 + 只限目标目录 + 只给 30 分钟），
 > 单测 362 → 374 例；兄弟仓 jarvis-desktop 右栏「跨会话目标」与「副作用账本」两个区块同时接完。
+> **2026-10-29 系统维护落计划**：第 6 节八件事中「清理垃圾 / 杀毒」与缺失的「加速」
+> 从“只有蓝图头目”补到可开工粒度——新建
+> [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)（B1 只读诊断 /
+> B2 可撤销清理 / B3 Defender 编排 / B4 性能诊断）；本节 6.1 补「加速」口径（改为性能诊断，
+> 绝不自动杀进程）、6.2 补成熟方案的**边界**（BleachBit 只借格式不借规则，Windows 系统级
+> 垃圾靠 `Dism` 等原生能力）、6.4 把首选从 `MpCmdRun.exe` 改为 Defender PowerShell 模块
+> （后者输出结构化、覆盖更全）、6.9 增加「详细计划」列与「性能诊断」行。
 
 > v2.0（2026-10-09）：由 `VISION.md` + `roadmap/jarvis-upgrade-roadmap.md` + `roadmap/VISION_ROADMAP(旧).md` 三份合并为一份蓝图；
 > 统一"阶段"进度坐标；补入电脑管家八件事技术选型、未来形态技术锚点、理论锚点与学习渠道。
