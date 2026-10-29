@@ -13,6 +13,7 @@ from pathlib import Path
 
 from agent.core.percept.source_mail import (
     MailSource,
+    _parse_uid,
     decode_header_value,
     envelope_key,
     parse_envelope,
@@ -204,9 +205,15 @@ class FakeIMAP:
         self.fetch_specs: list[str] = []        # 记录 FETCH 规格，锁死“只取信封头”
         self.logged_out = False
         self.idle_resp: list = [b"2 EXISTS (uidnext 3)"]
+        self.id_args: list[str] = []      # IMAP ID（网易 163/126 不发就 SELECT 不进去）
 
     def login(self, user, password):
         return "OK", [""]
+
+    def xatom(self, name, *args):
+        if str(name).upper() == "ID":
+            self.id_args.append(args[0] if args else "")
+        return "OK", [b""]
 
     def select(self, mailbox, readonly=False):
         self.select_args.append((mailbox, readonly))
@@ -218,10 +225,18 @@ class FakeIMAP:
     def fetch(self, num, spec):
         self.fetch_calls.append(num)
         self.fetch_specs.append(spec)
-        return "OK", [(b"1 (FLAGS ())", self.headers[num])]
+        # 真实服务器在 FETCH 响应前缀里回 UID（如 ``1 (UID 101 FLAGS ())``）
+        n = num.decode() if isinstance(num, bytes) else str(num)
+        prefix = f"1 (UID {100 + int(n)} FLAGS ())".encode()
+        return "OK", [(prefix, self.headers[num])]
 
     def hascapability(self, cap):
         return cap == "IDLE" and self._idle
+
+    def capability(self):
+        """真实的 ``imaplib`` 只提供 ``capability()``，**没有** ``hascapability``。"""
+        caps = b"IMAP4REV1 UIDPLUS IDLE" if self._idle else b"IMAP4REV1 UIDPLUS"
+        return "OK", [caps]
 
     def idle(self):
         outer = self
@@ -296,6 +311,8 @@ def test_mail_select_is_readonly_and_peek_only_headers(tmp_path):
     assert "BODY.PEEK[HEADER.FIELDS" in spec
     assert "BODY[" not in spec.replace("BODY.PEEK[", "")   # 没有非 PEEK 的取法
     assert "HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)" in spec
+    # UID 是 FETCH 数据项而非邮件头，不影响“不下正文”的口径
+    assert spec.startswith("(UID ")
 
 
 def test_mail_event_contains_envelope_only(tmp_path):
@@ -307,7 +324,74 @@ def test_mail_event_contains_envelope_only(tmp_path):
     assert events[0].payload["from"] == "李四 <l@x.com>"
     assert "会议邀请" in events[0].summary()
     assert events[0].dedup_key == "mail:m2@x"        # 去重键用 Message-ID（去尖括号）
+    # 播报带 uid：用户听完说“念一下”时，EmailBox(read) 有直接可用的句柄
+    assert events[0].payload["uid"] == "101"
     assert "auth-code" not in json.dumps(events[0].to_dict(), ensure_ascii=False)  # 凭据不入事件
+
+
+def test_parse_uid_reads_fetch_prefix():
+    """UID 从 FETCH 响应前缀取（imaplib 的 tuple 第一项）。"""
+    assert _parse_uid(b"1 (UID 4821 FLAGS (\\Seen))") == "4821"
+    assert _parse_uid(b'1 (uid 7 BODY[HEADER] {5}') == "7"     # 大小写不敏感
+
+
+def test_parse_uid_missing_is_not_failure():
+    """老服务器不回 UID 时返回空串，不抛——退回“按主题搜”仍能用。"""
+    assert _parse_uid(b"1 (FLAGS ())") == ""
+    assert _parse_uid(b"") == ""
+
+
+def test_cycle_sends_client_id(tmp_path):
+    """采集线程登录后必须发 IMAP ``ID``——网易 163/126 的硬要求。
+
+    实机（2026-10）：163 允许 `LOGIN` 成功，但紧接着的 `SELECT` 返回
+    `Unsafe Login. Please contact kefu@188.com for help`。不发 ID 的话，
+    163/126 用户的“来信提醒”永远不会触发。
+    """
+    conn = FakeIMAP([b"1"], {b"1": header_of("a@x.com", "报表", "<x@y>")})
+    src = make_mail(tmp_path, conn)
+    src._cycle()
+    assert conn.id_args, "未发送 IMAP ID：163/126 会在 SELECT 阶段报 Unsafe Login"
+    assert "jarvis" in conn.id_args[0]
+
+
+def test_supports_idle_reads_capability(tmp_path):
+    """IDLE 检测必须自己看 CAPABILITY，而不是调一个不存在的方法。
+
+    `imaplib.IMAP4` **没有** `hascapability` 方法，旧实现里那句
+    `conn.hascapability("IDLE")` 直接抛 AttributeError，又被 `except → False`
+    吞掉—— 结果**任何服务器**都被判成“不支持 IDLE”，连 Gmail/Outlook
+    也白等 5 分钟轮询（2026-10 实机发现）。
+    """
+    idle_conn = FakeIMAP([b"1"], {}, idle=True)
+    src = make_mail(tmp_path, idle_conn)
+    assert src._supports_idle(idle_conn) is True
+
+    plain = FakeIMAP([b"1"], {}, idle=False)   # 163 的真实情况：CAPABILITY 里无 IDLE
+    assert make_mail(tmp_path, plain)._supports_idle(plain) is False
+
+
+def test_supports_idle_prefers_cached_capabilities(tmp_path):
+    """连接已缓存 capabilities 时直接用，不再多发一次 CAPABILITY。"""
+
+    class _Cached:
+        capabilities = ("IMAP4REV1", "UIDPLUS", "IDLE")
+
+        def capability(self):  # pragma: no cover - 不应被调到
+            raise AssertionError("已有缓存却仍发了 CAPABILITY")
+
+    src = make_mail(tmp_path, FakeIMAP([b"1"], {}))
+    assert src._supports_idle(_Cached()) is True
+
+
+def test_supports_idle_survives_bare_connection(tmp_path):
+    """连接对象什么都没有时返回 False，不抛。"""
+
+    class _Bare:
+        pass
+
+    src = make_mail(tmp_path, FakeIMAP([b"1"], {}))
+    assert src._supports_idle(_Bare()) is False
 
 
 def test_mail_first_round_is_silent_baseline(tmp_path):

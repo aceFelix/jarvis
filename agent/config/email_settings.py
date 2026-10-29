@@ -90,12 +90,24 @@ def read_email_config(settings: Any) -> dict[str, Any]:
     result["has_password"] = smtp_password
     # IMAP 允许回退到 SMTP 授权码，所以“有凭据”= 两者任一已配
     result["has_imap_password"] = imap_password or smtp_password
+    # 主机名也允许回退：未显式配 imap_host 时按 smtp_host 推断（163/QQ 等厂商
+    # 是同域前缀互换）。不这么做，面板会在“已启用 + 授权码已配”的同时显示
+    # “收件未就绪”，而用户根本不知道还差一个 host——2026-10 实机就是这个困惑。
+    # 推导口径与 resolve_account 共用一份（derive_imap_host）。
+    # @author aceFelix
+    from agent.core.mail.imap import derive_imap_host
+
+    imap_host = str(getattr(settings, "email_imap_host", "") or "").strip()
+    if not imap_host:
+        imap_host = derive_imap_host(str(getattr(settings, "email_smtp_host", "") or ""))
     result["imap_ready"] = bool(
-        str(getattr(settings, "email_imap_host", "") or "").strip()
+        imap_host
         and str(getattr(settings, "email_imap_user", "")
                 or getattr(settings, "email_smtp_user", "") or "").strip()
         and result["has_imap_password"]
     )
+    # 面板文案用：告诉用户实际在用哪个 IMAP 主机（显式配的值或推导出来的值）
+    result["imap_host_effective"] = imap_host
     return result
 
 

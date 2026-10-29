@@ -27,16 +27,24 @@ from __future__ import annotations
 import email
 import email.header
 import imaplib
+import re
 import threading
 import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
+from agent.core.mail.imap import imap_connect, send_client_id
+from agent.core.mail.parse import decode_header_value
 from agent.core.percept.event import PerceptEvent, SOURCE_MAIL
 
-#: 只取这四个信封头，其余（含正文）一概不下
-HEADER_FIELDS = "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)] FLAGS)"
+#: 只取这四个信封头，其余（含正文）一概不下。
+#: UID 是 FETCH 的数据项而非邮件头，几乎不要带宽；带上它是为了让播报里能直接
+#: 给出「读这封」的稳定句柄（见 ``_parse_uid``）。
+HEADER_FIELDS = "(UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)] FLAGS)"
+
+#: FETCH 响应前缀里的 ``UID 123``（如 ``b'1 (UID 123 FLAGS ())'``）
+_UID_RE = re.compile(rb"\bUID\s+(\d+)", re.IGNORECASE)
 
 #: IDLE 单次最长等待（秒）：多数服务商会在 30 分钟左右掐掉 IDLE，主动到期重挂更稳
 IDLE_TICK_S = 25 * 60
@@ -50,32 +58,16 @@ SEEN_CAP = 500
 _STATE_FILE = Path.home() / ".jarvis" / "percept" / "mail_seen.json"
 
 
-def decode_header_value(raw: str) -> str:
-    """把 MIME 编码的邮件头（如 =?UTF-8?B?...?=）解成可读串。
-
-    中文邮件系统的主题/发件人几乎都是 RFC2047 编码，不解码会把"=?UTF-8?B?5oCO5LmI?="
-    这种原样播报出去。
-    """
-    if not raw:
-        return ""
-    try:
-        parts = email.header.decode_header(raw)
-    except (ValueError, UnicodeDecodeError):
-        return raw.strip()
-    out: list[str] = []
-    for text, charset in parts:
-        if isinstance(text, bytes):
-            try:
-                out.append(text.decode(charset or "utf-8", errors="replace"))
-            except (LookupError, TypeError):
-                out.append(text.decode("utf-8", errors="replace"))
-        else:
-            out.append(str(text))
-    return "".join(out).strip()
+# 头解码与 IMAP 连接口径已收敛到 core/mail（感知层与 EmailBox 工具共用一份，
+# 避免 RFC2047 解码规则两处漂移）。这里保留同名导入以兼容既有引用。
 
 
 def parse_envelope(header_bytes: bytes) -> dict[str, str]:
-    """从信封头字节解析 {from, subject, date, message_id}（不含正文）。"""
+    """从信封头字节解析 {from, subject, date, message_id}（不含正文）。
+
+    ``uid`` 不在这里：它是 FETCH 的数据项，不在邮件头里，由 ``_parse_uid``
+    从响应前缀另取。
+    """
     msg = email.message_from_bytes(header_bytes or b"")
     return {
         "from": decode_header_value(msg.get("From", "")),
@@ -85,21 +77,28 @@ def parse_envelope(header_bytes: bytes) -> dict[str, str]:
     }
 
 
+def _parse_uid(prefix: bytes) -> str:
+    """从 FETCH 响应前缀里抠出 UID（取不到返回空串）。
+
+    **为什么要费劲拿它**：播报只发「谁·什么主题·什么时候」，用户接着说
+    “念一下这封”时，`EmailBox(read)` 需要一个句柄。序号（`search` 返回的
+    `1:*`）会随删除/归档平移，同一个序号明天可能指着另一封信；UID 在同一
+    邮箱内终身不变，跨会话、跨重启都能对上。
+
+    取不到不算失败：老服务器可能不回 UID，那时退回「按主题搜」也能用。
+
+    @author aceFelix
+    """
+    m = _UID_RE.search(prefix or b"")
+    return m.group(1).decode("ascii", "replace") if m else ""
+
+
 def envelope_key(env: dict[str, str]) -> str:
     """一封信的稳定标识：优先 Message-ID，缺失时用 发件人+主题+日期。"""
     mid = env.get("message_id", "")
     if mid:
         return mid.strip("<> ")
     return f"{env.get('from', '')}|{env.get('subject', '')}|{env.get('date', '')}"
-
-
-def imap_connect(host: str, port: int) -> Any:
-    """建立 IMAP 连接：993 走 SSL，其余端口走 STARTTLS（143 等）。"""
-    if int(port) == 993:
-        return imaplib.IMAP4_SSL(host, int(port), timeout=30)
-    conn = imaplib.IMAP4(host, int(port), timeout=30)
-    conn.starttls()
-    return conn
 
 
 class MailSource:
@@ -246,6 +245,12 @@ class MailSource:
         self._conn = conn
         if hasattr(conn, "login"):
             conn.login(self._user, self._password)
+            # 登录后必须报客户端身份：网易 163/126 不发 `ID` 时 `LOGIN` 会成功，
+            # 但随后的 `SELECT` 直接返回 `Unsafe Login. Please contact kefu@188.com`
+            # （实机 2026-10）。不发这一步，163/126 用户的“来信提醒”永远不会
+            # 触发，而日志里只有一句像“授权码不对”的误导性错误。
+            # @author aceFelix
+            send_client_id(conn)
         # 首轮只记录"哪些信已经存过"，一律不发事件：否则一开源就把收件箱
         # 陈年未读全播一遍，用户第一感受就是"这玩意一装就吵"
         first = not self._seen_set
@@ -261,11 +266,35 @@ class MailSource:
         return self._poll_s
 
     def _supports_idle(self, conn: Any) -> bool:
-        """服务器是否广告 IDLE 能力（不支持就走轮询，不硬试）。"""
-        try:
-            return bool(conn.hascapability("IDLE"))
-        except Exception:
-            return False
+        """服务器是否广告 IDLE 能力（不支持就走轮询，不硬试）。
+
+        ⚠️ **不能用** ``conn.hascapability("IDLE")``：``imaplib.IMAP4`` 根本没有
+        ``hascapability`` 这个方法（Python 3.x 各版本都没有），访问它会走
+        ``__getattr__`` 兜底、抛 ``AttributeError: Unknown IMAP4 command``。而本方法
+        以前写的是 ``except → False``，于是**任何服务器都被判成不支持 IDLE**——
+        连真正支持推送的 Gmail / Outlook / 企业邮也白等 5 分钟轮询（2026-10 实机发现）。
+
+        正解：自己看 CAPABILITY——先读连接时缓存的 ``capabilities``，没有就现发一次。
+        """
+        caps = getattr(conn, "capabilities", None)
+        text = ""
+        if caps:
+            it = [caps] if isinstance(caps, (str, bytes)) else list(caps)
+            text = " ".join(
+                c.decode("ascii", "replace") if isinstance(c, bytes) else str(c) for c in it
+            )
+        if not text:
+            try:
+                status, data = conn.capability()
+            except Exception:
+                return False
+            if status != "OK" or not data:
+                return False
+            text = " ".join(
+                d.decode("ascii", "replace") if isinstance(d, bytes) else str(d)
+                for d in data if d
+            ).split("\r\n", 1)[0]
+        return "IDLE" in text.upper()
 
     def _wait_idle(self, conn: Any) -> int:
         """挂在 IDLE 上等推送；单次最多等 `idle_tick_s` 后主动重挂。
@@ -348,13 +377,19 @@ class MailSource:
         if typ != "OK" or not data:
             return None
         raw = b""
+        prefix = b""
         for item in data:
             if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], bytes):
                 raw = item[1]
+                prefix = item[0] if isinstance(item[0], bytes) else str(item[0]).encode()
                 break
         if not raw:
             return None
-        return parse_envelope(raw)
+        env = parse_envelope(raw)
+        uid = _parse_uid(prefix)
+        if uid:
+            env["uid"] = uid
+        return env
 
     def _watched(self, env: dict[str, str]) -> bool:
         """发件人白名单判定（名单为空=全放行）。"""
@@ -376,6 +411,9 @@ class MailSource:
                 "from": sender,
                 "subject": subject,
                 "date": env.get("date", ""),
+                # 播报带上 uid：模型听到“念一下这封”就能直接 EmailBox(read)，
+                # 不必先按主题猜一遍（主题重复时会搜出好几封）。
+                "uid": env.get("uid", ""),
             },
             salience_hint=hint,
             # 去重键用信封标识：同一封被 IDLE 与轮询都撞见也只播一次

@@ -157,7 +157,13 @@ class SendEmailTool(Tool):
         )
         msg.attach(part)
 
-    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    async def call(
+        self,
+        args: dict[str, Any],
+        ctx: ToolContext,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> ToolResult:
         """执行邮件发送。
 
         流程：
@@ -165,6 +171,11 @@ class SendEmailTool(Tool):
         2. 解析收件人、抄送、密送。
         3. 构造邮件正文与附件。
         4. 连接 SMTP 服务器并发送。
+
+        Args:
+            extra_headers: 额外邮件头（内部参数，不进 input_schema）。
+                ``EmailBox.reply`` 靠它注入 ``In-Reply-To`` 与 ``References``，
+                使回复在对方客户端里显示成同一条会话。模型永远无法直接传它。
         """
         settings = self._load_settings(ctx)
         if settings is None:
@@ -219,6 +230,10 @@ class SendEmailTool(Tool):
         msg["Subject"] = subject
         # Message-ID 有助于部分邮件服务器反垃圾策略
         msg["Message-ID"] = f"<jarvis-{uuid.uuid4().hex}@{smtp_host}>"
+        # 会话线程头：只有回复才需要，由 EmailBox.reply 经内部参数注入
+        for header_name, header_value in (extra_headers or {}).items():
+            if header_value:
+                msg[header_name] = header_value
 
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
