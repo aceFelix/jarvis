@@ -215,6 +215,15 @@ class SandboxExecutor:
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=effective_timeout
                 )
+            except asyncio.CancelledError:
+                # 用户中断（Ctrl+C / 点停止）：同样要终止进程树再抛。
+                # 不处理的话，「取消」只放弃等待，子进程照跑不误——实机表现为
+                # 「按了停止，火狐无头截图还常驻后台」，用户以为没反应。
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                raise
             except asyncio.TimeoutError:
                 # 超时：终止整个进程树（Job Object 的 KILL_ON_JOB_CLOSE 会处理）
                 try:
@@ -283,6 +292,13 @@ class SandboxExecutor:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=effective_timeout
             )
+        except asyncio.CancelledError:
+            # 用户中断：杀进程树再抛（否则子进程变孤儿，用户看不到它已结束）
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise
         except asyncio.TimeoutError:
             try:
                 proc.kill()
@@ -388,6 +404,13 @@ class SandboxExecutor:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=effective_timeout
             )
+        except asyncio.CancelledError:
+            # 用户中断：杀进程树再抛（Unix 下还要靠 killpg 带子孙）
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise
         except asyncio.TimeoutError:
             try:
                 proc.kill()

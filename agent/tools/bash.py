@@ -328,7 +328,33 @@ class BashTool(Tool):
             snapshot_id = guard.snapshot(work_dir, reason=f"沙箱执行: {command[:60]}")
             auditor.log_snapshot(snapshot_id, [work_dir], reason=command[:60])
 
-        result = await executor.run(command, cwd=work_dir, timeout=timeout)
+        # 与 ``ctx.abort_event`` 竞速：``_call_normal`` 早就有这一层，沙箱路径
+        # 一直漏着。后果是沙箱里跑长命令时 Ctrl+C 完全无效——实机 2026-10：
+        # 语音模式下命令超时后又要重试一轮，总等待两百多秒，用户按 Ctrl+C
+        # 毫无反应，最后只能强杀进程退出。
+        # 进程树的回收仍在 executor 内部做（它管着 Job Object），这里只负责
+        # 「及时放弃等待」并显式告知用户是被中断的。
+        # @author aceFelix
+        run_task = asyncio.ensure_future(
+            executor.run(command, cwd=work_dir, timeout=timeout)
+        )
+        abort_wait = asyncio.ensure_future(ctx.abort_event.wait())
+        try:
+            await asyncio.wait(
+                {run_task, abort_wait}, return_when=asyncio.FIRST_COMPLETED
+            )
+            # 兼查 is_set()：abort_event 由工作线程置位，跨线程唤醒未必可靠。
+            # 但 run_task 已完成时优先取结果（命令已经跑完了，不算中断）。
+            if ctx.abort_event.is_set() and not run_task.done():
+                run_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await asyncio.wait_for(run_task, timeout=_KILL_REAP_TIMEOUT_S)
+                return ToolResult.error(
+                    f"已取消（用户中断）: {command[:80]}", retryable=False
+                )
+            result = run_task.result()
+        finally:
+            abort_wait.cancel()
 
         # 审计记录
         auditor.log_execution(
@@ -341,13 +367,19 @@ class BashTool(Tool):
             cwd=work_dir,
         )
 
-        if result.error:
-            return ToolResult.error(f"[沙箱] {result.error}")
-
+        # 超时判定**必须在 error 之前**（2026-10 实测卡死根因）：executor 超时会
+        # 同时设 ``timed_out=True`` 与 ``error="命令超时（...）"``，所以 `if result.error`
+        # 先命中并返回了一个 **retryable 默认 True** 的 ToolResult，下面这条
+        # retryable=False 的分支永远执行不到。后果就是超时被自愈层当成可重试，
+        # 明明已经等满 120 秒，还要再等一轮——用户看到的是「卡住 + 退不出去」。
+        # @author aceFelix
         if result.timed_out:
             # retryable=False：超时意味着命令真跑满了时长，重试只会再等一遍、
             # 副作用还多出一次（前台拉起 GUI 程序尤其典型），该交回模型换方案。
             return ToolResult.error(f"[沙箱] 命令超时（{timeout}秒）: {command[:80]}", retryable=False)
+
+        if result.error:
+            return ToolResult.error(f"[沙箱] {result.error}")
 
         # 组装输出
         parts = []
