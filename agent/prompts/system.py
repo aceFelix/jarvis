@@ -23,6 +23,7 @@ from agent.core.tool import ToolRegistry
 from agent.prompts.text_blocks import (
     _BASE_PROMPT,
     _GOAL_SPINE_SECTION,
+    _MAIL_SECTION,
     _NO_THINKING_SECTION,
     _PLATFORM_LINUX,
     _PLATFORM_MACOS,
@@ -150,6 +151,20 @@ def _self_config_section(registry: ToolRegistry) -> str:
     return _SELF_CONFIG_SECTION
 
 
+def _mail_section(registry: ToolRegistry) -> str:
+    """邮件段（按需注入）：只有注册了 EmailBox 才拼进提示。
+
+    为什么要按需：这段教的是「播报只有一句话、正文要用 EmailBox 拉」——
+    工具不在手上时讲这些，只会让模型拿用户的“念一下”去调一个不存在的
+    工具，然后道个歉把话题接回能力边界，比他一开始就说“看不到正文”更差。
+
+    @author aceFelix
+    """
+    if "EmailBox" not in registry:
+        return ""
+    return _MAIL_SECTION
+
+
 def build_system_prompt(
     workdir: str,
     registry: ToolRegistry,
@@ -212,6 +227,7 @@ def build_system_prompt(
             _schedule_section(registry),
             _goal_spine_section(registry),
             _self_config_section(registry),
+            _mail_section(registry),
             _cli_anything_section(registry),
             _tools_section(registry),
         ]
