@@ -19,10 +19,12 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
+import time
 from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.message import Message, TextContent
+from agent.core.logging import get_logger
 from agent.utils.query_lock import acquire_lock_cancellable
 from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
 # 附件/渲染纯函数拆到 render.py（控本文件行数）；此处再导出保持
@@ -409,8 +411,10 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
         # 供桌面撤回（checkpoint.rewind）连带回滚文件。创建是同步 git
         # 操作（超时保护在 CheckpointManager 内部），失败静默降级。
         # @author aceFelix
+        _t_ckpt0 = time.monotonic()
         ckpt_mgr = checkpoint_ops.make_manager(self)
         ckpt_id = ckpt_mgr.create(reason=composed) if ckpt_mgr.available() else None
+        _t_ckpt1 = time.monotonic()
         # 把本轮 cid 与会话名交给副作用账本（W3.2）：cid 到轮末才挂上用户消息，
         # 工具调用时只能经 extra 拿到；本轮没检查点时必须写空串而不是留着上轮的
         # 值，否则 /undo 会把"回到本轮前"做成"多退一轮"。@author aceFelix
@@ -432,6 +436,16 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
         locked = False
         try:
             locked = await acquire_lock_cancellable(self._query_lock)
+            # 桌面壳比终端多出的两段本地开销，就在这里（终端没有会话检查点，
+            # 也不与其他通道争这把锁）。2026-10 性能排查：没有这份数据时只能
+            # 猜“是不是模型慢”，而实际上 git 快照是同步阻塞在主线程上的。
+            # 检查点一项若长期 > 0.3s，就该转后台线程或改成仅变更文件。
+            # @author aceFelix
+            _t_lock = time.monotonic()
+            get_logger().info(
+                "桌面发送: 检查点 %.3fs | 等锁 %.3fs | 本地前处理共 %.3fs",
+                _t_ckpt1 - _t_ckpt0, _t_lock - _t_ckpt1, _t_lock - _t_ckpt0,
+            )
             await self._query_loop.run(composed, self._ctx, images=img_blocks or None)
         except Exception as e:
             self._emitter.emit("error", f"运行出错: {type(e).__name__}: {e}")

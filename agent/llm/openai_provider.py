@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, AsyncIterator
 
 from agent.llm.text_tool_calls import TextualToolCallGuard
@@ -399,6 +400,17 @@ class OpenAIProvider(LLMProvider):
         # 调用全部抹掉（表现为裸码、工具不执行）。@author aceFelix
         guard = TextualToolCallGuard(set(t.name for t in tools) | set(known_tool_names or ()))
 
+        # ---- 分段计时（2026-10 性能排查）----
+        # 桌面壳比终端慢，但「慢在哪一段」此前完全不可见：只知道用户发完消息要
+        # 等一会儿，分不清是排队等网、模型思考、还是正文生成，于是只能靠猜
+        # （改档位、关功能——都是降级）。这里埋四个时间点，一次请求就能把
+        # 总耗时拆开，让优化有证据可依。@author aceFelix
+        _t0 = time.monotonic()
+        _t_first_think: float | None = None
+        _t_first_text: float | None = None
+        _think_chars = 0
+        _text_chars = 0
+
         stream = None
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
@@ -425,11 +437,17 @@ class OpenAIProvider(LLMProvider):
                 # 思维链思考内容（reasoning_content 先于 content 到达）
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning and self.is_thinking_enabled():
+                    if _t_first_think is None:
+                        _t_first_think = time.monotonic() - _t0
+                    _think_chars += len(reasoning)
                     yield ThinkingDelta(text=reasoning)
                 if delta.content:
                     # 走泄漏过滤器：正常文本即时放行，命中 DSML 标记后转入缓存不回显
                     _safe = guard.feed(delta.content)
                     if _safe:
+                        if _t_first_text is None:
+                            _t_first_text = time.monotonic() - _t0
+                        _text_chars += len(_safe)
                         yield TextDelta(text=_safe)
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
@@ -479,6 +497,20 @@ class OpenAIProvider(LLMProvider):
                 _rescued = guard.rescue_text
                 if _rescued:
                     yield TextDelta(text=_rescued)
+            # 三段耗时一次性落地：
+            #   首包思考 = 建连 + 服务端排队 + 模型想出第一个字（网络/服务端慢就卡在这）
+            #   首字正文 = 思考阶段长度（档位高就拉长这一段）
+            #   全程     = 你实际要等的时间
+            # -1 表示本次没有该类内容（例如纯思考后直接发工具调用）。
+            # @author aceFelix
+            _total = time.monotonic() - _t0
+            get_logger().info(
+                "LLM 计时: 首包思考 %.2fs | 首字正文 %.2fs | 全程 %.2fs | "
+                "思考 %d 字 | 正文 %d 字",
+                _t_first_think if _t_first_think is not None else -1.0,
+                _t_first_text if _t_first_text is not None else -1.0,
+                _total, _think_chars, _text_chars,
+            )
             yield Stop(reason=finish_reason or "stop", usage=final_usage)
         except Exception as e:
             from agent.llm.errors import classify

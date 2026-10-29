@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -526,3 +527,73 @@ class TestTextualToolCallFallback:
         # 解析不出来就靠 rescue_text 把原文补回显（不丢信息契约）
         texts = "".join(e.text for e in events if isinstance(e, TextDelta))
         assert "NoSuchTool" in texts
+
+
+class TestStreamTimingLog:
+    """流式请求的分段计时日志（2026-10 桌面壳性能排查）。
+
+    为什么要锁这个行为：桌面壳比终端慢，而唯一能分辨「慢在网络、慢在模型
+    排队、还是慢在思考阶段」的证据就是这三段耗时。它一旦被静默删掉或改名，
+    下次排查又会退回“改档位、关功能”这类靠猜的降级方案。
+
+    @author aceFelix
+    """
+
+    @pytest.mark.asyncio
+    async def test_timing_log_reports_three_segments_and_char_counts(
+        self, thinking_provider: OpenAIProvider, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """一轮带思考的流结束后，必须恰好落一条计时日志，且三段与字数都对。"""
+        msgs = [Message(role="user", content=[TextContent(text="问题")])]
+        thinking_provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(reasoning="想一想"),
+                _make_chunk(content="答案", finish_reason="stop",
+                            usage=_MockUsage(prompt_tokens=10, completion_tokens=2)),
+            )
+        )
+
+        with caplog.at_level(logging.INFO):
+            events = [
+                e async for e in thinking_provider.stream(
+                    model="gpt-4o", system="sys", messages=msgs, tools=[], max_tokens=50,
+                )
+            ]
+
+        assert any(isinstance(e, Stop) for e in events), "正常流应以 Stop 收尾"
+
+        rows = [r for r in caplog.records if "LLM 计时" in r.getMessage()]
+        assert len(rows) == 1, "每轮流结束应恰好落一条计时日志"
+
+        msg = rows[0].getMessage()
+        for seg in ("首包思考", "首字正文", "全程"):
+            assert seg in msg, f"计时日志缺少「{seg}」这一段"
+        # 字数是判断「思考到底多长」的直接依据，必须按实际内容累计
+        assert "思考 3 字" in msg, f"思考字数统计不对: {msg}"
+        assert "正文 2 字" in msg, f"正文字数统计不对: {msg}"
+
+    @pytest.mark.asyncio
+    async def test_timing_log_marks_absent_segment_as_negative(
+        self, provider: OpenAIProvider, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """本轮没开思考时，思考段应记 -1.00 而不是 0.00（区分“没想”与“瞬时返回”）。"""
+        msgs = [Message(role="user", content=[TextContent(text="你好")])]
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_make_stream(
+                _make_chunk(content="你好", finish_reason="stop",
+                            usage=_MockUsage(prompt_tokens=5, completion_tokens=1)),
+            )
+        )
+
+        with caplog.at_level(logging.INFO):
+            _ = [
+                e async for e in provider.stream(
+                    model="gpt-4o", system="sys", messages=msgs, tools=[], max_tokens=20,
+                )
+            ]
+
+        rows = [r for r in caplog.records if "LLM 计时" in r.getMessage()]
+        assert len(rows) == 1
+        msg = rows[0].getMessage()
+        assert "首包思考 -1.00s" in msg, f"无思考时应用 -1 标记: {msg}"
+        assert "思考 0 字" in msg
