@@ -33,18 +33,44 @@ from agent.ui.workbench.engine import ChatEngine
 # ---- BashTool：stdin=DEVNULL + 取消回收 ----
 
 class _FakeProc:
-    """假子进程：记录 kill 调用，communicate 返回固定输出。"""
+    """假子进程：记录 kill 调用，wait 立即返回，输出用真 StreamReader 喂。"""
 
     returncode = 0
 
-    def __init__(self) -> None:
+    def __init__(self, output: bytes = b"out") -> None:
         self.killed = False
+        self.stdout = _make_stream(output)
+        self.stderr = _make_stream(b"")
 
-    async def communicate(self):
-        return b"out", b""
+    async def wait(self):
+        return self.returncode
 
     def kill(self) -> None:
         self.killed = True
+
+
+def _make_stream(data: bytes) -> asyncio.StreamReader:
+    """造一个已喂入数据且带 EOF 的 StreamReader（读完立即返回）。"""
+    sr = asyncio.StreamReader()
+    sr.feed_data(data)
+    sr.feed_eof()
+    return sr
+
+
+class _HangingProc(_FakeProc):
+    """子进程永不自行退出；被 kill 时才“退出”。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._exited = asyncio.Event()
+
+    async def wait(self):
+        await self._exited.wait()
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self._exited.set()
 
 
 @pytest.mark.asyncio
@@ -58,7 +84,7 @@ async def test_bash_normal_uses_devnull_stdin(monkeypatch):
         return proc
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    result = await BashTool()._call_normal("echo hi", ".", 30)
+    result = await BashTool()._call_normal("echo hi", ".", 30, ToolContext(workdir=".", messages=[]))
     assert not result.is_error
     assert captured["stdin"] == asyncio.subprocess.DEVNULL
     assert captured["stdout"] == asyncio.subprocess.PIPE
@@ -66,11 +92,7 @@ async def test_bash_normal_uses_devnull_stdin(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bash_normal_cancellation_kills_child(monkeypatch):
-    """reply.abort 取消穿透 communicate 等待时必须回收子进程再抛取消。"""
-
-    class _HangingProc(_FakeProc):
-        async def communicate(self):
-            await asyncio.sleep(60)
+    """reply.abort 取消穿透等待时必须回收子进程再抛取消。"""
 
     proc = _HangingProc()
 
@@ -78,12 +100,101 @@ async def test_bash_normal_cancellation_kills_child(monkeypatch):
         return proc
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    task = asyncio.create_task(BashTool()._call_normal("sleep 100", ".", 30))
+    task = asyncio.create_task(
+        BashTool()._call_normal("sleep 100", ".", 30, ToolContext(workdir=".", messages=[]))
+    )
     await asyncio.sleep(0.05)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert proc.killed
+
+
+@pytest.mark.asyncio
+async def test_bash_normal_aborts_on_abort_event(monkeypatch):
+    """ctx.abort_event 置位时立即回收子进程并返回「已取消」。
+
+    语音模式下 SIGINT/ESC 只能置标志（在主线程 raise 会撕裂 asyncio.run）。
+    工具层是长操作里唯一能感知它的地方：旧实现只等 communicate，命令跑满
+    timeout 期间按 Ctrl+C / ESC 毫无反应（实机：等满 120 秒 + 重试再等 120 秒）。
+    """
+
+    proc = _HangingProc()
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    ctx = ToolContext(workdir=".", messages=[])
+    task = asyncio.create_task(BashTool()._call_normal("sleep 100", ".", 120, ctx))
+    await asyncio.sleep(0.05)
+    ctx.abort_event.set()
+    result = await asyncio.wait_for(task, timeout=2.0)
+
+    assert result.is_error
+    assert "已取消" in str(result.data)
+    assert result.retryable is False
+    assert proc.killed
+
+
+@pytest.mark.asyncio
+async def test_bash_timeout_marks_not_retryable(monkeypatch):
+    """命令跑满超时必须标记 retryable=False，否则自愈层会重跑一遍。
+
+    重跑的代价是双倍等时 + 副作用重复（前台拉起浏览器会被打开两次）。
+    """
+
+    proc = _HangingProc()
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    result = await BashTool()._call_normal("sleep 100", ".", 1, ToolContext(workdir=".", messages=[]))
+
+    assert result.is_error
+    assert "超时" in str(result.data)
+    assert result.retryable is False
+    assert proc.killed
+
+
+@pytest.mark.asyncio
+async def test_bash_returns_when_shell_exits_despite_open_pipe(monkeypatch):
+    """shell 退出即返回，不等管道 EOF。
+
+    这是「打开网页也要卡两分钟」的根因：`firefox.exe URL &` 会让 shell 立即退出，
+    但 firefox 继承了 stdout/stderr 写端，管道 EOF 永不到来。旧实现用
+    communicate()（等 EOF）就卡满 timeout。现在只等 shell 退出 + 读走已有输出。
+    """
+
+    class _ShellExitsButPipeOpen(_FakeProc):
+        """shell 已退出，但 stdout 上还有一个永不关闭的写端（模拟后台 GUI 进程）。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.stdout = asyncio.StreamReader()
+            self.stdout.feed_data(b"launched\n")
+            # 刻意 feed_eof()：没有 EOF，读第二个 chunk 会挂起
+
+    proc = _ShellExitsButPipeOpen()
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    started = time.monotonic()
+    result = await BashTool()._call_normal(
+        "firefox.exe https://www.bilibili.com &",
+        ".",
+        120,
+        ToolContext(workdir=".", messages=[]),
+    )
+    elapsed = time.monotonic() - started
+
+    assert not result.is_error
+    assert "launched" in str(result.data)
+    # 远小于 timeout（120s）；drain 宽限是 0.05s
+    assert elapsed < 5.0
 
 
 # ---- WorkbenchUI.ask_user_async：不饿死宿主事件循环 ----
