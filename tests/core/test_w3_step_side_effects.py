@@ -158,8 +158,9 @@ class TestStepSideEffectsJournaled:
         rec = recs[0]
         assert rec.state == STATE_APPLIED
         assert rec.tool == "FileWrite"
-        assert rec.undo_spec.get("kind") == "checkpoint", "本地写必须挂上检查点而不是假可撤销"
-        assert rec.undo_spec.get("workdir") == str(workdir)
+        assert rec.undo_spec.get("kind") in ("files", "checkpoint"), \
+            "本地写必须挂上真补偿，不能是假可撤销"
+        assert rec.undoable is True
         # 子 ctx 必须拿到宿主 settings：否则编排器读 [actions] 会退成默认值
         # （用户把延时窗口改 90 秒、或关掉记账，对后台步骤无效）
         assert captured["got"] is not None
@@ -198,13 +199,39 @@ class TestStepSideEffectsJournaled:
 class TestNothingRecordedWhenUnreversible:
     """撤不动就不记：一条"看着能撤其实撤不了"的记录比没有更坏。"""
 
-    def test_checkpoint_disabled_records_nothing(self, tmp_path, monkeypatch, workdir):
+    def test_file_snapshot_alone_is_enough(self, tmp_path, monkeypatch, workdir):
+        """整轮检查点关掉也应该能撤：文件级留底是另一条独立的通道（2026-10）。
+
+        修之前用户关掉 ``checkpoint_enabled`` 就同时失去了"改错一个文件能不能撤"，
+        因为补偿计划只有整轮检查点一种。现在两条路是分开的：检查点是"退整轮"，
+        文件留底是"退这一个文件"，关掉前者不影响后者。
+        """
         _patch_subagent(monkeypatch)
         journal = get_journal()
         goal = _goal(str(workdir))
         driver, store = _driver(
             tmp_path, str(workdir), goal=goal,
             settings=_settings(str(workdir), checkpoint_enabled=False),
+        )
+
+        driver._tick()
+
+        assert (workdir / _TARGET).exists(), "有没有留底都不该影响执行"
+        recs = journal.task_records(goal.id)
+        assert len(recs) == 1, "没有轮次检查点也要入账：文件级留底本身就是补偿计划"
+        assert recs[0].undo_spec.get("kind") == "files"
+        assert store.load(goal.id).steps[0].journal_ids, "台账要能回填这笔 id"
+
+    def test_no_compensation_channel_records_nothing(self, tmp_path, monkeypatch, workdir):
+        """两条补偿通道都关掉时就不记 —— 宁可少记，不可假可撤销。"""
+        _patch_subagent(monkeypatch)
+        journal = get_journal()
+        goal = _goal(str(workdir))
+        driver, store = _driver(
+            tmp_path, str(workdir), goal=goal,
+            settings=_settings(
+                str(workdir), checkpoint_enabled=False, actions_file_snapshots=0,
+            ),
         )
 
         driver._tick()

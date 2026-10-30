@@ -2,6 +2,7 @@
 
 语义: 在文件中找到 old_string，替换为 new_string。
 要求 old_string 在文件中唯一，否则报错（避免改错地方）。
+替换前由编排器统一留底原文，用户可用 ``/undo`` 恢复（见 core/actions/file_effects.py）。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ class FileEditTool(Tool):
         "精确编辑文件: 找到 old_string 并替换为 new_string。"
         "要求 old_string 在文件中唯一出现（多次出现会报错，需提供更多上下文）。"
         "用于小范围修改；大段重写请用 FileWrite。"
+        "替换前会保留原内容，改错了可以让用户用 /undo 恢复。"
     )
     input_schema: JSONSchema = {
         "type": "object",
@@ -36,7 +38,8 @@ class FileEditTool(Tool):
         return False
 
     def is_destructive(self, args: dict[str, Any]) -> bool:
-        # 替换操作不可逆（但 checker 会配合 fileHistory 做快照，v0.1 暂不做）
+        # 替换会改文件内容，需走权限确认。原文由编排器写前留底
+        # （core/actions/file_effects.py），改错可 /undo 恢复。@author aceFelix
         return True
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:

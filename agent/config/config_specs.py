@@ -260,6 +260,18 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "不可逆动作延时窗口（秒）", "发邮件这类收不回的动作先等这么久再真发",
         tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, lo=0, hi=300, default=30,
     ),
+    ConfigSpec(
+        "file_snapshots", "actions", "file_snapshots", "actions_file_snapshots", "int",
+        "文件留底保留条数",
+        "改文件前把原内容留一份底供 /undo 恢复；超出条数滚最旧的，0 = 关闭留底",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, lo=0, hi=500, default=50,
+    ),
+    ConfigSpec(
+        "file_snapshot_mb", "actions", "file_snapshot_mb", "actions_file_snapshot_mb", "int",
+        "文件留底体积上限（MB）",
+        "留底是复制不是硬链接，单次超过这个体积的目录就不留底（避免写满磁盘）",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, lo=1, hi=1024, default=64,
+    ),
 )
 
 SPEC_BY_KEY: dict[str, ConfigSpec] = {s.key: s for s in CONFIG_SPECS}

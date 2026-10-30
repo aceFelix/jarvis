@@ -67,6 +67,11 @@ UNDO_NONE = "none"              # {"kind","reason"}：明确不可撤销，报�
 # {"kind","before":{协议键: 原值}}：配置变更撤销（阶段 12）。配置是文本外科式写入，
 # git 检查点那套工作区回滚术语用不了，故单列一种形态，回写走 config_specs。
 UNDO_CONFIG = "config"
+# {"kind","snap_id","paths"}：**文件级**撤销（2026-10）。
+# 与 UNDO_CHECKPOINT 的差别是粒度：检查点回滚的是"整轮"（本轮所有改动一起退），
+# 这里只回滚被这次工具调用碰过的那几个文件——用户改错一个文件时不该被连带
+# 退掉同一轮里其它正确的改动。留底由 core/actions/file_effects.py 负责。
+UNDO_FILES = "files"
 
 
 def _new_id() -> str:
@@ -152,7 +157,12 @@ class EffectRecord:
 
     @property
     def undoable(self) -> bool:
-        """是否有可执行的补偿计划（checkpoint 类带有效 cid，或配置回写类带原值）。"""
+        """是否有可执行的补偿计划。
+
+        三种可撤销形态：checkpoint 类带有效 cid、配置回写类带原值、文件级
+        撤销带留底快照 ID。任一缺失即视为撤不动——宁可如实说撤不动，也不能
+        在 /undo list 里画一个假的"可撤销"。
+        """
         if not self.reversible:
             return False
         kind = self.undo_spec.get("kind")
@@ -160,6 +170,8 @@ class EffectRecord:
             return bool(self.undo_spec.get("cid"))
         if kind == UNDO_CONFIG:
             return bool(self.undo_spec.get("before"))
+        if kind == UNDO_FILES:
+            return bool(self.undo_spec.get("snap_id"))
         return False
 
     def human_time(self) -> str:
@@ -561,6 +573,8 @@ def undo_record(
     spec = rec.undo_spec
     if str(spec.get("kind") or "") == UNDO_CONFIG:
         return _undo_config(rec, spec, settings, journal)
+    if str(spec.get("kind") or "") == UNDO_FILES:
+        return _undo_files(rec, spec, settings, journal)
     mgr = manager_for(rec.workdir, settings, session_name or rec.session_id)
     if not mgr.available():
         return False, "文件回滚不可用（未启用 checkpoint 或缺少 git）"
@@ -581,6 +595,31 @@ def undo_record(
         journal.set_state(rec.id, STATE_UNDONE)
         if siblings:
             note = f"{note}（整轮回滚：同轮另 {len(siblings)} 项一并记为已撤销）"
+        return True, note
+    journal.set_state(rec.id, STATE_FAILED, error=note)
+    return False, note
+
+
+def _undo_files(
+    rec: EffectRecord,
+    spec: dict[str, Any],
+    settings: Any,
+    journal: ActionJournal,
+) -> tuple[bool, str]:
+    """文件级撤销：按写前留底恢复被这次调用碰过的文件。
+
+    与 ``UNDO_CHECKPOINT`` 的关键区别是**不做同轮连带标记**：整轮检查点回滚
+    会让同轮其它条目一起失效，所以那边要连带标 undone（否则 /undo list 会
+    继续显示"可撤销"）。这里恢复的只是几个文件，同轮其它记录仍然有效，
+    一并标记反而是错报。
+
+    @author aceFelix
+    """
+    from agent.core.actions.file_effects import restore
+
+    ok, note = restore(str(spec.get("snap_id") or ""), settings)
+    if ok:
+        journal.set_state(rec.id, STATE_UNDONE)
         return True, note
     journal.set_state(rec.id, STATE_FAILED, error=note)
     return False, note

@@ -8,10 +8,14 @@
     /undo --task <id>    按任务脊柱目标批量补偿
 
 两条如实性要求（比"看起来能撤"更重要）：
-1. 撤不动的就明确说撤不动，并给原因（邮件已离开本机 / 检查点已被配额修剪），
-   绝不返回一句模糊的"失败"，更不假装撤销成功；
-2. 文件类副作用的回滚粒度是**整轮**（恢复到本轮开始前的 shadow git 检查点），
-   所以本轮的其他文件改动也会一并回退 —— 落回前必须展示影响面并问过用户。
+1. 撤不动的就明确说撤不动，并给原因（邮件已离开本机 / 检查点已被配额修剪 /
+   留底已被清理），绝不返回一句模糊的"失败"，更不假装撤销成功；
+2. 落回前必须展示影响面并问过用户。影响面按**粒度**分开说，不能笼统写
+   "可撤销"（2026-10 加文件级撤销后）：
+   - 文件级（``kind=files``）：只还原这条改动碰过的几个文件，同轮其它改动
+     不受影响 —— 从写前留底恢复，不需要 git 检查点；
+   - 整轮（``kind=checkpoint``）：恢复到本轮开始前的 shadow git 检查点，
+     本轮其余文件改动会一并回退。
 
 @author aceFelix
 """
@@ -33,6 +37,22 @@ def _journal_or_none(ctx: "CommandContext"):
         ctx.ui.warn("副作用账本未启用（[actions].journal_enabled=false），无从撤销")
         return None
     return journal
+
+
+def _undo_kind_label(rec: Any) -> str:
+    """这条记录撤下去**会动多少东西**（清单里给用户看的粒度提示）。
+
+    为什么不能笼统写“可撤销”：文件级恢复只碰这一条改过的几个文件，整轮回滚
+    会把同一轮里其它正确的改动一起退掉。两者在用户眼里代价完全不同，用同一句
+    “可撤销”会把风险差说没了（2026-10 加文件级撤销时补上）。
+    @author aceFelix
+    """
+    kind = str((rec.undo_spec or {}).get("kind") or "")
+    return {
+        "files": "可按文件恢复",
+        "checkpoint": "可整轮回滚",
+        "config": "可回退配置",
+    }.get(kind, "可撤销")
 
 
 def _state_mark(rec: Any) -> str:
@@ -83,7 +103,9 @@ def _show_list(ctx: "CommandContext", journal) -> None:
         return
     lines = [f"最近副作用 {len(records)} 条（新→旧）："]
     for rec in records:
-        can = "可撤销" if rec.undoable else ("窗口内可撤回" if rec.held else "不可撤销")
+        can = _undo_kind_label(rec) if rec.undoable else (
+            "窗口内可撤回" if rec.held else "不可撤销"
+        )
         lines.append(f"  {rec.id}  〈{_state_mark(rec)}〉  {rec.label}  — {can}")
         if not rec.undoable and not rec.held:
             from agent.core.actions import describe_undo
@@ -94,7 +116,11 @@ def _show_list(ctx: "CommandContext", journal) -> None:
         f"统计: 已执行 {counts.get('applied', 0)}  待发 {counts.get('held', 0)}  "
         f"已撤销 {counts.get('undone', 0)}  失败 {counts.get('failed', 0)}"
     )
-    lines.append("（文件类撤销是整轮回滚：恢复到该轮开始前的检查点，本轮其余改动会一并回退）")
+    kinds = {str((r.undo_spec or {}).get("kind") or "") for r in records}
+    if "files" in kinds:
+        lines.append("（“可按文件恢复”的条目只还原这条改动碰过的文件，同轮其它改动不受影响）")
+    if "checkpoint" in kinds:
+        lines.append("（“可整轮回滚”的条目会恢复到该轮开始前，本轮其余改动会一并回退）")
     ctx.ui.info("\n".join(lines))
 
 
@@ -110,7 +136,7 @@ def _pick(ctx: "CommandContext", journal, arg: str, states: tuple[str, ...]) -> 
 
 async def _undo_one(ctx: "CommandContext", journal, arg: str) -> None:
     """撤销一条已执行的副作用：先展示影响面问过用户，再真回滚。"""
-    from agent.core.actions import STATE_APPLIED, describe_undo, manager_for, undo_record
+    from agent.core.actions import STATE_APPLIED, UNDO_FILES, describe_undo, manager_for, undo_record
 
     rec = _pick(ctx, journal, arg, (STATE_APPLIED,))
     if rec is None:
@@ -119,6 +145,13 @@ async def _undo_one(ctx: "CommandContext", journal, arg: str) -> None:
     if not rec.undoable:
         # 如实报告：这一条撤不回来，用户有权知道"我到底留下了什么"
         ctx.ui.warn(f"{rec.label} 无法撤销 — {describe_undo(rec)}")
+        return
+
+    # 文件级撤销走另一条路：它不需要 git 检查点，也不该展示“整轮影响面”
+    # （那条路径会去问 manager_for，而文件级条目根本没引用检查点，
+    # 照旧路径走会在“本轮检查点已不可用”那里被误判成撤不动）。
+    if str((rec.undo_spec or {}).get("kind") or "") == UNDO_FILES:
+        await _undo_files_ui(ctx, rec)
         return
 
     # 整轮回滚会影响本轮其他文件，必须先给用户看清单再落手（与 /rewind 同一口径）
@@ -152,6 +185,40 @@ async def _undo_one(ctx: "CommandContext", journal, arg: str) -> None:
 
     ok, note = undo_record(rec, settings=ctx.settings, session_name=ctx.session_name)
     (ctx.ui.info if ok else ctx.ui.warn)(f"撤销结果：{note}")
+
+
+async def _undo_files_ui(ctx: "CommandContext", rec: Any) -> None:
+    """文件级撤销：只还原这次碰过的那几个文件，不动同轮其它改动。
+
+    与整轮回滚分两套 UI 是有意的：整轮那边必须把几十个文件的影响面摆出来；
+    文件级这边就该明说“只动这几个”——否则用户会以为又要连带退掉别的改动，
+    于是不敢撤，这个功能等于白做。
+
+    @author aceFelix
+    """
+    from agent.core.actions import undo_record
+    from agent.core.actions.file_effects import list_entries
+
+    entries = list_entries(str((rec.undo_spec or {}).get("snap_id") or ""), ctx.settings)
+    if not entries:
+        ctx.ui.warn(f"{rec.label} 的留底已不在了（可能被配额清理），无法恢复文件")
+        return
+    ctx.ui.info(f"撤销 {rec.label} 只恢复下列文件，同轮其它改动不受影响：")
+    for e in entries[:20]:
+        mark = "恢复原内容" if e.get("existed") else "删除（原本不存在）"
+        ctx.ui.info(f"  〈{mark}〉{e.get('path', '')}")
+    if len(entries) > 20:
+        ctx.ui.info(f"  …… 共 {len(entries)} 项")
+    try:
+        answer = await ctx.ui.read_user_input_async("确认恢复这些文件？〈y/N〉 ")
+    except Exception:
+        answer = ""
+    if answer.strip().lower() not in ("y", "yes"):
+        ctx.ui.info("已放弃撤销，文件未改动")
+        return
+
+    ok, note = undo_record(rec, settings=ctx.settings, session_name=ctx.session_name)
+    (ctx.ui.info if ok else ctx.ui.warn)(f"恢复结果：{note}")
 
 
 async def _cancel_hold(ctx: "CommandContext", journal, rest: list[str]) -> None:

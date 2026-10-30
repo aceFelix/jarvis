@@ -412,6 +412,10 @@ class Settings:
     actions_track_local_writes: bool = True     # 本地破坏性写是否记一条可回滚条目
     actions_irreversible_tools: list = field(default_factory=list)  # 额外当不可逆处理的工具名
     actions_hold_blocks_equivalent: bool = True  # 待发窗口未结案时，等价外发命令不再自动放行
+    # 文件级撤销（2026-10）：工具写文件前把原文留底，改错可按文件恢复，
+    # 不必等整轮检查点。留底是**复制**，因此有体积闸。@author aceFelix
+    actions_file_snapshots: int = 50            # 文件留底保留条数（超出滚最旧的）
+    actions_file_snapshot_mb: int = 64          # 单次留底体积上限（MB），目录超限则不留底
 
     tasks_enabled: bool = False                 # 任务脊柱驱动器总开关（关=只读台账不自走）
     tasks_blocked_ask_days: int = 3             # 阻塞超此天数主动问一次（走 W1 预算闸门）

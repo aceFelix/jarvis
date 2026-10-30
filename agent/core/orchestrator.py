@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.core.context import ToolContext
+from agent.core.actions.effect_policy import (
+    actions_config,
+    is_irreversible_call,
+    note_effect_id,
+    turn_checkpoint_id,
+)
 from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
 from agent.core.policy import policy_gate
@@ -313,6 +319,28 @@ class ToolOrchestrator:
         if held is not None:
             return held
 
+        # ---- 文件级撤销：写前留底（2026-10）----
+        # 位置苛求在「能不能做」全部定案之后、真正执行之前：再早会给被拒绝/被
+        # 窗口拦下的调用白复制一份；再晚（执行后）原文已经没了，留底无从谈起。
+        # 为什么放编排器而不是 FileWrite/FileEdit 自己：那样只能覆盖两个工具，
+        # 将来新增的写类工具、带路径参数的 bash 工具都得再改一遍；这里是单点覆盖。
+        # 留底失败一律降级为空串（辅助能力不得拖垮主流程）。
+        # @author aceFelix
+        write_snap = ""
+        try:
+            from agent.core.actions.file_effects import snapshot_before_write
+
+            write_snap = snapshot_before_write(
+                tool.name,
+                effective_input,
+                read_only=bool(tool.is_read_only(effective_input)),
+                destructive=bool(tool.is_destructive(effective_input)),
+                settings=getattr(ctx, "settings", None),
+                workdir=str(getattr(ctx, "workdir", "") or ""),
+            )
+        except Exception:
+            write_snap = ""
+
         # ---- 工具错误自愈 ----
         # 优先用 RecoveryExecutor 包装 call，失败时自动重试/降级/询问用户
         # 如果未配置 recovery 或自愈关闭，直接调用原始 call
@@ -357,7 +385,7 @@ class ToolOrchestrator:
         # 失败的工具调用已经由工具自己把错误回给模型，再入账本会让 /undo
         # 面对一堆根本没发生的动作。
         # @author aceFelix
-        self._record_effect(tool, tu, effective_input, ctx, result)
+        self._record_effect(tool, tu, effective_input, ctx, result, write_snap=write_snap)
 
         if isinstance(data, str):
             content_str = data
@@ -370,6 +398,19 @@ class ToolOrchestrator:
                 content_str = json.dumps(data, ensure_ascii=False, indent=2, default=str)
             except Exception:
                 content_str = str(data)
+
+        # 把「这一步能反悔」写进回执：模型看得见才不会在写错之后只会道歉，
+        # 用户也当场知道该敲什么命令，不用等出事再去翻 /undo list。
+        # @author aceFelix
+        if write_snap:
+            try:
+                from agent.core.actions.file_effects import describe_snapshot
+
+                _hint = describe_snapshot(write_snap, getattr(ctx, "settings", None))
+                if _hint:
+                    content_str = f"{content_str}\n\n{_hint}"
+            except Exception:
+                pass
 
         # 超长截断 / 落盘持久化
         max_chars = getattr(tool, "max_result_chars", 20_000)
@@ -435,37 +476,11 @@ class ToolOrchestrator:
         )
 
     # ---- W3.2 副作用账本与延时窗口 ----
-
-    @staticmethod
-    def _actions_config(ctx: ToolContext) -> dict[str, Any]:
-        """读 ``[actions]`` 配置（无 settings 时用安全缺省）。
-
-        缺省口径：账本开、窗口 30 秒、本地写跟踪开。三者都是"少做事"方向，
-        所以配置读不出来时按缺省走比按"全关"走更安全——全关等于默默放弃保护。
-        @author aceFelix
-        """
-        s = getattr(ctx, "settings", None)
-        return {
-            "enabled": bool(getattr(s, "actions_journal_enabled", True)),
-            "window_s": float(getattr(s, "actions_undo_window_s", 30) or 0),
-            "track_local": bool(getattr(s, "actions_track_local_writes", True)),
-            "extra_tools": set(getattr(s, "actions_irreversible_tools", []) or []),
-        }
-
-    @staticmethod
-    def _is_irreversible_call(tool: Tool, args: dict[str, Any], extra_tools: set[str]) -> bool:
-        """这是否一个"出了本机就收不回"的调用。
-
-        配置里的 ``irreversible_tools`` 名单是给"代码里还没声明、但用户本机确实
-        想保护"的工具留的应急口子（改配置比重启改代码快）。
-        @author aceFelix
-        """
-        try:
-            if tool.is_irreversible(args):
-                return True
-        except Exception:
-            pass  # 工具自己报错时按"可逆"处理，不能因为它把一个正常调用拖进窗口
-        return tool.name in extra_tools
+    #
+    # 纯判定与取值（读 [actions] 配置、判断调用是否不可逆、回填账本 id、取本轮
+    # 检查点 cid）已搬到 ``agent/core/actions/effect_policy.py``：它们不依赖
+    # 编排器状态，放在这里只会把主文件推过 800 行红线，也不方便单测直接打。
+    # @author aceFelix
 
     def _maybe_hold_irreversible(
         self,
@@ -487,10 +502,10 @@ class ToolOrchestrator:
         docs/fixlogs/w3-delay-window-bypass-fix.md）。
         @author aceFelix
         """
-        cfg = self._actions_config(ctx)
+        cfg = actions_config(ctx)
         if not cfg["enabled"] or cfg["window_s"] <= 0:
             return None  # 窗口关闭：执行照常，由 _record_effect 记一笔"不可撤销"
-        if not self._is_irreversible_call(tool, args, cfg["extra_tools"]):
+        if not is_irreversible_call(tool, args, cfg["extra_tools"]):
             return None
 
         import time as _time
@@ -533,7 +548,7 @@ class ToolOrchestrator:
             # 不自动放行”，不能为了取名字去重读整本账（见 tools/bash.py）
             label=preview,
         )
-        self._note_effect_id(ctx, rec.id)
+        note_effect_id(ctx, rec.id)
         text = (
             f"已排入 {window_s:.0f} 秒待发窗口，尚未执行：{preview}。\n"
             f"期间输入 /undo cancel 可撤回；到点自动执行，执行结果另行播报。\n"
@@ -624,18 +639,30 @@ class ToolOrchestrator:
         args: dict[str, Any],
         ctx: ToolContext,
         result: ToolResult,
+        *,
+        write_snap: str = "",
     ) -> None:
-        """把一次已执行的副作用记进账本（本地写引用本轮检查点，外发标不可撤销）。
+        """把一次已执行的副作用记进账本。
 
-        本地写为什么必须有本轮检查点才记：没有检查点就记不成可执行的补偿计划，
-        记了反而让 /undo 列出一堆撤不动的条目。宁可少记，不可假可撤销。
+        补偿计划的**优先级**（2026-10 重排）：
+        1. 外发动作（不可逆）→ 如实标不可撤销，不留任何假希望；
+        2. 有写前留底 → ``UNDO_FILES``，只撤这次碰过的那几个文件；
+        3. 都没有但本轮有检查点 → ``UNDO_CHECKPOINT``，整轮回滚；
+        4. 连检查点也没有 → **不记**（记不出可执行补偿的条目会让 /undo
+           列出一堆撤不动的行）。
+
+        第 2 条是本次新增的主路径：此前本地写一律退到整轮检查点，用户改错
+        一个文件要连带退掉同一轮里所有正确的改动。
+
+        Args:
+            write_snap: 执行前留底的快照 ID（空串=没留底）。
         @author aceFelix
         """
-        cfg = self._actions_config(ctx)
+        cfg = actions_config(ctx)
         if not cfg["enabled"] or getattr(result, "is_error", False):
             return
         try:
-            irreversible = self._is_irreversible_call(tool, args, cfg["extra_tools"])
+            irreversible = is_irreversible_call(tool, args, cfg["extra_tools"])
             destructive = bool(tool.is_destructive(args))
         except Exception:
             return
@@ -643,7 +670,7 @@ class ToolOrchestrator:
             return
 
         from agent.core.actions import (
-            STATE_APPLIED, UNDO_CHECKPOINT, UNDO_NONE, EffectRecord, get_journal,
+            STATE_APPLIED, UNDO_CHECKPOINT, UNDO_FILES, UNDO_NONE, EffectRecord, get_journal,
         )
 
         preview = ""
@@ -655,10 +682,15 @@ class ToolOrchestrator:
         undo_spec: dict[str, Any]
         reversible = False
         if irreversible:
-            # 窗口关闭（window_s<=0）才会走到这里：确实是执行完了的外发动作
+            # 窗口关闭（window_s<=0）才会走到这里：确实是执行完了的外发动作。
+            # 即便同时留了底也不走文件恢复 —— 外发的那一半收不回来，
+            # 只恢复本地文件却回报“已撤销”反而是误报。
             undo_spec = {"kind": UNDO_NONE, "reason": "该动作已离开本机，无法撤回"}
+        elif write_snap:
+            undo_spec = {"kind": UNDO_FILES, "snap_id": write_snap}
+            reversible = True
         else:
-            cid = self._turn_checkpoint_id(ctx)
+            cid = turn_checkpoint_id(ctx)
             if not cid:
                 return
             undo_spec = {"kind": UNDO_CHECKPOINT, "cid": cid, "workdir": ctx.workdir}
@@ -677,42 +709,18 @@ class ToolOrchestrator:
             task_id=str((ctx.extra or {}).get("task_id", "") or ""),
         )
         if get_journal().record(rec):
-            self._note_effect_id(ctx, rec.id)
-
-    @staticmethod
-    def _note_effect_id(ctx: ToolContext, rec_id: str) -> None:
-        """把新记的账本 id 回报给宿主（``ctx.extra["effect_ids"]``），供任务脊柱回填。
-
-        为什么需要这一环：`/undo --task <goal>` 靠 `TaskStep.journal_ids` 找到一步
-        干过什么，而驱动器在子代理跑完前拿不到任何账本 id。没这个回扣链，
-        `journal_ids` 永远为空，“按目标批量补偿”就只是单测里手工造得起的功能。
-        宿主没传列表时静默跳过：普通对话不需要它，不该为它弄一个全局累加器。
-        @author aceFelix
-        """
-        bucket = (ctx.extra or {}).get("effect_ids")
-        if isinstance(bucket, list) and rec_id:
-            bucket.append(rec_id)
+            note_effect_id(ctx, rec.id)
 
     @staticmethod
     def _turn_checkpoint_id(ctx: ToolContext) -> str:
-        """取本轮的文件检查点 ID（宿主在轮次开始前写入 ``ctx.extra``）。
+        """取本轮的文件检查点 ID。
 
-        为什么要 extra 而不是去翻 messages：检查点是轮次开始前打的，但它的 cid
-        要到轮次结束才挂到用户消息上（main.py / engine.py 都是这个顺序），工具
-        调用时刻消息里还查不到。
-
-        区分"键存在但为空"与"键不存在"：前者说明宿主自己管每轮 cid、本轮确实
-        没有检查点（没装 git 或已关闭），必须照实返回"无"；去翻消息会拿到
-        **上一轮**的 cid，把"回退到本轮开始前"做成"多退一轮"。
+        判定口径本身已经搬到 ``actions/effect_policy.turn_checkpoint_id``，
+        这里只做转发：测试与外部已有对 ``ToolOrchestrator._turn_checkpoint_id``
+        的直接调用，没必要因为搬家把它们全改一遍。
         @author aceFelix
         """
-        extra = ctx.extra or {}
-        if "checkpoint_cid" in extra:
-            return str(extra.get("checkpoint_cid", "") or "")
-        for m in reversed(ctx.messages or []):
-            if getattr(m, "role", "") == "user":
-                return str((getattr(m, "extra", None) or {}).get("checkpoint_id", "") or "")
-        return ""
+        return turn_checkpoint_id(ctx)
 
 
 

@@ -1,7 +1,8 @@
 """FileWrite 工具 —— 写入文件（覆盖或新建）。
 
 语义: 把 content 完整写入指定文件。
-已存在的文件会被覆盖（v0.1 不做备份，依赖外部 git/versionControl）。
+已存在的文件会被覆盖；覆盖前由编排器统一留底（见 core/actions/file_effects.py），
+用户可用 ``/undo`` 恢复原文（2026-10 起；此前覆盖即丢，只能依赖外部 git）。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ class FileWriteTool(Tool):
         "写入文件（覆盖）。如果文件已存在会被覆盖。"
         "用于创建新文件或整文件重写；小范围修改请用 FileEdit。"
         "父目录不存在时会自动创建。"
+        "覆盖前会保留原内容，改错了可以让用户用 /undo 恢复。"
     )
     input_schema: JSONSchema = {
         "type": "object",
@@ -35,7 +37,8 @@ class FileWriteTool(Tool):
         return False
 
     def is_destructive(self, args: dict[str, Any]) -> bool:
-        # 覆盖写，不可逆
+        # 覆盖写：会改动受保护文件，需走权限确认。原文由编排器写前留底
+        # （core/actions/file_effects.py），改错可 /undo 恢复。@author aceFelix
         return True
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:

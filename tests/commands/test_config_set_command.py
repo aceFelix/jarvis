@@ -141,10 +141,10 @@ class TestParseCliValue:
 
 class TestConfigList:
     def test_lists_writable_items_only(self, ctx):
-        """/config list 与模型侧同一份渲染：27 项、禁改项零出现。"""
+        """/config list 与模型侧同一份渲染：29 项、禁改项零出现。"""
         _run(ctx, "/config list")
         text = ctx.ui.all_text
-        assert "可调整的配置（27 项）" in text
+        assert "可调整的配置（29 项）" in text
         assert "tts_volume" in text and "daily_max" in text
         # 禁改项（沙箱/凭据/留痕）连名字都不给
         for key in ("sandbox_enabled", "api_key", "log_events"):

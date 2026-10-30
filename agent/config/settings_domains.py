@@ -185,6 +185,9 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("track_local_writes", "actions_track_local_writes"),
         ("irreversible_tools", "actions_irreversible_tools"),  # 数组，见 LIST_FIELDS
         ("hold_blocks_equivalent", "actions_hold_blocks_equivalent"),
+        # 文件级撤销（2026-10）：写前留底的配额与体积闸
+        ("file_snapshots", "actions_file_snapshots"),
+        ("file_snapshot_mb", "actions_file_snapshot_mb"),
     )),
     ("tasks", (  # W3.1 任务脊柱（自主推进，默认关，需用户显式开启）
         ("enabled", "tasks_enabled"),
