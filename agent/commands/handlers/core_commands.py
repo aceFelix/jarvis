@@ -53,6 +53,10 @@ def _print_help(ui: RichCLI) -> None:
         "  /config list 列出可以改的配置项（协议键/当前值/要不要确认）\n"
         "  /config set 改一项配置（需确认的项先给预览，再加 --yes 执行）\n"
         "  /prefs       查看记住的偏好（带条件的「以后…」；suggest 提炼 / accept 接受）\n"
+        # 系统维护层（BLUEPRINT 6.1/6.2/6.4）@author aceFelix
+        "  /disk        磁盘占用与可回收清单（只读）；--top 看空间被谁占了\n"
+        "  /clean       清理：不带 --yes 只预览，执行后进隔离区（--restore 还原）\n"
+        "  /health      系统体检与安全诊断（--save 存报告；security/threats/scan）\n"
         "  /save [name] 保存当前会话\n"
         "  /load [前缀]  前缀匹配加载会话（支持模糊输入）\n"
         "  /loads       列出并选择已保存会话\n"

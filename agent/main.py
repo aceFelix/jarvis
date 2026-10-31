@@ -215,8 +215,12 @@ async def repl(settings: Settings) -> int:
     # @author aceFelix
     from agent.core.daemon.cli_reminder import CliReminderHost
 
+    # 顺手把自动清理的调度也挂上去：本宿主是 REPL 里唯一有 Scheduler 的地方。
+    # 两个开关（maintenance_enabled / auto_clean_enabled）任一为 false 就安静跳过。
+    # @author aceFelix
     reminder_host = CliReminderHost(
-        notify=getattr(ui, "notify_reminder", None) or ui.info
+        notify=getattr(ui, "notify_reminder", None) or ui.info,
+        settings=settings,
     )
     try:
         reminder_host.start()

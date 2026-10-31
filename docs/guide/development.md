@@ -37,6 +37,7 @@ agent/
 │   ├── tasks/        # W3.1 任务脊柱（spine 台账 / spine_ops 建管目标共用层 / driver 后台驱动 / approval_ops 阻塞与授权 / spawn 执行通路 / cli_host REPL 装配）
 │   ├── policy/       # W1 运行时层（授权租约 / 打扰预算 / away 与待批 / 空转检测）
 │   ├── percept/      # W2 统一事件总线（bus + 一源一文件 + status + consent + speech）
+│   ├── maintenance/  # 系统维护层（rules 规则库 / scanner 体积统计 / cleaner 隔离区 / psrun PowerShell 通道 / defender 杀软编排 / health 七区块体检）
 │   ├── daemon/        # 后台主动感知（调度器/监控/视觉守望/节假日/截止日期/日历/简报）
 │   ├── extensions/    # 外部扩展机制（MCP客户端/插件/Skill加载）
 │   ├── memory/        # 记忆持久化（上下文压缩/恢复/文件状态/存储）
@@ -138,7 +139,7 @@ agent/
 │    autostart.py 随三栏 GUI 于 2026-10 退役。主动感知服务在 agent/core/daemon/）
 ├── config/            # 配置加载（TOML 多源合并 + 环境变量覆盖）
 │   ├── settings.py    # Settings 数据类 + TOML 加载
-│   ├── settings_domains.py # 声明式域表（TOML 段→扁平字段：checkpoint/policy/actions/tasks/percept）
+│   ├── settings_domains.py # 声明式域表（TOML 段→扁平字段：checkpoint/policy/actions/tasks/percept/maintenance）
 │   ├── percept_settings.py / toml_writer.py # 面板可改的 [percept] 白名单 + 单节外科式落盘
 │   ├── env.py         # 环境变量覆盖（JARVIS_* → Settings）
 │   ├── keyring_store.py # API Key 加密存储（系统凭据管理器）

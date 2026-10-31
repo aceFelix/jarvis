@@ -338,3 +338,37 @@ wait_deadline_hours = 72   # 条件等待最长时限（超时转 blocked_timeou
                            # 只对 file_exists / percept_event 兜底；time 类自带确定时刻，不补 deadline
 checkpoint_max = 8         # 后台每推一步先打一个 shadow git 检查点（改动可回退）；
                            # 该配额与 [checkpoint].max_per_session 分族计数，不会把 /rewind 的消息级回退挤没
+
+[maintenance]
+# 系统维护层（阶段 12）：清理 / 查毒 / 性能诊断。
+# 代码见 agent/core/maintenance/（rules / scanner / cleaner / psrun / defender / health），
+# 工具 DiskReport / DiskClean / SystemHealth，命令 /disk /clean /health。
+# 清理总开关默认关：这是整个子系统里唯一会主动移动用户文件的部分。
+# 关着时 /disk 与 /health 只读能力照常可用，只有 /clean 报「未启用」。
+# 清理走隔离区（移动到 ~/.jarvis/quarantine/<批次>/）而不是复制式快照：
+#   GB 级的垃圾复制一份等于先把磁盘占满，所以 /clean --restore 才是撤销入口，
+#   不是走 W3 账本的 /undo（两套记录，别混）。
+# @author aceFelix
+enabled = false            # 清理总开关（false = 只读可看，不清）
+rules_file = ""             # 自定义规则库路径；留空用内置 agent/config/cleaners.toml
+quarantine_days = 7        # 隔离区保留天数，到期自动清（0 = 永不自动清）
+scan_max_dir_gb = 50       # 单条规则的体积上限，超过停止累加（防某个巨型目录卡死扫描）
+scan_timeout = 120         # 扫描总超时（秒），到点如实标注「已截断」而不是假装扫完
+report_min_mb = 100        # 只读报告的最低展示阈值（MB）；体积小于它的目录不占版面
+auto_clean_max_risk = "low"  # 允许自动执行的最高风险档 low/medium/high
+allow_full_scan = false    # 是否允许 Defender 全盘扫描（默认只给快速扫描，全盘可能跑几小时）
+
+# ── 无人值守自动清理 ─────────────────────────────────────────────────
+# 只动 cleaners.toml 里标了 auto_ok = true 的规则（当前仅 crash_dumps /
+# wer_reports 两条——删了永远察觉不到的垃圾）。
+#
+# 为什么不看 auto_clean_max_risk：risk 衡量「删了会怎样」，而这里要问的是
+# 「删了用户会不会发现」。risk=low 里混着 recycle_bin（用户刚删的文件就在
+# 里面）和 user_temp（可能正被程序占用），把它们当自动许可等于拿风险等级
+# 顶替意愿。auto_ok 是逐条人工评估后的独立许可，默认 false。
+#
+# 生效前提：enabled = true（总闸）。任一开关关闭都安静跳过，不刷日志。
+auto_clean_enabled = true    # 自动清理子闸（总闸开启后才有意义）
+auto_clean_time = "04:30"    # 每日自动清理时间（HH:MM），错开画像维护的 03:30
+auto_clean_min_mb = 20     # 低于此可回收量就不建批次（零感知垃圾常只有几 MB）
+auto_clean_notify_mb = 200 # 清出超过这个量才提示一句；低于它全静默

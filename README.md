@@ -135,6 +135,7 @@
 | 🧭 **管家运行时层** | permissions.yaml 路径级免确认 + 授权租约免打断 + 打扰预算削废话 + /away 无人值守待批清单（静默时段里你亲口设的提醒改为**上屏不出声**，可配同时发邮件） | [W1 运行时层](docs/architecture/16-W1判断层.md) |
 | 🧾 **敢放手的一层** | 发出去的邮件先进 30 秒待发窗口（`/undo cancel` 可拦，窗口未结案期间 `curl` 这类外发命令也会临时改问人），**替你改的文件在写入前自动留底，`/undo` 一条命令还原文（只动改过的那几个文件，不影响同批其它改动）**；"替我盯着这件事，条件到了再往下做"有跨会话任务脊柱承载，**一句话就能建目标**（`/tasks add …` 或对贾维斯说，等待期间一次 LLM 都不调） | [W3 兑现层](docs/architecture/18-W3兑现层.md) |
 | 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |
+| 🧹 **清理 / 查毒 / 体检** | `/disk` 出可回收清单且能回答**“空间到底被谁占了”**（`--top` 目录体积排行）；`/clean` 走**隔离区**（移走而非复制，随时 `/clean --restore` 还原），其中**崩溃转储与错误上报队列删了完全无感，开了即可无人值守自动清**（`/clean --auto-status` 看名单，`/clean --auto` 立即跑）；`/health` 七区块体检（资源/磁盘/安全/进程/启动项/电源/温度）。杀软判定看 `SecurityCenter2` 而不只是 Defender 自身字段——**装了第三方杀软不会被误报“没有实时防护”**；非管理员读不到的区块**如实标注需提权**，不显 0 | [系统维护层](docs/architecture/19-系统维护层.md) |
 | 🔐 **安全底线** | 五层权限 + 四级沙箱 + 操作审计 + keyring 加密存储，危险操作硬阻断 | [核心机制](docs/guide/concepts.md#五层权限系统) |
 
 **接入自由**：支持 11 家厂商（阿里云 DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务），`/models` 双击即改、运行中热切换。
@@ -182,10 +183,11 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 权限 / 压缩 / 记忆 / 沙箱 / 自愈 | [docs/guide/concepts.md](docs/guide/concepts.md) |
 | 授权租约 / 打扰预算 / 无人值守 | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) |
 | 撤销行动（`/undo`）/ 跨会话任务脊柱 | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) |
+| 清理磁盘 / 查毒 / 性能体检（`/disk` `/clean` `/health`） | [docs/architecture/19-系统维护层.md](docs/architecture/19-系统维护层.md) |
 | 让它自己改配置（说了就改 / 能改什么 / 为什么要确认） | [docs/architecture/12-配置系统.md](docs/architecture/12-配置系统.md) |
 | 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
-| 架构设计（18 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
+| 架构设计（19 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
 | 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
 | 蓝图（愿景 · 能力模型 · 演进路线） | [docs/blueprint/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
@@ -202,6 +204,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 9**：W2 感知层（统一事件总线 + 窗口/目录/仓库/来信/在场五类事件源 + 逐源默认关 + 首次启动询问 + 桌面「感知源」面板）——已随 v2.2.5 发布
 - [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——**后端已交付（374 例单测，全量 3205 例）**，含目标入口三件套（`/tasks add|show|approve|pause|resume|cancel|advance|delete` 子命令、`TrackGoal` 工具、serve `tasks.exec`/`actions.exec` RPC，共用 `core/tasks/spine_ops.py`）；两条一键实机命令：“不经模型”那一半 `python scripts/smoke_w3_spine.py`（40 项），**“到点真的自己把活干了并且真的能撤”那一半 `python scripts/livecheck_w3.py`（12 项，真 LLM）** —— 后者已于 2026-10-22 全绿跑穿，当场发现并修掉四条断链（子代理不继承宿主权限规则、受阻却谎报已完成、后台改动不入账、`[actions]` 对后台无效）；延时窗口一段则于 2026-10-21 跑穿（修了两处：等价通路绕道、`/undo --task` 归属断链）；同日补上「批准并重试」的真通路（`tasks.exec approve`：按本步被拒工具 + 目标目录 + 30 分钟签限定范围租约），并在 jarvis-desktop 仓接完右栏「跨会话目标」与「副作用账本」两个区块（那边 524 例 vitest 全绿）；尚未发布，只剩桌面实机渲染需人工走查
 - [x] **阶段 11**：感知层收编（把休眠的 `CalendarSource` / `SystemMonitor` 接进事件总线：日程临近每条只报一次、资源阈值告警复用 monitor 冷却；面板同步放开这两个开关，唯一仍未收编的 `schedule` 因会重复播报而刻意不接）
+- [x] **阶段 12（系统维护切片）**：清理 / 查毒 / 性能诊断（蓝图 6.1 / 6.2 / 6.4）——已随 v2.4.0 发布：声明式规则库（18 条）+ 隔离区式可撤销清理 + Defender 编排（以 `SecurityCenter2` 的 `productState` 为权威源）+ 七区块体检；`/disk` `/clean` `/health` 三条命令、`DiskReport` / `DiskClean` / `SystemHealth` 三个工具、`[maintenance]` 八个配置项；112 例单测，全量 4030 passed；本机（非管理员、Defender 被第三方接管）跑穿隔离区闭环与体检。设计与实测数据见 [19-系统维护层](docs/architecture/19-系统维护层.md)
 
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 

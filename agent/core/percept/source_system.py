@@ -7,14 +7,15 @@
 三个设计取舍：
 
 - **不 Start 监控线程，只索取快照**。``SystemMonitor.start()`` 会起一个每
-  ``check_interval`` 秒自转的线程；本源若也起一个，就成了两条并行的采样线，
+  ``check_interval`` 秒自转的线程；本源若也起一个，就成了两条并行的判定线，
   阈值状态（``_last_alert`` / ``_alert_active``）还会各记各的。所以这里只用
   ``check_now()``——它不依赖线程状态，且内部冷却照常生效，天然去重。
 - **阈值不另造一套**。直接吃 ``settings.monitor_*``（那些字段本来就在，只是没人读），
   避免出现"面板调阈值调不到真实生效值"的第二份真相。
-- **``state()`` 不做采样**。``get_status()`` 里的 ``psutil.cpu_percent(interval=1)``
-  会阻塞整整一秒——放在每帧都可能被调用的面板快照里，等于把 UI 卡住。本源只回报
-  自己的计数与最近一次告警摘要。
+- **采样不归本源管**。底层数值统一由 :mod:`agent.core.system_sampler` 的进程级
+  共享采样器提供，右栏每 2 秒采的那份快照在这里直接复用；本源只负责把
+  ``AlertInfo`` 翻译成总线事实。``state()`` 依然不做采样——面板快照可能每帧都取，
+  不能把这里当成取实时值的入口。
 
 @author aceFelix
 """
@@ -26,7 +27,8 @@ from typing import Any
 from agent.core.percept.event import SOURCE_SYSTEM, PerceptEvent
 
 #: 总线排空本源的默认节拍（秒）。比 monitor 自己的 ``check_interval``（10s）宽松：
-#: 资源阈值是分钟级事实，没必要每秒看一次。
+#: 资源阈值是分钟级事实，没必要每秒看一次。（采样已收口到 system_sampler，
+#: 这里不再有 1 秒阻塞的顾虑，节拍宽松纯粹是因为阈值本身是慢变量）
 DEFAULT_INTERVAL_S = 60
 
 #: 告警等级 → 显著性先验。critical 值得立刻说，warning 只作为背景信息。
@@ -85,10 +87,9 @@ class SystemSource:
     def collect(self) -> list[PerceptEvent]:
         """取一次资源快照，把触发的阈值告警转成总线事实。
 
-        注意：这会**阻塞约 1 秒**（``monitor._do_check`` 里的
-        ``psutil.cpu_percent(interval=1)`` 是阻塞采样）。总线是单轮询线程，故本源的
-        ``interval_s`` 刻意给到 60 秒——一秒的阻塞摊到分钟级节拍上可以忽略；而
-        :meth:`state` 绝不走这条路（面板快照可能每帧都取）。
+        底层采样走 :mod:`agent.core.system_sampler` 的共享采样器——如果右栏的
+        ``MetricsCollector``（2 秒节拍）刚采过，这里直接吃那份快照；纯终端无面板时
+        由采样器自己现采（首次会预热 0.1 秒）。
         """
         monitor = self._ensure_monitor()
         if monitor is None:
@@ -114,8 +115,8 @@ class SystemSource:
     def state(self) -> dict[str, Any]:
         """运行状态（面板"在采什么"用）。
 
-        刻意**不调** ``monitor.get_status()``：那里面的 ``cpu_percent(interval=1)``
-        会阻塞一秒，而面板快照是每帧都可能取的。
+        刻意**不调** ``monitor.get_status()``：面板快照是每帧都可能取的，本源只回报
+        自己的计数与最近一次告警摘要，不代它取实时值。
         """
         return {
             "unavailable": self.unavailable,

@@ -266,6 +266,13 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(SendEmailTool())
     # 收件箱查看/搜索/回复（全程只读，不改邮箱状态）@author aceFelix
     registry.register(EmailBoxTool())
+    # 系统维护层（BLUEPRINT 6.1/6.2/6.4）：DiskReport/SystemHealth 进核心，
+    # DiskClean 自带 deferred=True——唯一会动文件的一个，不该每轮占 schema。
+    # 注意：这里不判断 [maintenance].enabled，开关的拦截在 DiskClean.check_permissions
+    # 与命令层里做；让工具先注册上去，模型才能解释“为什么不能清”。@author aceFelix
+    from agent.tools.extensions.maintenance import register_maintenance_tools
+
+    register_maintenance_tools(registry)
     registry.register(DevServerTool())
 
     # 阶段二: GUI 工具（可选，依赖 pyautogui/pygetwindow，缺失则跳过）

@@ -178,6 +178,18 @@ class ProactiveHub:
                 # 日历源与系统监控本期不接线（二期），传 None 即优雅降级
                 calendar_enabled=False,
                 profile_maintenance_enabled=True,
+                # 自动清理：两个开关同时成立才启用（总闸 + 子闸），
+                # 与 REPL 路径（cli_reminder）保持同一口径
+                auto_clean_enabled=(
+                    bool(getattr(settings, "maintenance_enabled", False))
+                    and bool(getattr(settings, "maintenance_auto_clean_enabled", False))
+                ),
+                auto_clean_time=str(
+                    getattr(settings, "maintenance_auto_clean_time", "04:30") or "04:30"
+                ),
+                auto_clean_min_mb=float(
+                    getattr(settings, "maintenance_auto_clean_min_mb", 20.0) or 0.0
+                ),
             ),
             deadline_tracker=self._deadline_tracker,
             on_notify=self._on_notify,

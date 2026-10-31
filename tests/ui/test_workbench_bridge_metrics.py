@@ -15,6 +15,9 @@ import queue
 import threading
 import time
 
+import pytest
+
+from agent.core.system_sampler import reset_default_sampler
 from agent.ui.workbench.bridge import (
     WorkbenchRealtimeUI,
     WorkbenchUI,
@@ -24,6 +27,18 @@ from agent.ui.workbench.metrics import MetricsCollector, collect_metrics
 
 
 # ---- 指标采集 ----
+
+@pytest.fixture(autouse=True)
+def _isolate_sampler():
+    """隔离进程级共享采样器。
+
+    不重置就会用上上一例残留的缓存值与 ``psutil`` 替身（如 cpu=110 > 100
+    会让结构取值断言失败）。
+    """
+    reset_default_sampler()
+    yield
+    reset_default_sampler()
+
 
 def test_collect_metrics_structure():
     """采集结果含 cpu/memory/disk 三键，百分比在合理区间。"""

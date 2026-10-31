@@ -414,6 +414,55 @@ RPC 可临时传 `minutes`）签一条限定范围的授权租约，查看与提
 
 ---
 
+## 系统维护层（`[maintenance]`）
+
+清理磁盘 / 查杀病毒 / 性能诊断三件事的开关。机制详见
+[19-系统维护层](../docs/architecture/19-系统维护层.md)。
+
+> 🔒 **默认全关是有意的**：这是整个子系统里**唯一会主动移动用户文件**的部分。
+> 关着时 `/disk` 与 `/health` **照常可用**（纯只读），只有 `/clean` 与
+> `DiskClean(confirm=true)` 报「清理未启用」——被关掉的是“会动文件”的能力，
+> 不是“能看一眼”的能力。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `[maintenance] enabled` | `false` | 清理总开关（`false` = 只读可看，不清） |
+| `[maintenance] rules_file` | `""` | 自定义规则库路径；留空用内置 `agent/config/cleaners.toml`（19 条） |
+| `[maintenance] quarantine_days` | `7` | 隔离区保留天数，到期自动清（`0` = 永不自动清） |
+| `[maintenance] scan_max_dir_gb` | `50` | 单条规则的体积上限，超过停止累加（防某个巨型目录卡死扫描） |
+| `[maintenance] scan_timeout` | `120` | 扫描总超时（秒），到点如实标注「已截断」而不是假装扫完 |
+| `[maintenance] report_min_mb` | `100` | 只读报告的最低展示阈值（MB）；`/disk --all` 可看小项 |
+| `[maintenance] auto_clean_max_risk` | `"low"` | 手动 `/clean --yes` 时允许执行到的最高风险档 `low` / `medium` / `high` |
+| `[maintenance] allow_full_scan` | `false` | 是否允许 Defender 全盘扫描（默认只给快速，全盘可能跑几小时） |
+
+### 无人值守自动清理（`[maintenance]` 段）
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `auto_clean_enabled` | `true` | 自动清理子闸。生效前提是 `enabled = true`（总闸），两个开关同时开才会跑 |
+| `auto_clean_time` | `"04:30"` | 每日自动清理时间（`HH:MM`）；错开画像维护的 `03:30` |
+| `auto_clean_min_mb` | `20` | 低于此可回收量就不建隔离区批次（零感知垃圾常只有几 MB） |
+| `auto_clean_notify_mb` | `200` | 清出超过这个量才提示一句；低于它完全静默 |
+
+> **它到底会清什么**：只清 `cleaners.toml` 里标了 `auto_ok = true` 的规则，当前**只有两条**——
+> `crash_dumps`（崩溃转储）与 `wer_reports`（错误上报队列）。
+>
+> **为什么不直接用 `auto_clean_max_risk`**：`risk` 衡量「删了会怎样」，自动清理要问的是
+> 「删了用户会不会发现」。`risk=low` 里混着 `recycle_bin`（你刚删的文件就在里面）和
+> `user_temp`（可能正被程序占用），拿风险档当自动许可等于用严重度顶替意愿。
+> `auto_ok` 是逐条人工评估后的独立许可。用 `/clean --auto-status` 看每条规则为什么在/不在名单里。
+
+> ⚠️ **撤销入口是 `/clean --restore <batch_id>`，不是 `/undo`**。
+> 隔离区批次是独立于 W3 副作用账本的另一套记录——`/undo` 走 `EffectRecord`，
+> 对隔离区批次无从下手。两者不要混用。
+
+> 💡 **隔离区用“移动”而非“复制式快照”**：现有 `FileGuard` 写前留底是复制式且阈值只 50MB，
+> GB 级垃圾复制一份等于先把磁盘占满。同盘 `move` 是元数据操作，微秒级、不占新空间。
+
+相关命令见 [命令参考·系统维护](../docs/guide/commands.md)。
+
+---
+
 ## 上下文管理
 
 | 字段 | 默认值 | 说明 |

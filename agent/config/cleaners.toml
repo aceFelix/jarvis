@@ -1,0 +1,252 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 系统维护 · 声明式清理规则库（Windows）
+#
+# 借 BleachBit CleanerML 的「声明式」思路，**规则内容全部自写**——CleanerML 的
+# 官方规则集面向 Linux（~/.cache/mozilla、/var/tmp 这类），Windows 系统级垃圾
+# （Windows.old、SoftwareDistribution、WinSxS）根本不在其覆盖范围内。
+#
+# 字段约定（rules.py 会逐项校验，缺项即整条规则作废并在报告里点出来）：
+#   id             稳定标识。审计、账本、隔离区批次名都用它，改名等于断链
+#   name           给人看的中文名
+#   kind           paths = 按路径清；command = 走系统命令（dism / vssadmin / powercfg / cleanmgr）
+#   paths          仅 kind=paths。只接受**绝对路径**，`%VAR%` 与 `~` 会展开；
+#                  拒绝含通配符的路径（要限定文件用 include，别在路径里写 *）
+#   include        可选。文件名通配，只处理命中的文件；留空表示整个目录
+#   protect        可选。文件名通配，命中即跳过——这是「宁可少清也不误删」的那道闸
+#   category       temp / system / dev / browser / recycle 之一（报告分组用）
+#   risk           low | medium | high。决定是否需要二次确认，**high 默认不勾选**
+#   requires_admin 提前告知，而不是执行到一半才 PermissionError
+#   desc           **强制字段**。这段话会原样展示给用户，必须说清「删了会怎样」
+#   clean_cmd      仅 kind=command。必须是 rules.py 白名单里放行的命令
+#   analyze_cmd    仅 kind=command。**必须只读**，用于估算可回收量
+#   auto_ok        可选，默认 false。**无人值守自动清理的许可**。
+#                  刻意不复用 risk：risk 衡量「删了会怎样」，auto_ok 衡量「删了
+#                  用户会不会发现」。两者不是一回事——recycle_bin 是 low，但用户
+#                  刚删的文件就在里面；user_temp 是 low，但可能正被程序占用。
+#                  打开它的唯一标准：**删了完全无感**。
+#                  两道硬约束（rules.py 会直接作废违规规则）：
+#                    · kind=command 不许 auto_ok（命令型不可还原）
+#                    · requires_admin 不许 auto_ok（后台进程提不了权）
+#
+# 刻意不收录的（收了就是给自己挖坑）：
+#   Prefetch          删了接下来几次启动反而更慢，收益几十 MB
+#   node_modules      每个项目几百 MB，但属于项目文件——只在会话上下文命中时
+#                     作为建议提出，绝不进清理清单（见 PLAN 第八节「差异化」）
+#   pagefile.sys      由系统管理，动了会掉性能甚至起不来
+#
+# @author aceFelix
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────── 低风险：可直接问 ───────────────────────────
+
+[[cleaner]]
+id = "user_temp"
+name = "当前用户临时文件"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\Temp']
+category = "temp"
+risk = "low"
+requires_admin = false
+desc = "程序运行时的临时文件。删除安全，正在运行的程序占用的文件会自动跳过。"
+# 锁文件与本地数据库被占用时删掉会让程序状态异常，宁可占点空间也别碰
+protect = ['*.lock', '*.tmp.lock', '*.db', '*.db-wal', '*.db-shm', '*.log']
+
+[[cleaner]]
+id = "recycle_bin"
+name = "回收站"
+kind = "paths"
+paths = ['%SYSTEMDRIVE%\$Recycle.Bin']
+category = "recycle"
+risk = "low"
+requires_admin = false
+desc = "已删除文件的暂存区。清空后无法通过资源管理器还原，但仍可用本工具的 /clean --restore 找回。"
+
+[[cleaner]]
+id = "crash_dumps"
+name = "崩溃转储文件"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\CrashDumps']
+category = "system"
+risk = "low"
+requires_admin = false
+# 零感知：只有拿转储去提 bug 时才用得上，平时删了永远不会被察觉
+auto_ok = true
+desc = "程序崩溃时留下的内存转储，单个可能几百 MB。只有在提交 bug 给开发者时才需要，平时可删。"
+
+[[cleaner]]
+id = "wer_reports"
+name = "Windows 错误报告"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\Microsoft\Windows\WER', '%PROGRAMDATA%\Microsoft\Windows\WER']
+category = "system"
+risk = "low"
+requires_admin = false
+# 零感知：上报队列与缓存，已发送的报告不在里面
+auto_ok = true
+desc = "系统与应用错误的上报队列与缓存。删除不影响系统运行，也不会丢已发送的报告。"
+
+[[cleaner]]
+id = "thumbcache"
+name = "缩略图与图标缓存"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\Microsoft\Windows\Explorer']
+# 只认这两个前缀：同一目录下还有 Settings 之类不能删的东西
+include = ['thumbcache_*.db', 'iconcache_*.db']
+category = "system"
+risk = "low"
+requires_admin = false
+desc = "资源管理器的图片缩略图缓存。删除后首次浏览相册会重新生成，稍慢一次，之后照常。"
+
+[[cleaner]]
+id = "shader_cache"
+name = "显卡着色器缓存"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\D3DSCache', '%LOCALAPPDATA%\NVIDIA\DXCache', '%LOCALAPPDATA%\AMD\DxCache']
+category = "system"
+risk = "low"
+requires_admin = false
+desc = "游戏与图形程序编译好的着色器缓存。删除后对应程序首次启动会重新编译，会慢几秒。"
+
+[[cleaner]]
+id = "delivery_optimization"
+name = "传递优化缓存"
+kind = "paths"
+paths = ['%SYSTEMROOT%\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization']
+category = "system"
+risk = "low"
+requires_admin = true
+desc = "Windows 更新在你和局域网其他电脑间互相分发的缓存。删除只影响本轮分发的效率。"
+
+# ─────────────────────────── 中风险：要说明后果 ───────────────────────────
+
+[[cleaner]]
+id = "win_temp"
+name = "系统临时文件"
+kind = "paths"
+paths = ['%SYSTEMROOT%\Temp']
+category = "temp"
+risk = "medium"
+requires_admin = true
+desc = "系统级临时文件，安装程序与更新过程会往里写。删除时被占用的会自动跳过；建议先关掉正在运行的安装向导。"
+protect = ['*.lock', '*.log']
+
+[[cleaner]]
+id = "win_update_cache"
+name = "Windows 更新下载缓存"
+kind = "paths"
+paths = ['%SYSTEMROOT%\SoftwareDistribution\Download']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "已下载的更新安装包。删除后 Windows 需要时会重新下载（要联网、要时间），**不会影响已安装的更新**。"
+
+[[cleaner]]
+id = "windows_old"
+name = "旧版 Windows 安装残留"
+kind = "paths"
+paths = ['%SYSTEMDRIVE%\Windows.old']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "系统升级前的整份旧版本备份，常见 10–20 GB。**删除后无法回退到上一版 Windows**，也无法再从系统设置里「回到以前的版本」。确认新系统用着没问题再删。"
+
+[[cleaner]]
+id = "cbs_logs"
+name = "组件安装与服务日志"
+kind = "paths"
+paths = ['%SYSTEMROOT%\Logs\CBS', '%SYSTEMROOT%\Logs\DISM', '%SYSTEMROOT%\Logs\WindowsUpdate']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "系统更新与组件安装的过程日志，长期不动会涨到 1–2 GB。删除不影响系统，但如果最近在排查更新失败，先留着。"
+
+[[cleaner]]
+id = "downloaded_installations"
+name = "下载的安装程序缓存"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\Downloaded Installations', '%LOCALAPPDATA%\DownloadedInstallations']
+category = "temp"
+risk = "medium"
+requires_admin = false
+desc = "安装包自解压出来的临时副本。删除后重装该软件时可能要求重新下载安装包。"
+
+[[cleaner]]
+id = "winsxs_cleanup"
+name = "WinSxS 组件存储（旧版组件）"
+kind = "command"
+clean_cmd = ['dism.exe', '/Online', '/Cleanup-Image', '/StartComponentCleanup']
+analyze_cmd = ['dism.exe', '/Online', '/Cleanup-Image', '/AnalyzeComponentStore']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "被后续更新替换掉的旧组件。DISM 会在保证组件存储完整的前提下清掉它们，常见回收 2–5 GB。**不要手动删除 WinSxS 目录**——里面是硬链接，手删会损坏系统。清理耗时几分钟，且之后无法卸载已被替换的更新。"
+# 这条走命令，代价是慢：不参与常规扫描，需要 --deep 才分析
+
+[[cleaner]]
+id = "vss_shadow"
+name = "系统还原点与卷影副本"
+kind = "command"
+clean_cmd = ['vssadmin.exe', 'delete', 'shadows', '/all', '/quiet']
+analyze_cmd = ['vssadmin.exe', 'list', 'shadowstorage']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "系统还原与文件历史用的卷影副本，按磁盘容量上限累积，常吃掉 5% 的盘。删除后**所有还原点都会消失**，出问题时无法用系统还原回退。"
+
+[[cleaner]]
+id = "hiberfil"
+name = "休眠文件（hiberfil.sys）"
+kind = "command"
+clean_cmd = ['powercfg.exe', '/hibernate', 'off']
+analyze_cmd = ['powercfg.exe', '/a']
+category = "system"
+risk = "medium"
+requires_admin = true
+desc = "休眠与快速启动用的内存镜像，大小约等于内存容量的 40%–100%（16G 内存常见 6–12 GB）。关闭后**休眠与快速启动不可用**，开机稍慢一点；不常用休眠的话是笔划算的交易。"
+
+[[cleaner]]
+id = "cleanmgr_profile"
+name = "Windows 磁盘清理（预存配置）"
+kind = "command"
+# 64 是配置槽号；换成别的数字就要用同样的数字去 /sageset。
+# /sagerun 不带 /d 时对所有盘执行；只想清某个盘就手动加 /d C:
+clean_cmd = ['cleanmgr.exe', '/sagerun:64']
+category = "system"
+risk = "medium"
+requires_admin = false
+desc = "Windows 自带的磁盘清理，能清的项目比本规则库多。**必须先手动跑一次 cleanmgr /sageset:64 勾选项目**，否则 /sagerun 什么也不做；范围完全取决于你的勾选——里面有「下载」文件夹，勾了就会删下载文件。系统级项目需管理员权限。命令立即返回，清理在后台跑完，不可还原。"
+# 无 analyze_cmd：cleanmgr 没有分析模式，收益要跑完才知道
+
+# ─────────────────────────── 高风险：默认不勾 ───────────────────────────
+# 这三条收益很大，但清完会让「下次用」变慢或掉登录态。默认不勾选，
+# 用户主动要才动——这是 PLAN 第八节「坑 1」的直接规避。
+
+[[cleaner]]
+id = "browser_cache"
+name = "浏览器缓存（Edge / Chrome）"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache', '%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache']
+category = "browser"
+risk = "high"
+requires_admin = false
+desc = "网页资源缓存。删除后**所有网站的登录态可能失效**（要重新登录），首次打开网页也会变慢。只在你确实缺空间时才清。"
+
+[[cleaner]]
+id = "dev_cache_pip"
+name = "pip 下载缓存"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\pip\cache']
+category = "dev"
+risk = "high"
+requires_admin = false
+desc = "Python 包安装包的本地缓存。删除后**下次装同样的包要重新下载**，离线环境会直接装不上。开发机上通常不值得清。"
+
+[[cleaner]]
+id = "dev_cache_npm"
+name = "npm 下载缓存"
+kind = "paths"
+paths = ['%LOCALAPPDATA%\npm-cache', '%APPDATA%\npm-cache']
+category = "dev"
+risk = "high"
+requires_admin = false
+desc = "Node 依赖包的本地缓存。删除后**下次 npm install 会全量重新下载**，一个中型项目可能多花十分钟。"

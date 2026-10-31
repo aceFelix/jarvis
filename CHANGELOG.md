@@ -2,6 +2,179 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [2.4.0] — 2026-10-31
+
+本次补齐电脑管家八件事中的三件：**清理磁盘 / 查杀病毒 / 性能诊断**（排前两版一直空着的 6.1、6.2、6.4）。
+设计取舍与实测数据见 [19-系统维护层](docs/architecture/19-系统维护层.md)。
+
+### 新增能力
+
+- **`/disk` —— 回答“空间到底被谁占了”**
+  声明式规则库 `cleaners.toml`（18 条：7 low / 8 medium / 3 high，8 条需管理员）出可回收清单。
+  但实测发现一个真问题：本机 C 盘 100GB 只剩 14.6GB（85.4% 占用），可回收垃圾加起来
+  **只有 27MB**。所以额外做了 `/disk --top`，直接对根目录做体积排行——用户问“清一下”，
+  真正想知道的是空间去哪了，不是垃圾有多少。
+
+- **`/clean` —— 隔离区式清理，随时可撤**
+  这是子系统里唯一会主动动用户文件的部分，因此：无 `--yes` 只预览；`[maintenance].enabled`
+  默认关；即使开着也只动规则库白名单里的路径。
+  撤销口径与直觉不同：**用移动进 `~/.jarvis/quarantine/<批次>/`，不是复制式快照**。
+  现有 `FileGuard` 写前留底是复制式且阈值只 50MB，GB 级垃圾复制一份等于先把磁盘占满。
+  同盘 `move` 是元数据操作，微秒级、不占新空间。还原走 `/clean --restore <批次>`
+  （**不是 `/undo`**——隔离区批次与 W3 副作用账本是两套记录）。
+
+- **`/health` —— 七区块体检报告**
+  资源 / 磁盘 / 安全 / 进程 / 启动项 / 电源 / 温度，一次 PowerShell 取回，
+  支持 `--markdown` 与 `--save`。非管理员跑时，温度与 SMART 会**如实写“需要以管理员
+  身份运行才能读取”**——不显 0、不显 `--`、不静默丢块。
+
+- **杀软诊断：不再被第三方杀软骗到**
+  本机实测抓到一个会**系统性误报**的前提：Defender 被「电脑管家系统防护」接管后，
+  `Get-MpComputerStatus` 照常返回且 `AntivirusEnabled` / `RealTimeProtectionEnabled`
+  全为 `false`。只看它就会对装了第三方杀软的用户报「你没有实时防护」。
+  现在以 `root/SecurityCenter2` 的 `productState` 位为**权威**（`0x1000`=启用 /
+  `0x10`=库最新），Defender 自身字段降为补充；只有**所有产品都未启用**才允许说没防护。
+  扫描异步执行（`/health scan` 立即返回任务 id，`/health status <id>` 查进度），
+  全盘需显式开 `allow_full_scan`。
+
+### 新配置
+
+```toml
+[maintenance]
+enabled = false              # 清理总开关（关着时 /disk 与 /health 照常只读可用）
+rules_file = ""               # 留空用内置 agent/config/cleaners.toml
+quarantine_days = 7          # 隔离区保留天数，到期自动清
+scan_max_dir_gb = 50         # 单条规则体积上限
+scan_timeout = 120           # 扫描总超时（秒）
+report_min_mb = 100          # 只读报告最低展示阈值（MB）
+auto_clean_max_risk = "low"   # 允许自动执行的最高风险档
+allow_full_scan = false      # 是否允许 Defender 全盘扫描
+```
+
+### 新增工具与命令
+
+- 工具：`DiskReport`（只读）/ `DiskClean`（延迟加载，无 `confirm` 时只读）/ `SystemHealth`
+- 命令：`/disk`、`/clean`、`/health`（含 `security` / `threats` / `scan` / `status` 子命令）
+
+### 能力边界（如实说明）
+
+- **不自研查杀引擎**，不接 ClamAV（Defender 已够，多一个引擎多一份维护成本与误报源）。
+- **不自动杀进程**。热点进程是不是泄漏取决于用户当时在干什么，机器判断不了；“一键加速”
+  杀掉的可能是跑了两小时的编译或导入到一半的模型。
+- **不自研提权**（`Start-Process -Verb RunAs` 会弹 UAC 且打断授权链），只报告并提示手动提权。
+- **WinSxS / 卷影 / 休眠文件不进 `/clean`**：它们只能靠 `dism` / `vssadmin` / `powercfg`
+  直接做，**不可还原**。`--deep` 只给出命令文本，由用户自己跑。
+- 刻意**不收录** `prefetch`（删了常用程序启动变慢）与 `node_modules`（那是工程目录）。
+
+### 工程
+
+- 新增 6 模块 + 3 工具 + 3 命令 + 5 个测试文件（112 例）；全量 **4030 passed, 1 skipped**，零回归。
+- `cleaners.toml` 已加进 `package-data`（`config/*.toml`），否则装包后规则库找不到。
+- 本机（Windows 10 22H2、非管理员、Defender 被第三方接管）跑穿隔离区闭环
+  （moved 2 / protect 跳过 1 / restore 2 / 批次清空）与七区块体检（15.5s）。
+- 文档：新增 [19-系统维护层](docs/architecture/19-系统维护层.md)，同步更新配置指南、
+  命令参考、[系统维护层实机走查清单](docs/test/TEST_CHECKLIST-system-maintenance.md)
+  （新立分册，T-397–T-427）、BLUEPRINT 6.1/6.2/6.4/6.9 与第 11 节。
+
+### 内部重构：CPU/内存/磁盘采样收口
+
+交付完成后顺手清了一处重复设计——同一个物理事实（CPU/内存/磁盘）原由两处代码各读一遍：
+右栏三条进度条走 `workbench/metrics.py`（2 秒、非阻塞），阈值告警走 `core/daemon/monitor.py`
+（10/60 秒、`cpu_percent(interval=1)` 阻塞）。这不只是代码重复：`cpu_percent(interval=None)`
+返的是「距上次调用」的平均值，两个消费者会互相切碎采样时间窗（右栏 2 秒窗口尤其容易被
+monitor 的 1 秒阻塞采样截断），两边数字跟着抖。
+
+现在收敛成 `core/system_sampler.py`：
+
+- `SystemSampler` 持**唯一** psutil 调用点，进程级共享（`default_sampler()`），默认 1 秒节流——
+  右栏 2 秒节拍每次都真采（新鲜度不变），告警侧紧跟时吃缓存。
+- `SystemSnapshot` 不可变快照，自带 `to_metrics_payload()`（右栏格式）与 `to_status_dict()`
+  （`get_status()` 兼容格式），阈值仍归 `MonitorConfig`，快照不掺和判定。
+- `metrics.py` 退化为格式转换；`monitor.py` 只留报警状态机（持续时长 / 600s 冷却 / 恢复通知），
+  `get_status()` / `_do_check()` / `record_disk_usage()` 全部改读快照，**10 秒节拍的 1 秒阻塞没了**。
+- CPU 首次采样短阻塞 0.1 秒预热（原来 1 秒），之后全非阻塞；磁盘 psutil 优先、`shutil` 兜底
+  ——告警阈值一直按 psutil 的 `percent` 口径定，而 psutil 缺失时右栏磁盘条仍要有数。
+- 新增 19 例 `tests/core/test_system_sampler.py`；`test_monitor.py` 改为注入
+  `min_interval_s=0` 的采样器，保住「告警→恢复」状态翻转的可测性（单测里真实时钟几乎不走，
+  节流会让两次 `_do_check()` 吃到同一份缓存）。全量 **4048 passed, 1 skipped**。
+
+### 命令型规则：加入 Windows 磁盘清理（cleanmgr）
+
+回应「能不能让系统自带的清理工具也参与进来」：命令白名单从 3 条扩到 4 条
+（`ALLOWED_COMMAND_BINARIES` 新增 `cleanmgr.exe`），规则库同步加第 19 条 `cleanmgr_profile`。
+
+- 它比现有 18 条能清的多得多（临时文件、更新清理、旧安装残留、缩略图…），但**范围完全
+  取决于用户先用 `/sageset` 勾了什么**——里面有「下载」文件夹，勾了就会删下载文件。所以
+  规则的 `desc` 把「必须先手动跑一次 `cleanmgr /sageset:64`」写在了明面上；不写这段，用户
+  直接跑 `/sagerun` 什么都不会发生，只会以为是 bug。
+- **不破「命令型不代执行」这条线**：`cleanmgr` 与 `dism` / `vssadmin` / `powercfg` 一样，
+  只出现在 `/disk --deep` 的命令文本里，`cleaner.clean()` 依旧拒绝对 `is_command` 规则动手。
+- 白名单的守门测试改成精确等值断言（`test_allowed_binaries_are_the_known_ones`），刻意
+  不做子集断言——这张表是整个维护层最危险的一张，变大时应该有人停下来想一遍。
+- 顺手修了一个缺陷：`/disk --deep` 之前**只给 id 和说明、不给命令**，用户看完还得自己
+  去查 `clean_cmd`。现在每段都带上「要执行的命令」，提示行也区分「需执行分析命令」与
+  「无分析模式」（cleanmgr 没有分析模式）。
+- `/health` 的盘满建议里加了一句存储感知指路：一次性清理只能治标，真正把「盘慢慢变满」
+  这个趋势管起来的是 Windows 自带的存储感知（设置 → 系统 → 存储）。
+- 规则库 18 → 19 条，单测 112 → 115 例；全量 **4052 passed, 1 skipped**。
+
+### 修复：一次真实清理对话暴露的三处误导
+
+把「帮我清理垃圾」跑完整一遍（`/disk` → `--deep` → `DiskClean` → WinSxS）后，回看了全过程，
+修掉三个不是崩溃、但**会把用户或模型带错方向**的问题：
+
+- **还原命令写错了 8 处。** `DiskClean` 的工具描述、`ask` 确认提示、预览 hint、模块注释、
+  `cleaners.toml` 的回收站说明里，全都写成「可用 `/undo` 还原」。而 `/undo` 走的是 W3 副作用
+  账本，隔离区批次不在里面——敲下去注定落空，用户会以为删掉的东西找不回来了。
+  正确入口是 `/clean --restore <batch_id>`（`cleaner.RESTORE_COMMAND`，同一模块里本来就写了
+  「**不能写成 `/undo`**」的注释）。危害在于**模型会把工具描述原样转述**：实测回复里就出现了
+  「DISM 安全清理，不可用 `/undo` 还原」。守门测试改成断言文案不含 `/undo`，而不是只断言
+  「命令型不可还原」——后者在命令名写错时照样通过。
+- **`trend_7d_gb` 的裸数字被读反方向。** 实测 `-1.58` 的真实含义是「可用空间变多」，模型却
+  读成「近 7 天又少了 1.58GB」，并据此制造紧迫感催清理。实现没错，错在字段名没交代是
+  「已用增」还是「可用减」。现在 `DriveInfo` 同时给 `trend_7d_text`（「近 7 天占用下降
+  1.58 GB（已用变少、可用变多）」），`/disk` 终端输出也改成「近 7 天**已用** ↓1.58 GB」。
+- **`top_root` 不存在时静默返回空数组。** 模型把用户主目录猜成 `C:\Users\acefelix`（真机
+  是中文用户名），拿到 `top_dirs: []` 后只能自己连跑 `ls` / `du` 反复试错。空数组看起来
+  像「没有东西占空间」，是这里最贵的误导。现在返回 `top_error` 并直接写出该传什么；目录
+  存在但无一超阈值时另给 `top_note`。
+
+- 单测 115 → 119 例（新增 `trend_text` 方向、`top_root` 缺失必报、`DiskClean` 文案不误指
+  `/undo`）；全量 **4055 passed, 1 skipped**。
+
+### 无人值守自动清理：许可独立于 risk
+
+回应「那些完全不影响系统和我日常工作的垃圾，可以让 jarvis 随时监控并随时清理」。
+
+- **关键决定：自动许可不复用 `risk` 档。** `risk` 衡量「删了会怎样」，自动清理要问的是
+  「删了用户会不会发现」。`risk=low` 里混着 `recycle_bin`（用户刚删的文件就在里面）、
+  `user_temp`（可能正被程序占用）、`thumbcache` / `shader_cache`（重建会卡一下）——
+  拿风险档当自动许可等于用严重度顶替意愿。新增独立字段 `auto_ok`，默认 `false`，
+  逐条人工评估后显式打开，fail-closed：新加规则不会因为漏标风险档而被悄悄执行。
+- **当前只开两条**，标准是「删了用户永远不会察觉」：`crash_dumps`（崩溃转储）与
+  `wer_reports`（错误上报队列）。19 条里其余 17 条各自有明确不选的理由。
+- **两道反向闸**（`rules.py` 直接作废违规规则）：`kind=command` 不许 `auto_ok`
+  （命令型不可还原，隔离区救不了它，允许就等于给「从不代执行」开后门）；
+  `requires_admin` 不许 `auto_ok`（后台进程提不了权，只会白跑）。
+- **三个触发点**，任何一层生效就够：每日 04:30（`Scheduler` daily 任务）、
+  启动时机会清理（距上次超 20 小时；纯 CLI 是短会话，光靠定时可能永远遇不上）、
+  手动 `/clean --auto`。三条都走同一个 `run_auto_clean()`，不会出现「定时清的和
+  手动清的不是一回事」。
+- **两条路都装上了**：`ProactiveEngine`（桌面常驻）与 `CliReminderHost`（REPL）。
+  新增 `daemon/auto_clean_schedule.py` 作为共用宿主——挂 `Scheduler` 而不是
+  `ProactiveEngine`，因为后者只有桌面路径有。
+- **两个阈值**：`auto_clean_min_mb`（默认 20）以下不建批次，零感知垃圾常只有几 MB，
+  天天建隔离区目录再删一遍成本高于收益；`auto_clean_notify_mb`（默认 200）以下**完全静默**，
+  例行公事不该消耗注意力。
+- **自动清掉的东西必须能还原**：走的就是 `cleaner.clean()`，隔离区、`protect` 名单、
+  跨盘检测全部照旧。单测有一条专门钉它（`test_auto_cleaned_content_is_restorable`）——
+  它失效的话「零感知清理」就变成「零感知删除」。
+- 新命令 `/clean --auto-status`：逐条给出「为什么不在自动名单里」，不让用户去读 TOML。
+- 单测 119 → 137 例（新增 `tests/core/test_auto_clean.py` 18 例）；全量
+  **4073 passed, 1 skipped**。
+
+---
+
 ## [2.3.1] — 2026-10-30
 
 本次只有一件事：**改错的文件终于能撤了**。

@@ -78,27 +78,43 @@ class _FakeThread:
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
-    """重定向监控历史文件到 tmp + 替身线程。"""
+    """重定向监控历史文件到 tmp + 替身线程 + 隔离共享采样器。"""
     import agent.core.daemon.monitor as mod
+    from agent.core.system_sampler import reset_default_sampler
 
+    # 共享采样器是进程级单例：不重置就会把上一例的 psutil 替身和缓存值带进来
+    # （比如上一例 mock 了 cpu=110，这一例就断言不出 warning 等级）。
+    reset_default_sampler()
     # _history_file 是实例方法：打补丁到类上，返回 tmp 路径
     monkeypatch.setattr(
         mod.SystemMonitor, "_history_file",
         lambda self: tmp_path / "monitor_history.json",
     )
     monkeypatch.setattr(mod.threading, "Thread", _FakeThread)
-    return mod
+    yield mod
+    reset_default_sampler()
 
 
 @pytest.fixture
 def make_monitor(env):
-    """构造 SystemMonitor 工厂。"""
+    """构造 SystemMonitor 工厂。
+
+    采样器刻意注入 ``min_interval_s=0``：单测里真实时钟几乎不走，节流会让
+    同一例内两次 ``_do_check()`` 吃到同一份缓存，断言不出“告警→恢复”的状态翻转。
+    生产端用默认节流（见 core/system_sampler.py），那才是右栏与告警共享快照的场景。
+    """
+    from agent.core.system_sampler import SystemSampler
 
     def _make(config=None, on_alert=None):
         alerts = []
         if on_alert is None:
             on_alert = alerts.append
-        return SystemMonitor(config=config or MonitorConfig(), on_alert=on_alert), alerts
+        monitor = SystemMonitor(
+            config=config or MonitorConfig(),
+            on_alert=on_alert,
+            sampler=SystemSampler(min_interval_s=0),
+        )
+        return monitor, alerts
 
     return _make
 

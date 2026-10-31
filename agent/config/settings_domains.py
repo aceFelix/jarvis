@@ -197,7 +197,23 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("wait_deadline_hours", "tasks_wait_deadline_hours"),
         ("checkpoint_max", "tasks_checkpoint_max"),
     )),
-    ("percept", (  # W2 感知层：子键不带 percept_ 前缀（与 [policy.notify_budget] 同口径）
+    ("maintenance", (  # 系统维护层（清理/查毒/性能诊断）：子键不带 maintenance_ 前缀
+        ("enabled", "maintenance_enabled"),
+        ("rules_file", "maintenance_rules_file"),
+        ("quarantine_days", "maintenance_quarantine_days"),
+        ("scan_max_dir_gb", "maintenance_scan_max_dir_gb"),
+        ("scan_timeout", "maintenance_scan_timeout"),
+        ("report_min_mb", "maintenance_report_min_mb"),
+        ("auto_clean_max_risk", "maintenance_auto_clean_max_risk"),
+        # 无人值守自动清理：只动 auto_ok=true 的规则（删了无感的垃圾）
+        ("auto_clean_enabled", "maintenance_auto_clean_enabled"),
+        ("auto_clean_time", "maintenance_auto_clean_time"),
+        ("auto_clean_min_mb", "maintenance_auto_clean_min_mb"),
+        ("auto_clean_notify_mb", "maintenance_auto_clean_notify_mb"),
+        ("allow_full_scan", "maintenance_allow_full_scan"),
+    )),
+    # [percept] 表：W2 感知层，子键不带 percept_ 前缀（与 [policy.notify_budget] 同口径）
+    ("percept", (
         ("enabled", "percept_enabled"),
         ("dedup_window_s", "percept_dedup_window_s"),
         ("min_salience", "percept_min_salience"),

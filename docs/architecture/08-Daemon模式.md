@@ -26,17 +26,19 @@
 | [platform_utils.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/platform_utils.py) | 平台/依赖探测辅助 | ✅ 在用 |
 | [voice/voice_state.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/voice/voice_state.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（由语音包持有） |
 | [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配；2026-10 终端 CliReminderHost 装配） |
-| [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配） |
+| [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配；2026-10-31 起顺手挂自动清理） |
+| [core/daemon/auto_clean_schedule.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/auto_clean_schedule.py) | 无人值守自动清理的调度宿主（每日 04:30 + 启动机会清理） | ✅ 在用（2026-10-31；挂 Scheduler 而非 ProactiveEngine，因为后者只有桌面路径有） |
 | [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期已接，日历源传 None 未接） |
 | [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
 | [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | ✅ 在用（2026-10-26 由 W2 感知源 `percept/source_calendar.py` 接入总线，默认关） |
-| [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控 | ✅ 在用（同日由 `percept/source_system.py` 接入总线，走 `check_now()`，默认关） |
+| [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控（阈值判定 + 报警状态机） | ✅ 在用（同日由 `percept/source_system.py` 接入总线，走 `check_now()`，默认关） |
+| [core/system_sampler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/system_sampler.py) | **系统资源采样（CPU/内存/磁盘的唯一 psutil 调用点）** | ✅ 在用（2026-10-31 交付：右栏与阈值告警共享同一份快照） |
 | [core/daemon/vision_watcher.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/vision_watcher.py) | 视觉守望者 | ✅ 在用（2026-10 由 W2 感知源 `percept/source_vision.py` 接入总线，默认关） |
 | [core/daemon/holidays.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/holidays.py) | 节假日识别 | 💤 休眠 |
 
 > 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
 > ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报，并行用本机 CosyVoice 做待机 TTS 朗读（二期，`proactive_tts_enabled`，忙时跳过）；**仅 `--serve` / 桌面壳运行期间生效**（终端侧 2026-10 另接 `CliReminderHost`，仅文本上屏不播 TTS）。
-> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 轻量采集落地（现经 serve 事件供桌面壳右栏）；休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）已于 2026-10-26 由感知总线收编（面板上 `system_enabled` / `calendar_enabled`，默认关），`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
+> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 包装、经 serve 事件供桌面壳右栏。**2026-10-31 起采样本身已收口**：`metrics.py` 与 `monitor.py` 都不再自己调 psutil，统一读 [`core/system_sampler.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/system_sampler.py) 的进程级共享采样器（默认 1 秒节流）。此前两套实现不只是代码重复——`psutil.cpu_percent(interval=None)` 返的是「距上次调用」的平均值，右栏 2 秒窗口会被 monitor 的 1 秒阻塞采样截断，两边数字互相干扰；现在采样与判定彻底分层：采样器出 `SystemSnapshot`，`monitor.py` 只留报警状态机（持续时长/600s 冷却/恢复通知）。休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）已于 2026-10-26 由感知总线收编（面板上 `system_enabled` / `calendar_enabled`，默认关），`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
 
 ## 二、桌面入口（当前形态：jarvis-desktop）
 

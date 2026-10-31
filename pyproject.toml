@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-agent"
-version = "2.3.1"
+version = "2.4.0"
 description = "J.A.R.V.I.S. — 你的钢铁侠同款 AI 助手。可对话、可操作电脑、可后台常驻、能听会说，支持 100+ 内置工具、MCP 生态接入、多模型动态切换。"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -118,7 +118,9 @@ include = ["agent*"]
 
 [tool.setuptools.package-data]
 # （原 ui/realtime_window/assets/* 条目已随 2026-09 该孤儿包删除而清理）
-"agent" = ["configs/*.toml", "configs/*.yaml"]
+# config/*.toml 是运行时要读的声明式规则库（cleaners.toml），漏打包会让
+# 装出来的 /disk 报「规则文件不存在」。@author aceFelix
+"agent" = ["configs/*.toml", "configs/*.yaml", "config/*.toml"]
 
 [tool.ruff]
 line-length = 100

@@ -1,8 +1,13 @@
 """右栏系统指标采集：CPU / 内存 / 磁盘三件套（一期口径）。
 
-后台线程周期采集（默认 2 秒），把最新指标推入事件队列，
-前端轮询后渲染到右栏。采集失败（psutil 缺失/平台限制）时
-降级为全零，不阻塞窗口。
+**采样已收口**：本模块不再自己调 ``psutil``，一律走
+:mod:`agent.core.system_sampler` 的进程级共享采样器——右栏画图与
+:class:`~agent.core.daemon.monitor.SystemMonitor` 的阈值告警读同一份快照。
+历史上这里与 monitor 各采一次，``psutil.cpu_percent(interval=None)`` 的
+「距上次调用」语义会让两边互相切碎时间窗，右栏数字跟着抖。
+
+后台线程周期采集（默认 2 秒），把最新指标推入事件队列，前端轮询后渲染到右栏。
+采集失败（psutil 缺失/平台限制）时降级为零值，不阻塞窗口。
 
 @author aceFelix
 """
@@ -10,10 +15,10 @@
 from __future__ import annotations
 
 import queue
-import shutil
 import threading
-from pathlib import Path
 from typing import Any
+
+from agent.core.system_sampler import default_sampler
 
 # 采集间隔（秒）：2 秒足够趋势感知，又不至于频繁唤醒
 COLLECT_INTERVAL = 2.0
@@ -30,34 +35,12 @@ def collect_metrics() -> dict[str, Any]:
             "disk": {"percent": 百分比, "used_gb": 已用, "total_gb": 总量},
         }
 
+    采样细节（首次 0.1 秒预热、1 秒节流、磁盘 psutil 优先 shutil 兜底）全在
+    :class:`~agent.core.system_sampler.SystemSampler` 里，本函数只做格式转换。
+
     @author aceFelix
     """
-    result: dict[str, Any] = {"cpu": 0.0, "memory": {}, "disk": {}}
-    # CPU：psutil 非阻塞百分比（依赖上次调用间隔，首帧返回 0）
-    try:
-        import psutil
-
-        result["cpu"] = round(psutil.cpu_percent(interval=None), 1)
-        mem = psutil.virtual_memory()
-        result["memory"] = {
-            "percent": round(mem.percent, 1),
-            "used_gb": round(mem.used / 1024**3, 1),
-            "total_gb": round(mem.total / 1024**3, 1),
-        }
-    except Exception:
-        pass
-    # 磁盘：用 shutil 标准库读系统盘（Windows 上即 C:\），psutil 不可用时也能出数
-    try:
-        root = Path.home().anchor or "/"
-        usage = shutil.disk_usage(root)
-        result["disk"] = {
-            "percent": round(usage.used / usage.total * 100, 1) if usage.total else 0.0,
-            "used_gb": round(usage.used / 1024**3, 1),
-            "total_gb": round(usage.total / 1024**3, 1),
-        }
-    except Exception:
-        pass
-    return result
+    return default_sampler().snapshot().to_metrics_payload()
 
 
 class MetricsCollector:
@@ -78,11 +61,10 @@ class MetricsCollector:
         """启动采集线程（幂等）。"""
         if self._thread is not None and self._thread.is_alive():
             return
-        # 预热 cpu_percent：首次调用返回 0.0，提前调一次让首帧就有真实值
+        # 预热：共享采样器首次采样要 0.1 秒阻塞拿真实 CPU 值，提前在这里付掉，
+        # 免得首帧事件是 0%。采样器自己也有已预热判断，重复调无副作用。
         try:
-            import psutil
-
-            psutil.cpu_percent(interval=None)
+            default_sampler().snapshot()
         except Exception:
             pass
         self._stop.clear()

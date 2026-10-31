@@ -3,6 +3,36 @@
 > 对应 [BLUEPRINT 第 6.1 / 6.2 / 6.4 节](../blueprint/BLUEPRINT.md) 与第 11 节验收条目。
 > **一句话原则：不自研引擎，只做「扫描编排 + 上下文判断 + 可撤销执行」。**
 
+> ## ✅ 交付状态（2026-10-31）
+>
+> **B1 + B2 + B3 + B4 四批全部落地**，本文件从“计划稿”转为“已交付计划”。
+> 代码实现说明见 [19-系统维护层](../architecture/19-系统维护层.md)，
+> 实机走查清单见 [系统维护层分册](../test/TEST_CHECKLIST-system-maintenance.md)（T-397–T-427）。
+>
+> | 批次 | 内容 | 状态 |
+> |---|---|---|
+> | B1 | 规则库 + 扫描 + `DiskReport` + `/disk` | ✅ |
+> | B2 | 隔离区 + `DiskClean` + `/clean` + 还原 | ✅ |
+> | B3 | Defender 编排 + 异步扫描 | ✅ |
+> | B4 | 体检聚合 + `SystemHealth` + `/health` | ✅ |
+>
+> 单测 112 例；全量回归 4030 passed / 1 skipped；本机（Windows 10 22H2、非管理员、
+> Defender 被第三方接管）跑穿隔离区闭环与七区块体检。
+>
+> **三处与计划稿的偏离（均已就地记入实现与文档）**：
+> 1. **隔离区用移动，不用复制式快照**（§4.3 原稿写“快照”）。`FileGuard` 是复制式且阈值只 50MB，
+>    GB 级垃圾复制一份等于先把盘占满，与清理目的直接矛盾。撤销入口是 `/clean --restore <批次>`，
+>    **不是 `/undo`**——隔离区批次是独立于 W3 副作用账本的另一套记录，本文件 §七 写的 `/undo <batch_id>` 已纠正。
+> 2. **补上了计划未覆盖的 `top_dirs`（`/disk --top`）**。实测本机可回收只有 27MB，而 C 盘
+>    100GB 只剩 14.6GB（85.4% 占用）——用户真正问的是“空间被谁占了”，不是“垃圾有多少”。
+> 3. **杀软权威源改为 `root/SecurityCenter2` 的 `productState` 位**，`Get-MpComputerStatus`
+>    降为补充。只看后者会对装了第三方杀软的用户**误报「没有实时防护」**（本机实测：Defender 被
+>    「电脑管家系统防护」接管后，该命令照常返回且 `AntivirusEnabled=false`）。这是本批最有价值的发现。
+>
+> **本期不做**：`Remove-MpThreat` 一键处置威胁（不可逆动作，入口先留在 Defender 自身 UI）、
+> 自研查杀引擎 / ClamAV（本文件 §十.4 已拍板不做）、自动杀进程、自动提权。
+> 遗留：网络连通性巡检（BLUEPRINT 6.1 缺口里唯一没补的一项）。
+
 ---
 
 ## 一、现有基础分析
@@ -100,7 +130,7 @@
 | 工具层 | `agent/tools/extensions/maintenance.py` | `DiskReport` / `DiskClean` / `SystemHealth` 三个 Tool |
 | 命令层 | `agent/commands/handlers/system_commands.py` | `/disk`、`/clean`、`/health` |
 
-> 单文件 ≤ 800 行的约束下，扫描/清理/体检拆三个文件而不是合成一个。
+> 单文件 ≤ 900 行的约束下，扫描/清理/体检拆三个文件而不是合成一个。
 
 ---
 
@@ -394,7 +424,9 @@ Defender 免费、在线更新、误报率低。自研特征库除了拖慢电�
 ### 回退
 
 - 规则表出问题 → `[maintenance].enabled = false` 一键关闭，不影响其它功能
-- 清理误删 → 隔离区 7 天保留 + `/undo <batch_id>`
+- 清理误删 → 隔离区 7 天保留 + `/clean --restore <batch_id>`（**已实现**；
+  原稿写的 `/undo <batch_id>` 是错的——`/undo` 走 W3 副作用账本的 `EffectRecord`，
+  隔离区批次是另一套记录，敲进去注定落空）
 - Defender 调用异常 → 降级为「只报告状态不可操作」，不阻塞体检
 
 ---
@@ -406,24 +438,26 @@ Defender 免费、在线更新、误报率低。自研特征库除了拖慢电�
 | 文件 | 说明 |
 |---|---|
 | `agent/config/cleaners.toml` | 声明式清理规则库 |
-| `agent/core/maintenance/__init__.py` | 包聚合 |
-| `agent/core/maintenance/rules.py` | 规则解析与白名单校验 |
-| `agent/core/maintenance/scanner.py` | 目录扫描与大小统计 |
-| `agent/core/maintenance/cleaner.py` | 隔离区与可撤销删除 |
-| `agent/core/maintenance/health.py` | 体检聚合 + Defender 编排 |
+| `agent/core/maintenance/__init__.py` | 包聚合（只做再导出） |
+| `agent/core/maintenance/rules.py` | 规则解析、路径展开与三道白名单闸 |
+| `agent/core/maintenance/scanner.py` | 目录体积统计 + 磁盘趋势 + `top_dirs`（后补） |
+| `agent/core/maintenance/cleaner.py` | 隔离区、批次清单、可撤销删除与还原 |
+| `agent/core/maintenance/psrun.py` | **后补**：PowerShell 执行通道（编码 / JSON 深度 / 提权降级收口） |
+| `agent/core/maintenance/defender.py` | **拆分**：原稿把 Defender 编排全塞进 `health.py`，591 → 621 行逼近上限，拆出独立模块 |
+| `agent/core/maintenance/health.py` | 体检聚合（七区块）与 Markdown 报告 |
 | `agent/tools/extensions/maintenance.py` | `DiskReport` / `DiskClean` / `SystemHealth` |
 | `agent/commands/handlers/system_commands.py` | `/disk` `/clean` `/health` |
-| `tests/core/test_cleaner_rules.py` | 规则解析、白名单、保护模式 |
-| `tests/core/test_disk_scanner.py` | 扫描、超时、大小上限 |
-| `tests/core/test_disk_cleaner.py` | 隔离区、快照回滚、跳过原因 |
-| `tests/core/test_system_health.py` | 各区块解析、Top N |
-| `tests/tools/test_maintenance_tools.py` | 三个工具的契约 |
+| `tests/core/test_cleaner_rules.py` | 规则解析、白名单、保护模式（27 例） |
+| `tests/core/test_disk_scanner.py` | 扫描、超时、大小上限（15 例 + 1 skip） |
+| `tests/core/test_disk_cleaner.py` | 隔离区、还原、跳过原因（19 例） |
+| `tests/core/test_system_health.py` | productState 解码、提权降级、各区块解析（26 例） |
+| `tests/tools/test_maintenance_tools.py` | 三个工具的契约（24 例） |
 
 **修改**
 
 | 文件 | 改动 |
 |---|---|
-| `agent/tools/__init__.py` | 注册三个新工具（`DiskClean` 归延迟工具，`DiskReport`/`SystemHealth` 可进核心） |
+| `agent/tools/__init__.py` | 注册三个新工具（`DiskClean` 归延迟工具，`DiskReport`/`SystemHealth` 可进核心）。实际改在 `agent/core/tool.py` 的 `build_default_registry()` |
 | `agent/commands/router.py` | 注册 `/disk` `/clean` `/health` 三条命令 |
 | `agent/config/settings.py` + `settings_domains.py` | `[maintenance]` 配置域 |
 | `agent/core/percept/source_system.py` | 暴露 `trend_7d_gb` 给体检报告复用 |
@@ -435,9 +469,16 @@ Defender 免费、在线更新、误报率低。自研特征库除了拖慢电�
 
 ---
 
-## 十、开工前的待确认项
+## 十、开工前的待确认项（已全部拍板）
+
+> 四项均已在 2026-10-31 实施中拍板，结论与理由写在每条末尾。
 
 1. **是否真的需要 B2（删除能力）？** 建议 B1 上线跑一周，看「只报告」是否已满足九成需求 —— 多数时候人想知道的是"钱花哪了"，不是"帮我花掉"。
-2. **管理员权限怎么办？** 白名单里约一半需要提权。三个选项：(a) 只报告不动手；(b) 提示用户手动提权；(c) 走 `Start-Process -Verb RunAs` 拉起。**建议先 (a)**。
+   → **拍板：做了**，但默认关（`enabled = false`），且这个开关只拦 `/clean` 不拦 `/disk`。
+   实测支持了原判断：本机可回收只有 27MB，而 C 盘只剩 14.6GB——所以补了 `top_dirs`。
+2. **管理员权限怎么办？** 白名单里约一半需要提权（18 条中 8 条）。三个选项：(a) 只报告不动手；(b) 提示用户手动提权；(c) 走 `Start-Process -Verb RunAs` 拉起。**建议先 (a)**。
+   → **拍板：(a)**。`need_admin=True` + “需要以管理员身份运行才能读取”如实标注；不弹 UAC。
 3. **`[maintenance].enabled` 默认关闭**是否可接受？关闭状态下 `/disk` 仍可用（只读），`/clean` 报「未启用」。
+   → **拍板：接受**，已按此实现，单测 2 例锁死这个不对称（T-402 / T-403）。
 4. **ClamAV 要不要做？** 建议不做，Defender 已足够，多一个引擎多一份维护成本。
+   → **拍板：不做**。另外顺带发现：连 `Get-MpComputerStatus` 都不能当唯一真相源（见文件头交付状态第 3 条）。

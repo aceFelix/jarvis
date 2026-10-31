@@ -24,7 +24,8 @@ P2-3 增强：
 - 告警解除时（资源回落到阈值下）发一次恢复通知
 
 设计要点:
-- **轻量**: 每 10 秒采样一次，CPU 取 1 秒平均（psutil.cpu_percent(interval=1)）
+- **轻量**: 每 10 秒检查一次；采样本身走 ``agent/core/system_sampler.py`` 的进程级
+  共享采样器（右栏每 2 秒也在采，这里直接读那份快照，不再阻塞 1 秒重采）
 - **线程安全**: _lock 保护 _last_alert 等状态
 - **优雅降级**: psutil 未装 → start() 返回 False，daemon 照常运行
 """
@@ -38,6 +39,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
+
+from agent.core.system_sampler import default_sampler
 
 
 # ---- 默认阈值 ----
@@ -104,14 +107,18 @@ class SystemMonitor:
         self,
         config: MonitorConfig,
         on_alert: Callable[[AlertInfo], None],
+        sampler: object = None,
     ) -> None:
         """
         Args:
             config: 监控配置（阈值/间隔等）。
             on_alert: 告警回调。接收 AlertInfo 参数。
+            sampler: 采样器（``SystemSampler``）。``None`` 用进程级共享实例——
+                右栏每 2 秒采的那份快照可以直接复用，不必重采。
         """
         self._config = config
         self._on_alert = on_alert
+        self._sampler_override = sampler
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._started = False
@@ -134,6 +141,12 @@ class SystemMonitor:
     def available(self) -> bool:
         """psutil 是否可用。"""
         return self._available
+
+    def _sampler(self) -> object:
+        """取采样器：注入的优先，否则用进程级共享实例（见 core/system_sampler.py）。"""
+        if self._sampler_override is not None:
+            return self._sampler_override
+        return default_sampler()
 
     def start(self) -> bool:
         """启动监控线程。返回是否成功启动（psutil 不可用返回 False）。"""
@@ -167,30 +180,25 @@ class SystemMonitor:
     def get_status(self) -> dict:
         """获取当前系统资源状态（不触发告警）。
 
-        可用于用户问"电脑状态"时返回实时数据。
+        可用于用户问"电脑状态"时返回实时数据。采样走共享采样器，
+        返回字段与历史版本完全一致（阈值也一并带上）。
         """
         if not self._available:
             return {"error": "psutil 未安装，监控不可用"}
 
         try:
-            import psutil
-
-            cpu_percent = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage("C:\\" if __import__("sys").platform == "win32" else "/")
-
-            return {
-                "cpu_percent": round(cpu_percent, 1),
+            snap = self._sampler().snapshot()
+            # 契约不变：CPU / 内存采不到时仍返回 error dict（带原始异常类型），
+            # 简报那侧靠 `"error" not in status` 判断这一段能不能播。
+            if not snap.cpu_ok or not snap.memory_ok:
+                return {"error": f"获取系统状态失败: {snap.error or '采样异常'}"}
+            status = snap.to_status_dict()
+            status.update({
                 "cpu_threshold": self._config.cpu_threshold,
-                "memory_percent": round(memory.percent, 1),
                 "memory_threshold": self._config.memory_threshold,
-                "memory_available_gb": round(memory.available / 1024**3, 1),
-                "memory_total_gb": round(memory.total / 1024**3, 1),
-                "disk_percent_used": round(disk.percent, 1),
-                "disk_free_gb": round(disk.free / 1024**3, 1),
-                "disk_total_gb": round(disk.total / 1024**3, 1),
                 "disk_threshold_free_percent": self._config.disk_threshold,
-            }
+            })
+            return status
         except Exception as e:
             return {"error": f"获取系统状态失败: {type(e).__name__}: {e}"}
 
@@ -207,14 +215,15 @@ class SystemMonitor:
 
     def _do_check(self) -> list[AlertInfo]:
         """执行一次检查，触发告警回调。返回本次触发的告警列表。"""
-        import psutil
-        import sys as _sys
-
         now = time.time()
         alerts: list[AlertInfo] = []
 
+        # 采样统一走共享采样器（agent/core/system_sampler.py）：右栏每 2 秒也在采，
+        # 这里直接读它刚采的快照，不必再阻塞 1 秒重采一遍。
+        snap = self._sampler().snapshot()
+
         # ---- CPU 检查（需持续超阈值才告警）----
-        cpu_percent = psutil.cpu_percent(interval=1)
+        cpu_percent = snap.cpu_percent
 
         with self._lock:
             if cpu_percent > self._config.cpu_threshold:
@@ -244,15 +253,14 @@ class SystemMonitor:
                 self._cpu_high_since = None
 
         # ---- 内存检查 ----
-        memory = psutil.virtual_memory()
-        memory_percent = memory.percent
+        memory_percent = snap.memory_percent
 
         with self._lock:
             if memory_percent > self._config.memory_threshold:
                 alert = self._make_alert(
                     "memory", memory_percent, self._config.memory_threshold,
                     f"内存使用率 {memory_percent:.0f}%，超过 {self._config.memory_threshold}%，"
-                    f"仅剩 {memory.available / 1024**3:.1f}GB 可用",
+                    f"仅剩 {snap.memory_available_gb:.1f}GB 可用",
                     now,
                 )
                 if alert:
@@ -268,16 +276,14 @@ class SystemMonitor:
                 ))
 
         # ---- 磁盘检查 ----
-        disk_path = "C:\\" if _sys.platform == "win32" else "/"
-        try:
-            disk = psutil.disk_usage(disk_path)
-            disk_free_percent = 100 - disk.percent
-
+        # 采样失败（无权限/盘不存在）时静默跳过，与原实现一致。
+        if snap.disk_ok:
+            disk_free_percent = snap.disk_free_percent
             with self._lock:
                 if disk_free_percent < self._config.disk_threshold:
                     alert = self._make_alert(
                         "disk", disk_free_percent, self._config.disk_threshold,
-                        f"系统盘剩余空间仅 {disk_free_percent:.1f}%（{disk.free / 1024**3:.1f}GB），"
+                        f"系统盘剩余空间仅 {disk_free_percent:.1f}%（{snap.disk_free_gb:.1f}GB），"
                         f"低于 {self._config.disk_threshold}% 阈值，建议清理",
                         now,
                     )
@@ -292,8 +298,6 @@ class SystemMonitor:
                         value=disk_free_percent,
                         threshold=self._config.disk_threshold,
                     ))
-        except Exception:
-            pass  # 磁盘检查失败静默（可能无权限等）
 
         # 触发回调
         for alert in alerts:
@@ -343,10 +347,11 @@ class SystemMonitor:
         if not self._available:
             return
         try:
-            import psutil
-            import sys as _sys
-            disk_path = "C:\\" if _sys.platform == "win32" else "/"
-            disk = psutil.disk_usage(disk_path)
+            # max_age_s=0 强制现采：日记录一天只写一条，宁可多采一次，
+            # 不能把 2 秒前的缓存当成"今天"的值写进趋势库。
+            snap = self._sampler().snapshot(max_age_s=0)
+            if not snap.disk_ok:
+                return
             today_str = datetime.now().strftime("%Y-%m-%d")
 
             history = self._load_history()
@@ -354,8 +359,8 @@ class SystemMonitor:
             history = [h for h in history if h.get("date") != today_str]
             history.append({
                 "date": today_str,
-                "disk_percent": round(disk.percent, 2),
-                "disk_free_gb": round(disk.free / 1024**3, 2),
+                "disk_percent": round(snap.disk_percent_used, 2),
+                "disk_free_gb": round(snap.disk_free_gb, 2),
             })
             # 保留最近 90 天
             history = history[-90:]

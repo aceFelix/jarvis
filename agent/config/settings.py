@@ -426,6 +426,31 @@ class Settings:
     # [checkpoint].max_per_session 分开计，避免把 /rewind 的消息级回溯挤没
     tasks_checkpoint_max: int = 8
 
+    # 系统维护层（清理 / 查毒 / 性能诊断，BLUEPRINT 6.1/6.2/6.4）
+    # 清理总开关**默认关**：这是唯一会主动删用户文件的子系统，想用时显式开。
+    # 关着的时候 /disk 与 /health 仍可用（只读），只有 /clean 报“未启用”。@author aceFelix
+    maintenance_enabled: bool = False
+    maintenance_rules_file: str = ""          # 自定义规则文件；留空用内置 cleaners.toml
+    maintenance_quarantine_days: int = 7       # 隔离区保留天数（到期自动清）
+    maintenance_scan_max_dir_gb: float = 50.0  # 单条规则体积上限，超过停止累加（防卡死）
+    maintenance_scan_timeout: int = 120        # 扫描总超时（秒）
+    maintenance_report_min_mb: float = 100.0   # 只读报告的最低展示阈值（MB）
+    # 允许自动执行到的最高风险档（low/medium/high）；high 项默认不勾选
+    maintenance_auto_clean_max_risk: str = "low"
+    maintenance_allow_full_scan: bool = False  # 是否允许 Defender 全盘扫描（默认只给快速）
+
+    # 无人值守自动清理（只动 cleaners.toml 里 auto_ok=true 的那几条，当前是
+    # crash_dumps / wer_reports——删了永远察觉不到的垃圾）。
+    # 默认开，但生效前提是 maintenance_enabled=true：用户不想要就关这一项。
+    # 注意：**不看 risk 档**，auto_ok 是独立许可，原因见 maintenance/auto_clean.py。@author aceFelix
+    maintenance_auto_clean_enabled: bool = True
+    maintenance_auto_clean_time: str = "04:30"    # 每日自动清理时间（HH:MM）
+    # 低于这个可回收量就不建隔离区批次：零感知垃圾常只有几 MB，
+    # 天天建一个批次目录、再 7 天后删一遍，成本高于收益
+    maintenance_auto_clean_min_mb: float = 20.0
+    # 只有清出超过这个量才提示一句；低于它就完全静默（例行的无需消耗注意力）
+    maintenance_auto_clean_notify_mb: float = 200.0
+
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 + 不含文件名/路径形态 → 不发任何工具（0 token）。

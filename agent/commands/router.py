@@ -67,6 +67,12 @@ from agent.commands.handlers.skill_commands import (
     handle_dispatch_skill,
     handle_skills,
 )
+# 系统维护层（清理/查毒/性能诊断，BLUEPRINT 6.1/6.2/6.4）@author aceFelix
+from agent.commands.handlers.system_commands import (
+    handle_clean,
+    handle_disk,
+    handle_health,
+)
 from agent.commands.handlers.tool_commands import (
     handle_mcp,
     handle_server,
@@ -194,6 +200,10 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/undo": handle_undo,
     # 阶段 12 P3 偏好账本（带条件的"以后…"）@author aceFelix
     "/prefs": handle_prefs,
+    # 系统维护层：只读体检与安全诊断（/clean 带参数时走前缀表）
+    "/disk": handle_disk,
+    "/health": handle_health,
+    "/clean": handle_clean,   # 裸 /clean 不是“全清”，而是给用法提示
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -233,6 +243,10 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/undo ", handle_undo),   # /undo list|cancel|<id>|--task <id> @author aceFelix
     ("/prefs ", handle_prefs),  # /prefs forget <id>|clear @author aceFelix
     ("/tasks ", handle_tasks),  # /tasks add|show|pause|resume|cancel|advance|delete @author aceFelix
+    # 系统维护层：带参数的全部走前缀（精确表不认带参形态）@author aceFelix
+    ("/disk ", handle_disk),
+    ("/clean ", handle_clean),
+    ("/health ", handle_health),
 ]
 
 

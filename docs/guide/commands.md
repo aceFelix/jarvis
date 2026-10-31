@@ -137,6 +137,37 @@
 | `/disconnect-wechat` | 断开微信 ClawBot 连接 |
 | `/verbose` | 开关详细输出（token 统计、缓存命中等） |
 
+## 系统维护
+
+清理磁盘 / 查杀病毒 / 性能诊断。机制详见 [19-系统维护层](../architecture/19-系统维护层.md)，
+开关见 [配置指南·系统维护层](../../config-docs/configuration.md)。
+
+| 命令 | 说明 |
+|---|---|
+| `/disk` | 磁盘占用与可回收清单（低于 `report_min_mb` 的项不列）；**纯只读，不需要开 `[maintenance].enabled`** |
+| `/disk --all` | 含低于阈值的小项 |
+| `/disk --top [目录]` | 附带目录体积排行——回答“空间到底被谁占了” |
+| `/disk --deep` | 附带命令型规则说明（WinSxS / 卷影 / 休眠 / 磁盘清理），**只给命令不代执行**——这四条不可还原，隔离区救不了它们 |
+| `/disk <id> [id...]` | 只查这些规则 |
+| `/clean <id> [id...]` | **预览**（不动任何文件） |
+| `/clean --yes <id> [...]` | 执行：移入隔离区（`~/.jarvis/quarantine/<批次>/`），可还原 |
+| `/clean --batches` | 列出隔离区批次 |
+| `/clean --restore <batch_id>` | 从隔离区还原（目标已存在同名文件则跳过，**不覆盖**） |
+| `/clean --auto` | 立即跑一次无人值守清理（只动 `auto_ok=true` 的零感知规则） |
+| `/clean --auto-status` | 看每条规则为何在/不在自动清理名单里 |
+| `/health` | 完整体检：资源 / 磁盘 / 安全 / 进程 / 启动项 / 电源 / 温度七区块 |
+| `/health --markdown` | 同上，Markdown 输出 |
+| `/health --save [路径]` | 存成 `.md` 报告 |
+| `/health security` | 只看杀软与实时防护（含第三方接管判定） |
+| `/health threats` | 威胁检测记录与处置状态 |
+| `/health scan [quick\|full\|custom <路径>]` | 后台启动 Defender 扫描（全盘需 `allow_full_scan = true`） |
+| `/health status [job_id]` | 查扫描进度（异步，不阻塞对话） |
+
+> ⚠️ **撤销入口是 `/clean --restore <batch_id>`，不是 `/undo`**。隔离区批次不走 W3 副作用账本。
+
+> 💡 **温度 / SMART / 卷影 / DISM 需管理员**：非管理员跑时这几块会如实标注
+> “需要以管理员身份运行才能读取”，不会显示 0 或假装有数据。
+
 > 已加载的 Skill 也可直接作为斜杠命令调用：`/<skill-name> [参数]`（动态技能分发）。
 
 ---

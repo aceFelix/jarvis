@@ -262,11 +262,11 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 |---|---|
 | 数据源 | WMI / ETW / Performance Counters（CPU/内存/磁盘/网络/温度/电池/启动项） |
 | 磁盘健康 | SMART 数据，参考 `smartmontools`、`LibreHardwareMonitor`（开源、无需自研传感器层） |
-| 现状 | 已有 `SystemMonitor` 阈值告警 + 600s 冷却 + 磁盘趋势预测 + 异常进程检测 |
-| 缺口 | 电池/温度/启动项/网络连通性巡检；"体检报告"式汇总 |
+| 现状 | 已有 `SystemMonitor` 阈值告警 + 600s 冷却 + 磁盘趋势预测 + 异常进程检测；✅ 2026-10-31 补上 `/health` 七区块体检聚合 |
+| 缺口 | ~~电池/温度/启动项巡检、“体检报告”式汇总~~ ✅ 已补齐（温度/SMART/卷影/DISM 均需管理员，当前策略是**如实标注需提权**而不是隐藏）；网络连通性巡检仍未做 |
 | 落点 | `tools/system/maintenance.py` 一组工具 + scheduler 定期执行 |
 | 「加速」口径 | **改名「性能诊断」**：只做**发现 + 解释 + 建议**，执行权永远在用户手里。Win10/11 的「加速球」属产品噱头（进程调度与内存管理已够好），而「一键杀进程」杀掉的可能是跑了两小时的编译、导入到一半的模型、正在保存的文档。**绝不自动结束进程 / 禁用启动项**；SSD 走 TRIM 不做碎片整理 |
-| 升级说明 | 见 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B4 批（磁盘 SMART / 进程热点 Top N / 启动项清单 / 体检报告汇总） |
+| 升级说明 | 见 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B4 批（磁盘 SMART / 进程热点 Top N / 启动项清单 / 体检报告汇总）。✅ **2026-10-31 已交付**：`agent/core/maintenance/health.py` 一次 PowerShell 取回七区块（资源/磁盘/安全/进程/启动项/电源/温度），`SystemHealth` 工具 + `/health`（含 `--markdown` / `--save`）；提权失败的区块用 `need_admin=True` 标出来而不是返回 0。实现见 [19-系统维护层](../architecture/19-系统维护层.md) |
 
 ### 6.2 清理垃圾
 
@@ -274,10 +274,10 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 |---|---|
 | 成熟方案 | 规则表 + 预览 + 隔离区 + 白名单；参考 **BleachBit 的 CleanerML 规则格式**（声明式、可扩展、社区可维护） |
 | 安全约束 | 只清白名单目录；删除先进隔离区（可恢复）；预览确认后执行；绝不碰项目文件 |
-| 现状 | ☆ 空白（已有回收站纳入的文件工具，但无清理规则体系） |
+| 现状 | ✅ 2026-10-31 交付（B1 只读诊断 + B2 隔离区清理）：`agent/config/cleaners.toml` 18 条规则 + `rules` / `scanner` / `cleaner` 三模块 + `DiskReport` / `DiskClean` 工具 + `/disk` `/clean` |
 | 成熟方案的边界 | **BleachBit 只借格式、不借规则**：CleanerML 是声明式的好范式，但它的规则集面向 Linux（`~/.cache/*`、`/var/tmp`），Windows 系统级垃圾（`Windows.old`、`SoftwareDistribution`、WinSxS）**不在其覆盖内**。Windows 侧真正有效的是系统自带能力：`Dism /StartComponentCleanup`（WinSxS，常省 2–5 GB）、`cleanmgr`、回收站。**通用开源里没有能直接覆盖 Windows 系统级垃圾又安全可编排的清理器，规则表必须自己写** |
 | 落点 | `agent/core/maintenance/`（rules / scanner / cleaner）+ `tools/extensions/maintenance.py` + `/disk` `/clean` 命令 |
-| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，分 **B1 只读诊断**（零风险，先做）/ **B2 可撤销清理**（隔离区 + 快照 + `/undo`）两批；每批独立可用、独立验收 |
+| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，分 **B1 只读诊断**（零风险，先做）/ **B2 可撤销清理**（隔离区 + 快照 + `/undo`）两批；每批独立可用、独立验收。<br>✅ **两批均已于 2026-10-31 交付**，但隔离区口径与本文原稿不同：**用移动而非复制式快照**——现有 `FileGuard` 写前留底是复制式且阈值只有 50MB，GB 级垃圾复制一份等于先把磁盘占满。因此撤销入口是 `/clean --restore <batch>`（隔离区批次不走 W3 账本，`/undo` 是另一套记录）。另补了 PLAN 未覆盖的 `top_dirs`（`/disk --top`），因为实测可回收只有 27MB 而 C 盘只剩 14.6GB —— 用户真正问的是“空间被谁占了” |
 
 ### 6.3 整理文件
 
@@ -296,9 +296,9 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 首选 | **Defender PowerShell 模块**：`Get-MpComputerStatus` / `Start-MpScan` / `Get-MpThreatDetection` / `Get-MpThreat` / `Update-MpSignature`（系统自带、零依赖、免授权，且**返回结构化对象**） |
 | 兜底 | `MpCmdRun.exe`（老命令行，输出是非结构化文本，仅在前者不可用时）；ClamAV 限为**手动**第二意见——Windows 上需另装、特征库单独维护，与实时防护有互扫风险，**不进自动流程** |
 | 原则 | **绝不写查杀引擎**——只做"扫描编排 + 结果解读 + 处置建议" |
-| 现状 | ☆ 空白 |
+| 现状 | ✅ 2026-10-31 交付（B3）：`agent/core/maintenance/{defender,psrun}.py` + `SystemHealth` 的 `security` / `threats` / `scan` / `scan_status` 四个 action + `/health security|threats|scan|status` |
 | 落点 | `agent/core/maintenance/health.py` 的 security 区块 + `SystemHealth` 的 action 分支 |
-| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B3 批。两个硬约束：全盘扫描可跑一小时以上，**必须异步执行 + 进度查询**（复用后台命令句柄），不得阻塞主循环；`Remove-MpThreat` 处置威胁需**管理员 + 强制确认** |
+| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B3 批。两个硬约束：全盘扫描可跑一小时以上，**必须异步执行 + 进度查询**（复用后台命令句柄），不得阻塞主循环；`Remove-MpThreat` 处置威胁需**管理员 + 强制确认**。<br>✅ **2026-10-31 已交付**（异步扫描已做，`Remove-MpThreat` 本期不做——处置威胁属不可逆动作，入口先留在 Defender 自身 UI）。<br>⚠️ **实测推翻了一个前提**：只看 `Get-MpComputerStatus` 会对装了第三方杀软的用户报「你没有实时防护」——本机（Defender 被「电脑管家系统防护」接管）实测该命令照常返回且字段全为 false。权威源是 `root/SecurityCenter2` 的 `productState` 位（`0x1000`=启用 / `0x10`=库最新）。实现见 [19-系统维护层](../architecture/19-系统维护层.md) §4 |
 
 ### 6.5 日常电脑办公
 
@@ -340,11 +340,11 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 
 | 事项 | 优先级 | 归属阶段 | 依赖 | 详细计划 |
 |---|---|---|---|---|
-| 监控电脑健康 | 高 | 阶段 8–9（配合事件总线） | 无 | 系统维护计划 B4 |
-| 性能诊断（原「加速」） | 高 | 阶段 12（并入体检报告一起交） | 无 | 系统维护计划 B4 |
-| 清理垃圾 | 中 | 阶段 10（需副作用账本才安全） | W3 账本 ✅ | 系统维护计划 B1 + B2 |
+| 监控电脑健康 | 高 | 阶段 8–9（配合事件总线） | 无 | 系统维护计划 B4 ✅ |
+| 性能诊断（原「加速」） | 高 | 阶段 12（并入体检报告一起交） | 无 | 系统维护计划 B4 ✅ |
+| 清理垃圾 | 中 | 阶段 10（需副作用账本才安全） | W3 账本 ✅ | 系统维护计划 B1 + B2 ✅ |
 | 整理文件 | 高 | 阶段 10 | W3 账本 | [fileops-desktop-upgrade](../plans/fileops-desktop-upgrade.md) |
-| 杀毒 | 中 | 阶段 9+ | 无（Defender 编排） | 系统维护计划 B3 |
+| 杀毒 | 中 | 阶段 9+ | 无（Defender 编排） | 系统维护计划 B3 ✅ |
 | 日常办公 | 高 | 持续（工具层补齐） | 无 | — |
 | 查阅资料 | 中 | 持续 | 无 | — |
 | 管理线上事务 | 中 | 阶段 10 | W3 账本 | — |
@@ -605,10 +605,23 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ### 电脑管家八件事（第 6 节）
 
-- [ ] 健康体检报告（CPU/内存/磁盘/温度/电池/启动项 + 趋势）可一条命令生成
-- [ ] 清理有规则表 + 预览 + 隔离区，且绝不碰项目文件
+- [x] 健康体检报告（CPU/内存/磁盘/温度/电池/启动项 + 趋势）可一条命令生成
+  —— ✅ **2026-10-31 交付**：`/health` / `/health --markdown` / `/health --save`，七区块一次取回；
+  本机实测 15.5s、6 区块 OK + thermal 如实标注需管理员；磁盘趋势复用
+  `monitor_history.json`（样本 < 3 返回 None 而不是编个数）。实现见
+  [19-系统维护层](../architecture/19-系统维护层.md) §5。**未做**：网络连通性巡检。
+- [x] 清理有规则表 + 预览 + 隔离区，且绝不碰项目文件
+  —— ✅ **2026-10-31 交付**：`cleaners.toml` 18 条（7 low / 8 medium / 3 high，8 条需管理员），
+  三道解析闸（绝对路径 / 禁通配 / 禁盘根）+ 命令白名单 + 扫描三道性能闸；
+  `/clean` 无 `--yes` 只预览；隔离区在 `~/.jarvis/quarantine/<批次>/`，`/clean --restore` 不覆盖还原；
+  本机跑穿闭环（moved 2 / protect 跳过 1 / restore 2 / 批次清空）。
+  刻意**不收录** `prefetch`（删了常用程序启动变慢）与 `node_modules`（那是工程目录，不是系统垃圾）。
 - [ ] 文件整理可一键回滚（走 W3 账本）
-- [ ] 杀毒走 Defender 编排并可解读结果
+- [x] 杀毒走 Defender 编排并可解读结果
+  —— ✅ **2026-10-31 交付**：`security_status()` 以 `root/SecurityCenter2` 的 `productState` 位为**权威**，
+  `Get-MpComputerStatus` 只补 Defender 自身状态；扫描异步（`CREATE_NEW_PROCESS_GROUP` + 任务 json），
+  全盘默认拒（`allow_full_scan` 显式开）；威胁状态码 0~6/102 转中文，读不到时返回原因而不是空列表。
+  本机实测正确识别「电脑管家系统防护」接管，未误报「没有实时防护」（单测钉死）。
 - [ ] Office 内容级工具层可用（Excel/Word/PPT/Outlook）
 - [ ] 线上事务写操作默认 dry_run，可延时撤回
 
@@ -650,12 +663,12 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 文件整理落地 | [plans/fileops-desktop-upgrade.md](../plans/fileops-desktop-upgrade.md) |
 | 画像记忆落地 | [plans/memory-profile-phase1a.md](../plans/memory-profile-phase1a.md) |
 | 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md) |
-| 架构设计（18 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
+| 架构设计（19 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
 | 全部路线图 | [roadmap/](../roadmap/) |
 
 ---
 
-**文档版本**：v2.0（合并版）| **最后更新**：2026-10-29 | **维护者**：艾斯（aceFelix）
+**文档版本**：v2.0（合并版）| **最后更新**：2026-10-31 | **维护者**：艾斯（aceFelix）
 
 > v2.0 内的修订（不拆版本号，只记已发生的变化）：2026-10-21 阶段 10（W3）后端交付后，
 > 重写了 2.1 的感知/主动性/安全权限三行与“一句话”结论（顺带补上阶段 9 漏改的总线描述），
@@ -677,6 +690,8 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 > 绝不自动杀进程）、6.2 补成熟方案的**边界**（BleachBit 只借格式不借规则，Windows 系统级
 > 垃圾靠 `Dism` 等原生能力）、6.4 把首选从 `MpCmdRun.exe` 改为 Defender PowerShell 模块
 > （后者输出结构化、覆盖更全）、6.9 增加「详细计划」列与「性能诊断」行。
+> **2026-10-31 系统维护四批交付**：B1（只读诊断）+ B2（隔离区清理）+ B3（Defender 编排）+ B4（体检聚合）全部落地，新增 [architecture/19-系统维护层](../architecture/19-系统维护层.md)，单测 4030 例全绿（本组 112 例）。
+> 三处与计划稿的偏离已就地记入：① 隔离区**用移动不用复制式快照**（`FileGuard` 阈值只 50MB，GB 级垃圾复制一份等于先把盘占满），撤销入口是 `/clean --restore` 而非 `/undo`；② 补了 PLAN 未覆盖的 `top_dirs`（`/disk --top`），因为实测可回收只有 27MB 而 C 盘只剩 14.6GB；③ 杀软权威源改为 `SecurityCenter2` 的 `productState` 位——只看 `Get-MpComputerStatus` 会对装了第三方杀软的用户**误报「没有实时防护」**。本节 6.1/6.2/6.4/6.9 与第 11 节已同步打钩。
 
 > v2.0（2026-10-09）：由 `VISION.md` + `roadmap/jarvis-upgrade-roadmap.md` + `roadmap/VISION_ROADMAP(旧).md` 三份合并为一份蓝图；
 > 统一"阶段"进度坐标；补入电脑管家八件事技术选型、未来形态技术锚点、理论锚点与学习渠道。

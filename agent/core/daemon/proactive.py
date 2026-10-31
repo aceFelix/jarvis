@@ -49,6 +49,9 @@ class ProactiveConfig:
         calendar_check_interval_min: int = 30,
         calendar_remind_minutes_before: int = 30,
         profile_maintenance_enabled: bool = True,
+        auto_clean_enabled: bool = False,
+        auto_clean_time: str = "04:30",
+        auto_clean_min_mb: float = 20.0,
     ) -> None:
         self.briefing_enabled = briefing_enabled
         self.briefing_time = briefing_time
@@ -58,6 +61,11 @@ class ProactiveConfig:
         self.calendar_check_interval_min = calendar_check_interval_min
         self.profile_maintenance_enabled = profile_maintenance_enabled
         self.calendar_remind_minutes_before = calendar_remind_minutes_before
+        # 自动清理：默认关，且还要 maintenance_enabled 总闸同时开（在两个开关
+        # 那里分别把关，任一处关掉都不吵不闹）
+        self.auto_clean_enabled = auto_clean_enabled
+        self.auto_clean_time = auto_clean_time
+        self.auto_clean_min_mb = auto_clean_min_mb
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +77,17 @@ _BRIEFING_NOTE = "__proactive_briefing__"
 _DEADLINE_NOTE = "__proactive_deadline__"
 _CALENDAR_NOTE = "__proactive_calendar__"
 _PROFILE_MAINT_NOTE = "__proactive_profile_maintenance__"
+
+
+def _is_auto_clean_note(task: ScheduleTask) -> bool:
+    """是不是自动清理任务。
+
+    判定委托给 auto_clean_schedule（它拥有那个 note 常量）：两边各写一份字符串
+    的话，改一处忘一处就变成“任务注册了但从不触发”，而且不报错。
+    """
+    from agent.core.daemon import auto_clean_schedule as acs
+
+    return acs.is_auto_clean_task(task)
 
 
 def _preference_silence_reason() -> str:
@@ -294,6 +313,10 @@ class ProactiveEngine:
         if self._config.profile_maintenance_enabled:
             self._register_profile_maintenance()
 
+        # 注册每日自动清理（只动 cleaners.toml 里 auto_ok=true 的零感知垃圾）
+        if getattr(self._config, "auto_clean_enabled", False):
+            self._register_auto_clean()
+
         # 注册日历检查任务（暂用 daily 任务模拟，后续可改为更频繁）
         # 注意：Scheduler 目前只支持 once/daily/weekly，
         # 日历检查暂用 daily 在 briefing_time 时一并检查
@@ -388,6 +411,41 @@ class ProactiveEngine:
         )
         self._task_ids.append(task.id)
 
+    def _register_auto_clean(self) -> None:
+        """注册每日自动清理（只动 cleaners.toml 里 auto_ok=true 的零感知垃圾）。
+
+        为什么错开画像维护半小时：深夜两件事挤在一起，出问题时不好判断
+        是谁把机器拖起来的。
+
+        为什么委托给 ``auto_clean_schedule``：纯 CLI 路径没有 ProactiveEngine，
+        它挂在 ``CliReminderHost`` 上；两边走同一个注册函数，不存在“桌面清的和
+        终端清的不是一回事”这种分叉。
+        """
+        import logging
+
+        from agent.core.daemon import auto_clean_schedule as acs
+
+        try:
+            acs.register(self._scheduler, time_str=self._config.auto_clean_time)
+        except Exception as e:  # noqa: BLE001 - 注册失败不影响其它定时任务
+            logging.getLogger("jarvis.maintenance.auto_clean").warning(
+                "自动清理任务注册失败: %s", e
+            )
+
+    def _fire_auto_clean(self) -> None:
+        """触发一次自动清理。
+
+        **另起线程**：本方法由 Scheduler 的调度线程调用，而清理要扫盘 + 移文件。
+        直接跑会把同一时刻到期的提醒往后压，用户只会看到“提醒迟到了”。
+        清理完成后静默——零感知垃圾的例行公事不该占用注意力。
+        """
+        from agent.core.daemon import auto_clean_schedule as acs
+
+        acs.fire(
+            max_risk="low",
+            min_mb=float(getattr(self._config, "auto_clean_min_mb", 20.0) or 0.0),
+        )
+
     def _fire_profile_maintenance(self) -> None:
         """执行画像维护：decay + prune。静默（写日志，不打扰用户）。"""
         import logging
@@ -425,10 +483,14 @@ class ProactiveEngine:
             self._fire_calendar_check()
         elif task.note == _PROFILE_MAINT_NOTE:
             self._fire_profile_maintenance()
+        elif _is_auto_clean_note(task):
+            self._fire_auto_clean()
 
     def is_proactive_task(self, task: ScheduleTask) -> bool:
         """判断任务是否是 ProactiveEngine 注册的（用于 daemon 分发）。"""
-        return task.note in (_BRIEFING_NOTE, _DEADLINE_NOTE, _CALENDAR_NOTE, _PROFILE_MAINT_NOTE)
+        return task.note in (
+            _BRIEFING_NOTE, _DEADLINE_NOTE, _CALENDAR_NOTE, _PROFILE_MAINT_NOTE,
+        ) or _is_auto_clean_note(task)
 
     # ---- 通知出口（W1 预算闸门）----
 

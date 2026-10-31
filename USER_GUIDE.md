@@ -210,6 +210,59 @@ jarvis --quick      # 快速启动（跳过动画和可选初始化）
 | `/plugin` `/plugins` | 插件管理 |
 | `/cli_anything` `/harnesses` | CLI-Anything harness 管理 |
 
+### 清理 / 查毒 / 体检
+
+三件事一条命令一件，**只读的两条不需要任何配置就能用**。
+
+| 命令 | 说明 |
+|------|------|
+| `/disk` | 看各盘还剩多少 + 哪些垃圾可以清 |
+| `/disk --top` | **空间到底被谁占了**——直接列根目录下的体积排行（这个比清理清单更常用） |
+| `/disk --all` | 连低于 100MB 的小项一起列出来 |
+| `/disk --deep` | 看 WinSxS / 卷影 / 休眠 / Windows 磁盘清理这类系统级占用（**只给命令，由你自己跑**） |
+| `/clean <id>` | 先预览，不动文件 |
+| `/clean --yes <id>` | 真清：**移到隔离区**而不是删除，随时可还原 |
+| `/clean --batches` | 看隔离区里有哪些批次 |
+| `/clean --restore <批次号>` | 从隔离区还原（目标位置已有同名文件就跳过，不覆盖） |
+| `/clean --auto` | 立刻跑一次自动清理（只动「删了完全无感」的那几条） |
+| `/clean --auto-status` | 看哪些规则允许自动清、哪些不允许及原因 |
+| `/health` | 一次体检：资源 / 磁盘 / 安全 / 进程 / 启动项 / 电源 / 温度 |
+| `/health --save` | 存成 Markdown 报告 |
+| `/health security` | 只看杀软开了没 |
+| `/health scan quick` | 后台跑一次快速查毒，不阻塞对话；`/health status` 看进度 |
+
+> 🔒 **清理默认是关的**。这是整套系统里唯一会主动动你文件的功能，所以
+> `[maintenance].enabled = false` 出厂默认；`/disk` 和 `/health` 照常能用（它们只看不动）。
+> 想允许清理，在 `~/.jarvis/settings.toml` 里加：
+>
+> ```toml
+> [maintenance]
+> enabled = true
+> auto_clean_max_risk = "low"   # 先只允许清最安全的那档
+> ```
+
+> 🧹 **开了维护层，零感知垃圾会自己清**。不用你每次发话。
+>
+> 每日 04:30 一次，加上每次启动时（距上次超 20 小时才跑）——把崩溃转储和
+> Windows 错误上报队列扫掉。这两样删了永远不会被察觉，所以不问你。
+>
+> **但它只敢动这两条。** 判定标准不是“风险低”，而是“删了你也不会发现”：
+> 回收站（你刚删的文件就在里面）、Temp（可能正被程序占用）、缩略图/着色器
+> 缓存（重建会卡一下）**都不在自动名单里**，它们仍然只能你手动 `/clean --yes`。
+> 想看每条的具体理由：`/clean --auto-status`。
+>
+> 三个旋钮（`[maintenance]` 段）：`auto_clean_enabled = true`、
+> `auto_clean_time = "04:30"`、`auto_clean_min_mb = 20`（低于 20MB 不值当建批次）。
+> 清出来的东西照旧进隔离区，7 天内 `/clean --restore` 都能拿回来。
+
+> ⚠️ **撤销入口是 `/clean --restore <批次号>`，不是 `/undo`**。隔离区是独立于副作用账本的另一套记录。
+
+> 💡 **“我明明没多少垃圾，C 盘怎么还是红了”** —— 这是常态。本机实测可回收垃圾只要 27MB，
+> 而 C 盘已经用掉 85%。先跑 `/disk --top` 看是谁占着，再决定动什么。
+
+> 💡 **提示“需要以管理员身份运行”不是出错**。温度、SMART 磨损、卷影占用、WinSxS
+> 回收量这几项 Windows 只给管理员读。宁可如实告诉你读不到，也不拿 0 冒充数据。
+
 ---
 
 ## 语音交互
@@ -631,6 +684,13 @@ max_cpu_seconds = 60
 enabled = true                 # 总开关（关闭后仅支持对话回退）
 max_per_session = 20           # 每会话检查点保留上限（超出修剪最早的）
 timeout_seconds = 10           # 单条 git 命令超时（秒）
+
+# 系统维护层（清理 / 查毒 / 体检）
+[maintenance]
+enabled = false                # 清理总开关（关着时 /disk、/health 照常只读可用）
+auto_clean_max_risk = "low"    # 允许清的最高风险档 low/medium/high
+quarantine_days = 7            # 隔离区保留天数，到期自动清
+allow_full_scan = false        # 是否允许 Defender 全盘扫描（可能跑几小时）
 ```
 
 ---
