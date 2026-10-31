@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-10-31T09:47:34Z",
+  "updated_at": "2026-10-31T10:49:00Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -47,9 +47,9 @@
     },
     "CHANGELOG.md": {
       "role": "index",
-      "sha256": "2cfc2fc7e0207ccf2db83c0ee9bf295c03ce81d9f94168a88d970cf8e15b0f90",
+      "sha256": "8edb907e5aa7dc126f25d5a72676b9f5118fb98f568f2bcbf9996df0c283745b",
       "size": 19833,
-      "normalized_sha256": "2cfc2fc7e0207ccf2db83c0ee9bf295c03ce81d9f94168a88d970cf8e15b0f90"
+      "normalized_sha256": "8edb907e5aa7dc126f25d5a72676b9f5118fb98f568f2bcbf9996df0c283745b"
     },
     "LICENSE": {
       "role": "index",
@@ -71,9 +71,9 @@
     },
     "README.md": {
       "role": "index",
-      "sha256": "635817865282732a9700450bbf5fba5c49a637460c1fc300a23cd5c1fe020e93",
-      "size": 21459,
-      "normalized_sha256": "635817865282732a9700450bbf5fba5c49a637460c1fc300a23cd5c1fe020e93"
+      "sha256": "7aa70b7013404fa363c2bd707f667f7190b29fbe401b2e2b10ea03edafd81780",
+      "size": 21530,
+      "normalized_sha256": "7aa70b7013404fa363c2bd707f667f7190b29fbe401b2e2b10ea03edafd81780"
     },
     "USER_GUIDE.md": {
       "role": "index",
@@ -83,9 +83,9 @@
     },
     "agent/__init__.py": {
       "role": "index",
-      "sha256": "368b8ec8bcd83581badd1d83114b477b7a6129b2da1daa6d88d52eb0ceec5566",
+      "sha256": "78a7e58af6e4be9acde1c9c74fdb49816a1e8bdcd384b2f2452ee3e7dfd23103",
       "size": 314,
-      "normalized_sha256": "368b8ec8bcd83581badd1d83114b477b7a6129b2da1daa6d88d52eb0ceec5566"
+      "normalized_sha256": "78a7e58af6e4be9acde1c9c74fdb49816a1e8bdcd384b2f2452ee3e7dfd23103"
     },
     "agent/bootstrap.py": {
       "role": "index",
@@ -2030,9 +2030,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "e3130ef67d9bd48ba83e893aa11f008cd5051a5c3234ab13586a6f51638e514f",
+      "sha256": "632565688bdf85bbfa424fd9ff338502dfa55f2d74d8ecd73ecfcae4004ed643",
       "size": 229067,
-      "normalized_sha256": "e3130ef67d9bd48ba83e893aa11f008cd5051a5c3234ab13586a6f51638e514f"
+      "normalized_sha256": "632565688bdf85bbfa424fd9ff338502dfa55f2d74d8ecd73ecfcae4004ed643"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2110,9 +2110,9 @@
     },
     "configs/settings.example.toml": {
       "role": "index",
-      "sha256": "4d29c28b1b71ade13adcde2276a6222d6ff25b9de5b533773fd693d25c4ee24a",
-      "size": 27390,
-      "normalized_sha256": "4d29c28b1b71ade13adcde2276a6222d6ff25b9de5b533773fd693d25c4ee24a"
+      "sha256": "eaa9c05789568e6b31011e6fb820891049f6cd5c2d51f5612d13ba1943c5adb2",
+      "size": 28576,
+      "normalized_sha256": "eaa9c05789568e6b31011e6fb820891049f6cd5c2d51f5612d13ba1943c5adb2"
     },
     "dashscope-docs/AOQ 接入.md": {
       "role": "index",
@@ -3146,9 +3146,9 @@
     },
     "npm/package.json": {
       "role": "index",
-      "sha256": "4ff38b3db73b014978576e6371e7a33a46f429686e9eca387709151aafdd0fe6",
+      "sha256": "b22b3f50ac7a7d404230289e6ffd534ea7bd40e48c15d48a8d70585f9dda1305",
       "size": 898,
-      "normalized_sha256": "4ff38b3db73b014978576e6371e7a33a46f429686e9eca387709151aafdd0fe6"
+      "normalized_sha256": "b22b3f50ac7a7d404230289e6ffd534ea7bd40e48c15d48a8d70585f9dda1305"
     },
     "npm/run.js": {
       "role": "index",
@@ -3176,9 +3176,9 @@
     },
     "pyproject.toml": {
       "role": "index",
-      "sha256": "90b7723d11608be67a354345cb21bc35949516d72230ec05b680ef541e527240",
+      "sha256": "95eaa8ed0cdf89b11dbccd1d30c8bebdd318e9183459c39ef6d2a90f50fee6de",
       "size": 4428,
-      "normalized_sha256": "90b7723d11608be67a354345cb21bc35949516d72230ec05b680ef541e527240"
+      "normalized_sha256": "95eaa8ed0cdf89b11dbccd1d30c8bebdd318e9183459c39ef6d2a90f50fee6de"
     },
     "scripts/check_md_links.py": {
       "role": "index",

@@ -371,7 +371,7 @@ voice-setup.md[SC5L]: F:实时语音配置指南：怎么起 /talk、配 DashSco
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/configs/===
 models.example.toml[FC4T]: F:模型域配置模板：provider、api_format、last_model、base_url、api_key 与可选模型清单，复制成 models.toml 用。 | R:code:configs/settings.example.toml | A:- | S:顶层键必须写在任何 [section] 之前，写在 [llm.models] 之后的会被静默归入该表。
 permissions.yaml[FS5T]: F:Permission rule table: pattern, value and source entries mapping tool calls to allow, deny or ask, with fnmatch wildcards in the tool spec. | R:- | A:- | S:Priority enterprise>user>project>session, deny beats ask in a layer, hardcoded dangerous rules always win; spec-carrying allow relaxes tool ASK, bare tool name does not.
-settings.example.toml[FC5M]: F:settings.toml 的全量注释模板：从模型、语音到权限、策略（含 notify_budget 与提醒降级通道）、感知、W3 actions/tasks 与 maintenance 的每个可选键。 | R:code:configs/models.example.toml,code:agent/config/settings.py,code:agent/config/percept_settings.py,code:agent/core/policy/budget.py | A:- | S:新字段要同步白名单与配置文档；模型键已拆到 models.example.toml；本仓两份 example TOML，加新表要两边都加否则用户丢开关；[maintenance] 默认关但 /disk 与 /health 只读可用。
+settings.example.toml[FC5L]: F:settings.toml 的全量注释模板：从模型、语音到权限、策略（含 notify_budget 与提醒降级通道）、感知、W3 actions/tasks 与 maintenance 的每个可选键。 | R:code:configs/models.example.toml,code:agent/config/settings.py,code:agent/config/percept_settings.py,code:agent/core/policy/budget.py | A:- | S:新字段要同步白名单与配置文档；模型键已拆到 models.example.toml；本仓两份 example TOML，加新表要两边都加否则用户丢开关；[maintenance] 默认关但 /disk 与 /health 只读可用。
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/dashscope-docs/===
 AOQ 接入.md[SN4M]: F:Reference notes: connecting to Realtime API through the AOQ client SDK, from credentials and media direction to event exchange and release. | R:- | A:- | S:AOQ splits media and model events into separate tracks and is not supported in browsers.
@@ -551,7 +551,7 @@ minimax系列模型官方sdk.md[SN4S]: F:Vendor note: the official MiniMax Pytho
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/npm/===
 README.md[SV4S]: F:npm wrapper readme: the @acefelix/jarvis package page mirroring the GitHub product README for the npm registry. | R:- | A:- | S:It is a product-README mirror, not the maintainer guide; license now Apache-2.0.
 install.js[XV4M]: F:postinstall script: detects a Python interpreter and installs the jarvis-agent package, preferring uv and offering extras. | R:- | A:- | S:Non-TTY CI installs [all] silently; the realtime window menu option is gone with pywebview retired.
-package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本、bin 入口与安装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本必须等于 pyproject 版本（现 2.4.0），漏改则装出的 --version 与包版本不一致。
+package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本、bin 入口与安装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本必须等于 pyproject 版本（现 2.3.2），漏改则装出的 --version 与包版本不一致。
 run.js[XV4S]: F:Launcher script: locates the installed jarvis entry point and forwards the command-line arguments to it. | R:- | A:- | S:A wrapper launcher must resolve the real entry point and pass arguments through unchanged.
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/packaging/===
