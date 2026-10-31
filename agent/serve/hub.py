@@ -38,7 +38,7 @@ from typing import Any, Callable
 
 from agent.config.settings import Settings
 from agent.core.daemon.deadline import DeadlineTracker
-from agent.core.daemon.proactive import ProactiveConfig, ProactiveEngine
+from agent.core.daemon.proactive_wiring import build_proactive_engine
 from agent.core.daemon.scheduler import Scheduler, ScheduleTask
 from agent.core.policy import get_budget  # W1 打扰预算（阶段 8）@author aceFelix
 from agent.serve import protocol
@@ -168,34 +168,12 @@ class ProactiveHub:
         self._current_tts: Any = None
         self._scheduler = Scheduler(on_fire=self._on_fire)
         self._deadline_tracker = DeadlineTracker()
-        self._engine = ProactiveEngine(
-            scheduler=self._scheduler,
-            config=ProactiveConfig(
-                briefing_enabled=settings.briefing_enabled,
-                briefing_time=settings.briefing_time,
-                deadline_enabled=settings.deadline_enabled,
-                deadline_check_time=settings.deadline_check_time,
-                # 日历源与系统监控本期不接线（二期），传 None 即优雅降级
-                calendar_enabled=False,
-                profile_maintenance_enabled=True,
-                # 自动清理：两个开关同时成立才启用（总闸 + 子闸），
-                # 与 REPL 路径（cli_reminder）保持同一口径
-                auto_clean_enabled=(
-                    bool(getattr(settings, "maintenance_enabled", False))
-                    and bool(getattr(settings, "maintenance_auto_clean_enabled", False))
-                ),
-                auto_clean_time=str(
-                    getattr(settings, "maintenance_auto_clean_time", "04:30") or "04:30"
-                ),
-                auto_clean_min_mb=float(
-                    getattr(settings, "maintenance_auto_clean_min_mb", 20.0) or 0.0
-                ),
-            ),
+        # 装配（含日历源与系统监控实例）：细节在 proactive_wiring，那段是纯
+        # 「配置 → 实例」，搬出去是为了 hub 别继续往 800 行上挤。
+        self._engine = build_proactive_engine(
+            settings, scheduler=self._scheduler,
             deadline_tracker=self._deadline_tracker,
-            on_notify=self._on_notify,
-            # 打扰预算闸门：settings 已注入 init_policy 时按配置建单例，
-            # 未启用预算（notify_budget_enabled=False）时 None=直接播 @author aceFelix
-            budget=get_budget(),
+            on_notify=self._on_notify, budget=get_budget(),
         )
         self._started = False
         self._catchup_timer: threading.Timer | None = None

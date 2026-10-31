@@ -291,11 +291,13 @@ def test_system_state_never_samples():
 def test_system_thresholds_come_from_settings():
     """阈值必须来自 settings.monitor_*，不另造一份（否则面板调的不是生效值）。"""
     src = SystemSource(cpu_threshold=70.0, memory_threshold=80.0, disk_threshold=5.0,
-                       alert_cooldown=120, disk_trend_days=3)
+                       alert_cooldown=120, disk_trend_days=3, work_break_interval=3600)
     th = src.state()["thresholds"]
+    # ``work_break_interval`` 也在这张表里：久坐提醒的判定在 ``SystemMonitor._do_check``，
+    # 而本源是它唯一的驱动点，不传下来字段就改不动。
     assert th == {
         "cpu_threshold": 70.0, "memory_threshold": 80.0, "disk_threshold": 5.0,
-        "alert_cooldown": 120, "disk_trend_days": 3,
+        "alert_cooldown": 120, "disk_trend_days": 3, "work_break_interval": 3600,
     }
 
 

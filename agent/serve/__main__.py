@@ -23,4 +23,9 @@ if __name__ == "__main__":
     _restore = get_last_active_existing()
     if _restore:
         _settings = _settings.with_overrides(workdir=_restore)
+    # 技能包 / 插件系统总开关：桌面壳走这条路进 serve，不经过 main()，
+    # 所以这里得单独接一下，否则面板里关掉了模型还在用。@author aceFelix
+    from agent.bootstrap import init_extension_switches
+
+    init_extension_switches(_settings)
     sys.exit(run_serve(_settings))

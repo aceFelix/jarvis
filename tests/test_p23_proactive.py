@@ -94,13 +94,11 @@ if monitor.available:
     prediction = monitor.predict_disk_full()
     print(f"  [OK] 磁盘记录完成，预测结果: {prediction or '数据不足/无趋势'}")
 
-    # 工作时长
+    # 工作时长（久坐提醒已挂进 _do_check，这里只验底层取值能力）
     idle = monitor.get_idle_time_seconds()
     print(f"  [OK] 用户空闲时间: {idle:.1f}s" if idle else "  [SKIP] 非Windows，跳过")
 
-    # 异常进程
-    procs = monitor.check_high_cpu_processes()
-    print(f"  [OK] 高CPU进程: {len(procs)} 个")
+    # 异常进程检测已下线：功能由 /health 的进程 Top N 取代（带 CPU/内存/启动时间）
 else:
     print("  [SKIP] psutil 未安装，跳过监控测试")
 

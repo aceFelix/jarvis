@@ -27,6 +27,12 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from agent.config.catalog import (
+    describe_missing,
+    render_entries,
+    render_overview,
+    search_catalog,
+)
 from agent.config.config_ops import (
     ENTRY_TERMINAL,
     apply_config_patch,
@@ -302,10 +308,29 @@ _CONFIG_USAGE = (
     "  /config                     查看当前生效的完整配置\n"
     "  /config show                同上\n"
     "  /config list                列出可以改哪些项（协议键 / 当前值 / 要不要确认）\n"
+    "  /config explain <关键词>     查全部配置的说明、当前值与改法（如：自动清理 / 邮件 / monitor）\n"
+    "  /config explain --overview  按段看有哪些配置\n"
     "  /config set <键> <值>        改一项（需确认的项会先给预览）\n"
     "  /config set <键> <值> --yes  确认执行\n"
     "  清空名单类：/config set <键> \"\""
 )
+
+
+def _handle_explain(ctx: "CommandContext", body: str) -> None:
+    """/config explain [关键词|--overview]：与模型侧 ConfigExplain 同一份目录。
+
+    给人用的入口意义在于**不必先知道对方是 Agent**：用户自己翻两百行 TOML 时，
+    敲这一句比问模型快，也不用把话包装成对话。
+    """
+    if ctx.settings is None:
+        ctx.ui.warn("当前没有配置实例")
+        return
+    arg = body.strip()
+    if not arg or arg in ("--overview", "overview", "-o"):
+        ctx.ui.info(_esc(render_overview()))
+        return
+    entries = search_catalog(arg, limit=20)
+    ctx.ui.info(_esc(render_entries(entries, ctx.settings)))
 
 
 def _handle_list(ctx: "CommandContext") -> None:
@@ -346,8 +371,15 @@ def _handle_set(ctx: "CommandContext", body: str) -> None:
 
     spec = get_spec(key)
     if spec is None:
-        ctx.ui.warn(f"不认识的配置项 {key}")
-        ctx.ui.info("用 /config list 看可用键。")
+        # “表里没有”有两种完全不同的实情，必须分开说：这项**根本不存在**，与这项
+        # **存在但没进真源表**（只能改文件）。混成一句“不认识的配置项”会让用户
+        # 以为自己拼错了，然后去两百行 TOML 里白找。
+        hint = describe_missing(key)
+        if hint:
+            ctx.ui.info(hint)
+        else:
+            ctx.ui.warn(f"没有 {key} 这个配置项")
+            ctx.ui.info("用 /config list 看可代改的键；/config explain <关键词> 查全部配置。")
         return
 
     # 名单类允许清空，但必须显式写一对引号——裸写一个键就清空太容易误伤
@@ -403,6 +435,8 @@ def handle_config_show(ctx: "CommandContext", stripped: str) -> bool:
     sub = parts[1].lower() if len(parts) > 1 else ""
     if sub == "list":
         _handle_list(ctx)
+    elif sub == "explain":
+        _handle_explain(ctx, parts[2] if len(parts) > 2 else "")
     elif sub == "set":
         _handle_set(ctx, parts[2] if len(parts) > 2 else "")
     elif sub in ("", "show"):

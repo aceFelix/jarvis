@@ -154,12 +154,24 @@ def test_mixed_patch_asks_because_one_item_needs_confirm(ctx):
         ({}, "patch 必须是非空对象"),
         ({"patch": {}}, "patch 必须是非空对象"),
         ({"patch": "不是对象"}, "patch 必须是非空对象"),
-        ({"patch": {"no_such_key": 1}}, "不认识的配置项"),
+        # 改文案是有意的：真不存在的名字说“没有”，存在但只能改文件的另有一套说法
+        # （见下面那条用例）——“不认识”这个措辞把两者混成了一句话。
+        ({"patch": {"no_such_key": 1}}, "没有 no_such_key 这个配置项"),
     ],
 )
 def test_validate_input_rejects_bad_patch(ctx, args, frag):
     check = ConfigSetTool().validate_input(args, ctx)
     assert check.ok is False and frag in (check.message or "")
+
+
+def test_validate_input_distinguishes_unmanaged_from_absent(ctx):
+    """存在但没进真源表的键，要把模型引向 ConfigExplain，而不是让它猜“没这项”。"""
+    check = ConfigSetTool().validate_input({"patch": {"smtp_host": "smtp.163.com"}}, ctx)
+    assert check.ok is False
+    message = check.message or ""
+    assert "smtp_host" in message
+    assert "ConfigExplain" in message
+    assert "没有 smtp_host 这个配置项" not in message
 
 
 def test_validate_input_accepts_forbidden_key_so_deny_can_explain(ctx):

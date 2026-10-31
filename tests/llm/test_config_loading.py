@@ -176,7 +176,11 @@ class TestApplyToml:
         assert result.email_smtp_port == 465
 
     def test_daemon_subtable_mapping(self) -> None:
-        """[daemon] 表字段应映射到主动播报/热键字段（含新增补播窗口）。"""
+        """[daemon] 表字段应映射到简报与主动播报字段（含补播窗口）。
+
+        热键三项已于 2026-11-01 随 ``agent/daemon/`` 整包下线，这里刻意多写一个
+        ``hotkey`` 键：旧配置里残留它时，加载器必须静默忽略而不是报错。
+        """
         s = Settings()
         # 默认值：补播窗口 120 分钟（与旧常量一致，向后兼容）
         assert s.briefing_catchup_window_min == 120
@@ -185,13 +189,13 @@ class TestApplyToml:
                 "briefing_enabled": False,
                 "briefing_time": "09:15",
                 "briefing_catchup_window_min": 45,
-                "hotkey": "ctrl+alt+j",
+                "hotkey": "ctrl+alt+j",   # 已下线的旧字段：可带上，应被忽略
             }
         })
         assert result.briefing_enabled is False
         assert result.briefing_time == "09:15"
         assert result.briefing_catchup_window_min == 45
-        assert result.daemon_hotkey == "ctrl+alt+j"
+        assert not hasattr(result, "daemon_hotkey"), "热键字段已删除，不该复活"
 
     def test_llm_models_subtable(self) -> None:
         """[llm.models] 应映射到 models 字典。"""

@@ -6,8 +6,13 @@
 
 P2-3 增强：
 - 磁盘趋势预测：记录每日磁盘使用率，线性回归预测 N 天后将满
-- 异常进程检测：CPU 占用 > 50% 持续 N 分钟的进程通知用户
 - 工作时长提醒：检测用户连续工作时长，超时提醒休息
+
+**异常进程检测已下线**（2026-10-31）：原来的 ``check_high_cpu_processes()`` 只返回
+``"chrome.exe (PID: 1) CPU: 67%"`` 这种字符串，而 ``core/maintenance/health.py`` 的
+进程区块给的是 CPU + 内存 + 启动时间的结构化 Top N，且遵循「只发现、只解释、只建议」
+的处置原则。两套并存只会让人搞不清该信哪个，故删除本模块那份，需要看进程请用
+``/health``。
 
 依赖: psutil（跨平台系统信息库）。未安装时监控不可用，不影响其他功能。
 
@@ -16,8 +21,7 @@ P2-3 增强：
 - **内存**: 使用率 > 90% 告警
 - **磁盘**: 剩余空间 < 10% 告警（系统盘 C:）
 - **磁盘趋势**: 预测 N 天内将满时提前告警
-- **异常进程**: CPU > 50% 持续 10 分钟的进程
-- **工作时长**: 连续工作超过 2 小时提醒休息
+- **工作时长**: 连续工作超过 2 小时提醒休息（详见 ``check_work_break``）
 
 告警去重:
 - 同一告警类型 10 分钟内不重复触发（避免"内存满了"每 30 秒报一次烦人）
@@ -52,8 +56,11 @@ DEFAULT_CHECK_INTERVAL = 10        # 检查间隔（秒）
 DEFAULT_ALERT_COOLDOWN = 600       # 同类告警冷却时间（秒，10分钟）
 # P2-3 增强默认值
 DEFAULT_DISK_TREND_DAYS = 7        # 磁盘趋势预测：预测几天后将满
-DEFAULT_HIGH_CPU_DURATION = 600    # 异常进程：高 CPU 持续秒数阈值
 DEFAULT_WORK_BREAK_INTERVAL = 7200 # 工作时长：连续工作多少秒提醒休息
+#: 判“真的离位了”的空闲阈值（秒）。低于它算“还在工位上”继续累计，超过它
+#: 才把久坐计时归零。定成 5 分钟而非几十秒：集中写代码时几十秒不碰键鼠太常见，
+#: 阈值太小会让用户每停一下就把 2 小时的账清零，久坐提醒永远攒不满。
+WORK_BREAK_IDLE_RESET = 300
 
 
 @dataclass
@@ -68,7 +75,6 @@ class MonitorConfig:
     enabled: bool = True
     # P2-3 增强
     disk_trend_days: int = DEFAULT_DISK_TREND_DAYS
-    high_cpu_duration: int = DEFAULT_HIGH_CPU_DURATION
     work_break_interval: int = DEFAULT_WORK_BREAK_INTERVAL
 
 
@@ -129,6 +135,9 @@ class SystemMonitor:
         self._cpu_high_since: float | None = None  # CPU 开始超阈值的时间戳
         self._last_alert: dict[str, float] = {}     # alert_type -> 上次告警时间戳
         self._alert_active: dict[str, bool] = {}    # alert_type -> 当前是否告警中
+        # 久坐计时起点（None=还没开始计）。以前用 ``hasattr(self, '_work_start_time')``
+        # 懒初始化——那种写法在属性名走样时会静默失效，这里改成显式字段。
+        self._work_start_time: float | None = None
 
         # 检查 psutil 是否可用
         try:
@@ -299,6 +308,28 @@ class SystemMonitor:
                         threshold=self._config.disk_threshold,
                     ))
 
+        # ---- 久坐提醒（P2-3）----
+        # 前三项是“机器到危险线了”，这一项是“人该歇了”——两种性质不同，所以不走
+        # ``_make_alert``：它的 ``alert_cooldown`` 管的是“同一件事多久不再说”，
+        # 而久坐提醒的节流靠 ``check_work_break`` 自己“说过就重置计时”，天然就是
+        # 一个 ``work_break_interval`` 长的周期，再套冷却只会把间隔拉得更长。
+        #
+        # 以前 ``check_work_break`` 写完整了却**没挂在这里**，所以配置项改了也白改：
+        # 这条链是 ``SystemSource.collect()``（每 60s）→ ``check_now()`` → 本方法，
+        # 是全工程唯一在跑的监控驱动点（``start()`` 从来没被调用过）。
+        try:
+            rest_text = self.check_work_break()
+        except Exception:
+            rest_text = None
+        if rest_text:
+            alerts.append(AlertInfo(
+                alert_type="work_break",
+                level="warning",
+                message=rest_text,
+                value=float(self._config.work_break_interval),
+                threshold=float(self._config.work_break_interval),
+            ))
+
         # 触发回调
         for alert in alerts:
             try:
@@ -436,33 +467,6 @@ class SystemMonitor:
         except Exception:
             pass
 
-    # ---- P2-3 增强：异常进程检测 ----
-
-    def check_high_cpu_processes(self) -> list[str]:
-        """检测 CPU 占用异常高的进程。
-
-        返回 CPU > 50% 的进程信息列表。
-        由 ProactiveEngine 定期检查，或用户主动询问时调用。
-        """
-        if not self._available:
-            return []
-        try:
-            import psutil
-            results = []
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
-                try:
-                    info = proc.info
-                    cpu = info.get('cpu_percent', 0) or 0
-                    if cpu > 50.0:
-                        results.append(
-                            f"{info.get('name', '?')} (PID: {info.get('pid', '?')}) CPU: {cpu:.0f}%"
-                        )
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            return results
-        except Exception:
-            return []
-
     # ---- P2-3 增强：工作时长提醒 ----
 
     def get_idle_time_seconds(self) -> float | None:
@@ -489,36 +493,42 @@ class SystemMonitor:
     def check_work_break(self) -> str | None:
         """检查是否需要提醒用户休息。
 
-        如果用户连续工作超过 work_break_interval 秒（键鼠活跃），
-        返回提醒文本。否则返回 None。
+        连续工作时长靠“键鼠有多久没动”反推：空闲短于
+        :data:`WORK_BREAK_IDLE_RESET` 视为还在工位上，继续累计；一旦超过它，
+        判定为真中断（开会、午休、走开），计时从真正回来的那一刻重新起算。
+
+        以前这里用的是“空闲 < 60 秒就算在工作”，与``work_break_interval``
+        （默认 2 小时）根本对不上：用户只要发一会儿呆、读段文档，计时就归零，
+        2 小时永远攒不满。这也是该功能尽管测试全绿却从未真正触发过的原因之一。
+
+        Returns:
+            该休息时的提醒文本；不需要提醒时返回 ``None``。
         """
         idle = self.get_idle_time_seconds()
         if idle is None:
             return None
 
-        break_interval = self._config.work_break_interval
-        # 如果空闲时间很短（< 60秒），说明用户正在活跃操作
-        # 用“总运行时间 - 空闲时间”粗略估算连续工作时长
-        # 简化方案：如果空闲 < 60s，认为用户在工作中，检查 daemon 运行时长
-        if idle < 60:
-            # 用户正在操作，检查是否超过休息间隔
-            # 用 _work_start_time 跟踪
-            now = time.time()
-            if not hasattr(self, '_work_start_time'):
-                self._work_start_time = now
-                return None
-            work_duration = now - self._work_start_time
-            if work_duration >= break_interval:
-                hours = int(work_duration // 3600)
-                minutes = int((work_duration % 3600) // 60)
-                # 重置计时器（下次再等 break_interval）
-                self._work_start_time = now
-                return (
-                    f"先生，您已连续工作 {hours} 小时 {minutes} 分钟了。"
-                    f"建议起身活动一下，喝杯水，让眼睛休息休息。"
-                )
-        else:
-            # 用户空闲中，重置工作计时
-            if hasattr(self, '_work_start_time'):
-                self._work_start_time = time.time()
-        return None
+        now = time.time()
+        # 离位够久：不是“没在干活”，而是“已经歇过了”，计时从头再来。
+        # 起点用 ``now - idle`` 而不是 ``now``——这样即使隔一分钟才轮询一次，
+        # 也是从用户真正落座那一刻开始算。
+        if idle >= WORK_BREAK_IDLE_RESET:
+            self._work_start_time = now - idle
+            return None
+        if self._work_start_time is None:
+            self._work_start_time = now - idle
+            return None
+
+        work_duration = now - self._work_start_time
+        if work_duration < self._config.work_break_interval:
+            return None
+
+        hours = int(work_duration // 3600)
+        minutes = int((work_duration % 3600) // 60)
+        # 提醒过就重置计时（下一轮再从零攒 ``work_break_interval``），
+        # 否则每 60 秒都会重算一次并重复告警。
+        self._work_start_time = now
+        return (
+            f"先生，您已连续工作 {hours} 小时 {minutes} 分钟了。"
+            f"建议起身活动一下，喝杯水，让眼睛休息休息。"
+        )

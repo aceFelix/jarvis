@@ -162,7 +162,7 @@ remind_minutes_before = 30     # 事件前多少分钟提醒
 
 [monitor]
 disk_trend_days = 7            # 磁盘趋势预测：预测几天后将满
-high_cpu_duration = 600        # 异常进程：CPU > 50% 持续多少秒通知
+high_cpu_duration = 600        # 【已于 2026-10-31 下线：功能由 /health 进程 Top N 取代】
 work_break_interval = 7200     # 连续工作多少秒提醒休息（2小时）
 ```
 
@@ -177,7 +177,16 @@ work_break_interval = 7200     # 连续工作多少秒提醒休息（2小时）
 - [x] 提醒触发后未确认自动升级（5→10→20 分钟，最多 3 次）。
 - [x] AcknowledgeReminder 工具可确认提醒，停止升级。
 - [x] 磁盘趋势预测：线性回归拟合历史数据，提前 N 天预警。
-- [x] 工作时长提醒：连续工作 2 小时后提醒休息（Windows GetLastInputInfo）。
+- [x] 工作时长提醒：连续活跃超过 `work_break_interval` 后提醒休息（Windows GetLastInputInfo）。
+      **血泪注**（2026-10-31 补记）：当年这一条打勾时，方法写了、单测也有 10 例全绿，
+      但它**不在 `_do_check()` 里**，而 `_do_check()` 是全工程唯一的监控驱动点
+      （`SystemSource.collect()` → `check_now()`；`SystemMonitor.start()` 从未被调用）。
+      测试直接调方法、绕过真实入口，所以绿得毫无意义。同日才真接上，并把
+      “空闲 60 秒就清零计时”改成“离开超 5 分钟才算中断”。
+      **教训：验收要问“它在真实链路上会被调到吗”，不是“方法本身能不能跑”。**
+- [x] 异常进程检测 —— 【已下线】原方法只返回 `"chrome.exe (PID: 1) CPU: 67%"` 字符串，
+      而 `/health` 的进程区块给的是 CPU + 内存 + 启动时间的结构化 Top N 且只建议不动手，
+      两套并存只会让人分不清该信哪个。
 - [x] 日历集成：Outlook COM 优先，回退 ICS 文件/URL（默认关闭，需配置启用）。
 - [x] 所有新模块编译通过、导入正常、配置加载正确。
 - [x] README.md + roadmap 文档已更新。

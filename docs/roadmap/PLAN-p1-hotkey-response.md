@@ -1,8 +1,13 @@
 # P1-2 更快的热键响应 — 升级方案（历史文档）
 
-> ⚠️ 2026-08 更新：常驻托盘模式已下线，本方案中 `text_terminal_warm` 配置与终端派生路径已移除；
-> 热键能力（`hotkey` / `hotkey_native` / `hotkey_debounce_ms`）保留，待三栏工作台（一期已落地）接线。
-> 以下为历史实现记录。
+> ⚠️ 2026-08 更新：常驻托盘模式已下线，本方案中 `text_terminal_warm` 配置与终端派生路径已移除。
+>
+> ❌ **2026-11-01：本方案整体作废。** 热键能力（`hotkey` / `hotkey_native` /
+> `hotkey_debounce_ms`）连同 `agent/daemon/` 整包已删除——它服务的 pywebview 工作台
+> 早已退役，而新宿主 jarvis-desktop（Electron）自带 `globalShortcut`，桌面热键应在
+> Electron 主进程实现，不需要 Python 侧抢系统热键。
+>
+> 以下内容仅作历史实现记录保留，**不可照着接线**。
 
 
 > 目标：把「全局热键按下 → 文本对话窗口可输入」的耗时控制在 **500ms** 以内。

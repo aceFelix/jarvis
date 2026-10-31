@@ -51,17 +51,14 @@
 > 📌 更早之前的桌面快捷方式（`desktop` / `desktop-uninstall` / `desktop-status` 子命令）
 > 已于 2026-09 下线；存量桌面 JARVIS.lnk 可直接手动删除。
 
-## 全局热键（保留待接线）
+## 全局热键（已下线）
 
-全局热键能力已保留（Windows 默认用原生 `RegisterHotKey`），原为 GUI 工作台的「热键召唤
-窗口」预留；窗口壳退役后该能力尚未接线，由桌面壳或后续方案自行调用：
+全局热键已于 2026-11-01 从本仓库整体删除（`agent/daemon/` 整包，含 keyboard / pynput /
+原生 RegisterHotKey 三条后端）。它原本只服务于已退役的 pywebview 工作台「热键召唤
+窗口」；现在的宿主 jarvis-desktop 是 Electron 应用，自带 `globalShortcut`，注册系统级
+快捷键是原生能力——真要做桌面热键应该做在 Electron 主进程里。
 
-```toml
-[daemon]
-hotkey = "ctrl+shift+j"        # 全局热键
-hotkey_native = true            # Windows 优先使用 RegisterHotKey（更快）
-hotkey_debounce_ms = 200        # 去抖毫秒，防止一次按下触发多次
-```
+旧配置里留着 `[daemon] hotkey = "..."` 不会报错：加载器对未知键静默忽略。
 
 REPL 仍可用 `--quick` 快速启动，跳过开机动画、MCP、LSP 等可选初始化，首次调用相关命令时再懒加载：
 
@@ -245,16 +242,15 @@ vision_auto_stop_minutes = 0  # >0：空闲自动关摄像头（更省隐私，�
 
 ```toml
 [monitor]
-enabled = true
+# 开关不在这段：真正管监控启停的是 [percept] system_enabled（旧的 enabled 字段已删）
 cpu_threshold = 85.0       # CPU 超 85% 持续 30s 告警
 memory_threshold = 90.0    # 内存超 90% 告警
 disk_threshold = 10.0      # 磁盘剩余低于 10% 告警
-check_interval = 10        # 检查间隔（秒）
+check_interval = 60        # 采样间隔（秒），感知源多久拉一次快照
 alert_cooldown = 600       # 同类告警冷却（10 分钟）
 # P2-3 增强
 disk_trend_days = 7        # 磁盘趋势预测：预测几天后将满
-high_cpu_duration = 600    # 异常进程：CPU > 50% 持续多少秒通知
-work_break_interval = 7200 # 连续工作 2 小时提醒休息
+work_break_interval = 7200 # 连续活跃多久提醒休息；离开超 5 分钟才算中断
 ```
 
 ## 跨设备协同（P3-1）

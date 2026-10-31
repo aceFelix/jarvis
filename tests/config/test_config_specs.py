@@ -142,6 +142,70 @@ def test_interrupt_and_scope_items_require_confirm():
         assert get_spec(key).tier == TIER_CONFIRM
 
 
+# ---- 阶段 12 补齐：监控阈值 / 上下文压缩 / 能力总开关 ----
+
+
+def test_monitor_thresholds_apply_via_percept():
+    """``[monitor]`` 阈值由 ``percept/factory.py`` 造 ``SystemSource`` 时吃进。
+
+    标成 ``live`` 就是"只落盘不生效"：改运行时 Settings 不会让已经装好的源换
+    阈值，用户会以为调了、实际一路沿用旧值。
+    """
+    for key in (
+        "cpu_threshold", "memory_threshold", "disk_threshold",
+        "alert_cooldown", "disk_trend_days", "check_interval", "work_break_interval",
+    ):
+        spec = get_spec(key)
+        assert spec is not None, f"{key} 没进真源表"
+        assert spec.apply_mode == APPLY_PERCEPT, f"{key} 的 apply_mode 标错了"
+
+
+def test_factory_really_passes_work_break_interval_to_system_source():
+    """真跑一遍 factory，确认 ``work_break_interval`` 落到了源上。
+
+    这条盯的是本次修过的那类毛病：字段存在、真源表收得下、单测全绿，但装配
+    那一行忘了传——用户改了配置，值却停在默认的 2 小时，而且没有任何地方报错。
+    """
+    from agent.config.settings import Settings
+    from agent.core.percept.event import SOURCE_SYSTEM
+    from agent.core.percept.factory import build_sources
+
+    settings = Settings(monitor_work_break_interval=1800, monitor_check_interval=30)
+    sources = {src.name: src for src, _enabled in build_sources(settings)}
+    system = sources[SOURCE_SYSTEM]
+    assert system.state()["thresholds"]["work_break_interval"] == 1800
+    assert system.interval_s == 30.0, "check_interval 没落到源的采集节拍上"
+
+
+def test_context_and_capability_switches_need_restart():
+    """上下文参数与能力总开关都在启动/重建 engine 时构造，改完必须重启。"""
+    for key in (
+        "context_compaction", "context_window", "compact_ratio",
+        "compact_max_output_tokens",
+        "enable_mcp", "enable_lsp", "deferred_loading", "chat_detection",
+    ):
+        spec = get_spec(key)
+        assert spec is not None, f"{key} 没进真源表"
+        assert spec.apply_mode == APPLY_RESTART, f"{key} 标成 {spec.apply_mode} 会让回执说假话"
+
+
+def test_dead_settings_never_enter_the_spec_table():
+    """当前版本没人读的字段（``catalog.DEAD_FIELDS``）必须留在表外。
+
+    纳管它们等于把用户推到“改一个没用的开关”上去——比“不能代改”更糟。
+    """
+    from agent.config.catalog import DEAD_FIELDS
+
+    leaked = [s.key for s in CONFIG_SPECS if s.attr in DEAD_FIELDS]
+    assert leaked == [], f"死配置进了真源表（改了也不生效）: {leaked}"
+
+
+def test_capability_switches_require_confirm():
+    """关 MCP / 关 LSP / 关延迟加载都在改"能干什么活"，必须 confirm。"""
+    for key in ("enable_mcp", "enable_lsp", "deferred_loading"):
+        assert get_spec(key).tier == TIER_CONFIRM
+
+
 # ---- 禁改项 ----
 
 

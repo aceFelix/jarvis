@@ -68,8 +68,10 @@ class CliSpineHost:
         @author aceFelix
         """
         try:
-            from agent.bootstrap import init_actions
+            from agent.bootstrap import init_actions, init_extension_switches
 
+            # 任务宿主是子进程，同样不经 main()：技能包/插件开关得在这里补一次
+            init_extension_switches(self._settings)
             for stale in init_actions(self._settings):
                 self._ui.warn(
                     f"上次进程遗留一项未发出的预约动作已按取消处理：{stale.label}（/undo list 可查）"

@@ -114,11 +114,38 @@ def _scan_skills_dir(base: Path, source: str) -> list[Skill]:
     return skills
 
 
+#: 技能包总开关（``settings.enable_skills`` 在启动时经 ``set_skills_enabled`` 写入）。
+#:
+#: 为什么用模块级而不是逐层传参：加载入口散在 UI、工具、命令三条路上的八处调用，
+#: 逐层传参漏一处就会出现“面板里关掉了、模型还在用”。``None`` 表示还没初始化，按
+#: 开处理，这样测试与纯库调用不必先设它。
+_ENABLED: bool | None = None
+
+
+def set_skills_enabled(enabled: bool | None) -> None:
+    """写入技能总开关（启动时调一次；传 ``None`` 可恢复“未初始化”）。
+
+    Args:
+        enabled: ``False`` 时 ``load_skills`` 与 ``list_skill_files`` 一律回空。
+    """
+    global _ENABLED
+    _ENABLED = None if enabled is None else bool(enabled)
+
+
+def skills_enabled() -> bool:
+    """当前技能总开关是否开着（未初始化按开处理）。"""
+    return _ENABLED is not False
+
+
 def load_skills(workdir: str) -> list[Skill]:
     """加载所有 skill（用户级 + 项目级）。
 
     优先级: 项目级 > 用户级（项目级更具体，同名时覆盖用户级）。
+
+    总开关关着时直接返回空表：调用方不用各自判，也不会出现“关了一半”。
     """
+    if not skills_enabled():
+        return []
     user_dir = Path.home() / ".jarvis" / "skills"
     proj_dir = Path(workdir) / ".jarvis" / "skills"
 
@@ -203,7 +230,13 @@ def skills_section(workdir: str) -> str:
 
 
 def list_skill_files(workdir: str) -> dict[str, list[Path]]:
-    """返回各来源的 skill 目录路径（供 /skills 命令展示）。"""
+    """返回各来源的 skill 目录路径（供 /skills 命令展示）。
+
+    总开关关着时回空表：面板与 /skills 应该跟模型看到的一致，否则会出现
+    “列出十个技能、模型一个都用不了”。
+    """
+    if not skills_enabled():
+        return {"user": [], "project": []}
     user_dir = Path.home() / ".jarvis" / "skills"
     proj_dir = Path(workdir) / ".jarvis" / "skills"
     return {"user": user_dir, "project": proj_dir}

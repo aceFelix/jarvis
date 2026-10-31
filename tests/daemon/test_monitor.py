@@ -137,7 +137,6 @@ class TestModels:
         assert cfg.alert_cooldown == 600
         assert cfg.enabled is True
         assert cfg.disk_trend_days == 7
-        assert cfg.high_cpu_duration == 600
         assert cfg.work_break_interval == 7200
 
     def test_alert_info_default_timestamp(self):
@@ -484,40 +483,11 @@ class TestDiskHistory:
 
 
 class TestProcessAndWork:
-    """check_high_cpu_processes / get_idle_time_seconds / check_work_break。"""
+    """get_idle_time_seconds / check_work_break。
 
-    def test_high_cpu_processes(self, env, make_monitor, monkeypatch):
-        class FakeProc:
-            def __init__(self, info):
-                self._info = info
-
-            @property
-            def info(self):
-                if isinstance(self._info, Exception):
-                    raise self._info
-                return self._info
-
-        procs = [
-            FakeProc({"pid": 1, "name": "chrome", "cpu_percent": 80.0}),
-            FakeProc({"pid": 2, "name": "notepad", "cpu_percent": 5.0}),
-            FakeProc(psutil.NoSuchProcess(pid=3)),
-            FakeProc(psutil.AccessDenied(pid=4)),
-        ]
-        monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: procs)
-        monitor, _ = make_monitor()
-        result = monitor.check_high_cpu_processes()
-        assert len(result) == 1
-        assert "chrome (PID: 1) CPU: 80%" in result[0]
-
-    def test_high_cpu_processes_not_available(self, env, monkeypatch):
-        monkeypatch.setitem(sys.modules, "psutil", None)
-        monitor = SystemMonitor(config=MonitorConfig(), on_alert=lambda a: None)
-        assert monitor.check_high_cpu_processes() == []
-
-    def test_high_cpu_processes_iter_exception(self, env, make_monitor, monkeypatch):
-        monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: (_ for _ in ()).throw(RuntimeError("x")))
-        monitor, _ = make_monitor()
-        assert monitor.check_high_cpu_processes() == []
+    ``check_high_cpu_processes`` 已下线（功能由 ``/health`` 的进程 Top N 取代），
+    对应的用例一并删除。
+    """
 
     def test_idle_time_non_windows(self, env, make_monitor, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
@@ -563,7 +533,7 @@ class TestProcessAndWork:
         assert monitor.check_work_break() is None
 
     def test_work_break_active_user_flow(self, env, make_monitor, monkeypatch):
-        """用户活跃（idle<60s）：首次记录开始时间，超时后提醒并重置。"""
+        """用户活跃（空闲未到 5 分钟的中断线）：首次记时间，超时后提醒并重置。"""
         now = {"t": 1000.0}
         monkeypatch.setattr(env.time, "time", lambda: now["t"])
         monitor, _ = make_monitor()
@@ -594,3 +564,55 @@ class TestProcessAndWork:
         monkeypatch.setattr(monitor, "get_idle_time_seconds", lambda: 300.0)  # 空闲 5 分钟
         now["t"] = 5000.0
         assert monitor.check_work_break() is None  # 空闲重置计时，不提醒
+
+    def test_work_break_short_pause_does_not_reset(self, env, make_monitor, monkeypatch):
+        """空闲超过 60 秒但没到 5 分钟：算“还在工位”，继续累计，不清零。
+
+        这条盯的是老实现的缺陷：以前“空闲 ≥60 秒”就把计时归零，用户读一段
+        文档、想一会儿问题就把 2 小时的账清掉，``work_break_interval`` 永远攒不满。
+        """
+        now = {"t": 1000.0}
+        monkeypatch.setattr(env.time, "time", lambda: now["t"])
+        monitor, _ = make_monitor()
+        monkeypatch.setattr(monitor, "get_idle_time_seconds", lambda: 5.0)
+        monitor.check_work_break()  # 开始计时（t=1000）
+        # 攒满 2 小时，期间“想了 3 分钟问题”——超过 60 秒，但没到 5 分钟的中断线
+        now["t"] = 1000.0 + 7200
+        monkeypatch.setattr(monitor, "get_idle_time_seconds", lambda: 180.0)
+        text = monitor.check_work_break()
+        assert text is not None, "3 分钟停顿不该把 2 小时的账清掉"
+
+    def test_work_break_wired_into_do_check(self, env, make_monitor, monkeypatch):
+        """久坐提醒必须由 ``_do_check`` 产出告警。
+
+        这条是复核本次修的那个毛病：以前 ``check_work_break`` 写得完整、单测也
+        全绿，但它不在 ``_do_check`` 里，而 ``_do_check`` 是全工程唯一的监控驱动点
+        （``SystemSource.collect`` → ``check_now``，``start()`` 从未被调用）。
+        结果就是字段改了不生效、提醒永远不响。
+        """
+        monitor, _ = make_monitor()
+        monkeypatch.setattr(psutil, "cpu_percent", lambda interval=0: 10.0)
+        monkeypatch.setattr(
+            psutil, "virtual_memory", lambda: MagicMock(percent=40.0, available=1)
+        )
+        monkeypatch.setattr(psutil, "disk_usage", lambda p: MagicMock(percent=50.0, free=1))
+        monkeypatch.setattr(monitor, "check_work_break", lambda: "先生，该起来走走了")
+        alerts = monitor.check_now()
+        assert [a.alert_type for a in alerts] == ["work_break"]
+        assert alerts[0].message == "先生，该起来走走了"
+        assert alerts[0].level == "warning"
+
+    def test_work_break_survives_exception(self, env, make_monitor, monkeypatch):
+        """久坐判定抛错不能拖垮整个采样循环（CPU/内存/磁盘还在工作）。"""
+        monitor, _ = make_monitor()
+        monkeypatch.setattr(psutil, "cpu_percent", lambda interval=0: 10.0)
+        monkeypatch.setattr(
+            psutil, "virtual_memory", lambda: MagicMock(percent=40.0, available=1)
+        )
+        monkeypatch.setattr(psutil, "disk_usage", lambda p: MagicMock(percent=50.0, free=1))
+
+        def _boom():
+            raise RuntimeError("ctypes 挂了")
+
+        monkeypatch.setattr(monitor, "check_work_break", _boom)
+        assert monitor.check_now() == []

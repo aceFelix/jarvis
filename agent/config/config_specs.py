@@ -272,6 +272,194 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "留底是复制不是硬链接，单次超过这个体积的目录就不留底（避免写满磁盘）",
         tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, lo=1, hi=1024, default=64,
     ),
+    # ---- 系统维护层（阶段 12 维护切片）：清理能清多少、什么时候清 ----
+    #
+    # 一律不标 ``reschedule``：自动清理任务确实是启动时注册的快照，但
+    # ``hot_update_schedule`` 目前只重注册简报/截止日期，不含自动清理。标成
+    # reschedule 会回一句“已按新配置重注册”——而实际什么也没变，比不标更糟。
+    # 所以能现读的标 live，注册期快照标 restart，各自把话说准。
+    ConfigSpec(
+        "maintenance_enabled", "maintenance", "enabled", "maintenance_enabled", "bool",
+        "系统维护总开关",
+        "唯一会主动删文件的子系统的总闸；关着时 /disk 与 /health 仍可用，只有 /clean 报未启用",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=False,
+    ),
+    ConfigSpec(
+        "auto_clean_enabled", "maintenance", "auto_clean_enabled",
+        "maintenance_auto_clean_enabled", "bool",
+        "无人值守自动清理",
+        "每天自动清一次零感垃圾（崩溃转储/错误上报队列）；这是“允许替你删文件”的许可，不能自己开",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "auto_clean_time", "maintenance", "auto_clean_time",
+        "maintenance_auto_clean_time", "time",
+        "自动清理时间", "每天几点跑自动清理（HH:MM）；错开画像维护的 03:30 便于定位问题",
+        tier=TIER_AUTO, apply_mode=APPLY_RESTART, default="04:30",
+    ),
+    ConfigSpec(
+        "auto_clean_min_mb", "maintenance", "auto_clean_min_mb",
+        "maintenance_auto_clean_min_mb", "float",
+        "自动清理最小回收量（MB）",
+        "低于这个量就不建隔离区批次：零感垃圾常只有几 MB，天天建目录的成本高于收益",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, lo=1.0, hi=10_000.0, default=20.0,
+    ),
+    ConfigSpec(
+        "auto_clean_notify_mb", "maintenance", "auto_clean_notify_mb",
+        "maintenance_auto_clean_notify_mb", "float",
+        "自动清理静默阈值（MB）",
+        "清出的量不到这个数就一句话也不说（例行的事不该消耗注意力）；超过才提示一句",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, lo=1.0, hi=10_000.0, default=200.0,
+    ),
+    ConfigSpec(
+        "quarantine_days", "maintenance", "quarantine_days", "maintenance_quarantine_days",
+        "int", "隔离区保留天数",
+        "清理不是删而是先移到隔离区，这么多天后才真删——调小等于缩短可后悔的窗口",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, lo=1, hi=90, default=7,
+    ),
+    ConfigSpec(
+        "scan_max_dir_gb", "maintenance", "scan_max_dir_gb", "maintenance_scan_max_dir_gb",
+        "float", "单条规则扫描体积上限（GB）",
+        "一条规则累加超过这个体积就不再往下扫（防止扫缓存的目录把整机卡住）",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, lo=1.0, hi=1000.0, default=50.0,
+    ),
+    ConfigSpec(
+        "scan_timeout", "maintenance", "scan_timeout", "maintenance_scan_timeout", "int",
+        "扫描总超时（秒）", "整次清理扫描的硬超时；到时即使没扫完也返回已得结果",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, lo=10, hi=3600, default=120,
+    ),
+    ConfigSpec(
+        "report_min_mb", "maintenance", "report_min_mb", "maintenance_report_min_mb", "float",
+        "报告展示阈值（MB）", "可回收量低于这个数就不列进 /disk 输出（避免满屏几百字节的小项）",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, lo=0.0, hi=10_000.0, default=100.0,
+    ),
+    ConfigSpec(
+        "allow_full_scan", "maintenance", "allow_full_scan", "maintenance_allow_full_scan",
+        "bool", "允许 Defender 全盘扫描",
+        "全盘扫描要跑几十分钟且严重占 CPU；默认只给快速扫描，开它等于允许一次长任务",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=False,
+    ),
+    # ---- 系统资源监控（阶段 12 补齐）：阈值存于 [monitor]，但由感知源装配时读取 ----
+    #
+    # 为什么是 ``percept`` 而不是 ``live``：阈值由 ``percept/factory.py`` 在造
+    # ``SystemSource`` 时吃进去，改运行时 Settings 不会让已装的源换阈值。
+    #
+    # 为什么不收 ``[monitor] enabled`` / ``high_cpu_duration``：前者 2026-10-31 删了
+    # （开关在 ``[percept] system_enabled``），后者同日随 ``check_high_cpu_processes``
+    # 一起下线（功能已由 ``/health`` 的进程 Top N 取代）。两个字段都已不存在，
+    # 收进来只会得到一条指向空处的代改入口。
+    ConfigSpec(
+        "cpu_threshold", "monitor", "cpu_threshold", "monitor_cpu_threshold", "float",
+        "CPU 告警阈值（%）",
+        "CPU 使用率高于它且持续一段时间就告警；调低会明显变吵，属于“何时能打断你”那一档",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, lo=1.0, hi=100.0, default=85.0,
+    ),
+    ConfigSpec(
+        "memory_threshold", "monitor", "memory_threshold", "monitor_memory_threshold", "float",
+        "内存告警阈值（%）", "内存使用率高于它就告警；同样归入“何时能打断你”",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, lo=1.0, hi=100.0, default=90.0,
+    ),
+    ConfigSpec(
+        "disk_threshold", "monitor", "disk_threshold", "monitor_disk_threshold", "float",
+        "磁盘剩余告警阈值（%）", "剩余空间低于它就告警；调高会提前收到“快满了”",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, lo=1.0, hi=100.0, default=10.0,
+    ),
+    ConfigSpec(
+        "alert_cooldown", "monitor", "alert_cooldown", "monitor_alert_cooldown", "int",
+        "同类告警冷却（秒）", "同一种告警在这段时间内不重复说；调小只会变吵，不改变何时开始告警",
+        tier=TIER_AUTO, apply_mode=APPLY_PERCEPT, lo=60, hi=86_400, default=600,
+    ),
+    ConfigSpec(
+        "disk_trend_days", "monitor", "disk_trend_days", "monitor_disk_trend_days", "int",
+        "磁盘趋势预测窗口（天）", "按最近趋势推算几天后会满，预测到就将提前告警",
+        tier=TIER_AUTO, apply_mode=APPLY_PERCEPT, lo=1, hi=90, default=7,
+    ),
+    ConfigSpec(
+        "check_interval", "monitor", "check_interval", "monitor_check_interval", "int",
+        "采样间隔（秒）",
+        "感知源多久拉一次系统快照；调密更跟手也更费 CPU，默认 60 与代码常量同口径",
+        tier=TIER_AUTO, apply_mode=APPLY_PERCEPT, lo=10, hi=3600, default=60,
+    ),
+    ConfigSpec(
+        "work_break_interval", "monitor", "work_break_interval",
+        "monitor_work_break_interval", "int",
+        "久坐提醒间隔（秒）",
+        "连续工作多久提醒起来活动一下；久坐提醒靠键鼠活动推算，离开超过 5 分钟才清零计时。"
+        "调小会明显变吵，属于“何时能打断你”那一档",
+        tier=TIER_CONFIRM, apply_mode=APPLY_PERCEPT, lo=600, hi=28_800, default=7200,
+    ),
+    # ---- 上下文压缩：在启动（以及重建 engine）时构造，改完需重启 ----
+    ConfigSpec(
+        "context_compaction", "context", "compaction", "context_compaction", "bool",
+        "上下文自动压缩",
+        "长会话快装满时自动压缩；关掉后会直接撞模型窗口报错，等于改变“一口气能干多少活”",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "context_window", "context", "context_window", "context_window", "int",
+        "上下文窗口大小（token）",
+        "上下文窗口能装多少 token；换模型时要同步改，填大了会超出模型真实上限而过不了请求",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, lo=8_000, hi=2_000_000, default=128_000,
+    ),
+    ConfigSpec(
+        "compact_ratio", "context", "compact_ratio", "compact_ratio", "float",
+        "触发压缩的比例", "上下文用到窗口的这个比例才压缩；调大拖得更久才压，调小压得更频繁",
+        tier=TIER_AUTO, apply_mode=APPLY_RESTART, lo=0.1, hi=1.0, default=0.5,
+    ),
+    ConfigSpec(
+        "compact_max_output_tokens", "context", "compact_max_output_tokens",
+        "compact_max_output_tokens", "int",
+        "压缩摘要输出上限（token）",
+        "给压缩摘要请求的额度；太小会丢细节，代码场景不建议调低",
+        tier=TIER_AUTO, apply_mode=APPLY_RESTART, lo=256, hi=32_768, default=2048,
+    ),
+    # ---- 能力总开关：都在启动时装配，改完需重启 ----
+    ConfigSpec(
+        "enable_mcp", "mcp", "enable", "enable_mcp", "bool",
+        "MCP 外部工具接入",
+        "关掉后 mcp.json 里的服务器全部不连；改它等于改变“能干什么活”",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "enable_lsp", "lsp", "enable", "enable_lsp", "bool",
+        "代码智能（LSP）",
+        "关掉后没有跳转定义/找引用/诊断；依赖外部 language server 装没装",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "deferred_loading", "tools", "deferred_loading", "tools_deferred_loading", "bool",
+        "工具延迟加载",
+        "可选工具只发名字、按需取回；关掉后每轮全量下发 schema，token 会涨得很明显",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "chat_detection", "tools", "chat_detection", "tools_chat_detection", "bool",
+        "纯聊天零工具",
+        "短消息且无动作意图时一个工具都不发；关掉只是多花 token，不改变能力",
+        tier=TIER_AUTO, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "enable_skills", "skills", "enable", "enable_skills", "bool",
+        "技能包加载",
+        "关掉后技能包一个都不加载；插件最后也是落成技能才生效，所以会连带关掉已装插件",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "enable_plugins", "plugins", "enable", "enable_plugins", "bool",
+        "插件系统",
+        "只管安装/卸载/启停这几个动作；已装插件是否被加载看 enable_skills",
+        tier=TIER_CONFIRM, apply_mode=APPLY_RESTART, default=True,
+    ),
+    ConfigSpec(
+        "briefing_calendar", "calendar", "enabled", "calendar_enabled", "bool",
+        "简报带今日日程",
+        "开了后每日简报多一段「今日日程」（读 Outlook 或 ICS）；感知源那份开关另有其人",
+        tier=TIER_AUTO, apply_mode=APPLY_RESTART, default=False,
+    ),
+    # 注意：``enable_tool_self_healing`` 不在此表——它不在 ``settings_domains`` 的
+    # 任何映射里（``[tools]`` 段只有上面两项），``save_value`` 找不到落盘位置。
+    # 它确实在 ``bootstrap.py`` 启动时被读、真生效，所以也不能当死配置标——
+    # 属于“生效但无处可配”，只能代码里改默认值。混进来只会让回执说假话。
 )
 
 SPEC_BY_KEY: dict[str, ConfigSpec] = {s.key: s for s in CONFIG_SPECS}
@@ -290,6 +478,9 @@ FORBIDDEN_SPECS: dict[str, str] = {
     "api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
     "email_smtp_password": "邮箱密码是凭据，只能由人填，模型不碰",
     "email_imap_password": "邮箱密码是凭据，只能由人填，模型不碰",
+    # 维护层的两道许可线：它们定义“自动清理能碰到什么”，等价于沙箱的豁免名单
+    "auto_clean_max_risk": "这决定自动清理能自动到多高的风险档，是许可边界本身；模型改它等于给自己放宽删文件的范围",
+    "rules_file": "规则文件决定“清理哪些目录”，换一个文件就等于换一套靶子；模型改它等于给自己扩容",
 }
 
 #: 键前缀 → 理由（覆盖 api_key_* / sandbox_* 这类成族字段）

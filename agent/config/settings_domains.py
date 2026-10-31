@@ -128,24 +128,26 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("imap_mailbox", "email_imap_mailbox"),
     )),
     ("lsp", (("enable", "enable_lsp"),)),  # 嵌套 servers 见 DICT_CHILDREN
-    ("daemon", (  # 常驻模式热键 + P2-3 每日简报 + 二期主动播报 TTS 总开关
-        ("hotkey", "daemon_hotkey"),
-        ("hotkey_native", "daemon_hotkey_native"),
-        ("hotkey_debounce_ms", "daemon_hotkey_debounce_ms"),
+    ("daemon", (  # P2-3 每日简报 + 二期主动播报 TTS 总开关
+        # 没有 hotkey*：全局热键 2026-11-01 整体下线（该能力归 Electron 桌面壳的
+        # globalShortcut），旧配置里写了会被静默忽略。
         ("briefing_enabled", "briefing_enabled"),
         ("briefing_time", "briefing_time"),
         ("briefing_catchup_window_min", "briefing_catchup_window_min"),
         ("proactive_tts_enabled", "proactive_tts_enabled"),
     )),
     ("monitor", (  # 系统监控阈值 + P2-3 增强项
-        ("enabled", "monitor_enabled"),
+        # 没有 enabled：监控启停看 [percept] system_enabled。本段以前的
+        # monitor_enabled 字段没有任何代码读，留着会让人以为关了其实还在跑，
+        # 已于 2026-10-31 连同 Settings 字段一起删除（旧配置里写了也会被静默忽略）。
+        # 也没有 high_cpu_duration：该功能已由 /health 的进程 Top N 取代，
+        # 同日删除；留着会让人调一个已经不存在的判定。
         ("cpu_threshold", "monitor_cpu_threshold"),
         ("memory_threshold", "monitor_memory_threshold"),
         ("disk_threshold", "monitor_disk_threshold"),
         ("check_interval", "monitor_check_interval"),
         ("alert_cooldown", "monitor_alert_cooldown"),
         ("disk_trend_days", "monitor_disk_trend_days"),
-        ("high_cpu_duration", "monitor_high_cpu_duration"),
         ("work_break_interval", "monitor_work_break_interval"),
     )),
     ("deadline", (

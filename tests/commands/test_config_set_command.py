@@ -24,7 +24,7 @@ import pytest
 
 from agent.commands.handlers.config_commands import handle_config_show
 from agent.config.config_ops import parse_cli_value, render_cli_value
-from agent.config.config_specs import get_spec
+from agent.config.config_specs import CONFIG_SPECS, TIER_FORBIDDEN, get_spec
 from agent.config.settings import Settings
 from agent.core.actions import journal as journal_mod
 from agent.core.actions.journal import configure_journal
@@ -141,10 +141,18 @@ class TestParseCliValue:
 
 class TestConfigList:
     def test_lists_writable_items_only(self, ctx):
-        """/config list 与模型侧同一份渲染：29 项、禁改项零出现。"""
+        """/config list 与模型侧同一份渲染：可写项全列、禁改项零出现。
+
+        数量断言从真源表派生而不是写死数字：写死的代价是每加一条配置就得改测试，
+        而真正要守的不变量是“列出的集合 == 真源表里可写的集合”，这条断言恰好把
+        它守住了（少渲染一条也会抱）。
+        """
         _run(ctx, "/config list")
         text = ctx.ui.all_text
-        assert "可调整的配置（29 项）" in text
+        writable = [s for s in CONFIG_SPECS if s.tier != TIER_FORBIDDEN]
+        assert f"可调整的配置（{len(writable)} 项）" in text
+        for spec in writable:
+            assert spec.key in text, f"{spec.key} 该出现在清单里"
         assert "tts_volume" in text and "daily_max" in text
         # 禁改项（沙箱/凭据/留痕）连名字都不给
         for key in ("sandbox_enabled", "api_key", "log_events"):
@@ -194,8 +202,27 @@ class TestConfigSetAuto:
 
     def test_unknown_key(self, ctx):
         ui = _run(ctx, "/config set nonsense 1")
-        assert "不认识的配置项 nonsense" in ui.warns[0]
+        assert "没有 nonsense 这个配置项" in ui.warns[0]
         assert "/config list" in ui.all_text
+
+    def test_existing_but_unmanaged_key_points_to_file(self, ctx):
+        """存在但没进真源表的项：必须说“存在、只能改文件”，不是“不认识”。
+
+        这是两类完全不同的实情。旧实现一律回“不认识的配置项”，用户会以为自己
+        拼错了，然后去两百多行 TOML 里白找一场。
+        """
+        ui = _run(ctx, "/config set smtp_host smtp.163.com")
+        text = ui.all_text
+        assert "不认识的配置项" not in text
+        assert "smtp_host" in text
+        assert "[email]" in text  # 指出它在哪个段
+        assert "settings.toml" in text  # 指出去哪个文件改
+        assert not ui.warns  # 不是错误，是说明
+
+    def test_truly_absent_key_is_reported_as_absent(self, ctx):
+        """目录里也没有的名字，仍然要如实说“没有”——不能因为加了目录就什么都不算错。"""
+        ui = _run(ctx, "/config set zzz_not_a_real_knob 1")
+        assert "没有 zzz_not_a_real_knob 这个配置项" in ui.all_text
 
     def test_unknown_subcommand_shows_usage(self, ctx):
         ui = _run(ctx, "/config bogus")

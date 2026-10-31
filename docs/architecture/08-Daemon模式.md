@@ -21,14 +21,11 @@
 
 | 文件 | 职责 | 状态 |
 |---|---|---|
-| [hotkey.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/hotkey.py) | 跳平台全局热键（keyboard / pynput） | ✅ 保留（待接线） |
-| [hotkey_native.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/hotkey_native.py) | Windows 原生 RegisterHotKey 热键监听 | ✅ 保留（待接线） |
-| [platform_utils.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/daemon/platform_utils.py) | 平台/依赖探测辅助 | ✅ 在用 |
 | [voice/voice_state.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/voice/voice_state.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（由语音包持有） |
 | [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配；2026-10 终端 CliReminderHost 装配） |
 | [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配；2026-10-31 起顺手挂自动清理） |
 | [core/daemon/auto_clean_schedule.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/auto_clean_schedule.py) | 无人值守自动清理的调度宿主（每日 04:30 + 启动机会清理） | ✅ 在用（2026-10-31；挂 Scheduler 而非 ProactiveEngine，因为后者只有桌面路径有） |
-| [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期已接，日历源传 None 未接） |
+| [core/daemon/proactive.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/proactive.py) | 主动引擎（简报/期限/日历提醒） | ✅ 在用（同上；简报/截止日期/日历均已接——2026-10-31 起日历源由 `proactive_wiring.py` 按 `[calendar]` 真装配）|
 | [core/daemon/deadline.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/deadline.py) | 截止日期追踪（分级提醒） | ✅ 在用（同上） |
 | [core/daemon/calendar_source.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/calendar_source.py) | 日历源解析 | ✅ 在用（2026-10-26 由 W2 感知源 `percept/source_calendar.py` 接入总线，默认关） |
 | [core/daemon/monitor.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/monitor.py) | 系统资源监控（阈值判定 + 报警状态机） | ✅ 在用（同日由 `percept/source_system.py` 接入总线，走 `check_now()`，默认关） |
@@ -67,23 +64,27 @@ jarvis --serve      # headless 后端（供 jarvis-desktop 等外部前端接入
 - 持锁进程后台线程每 30 秒心跳续约；时间戳超过 60 秒视为持锁进程崩溃，锁可被抢占
 - 不依赖 `os.kill(pid, 0)` 检活：Windows 上该调用对已死进程同样成功，不可靠
 
-## 四、全局热键（保留，待接线）
+## 四、全局热键（已下线，2026-11-01）
 
-> 原为窗口壳的「热键召唤窗口」场景保留，壳退役后暂无装配点；能力与测试完整保留，
-> 待桌面壳或后续方案自行调用。
+热键原为「召唤 pywebview 三栏工作台窗口」而设，窗口壳 2026-10 退役后一直没有装配点。
+2026-11-01 整体删除，而不是继续挂着「待接线」：
 
-```toml
-[daemon]
-hotkey = "ctrl+shift+j"   # 全局热键
-hotkey_native = true      # Windows 优先 RegisterHotKey
-hotkey_debounce_ms = 200  # 去抖毫秒
-```
+| 删除项 | 规模 |
+|---|---|
+| `agent/daemon/hotkey.py`（keyboard / pynput 跳平台） | 137 行 |
+| `agent/daemon/hotkey_native.py`（Windows RegisterHotKey） | 270 行 |
+| `agent/daemon/platform_utils.py`（只为它服务的平台探测） | 47 行 |
+| `tests/daemon/test_hotkey.py` | 72 行 |
+| `Settings.daemon_hotkey` / `_native` / `_debounce_ms` 与 `[daemon] hotkey*` 三个键 | 6 处 |
 
-| 平台 | 优先后端 | 回退 | 说明 |
-|---|---|---|---|
-| Windows | 原生 RegisterHotKey（`NativeHotkeyListener`） | keyboard 库 | 无需额外依赖 |
-| macOS | pynput | keyboard 库（需 root） | pynput 只需辅助功能权限 |
-| Linux | keyboard 库 | — | 需 root 或 input 组权限 |
+整个 `agent/daemon/` 包随之消失（它只有这四个文件）。
+
+**为什么删而不是留着等接线**：现在的宿主是 jarvis-desktop（Electron），它自带
+`globalShortcut`——注册系统级快捷键是原生能力、一行代码；而 Python 侧那套要自己开只
+消息窗口、跑后台线程、再按平台分三条后端（RegisterHotKey / pynput / keyboard），
+属于**架构错配**。真要做桌面热键，应该做在 Electron 主进程里。
+
+旧配置里写了 `[daemon] hotkey = "..."` 不会报错：加载器对未知键是静默忽略的。
 
 ## 五、开机自启（已退役）
 
@@ -123,10 +124,10 @@ rm ~/Library/LaunchAgents/*JARVIS*.plist
 | 服务 | 能力 | 配置节 | 状态 |
 |---|---|---|---|
 | Scheduler | 定时/周期/一次性任务，与日程工具联动 | — | ✅ serve 宿主 ProactiveHub + 终端 CliReminderHost 装配 |
-| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` | ✅ 简报/截止已接；日历源传 None 未接（要日程临近播报请开 `[percept] calendar_enabled`） |
+| ProactiveEngine | 每日简报、截止日期分级提醒、日历提醒 | `[daemon] briefing_*` + `[calendar]` | ✅ 简报/截止/日历均已装配（2026-10-31：日历源改由 `proactive_wiring.py` 真传入，简报里从此有“今日日程”）|
 | DeadlineTracker | 截止日期条目管理（`~/.jarvis/deadlines.json`） | `[deadline]` | ✅ serve 宿主 ProactiveHub 装配 |
 | CalendarSource | Outlook（win32com）/ ICS 日历解析 | `[calendar]` + `[percept] calendar_enabled` | ✅ 在用（2026-10-26：W2 感知源接入总线，默认关） |
-| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、异常进程检测 | `[monitor]` + `[percept] system_enabled` | ✅ 在用（同日：W2 感知源接入总线，用 `check_now()`，默认关） |
+| Monitor | CPU/内存/磁盘阈值告警、磁盘趋势预测、久坐提醒 | `[monitor]` + `[percept] system_enabled` | ✅ 在用（同日：W2 感知源接入总线，用 `check_now()`，默认关）。2026-10-31：久坐提醒（`work_break_interval`）以前写了方法却不在 `_do_check()` 里，现已挂上；异常进程检测则整体下线，由 `/health` 的进程 Top N 接管 |
 | VisionWatcher | mediapipe 本地手势/人脸监控 | `[percept] vision_*` | ✅ 在用（2026-10：W2 感知源接入总线，`vision_enabled` 默认关） |
 | Holidays | 节假日/工作日识别 | — | 💤 休眠 |
 
@@ -137,6 +138,6 @@ rm ~/Library/LaunchAgents/*JARVIS*.plist
 | 托盘遥控 | ❌ 移除 | 工作台直接呈现对话，托盘菜单交互被窗口内控件取代 |
 | 无窗口后台分离 | ❌ 移除 | 单窗口进程模型更简单：最小化到任务栏即可，无需 DETACHED_PROCESS |
 | 文本终端派生 | ❌ 移除 | 文本对话已进入工作台中栏，不再弹独立终端 |
-| 全局热键 | ✅ 保留 | 原为工作台「热键召唤窗口」场景保留；窗口壳退役后暂无装配点，待桌面壳或后续方案接线 |
+| 全局热键 | ❌ 删除 | 服务对象（GUI 窗口）已退役；新宿主 Electron 自带 `globalShortcut`，Python 侧实现属架构错配，2026-11-01 随 `agent/daemon/` 整包删除 |
 | 主动感知全家桶 | ✅ 部分复活 | 调度/简报/截止三件套 2026-09 由 serve 宿主 `ProactiveHub` 装配、经 jarvis-desktop 桌面壳播报（`proactive_notify` 事件 + 系统通知），二期补齐待机 TTS 朗读通道（老 daemon 三通道中的「待机语音」复活，忙时跳过）；监控/日历/视觉/节假日仍休眠待二期 |
 | 语音互斥锁 | ✅ 迁移 | 麦克风独占需求与形态无关，迁入 `agent/voice/` |

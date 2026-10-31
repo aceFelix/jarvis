@@ -155,8 +155,15 @@ def build_sources(settings: Any) -> list[tuple[Any, bool]]:
         _flag("percept_calendar_enabled"),
     ))
 
-    # 系统资源源（阶段 11 收编）：阈值直接吃 ``monitor_*`` 那一组（本来就有、只是没人读），
-    # 本源只用 check_now() 拉快照，不起第二条采样线程。
+    # 系统资源源（阶段 11 收编）：阈值直接吃 ``monitor_*`` 那一组，本源只用
+    # check_now() 拉快照，不起第二条采样线程。
+    #
+    # 采样间隔以前写死常量 60s，导致 ``[monitor] check_interval`` 改了没反应
+    # （字段存在、模板也有注释，就是没人读）。现在真读它；``source_system`` 里
+    # 的 DEFAULT_INTERVAL_S 仍作为“这个字段没配”时的兜底值，两处默认必须同为 60。
+    #
+    # ``work_break_interval`` 同理必传：久坐提醒的判定在 ``_do_check`` 里，
+    # 而本源的 ``check_now`` 是它唯一的驱动点，漏了这一行字段就永远改不动。
     out.append((
         SystemSource(
             cpu_threshold=float(getattr(settings, "monitor_cpu_threshold", 85.0) or 85.0),
@@ -164,7 +171,11 @@ def build_sources(settings: Any) -> list[tuple[Any, bool]]:
             disk_threshold=float(getattr(settings, "monitor_disk_threshold", 10.0) or 10.0),
             alert_cooldown=int(getattr(settings, "monitor_alert_cooldown", 600) or 600),
             disk_trend_days=int(getattr(settings, "monitor_disk_trend_days", 7) or 7),
-            interval_s=SYSTEM_INTERVAL_S,
+            work_break_interval=int(
+                getattr(settings, "monitor_work_break_interval", 7200) or 7200
+            ),
+            interval_s=int(getattr(settings, "monitor_check_interval", SYSTEM_INTERVAL_S)
+                           or SYSTEM_INTERVAL_S),
         ),
         _flag("percept_system_enabled"),
     ))

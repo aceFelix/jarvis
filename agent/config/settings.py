@@ -263,30 +263,40 @@ class Settings:
     enable_lsp: bool = True
     lsp_servers: dict[str, dict] = field(default_factory=dict)
 
-    # 全局热键（为新 GUI 工作台保留：热键召唤/置顶窗口）。
-    # 原"无窗口 daemon + 托盘"常驻模式已下线，热键配置在 GUI 阶段继续生效。
-    # 作者：aceFelix
-    daemon_hotkey: str = "ctrl+shift+j"        # 全局热键（keyboard 库格式）
-    daemon_hotkey_native: bool = True            # Windows 优先使用 RegisterHotKey（更快）
-    daemon_hotkey_debounce_ms: int = 200         # 热键去抖毫秒，防双击触发
+    # 全局热键已于 2026-11-01 整体下线（字段与 ``agent/daemon/`` 包一并删除）。
+    #
+    # 原委：热键是为「召唤 pywebview 三栏工作台窗口」设计的，那套窗口退役后，
+    # 宿主换成 jarvis-desktop（Electron），而 Electron 自带 ``globalShortcut``，
+    # 天生就该在那边注册——Python 侧再去抢系统热键（RegisterHotKey + 只消息窗口
+    # + 后台线程）属于架构错配。旧配置里写了 ``[daemon] hotkey*`` 会被静默忽略。
 
-    # 快速启动模式（P1-2 热键响应优化）
+    # 快速启动模式（P1-2）
     # --quick 时启用，用于跳过可选初始化、延迟加载 harness
     quick_start: bool = False
 
     # 主动感知（阶段五第三刀）
-    # 系统资源监控：CPU/内存/磁盘超阈值时通知+语音告警。
-    # 依赖 psutil。enabled=false 关闭监控。
-    monitor_enabled: bool = True
+    # 系统资源监控：CPU/内存/磁盘超阈值时通知+语音告警。依赖 psutil。
+    #
+    # 开关不在这里：真正管监控启停的是 ``[percept] system_enabled``（感知源逐源
+    # 开关那一套）。以前的 ``monitor_enabled`` 字段没有任何代码读它，留着只会让
+    # 人在 ``[monitor]`` 段关了半天而监控照跑，已于本次删除。
     monitor_cpu_threshold: float = 85.0    # CPU 使用率 %，超过告警
     monitor_memory_threshold: float = 90.0 # 内存使用率 %
     monitor_disk_threshold: float = 10.0   # 磁盘剩余 %，低于告警
-    monitor_check_interval: int = 10       # 检查间隔（秒）
+    # 采样间隔（秒）：感知源 SystemSource 真读它。默认 60 与
+    # source_system.DEFAULT_INTERVAL_S 必须一致，否则“没配”的人的采样频率会
+    # 悄悄变成另一回事（这个字段以前就没生效，默认值写的是 10，接上后必须同口径）。
+    monitor_check_interval: int = 60
     monitor_alert_cooldown: int = 600      # 同类告警冷却（秒）
-    # P2-3 监控增强
+    # P2-3 监控增强。久坐提醒真生效：由 ``monitor._do_check`` 挂在感知源的
+    # 60 秒采集链上（``SystemSource`` → ``check_now``），走总线播报。
+    #
+    # ``monitor_high_cpu_duration`` 已于 2026-10-31 删除：它对应的
+    # ``check_high_cpu_processes()`` 一直没人调用，而 ``/health`` 的进程区块
+    # （CPU + 内存 + 启动时间 Top N）已覆盖同一需求且更完整。两套并存只会
+    # 让人分不清该信哪个，旧配置里写了这个字段会被静默忽略。
     monitor_disk_trend_days: int = 7       # 磁盘趋势预测：预测几天后将满
-    monitor_high_cpu_duration: int = 600   # 异常进程：高 CPU 持续秒数阈值
-    monitor_work_break_interval: int = 7200  # 工作时长：连续工作多少秒提醒休息
+    monitor_work_break_interval: int = 7200  # 连续工作多少秒提醒休息（默认 2 小时）
 
     # 主动提醒系统（P2-3）
     # 每日简报：每天定时播报今日概览（提醒/节假日/系统状态/截止日期/日程）
@@ -675,7 +685,6 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "enable_lsp",
         "enable_thinking", "thinking_budget", "thinking_effort",
         "vendor_fallback",
-        "daemon_hotkey", "daemon_hotkey_native", "daemon_hotkey_debounce_ms",
     ):
         if key in data:
             updates[key] = data[key]

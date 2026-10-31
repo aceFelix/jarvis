@@ -6,6 +6,10 @@
 > `assets/`）、开机自启（`agent/daemon/autostart.py`）与 `realtime_ui` 可选依赖均已删除，
 > `jarvis --gui` / `--talk` 仅保留退役提示。图形化桌面唯一入口为独立仓库
 > **jarvis-desktop**；`agent/ui/workbench/` 引擎层现役（serve 与桌面壳共用）。
+>
+> 🔻 **2026-11-01 补充**：文中「热键模块已保留，二期接」的说法已失效——热键是为本工作台
+> 召唤窗口而设，工作台退役后它成了孤儿，故连同 `agent/daemon/` 整包一并删除；桌面热键
+> 若要做，归 jarvis-desktop 的 Electron `globalShortcut`。
 > 退役判断依据与影响面见 [`docs/fixlogs/workbench-gui-retired.md`](../fixlogs/workbench-gui-retired.md)。
 > 以下内容为历史开发计划快照，保留供技术复盘，不再更新。
 

@@ -51,6 +51,34 @@ def _find_git() -> str:
     return ""
 
 
+#: 插件系统总开关（``settings.enable_plugins`` 在启动时经 ``set_plugins_enabled`` 写入）。
+#:
+#: 它管的是**安装 / 卸载 / 启停这几个动作能不能做**，不管已装插件是否被加载——
+#: 插件最终要落成 ``~/.jarvis/skills/`` 里的技能才生效，加载与否由 ``enable_skills``
+#: 决定（两道开关各管一段，不是重复）。
+#:
+#: 读操作（市场搜索、已装列表）**不拦**：关掉系统不等于连“我装了什么”都不给人看。
+_ENABLED: bool | None = None
+
+#: 写操作被拦时的统一文案（区分“关了”与“失败了”）。
+_DISABLED_MSG = "插件系统已关闭（settings 里 [plugins] enable = false）；要恢复请打开并重启"
+
+
+def set_plugins_enabled(enabled: bool | None) -> None:
+    """写入插件总开关（启动时调一次；传 ``None`` 可恢复“未初始化”）。
+
+    Args:
+        enabled: ``False`` 时安装/卸载/启停一概拒绝，读操作照常。
+    """
+    global _ENABLED
+    _ENABLED = None if enabled is None else bool(enabled)
+
+
+def plugins_enabled() -> bool:
+    """当前插件总开关是否开着（未初始化按开处理）。"""
+    return _ENABLED is not False
+
+
 class PluginManager:
     """插件管理器。负责插件的发现、安装、卸载和状态跟踪。"""
 
@@ -213,6 +241,8 @@ class PluginManager:
         Returns:
             (True, "") 成功，(False, "错误信息") 失败。
         """
+        if not plugins_enabled():
+            return False, _DISABLED_MSG
         # 1. 查市场（远程 + 本地）
         plugins = self.search(name)
         entry = None
@@ -352,6 +382,8 @@ class PluginManager:
 
     def uninstall(self, name: str) -> tuple[bool, str]:
         """卸载插件。删除 skills 目录、移除 MCP 条目、更新 installed.json。"""
+        if not plugins_enabled():
+            return False, _DISABLED_MSG
         installed = self._load()
         entry = installed.get("plugins", {}).get(name)
         if not entry:
@@ -399,6 +431,8 @@ class PluginManager:
 
         @author aceFelix
         """
+        if not plugins_enabled():
+            return False, _DISABLED_MSG
         disabled_dir = self._install_base / "disabled" / name
         if not disabled_dir.is_dir():
             return True, f"插件 '{name}' 已是启用状态。"
@@ -440,6 +474,8 @@ class PluginManager:
 
         @author aceFelix
         """
+        if not plugins_enabled():
+            return False, _DISABLED_MSG
         installed = self._load().get("plugins", {})
         entry = installed.get(name)
         if not entry:

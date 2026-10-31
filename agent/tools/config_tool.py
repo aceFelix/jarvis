@@ -24,6 +24,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.config.catalog import (
+    describe_missing,
+    entries_of_section,
+    render_entries,
+    render_overview,
+    search_catalog,
+)
 from agent.config.config_ops import (
     ENTRY_MODEL,
     apply_config_patch,
@@ -86,6 +93,82 @@ class ConfigListTool(Tool):
         return "查看可改配置"
 
 
+class ConfigExplainTool(Tool):
+    """回答"这项配置是干什么的、在哪改、能不能你帮我改"。
+
+    与 ``ConfigList`` 的分工是**答案的广度**而不是深浅：``ConfigList`` 只列
+    真源表里那三十项（都是可以代改的），而用户真正会问的常常是表外那一百七十
+    多项——"CPU 阈值太高了怎么调""邮件要怎么配"——那些项既不在表里，模型也
+    没有别的途径知道它们存在。
+
+    所以本工具查到的东西分两种，返回里会直接标出来，不需要模型自己判断：
+
+    - ``我可以代改``：在真源表内，接着用 ``ConfigSet`` 就行；
+    - ``只能自己改``：给出配置文件的准确位置（文件名 + 段名），别去试 ``ConfigSet``
+      ——那只会得到一个"不认识的配置项"。
+
+    只读，不过权限管线（允许）：它只读进程内已有对象与包内模板，不碰文件。
+    """
+
+    name = "ConfigExplain"
+    description = (
+        "查某个配置项的说明、当前值、在哪改、能不能代改——覆盖全部两百多项，包括"
+        "ConfigList 里没有的那些。用户问『这个有什么用』『在哪改』『怎么配邮件 / "
+        "监控 / 自动清理』『有哪些配置』时用它。返回里标『我可以代改』的才用 "
+        "ConfigSet；标『只能自己改』的把文件位置如实告诉用户，不要试着改。"
+    )
+    input_schema: JSONSchema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "用户的功能说法或关键词（中文就行），如「CPU 阈值」「邮件」「自动清理」",
+            },
+            "section": {
+                "type": "string",
+                "description": "直接看某一整段，如 monitor / email / maintenance；与 query 二选一",
+            },
+            "overview": {
+                "type": "boolean",
+                "description": "true 时返回按段汇总的总览（用户问「都有哪些配置」时用）",
+            },
+        },
+    }
+    max_result_chars = 6_000
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
+        return True
+
+    def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
+        return PermissionResult.allow("只读配置说明")
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        if args.get("overview"):
+            return ToolResult.ok(render_overview())
+        section = str(args.get("section") or "").strip()
+        query = str(args.get("query") or "").strip()
+        if section:
+            # 段名给了但正好没这项（如用户把 percept 敲成 perception）→ 退回关键词检索，
+            # 不让一个笔误直接变成"没找到"。
+            entries = entries_of_section(section) or search_catalog(section, limit=10)
+        elif query:
+            entries = search_catalog(query, limit=10)
+        else:
+            # 两个都没给：退回总览，比报参数错误对用户有用得多
+            return ToolResult.ok(render_overview())
+        return ToolResult.ok(render_entries(entries, ctx.settings))
+
+    def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
+        data = args or {}
+        if data.get("overview"):
+            return "看配置总览"
+        target = str(data.get("section") or data.get("query") or "").strip()
+        return f"查配置 {target}" if target else "看配置总览"
+
+
 class ConfigSetTool(Tool):
     """按协议键改一个或多个配置项，并把"原值 → 新值"记进副作用账本。"""
 
@@ -123,8 +206,16 @@ class ConfigSetTool(Tool):
             return ValidationResult.fail("patch 必须是非空对象，如 {\"tts_volume\": 30}")
         for key in patch:
             if get_spec(str(key)) is None and not forbidden_reason(str(key)):
+                # 两种情形要分开说：这项根本不存在，与这项存在但只能改文件。
+                # 后者若也说“不认识”，模型会反复重试同一个名字。
+                if describe_missing(str(key)):
+                    return ValidationResult.fail(
+                        f"{key} 这项存在但不在可代改范围内（多半只能改文件）；"
+                        f"用 ConfigExplain 查它的位置与改法，不要把值猜着填"
+                    )
                 return ValidationResult.fail(
-                    f"不认识的配置项 {key}；先用 ConfigList 查可用键"
+                    f"没有 {key} 这个配置项；用 ConfigList 看可代改的键，"
+                    f"或 ConfigExplain 按关键词查全部配置"
                 )
         return ValidationResult.pass_()
 

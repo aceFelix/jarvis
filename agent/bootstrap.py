@@ -134,6 +134,28 @@ def init_actions(settings: Settings) -> list:
     return stale
 
 
+def init_extension_switches(settings: Settings) -> None:
+    """把「技能包 / 插件系统」两个总开关写进各自模块（宿主启动时调一次）。
+
+    **为什么用模块级开关而不是逐层传参**：这两类加载入口散在 UI、工具、命令三条
+    路上（技能 8 处、插件 11 处），逐层传参漏一处就会出现「面板里关掉了、模型还在
+    用」——而这正是本次修的那个毛病（``enable_skills`` / ``enable_plugins`` 以前
+    存在、能从 TOML 读进来，但全文没有任何一处读它们）。
+
+    口径与 ``enable_mcp`` / ``enable_lsp`` 一致：**启动期快照，改完要重启**。
+
+    Args:
+        settings: 已加载的配置（读 ``enable_skills`` / ``enable_plugins``）。
+
+    @author aceFelix
+    """
+    from agent.core.extensions.plugins import set_plugins_enabled
+    from agent.core.extensions.skills import set_skills_enabled
+
+    set_skills_enabled(bool(getattr(settings, "enable_skills", True)))
+    set_plugins_enabled(bool(getattr(settings, "enable_plugins", True)))
+
+
 def _build_context(settings: Settings, ui: RichCLI, messages: list[Message]) -> ToolContext:
     """构造工具执行上下文。
 

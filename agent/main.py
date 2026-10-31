@@ -782,6 +782,10 @@ def main(argv: list[str] | None = None) -> int:
     # 用安全缺省，行为全回落既有管线。@author aceFelix
     from agent.core.policy import init_policy
     init_policy(settings)
+    # 技能包 / 插件系统总开关：同为启动期快照（改完要重启），口径与
+    # enable_mcp / enable_lsp 一致。@author aceFelix
+    from agent.bootstrap import init_extension_switches
+    init_extension_switches(settings)
 
     # 切到工作目录（不存在则自动创建）
     try:

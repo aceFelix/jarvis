@@ -207,12 +207,8 @@ args = []
 extensions = ["py"]
 
 [daemon]
-# 桌面入口与全局热键（原常驻托盘已下线，热键/自启保留给 JARVIS 对话窗口使用）。
-# 开机自启: 运行 `jarvis --talk` 的快捷方式放入 shell:startup 文件夹。
-# 依赖: pip install keyboard（仅 keyboard 库方案需要；Windows 默认走 RegisterHotKey）。
-hotkey = "ctrl+shift+j"        # 全局热键（keyboard 库格式，如 "ctrl+shift+j"）
-hotkey_native = true            # Windows 优先使用 RegisterHotKey（比 keyboard 库更快）
-hotkey_debounce_ms = 200        # 热键去抖毫秒，防双击触发
+# 全局热键已于 2026-11-01 下线：热键是给已退役的 GUI 窗口用的，现归桌面应用的
+# Electron globalShortcut，Python 侧不再提供。旧配置里的 hotkey* 会被静默忽略。
 # P2-3 每日简报：每天定时播报今日概览（提醒/节假日/系统状态/截止日期/日程）
 briefing_enabled = true
 briefing_time = "08:30"         # 简报时间（HH:MM）
@@ -240,7 +236,9 @@ check_interval = 10        # 检查间隔（秒）
 alert_cooldown = 600       # 同类告警冷却（秒，10分钟内不重复）
 # P2-3 增强
 disk_trend_days = 7        # 磁盘趋势预测：预测几天后将满时提前告警
-high_cpu_duration = 600    # 异常进程：CPU > 50% 持续多少秒通知用户
+# 久坐提醒：连续工作这么久就提醒起来活动一下。靠键鼠活动推算，离开超过 5 分钟
+# 才清零计时。以前这条链没人调用（字段改了不生效），现已挂到 60 秒的采集链上。
+# 异常进程检测已下线：看谁在吃 CPU 请用 /health（进程 Top N 带 CPU/内存/启动时间）。
 work_break_interval = 7200 # 工作时长：连续工作多少秒提醒休息（2小时）
 
 [deadline]

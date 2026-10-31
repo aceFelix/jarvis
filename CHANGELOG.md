@@ -2,6 +2,152 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布]
+
+这一版只解决一件事：**用户不懂配置时，能不能问出来答案**。
+
+起因是一个具体的尴尬——`Settings` 有 202 个字段，而自配置层只收 58 项（都是“可以
+代改”的）。剩下 144 项用户想调时，模型的处境是**既不知道它存在，也说不清它在哪**，
+只能含糊回一句“请打开 settings.toml”。而命令行 `/config list` 也帮不上忙：它要用户
+先知道有这条命令。**用户不懂配置时最自然的入口是问，不是敲命令。**
+
+### 新增能力
+
+- **配置问答：202 项全都有话说**
+  新增 `agent/config/catalog.py`——把两百多个配置项变成能回答的知识，不只是能改的
+  白名单。实测覆盖率 **202/202 = 100%**（每条都有说明、当前值、所在文件与段、能否代改）。
+
+  关键是不造第五份人工表：项目里已有四套配置视图（真源表 / `percept_settings` /
+  `desktop_settings` / `settings.example.toml`），再手写一份 202 项的中文说明必然漂移。
+  所以目录**只派生**，说明按精确度四级取：真源表 `hint`（58 项）→ 模板行尾注释（补到
+  76%）→ 段级用途 / 人工补丁（补齐到 100%）。
+
+  实现里踩到两个坑：①`[email]` 段把带说明的字段整行注掉当文档用（`# smtp_user =
+  "x@163.com"  # 发件邮箱账号`），正则不认行首 `#` 就从这一段一个说明都拿不到；
+  ②两份模板（包内 `agent/configs/` 与仓库根 `configs/`）段与字段**互补**，只读一份会
+  白丢二十来项。
+
+- **`ConfigExplain` —— 让模型先查再答**
+  第四个自配置工具。按关键词或段名查全量目录，返回里直接标明“我可以代改”还是
+  “只能自己改（文件 + 段名）”，模型照旗标说话即可，不用自己判断。
+  用户说得模糊时（“监控太烦了”）拿这一段出来挑，比反问“你指的是哪个配置”有用。
+
+- **`/config explain <关键词>` / `--overview`**
+  人自己用的入口，与工具同一份目录。用户翻两百行 TOML 时，敲一句比问模型快。
+
+### 修复
+
+- **“不认识的配置项”这句话是错的**
+  `/config set maintenance_auto_clean_time 03:00` 会得到“不认识的配置项”——可这项
+  确实存在，只是没进真源表。用户看到这句会以为自己拼错了，然后去两百多行里白找一场。
+  现在按四种实情分开回：**存在但没人读**（说“未接线”+ 替代改法）、**存在但未纳管**
+  （给文件 + 段名 + 说明）、**拼得接近**（列相近项）、**真不存在**（才说没有）。
+  模型侧 `ConfigSet.validate_input` 也做了同样区分。
+
+- **`[maintenance]` 十项进真源表**
+  2.3.2 刚发的维护层当时一项都没纳管——用户想改“自动清理挪到凌晨 3 点”只能手改文件。
+  现在纳管 10 项（`auto_clean_time` / `min_mb` / `notify_mb` / `quarantine_days` /
+  `scan_*` / `report_min_mb` / `allow_full_scan` 等），另 2 项进护栏：
+  `auto_clean_max_risk`（决定自动清理能碰到多高风险，是许可边界本身）与 `rules_file`
+  （换规则文件等于换一套靶子）。
+
+  生效方式一律没标 `reschedule`：自动清理确实是启动时注册的调度快照，但
+  `hot_update_schedule` 目前只重注册简报/截止日期。标成 reschedule 会回一句“已按新配置
+  重注册”——而实际什么也没变，比不标更糟。能现读的标 `live`，注册期快照标 `restart`。
+
+- **7 项“死配置”如实标出来，并全部处理完**
+  逐项核对“这字段到底谁在读”时揪出一类更隐蔽的：字段存在、面板可见、TOML 写得进去，
+  但**没有任何代码读它**——改了完全不生效。共 7 项。
+
+  处理不是“也给它开个代改口子”，而是先如实标出来：每项挂一句“改了不生效 + 那到底
+  该改哪个”，`editable` 对它**强制为假**（将来误加进真源表也不放行），提示排在
+  “能否代改”之前——把人推去翻文件等于骗他白改一场。然后逐项收口：
+
+  - `[monitor] enabled` —— **删**。真开关是 `[percept] system_enabled`；留着只会让人
+    在 `[monitor]` 段关了半天，而监控照跑。
+  - `[monitor] check_interval` —— **接线**。`percept/factory.py` 改读
+    `monitor_check_interval`，以前这里写死常量 60s，模板里那句注释等于白写。
+  - `[monitor] high_cpu_duration` —— **删**。它对应的 `check_high_cpu_processes()` 只
+    返回 `"chrome.exe (PID: 1) CPU: 67%"` 这种字符串，而 `/health` 的进程区块给的是
+    CPU + 内存 + 启动时间的结构化 Top N，还守着“只发现、只解释、只建议”的处置原则。
+    两套并存只会让人搞不清该信哪个。
+  - `[monitor] work_break_interval` —— **接线**。久坐提醒原先方法写完整了、10 个测试
+    也全绿，但它**不在 `_do_check()` 里**——而 `_do_check()` 是全工程唯一的监控驱动点
+    （`SystemSource.collect()` 每 60s → `check_now()` → `_do_check()`；`start()` 从来
+    没人调过）。测试自己直接调方法，绕过了真实入口，所以绿得毫无意义。
+    现在挂进 `_do_check()`，并顺手修掉口径缺陷：原来“空闲 ≥60 秒就清零计时”，用户
+    读段文档、想会儿问题就把 2 小时的账清掉，阈值永远攒不满；改为**离开超过 5 分钟
+    才算真中断**，起点按“真正落座那一刻”回溯。
+  - `[calendar] enabled` —— **接线**。新建 `proactive_wiring.py` 按 `[calendar]` 装配
+    `CalendarSource` 传给 `ProactiveEngine`（hub 那句“日历源与系统监控本期不接线”
+    把两件半成品混着说），简报里从此真有“今日日程”。
+  - `[skills] enable` / `[plugins] enable` —— **接线**。两个都用模块级开关：加载入口
+    散在 UI / 工具 / 命令三条路上（技能 8 处、插件 11 处），逐层传参漏一处就会出现
+    “面板里关掉了、模型还在用”。插件开关只管装/卸/启/停这类写动作，读操作不拦——
+    关掉系统不等于连“我装了什么”都不给人看。
+
+  至此 `catalog.DEAD_FIELDS` 清零。表留着不拆：下一个“字段在、没人读”的情况还得往
+  这里放，拆了等于拆掉检测能力。
+
+- **用属性名问配置时被误判成“不能代改”**
+  `/config set monitor_work_break_interval …` 这种按 `Settings` 属性名问的写法，明明
+  这项已经纳管、一句话就能改，却被回“不在可以代改的范围”，把人打发去翻文件。
+  现在这种情况会把真源表的协议键直接给出来：`/config set work_break_interval <值>`。
+
+- **`[monitor]` / `[context]` 与能力总开关 13 项进真源表**
+  `monitor` 那组阈值一直存在、却一直没人读——现在真管告警的是感知源的 `SystemSource`，
+  它装配时吃进 `cpu_threshold` / `memory_threshold` / `disk_threshold` / `alert_cooldown`
+  / `disk_trend_days` / `check_interval` / `work_break_interval`，所以这七项标
+  `percept`（标 `live` 就是“落盘不生效”）。`context`
+  四项与 `enable_mcp` / `enable_lsp` / `deferred_loading` / `chat_detection` 都在启动或
+  重建 engine 时构造，标 `restart`。用户以前改这些只能手翻文件。
+
+  顺带一处写进注释的取舍：`enable_tool_self_healing` **没有**纳管——它不在
+  `settings_domains` 任何映射里，`save_value` 找不到落盘位置。纳管它等于回一句“已改好”
+  而实际没落盘。
+
+### 移除
+
+- **删掉全局热键（`agent/daemon/` 整包）**
+  热键从一开始就只服务于「召唤 pywebview 三栏工作台窗口」——那个工作台 2026-10 退役后，
+  这套代码就没有服务对象了，一直挂着「待接线」。本次整体删除：
+
+  | 删除项 | 规模 |
+  |---|---|
+  | `hotkey.py`（keyboard / pynput 跳平台） | 137 行 |
+  | `hotkey_native.py`（Windows RegisterHotKey） | 270 行 |
+  | `platform_utils.py`（只为它服务的平台探测） | 47 行 |
+  | `tests/daemon/test_hotkey.py` | 72 行 |
+  | `Settings.daemon_hotkey` / `_native` / `_debounce_ms` | 3 字段 |
+
+  以及 `settings_domains` 三条映射、`settings.py` 的加载白名单、三个 `settings.toml`
+  模板里的 `[daemon] hotkey*`。整个 `agent/daemon/` 包随之消失。
+
+  **为什么是删而不是继续等接线**：现在的宿主是 jarvis-desktop（Electron），它自带
+  `globalShortcut`——注册系统级快捷键是原生能力，一行代码；而 Python 侧那套要自己开
+  只消息窗口、跑后台线程、再按平台分三条后端，属于**架构错配**。桌面热键应该做在
+  Electron 主进程里。
+
+  旧配置里留着 `hotkey = "..."` 不会报错（加载器对未知键静默忽略），但已经不会再有任何
+  效果，所以三个字段都登进了 `REMOVED_FIELDS`：问「hotkey 这项怎么改」会直接回
+  「已于 2026-11-01 删除，桌面热键归 Electron」，而不是让人去翻一个不存在的字段。
+
+### 工程
+
+- 真源表 30 → **58 项**（28 auto / 29 confirm / 1 forbidden），配置可代改率
+  14.5% → 28.3%；目录覆盖 `Settings` 全部 202 个字段，未接线 **0** 项。
+- 配置测试共 **142 例**（`test_catalog.py` 39 / `test_config_specs.py` 103），守住三条
+  不变量：**一个都不漏**（目录覆盖全部 `Settings` 字段）、**一个都不空**（每条都有说明）、
+  **凭据不吐值**；另有专用用例守死配置与真源表形状（死配置永不进表 / 永不判为可代改 /
+  `DEAD_FIELDS` 非空时必须指出替代改法），以及“装配那一行到底传没传”——
+  `test_factory_really_passes_work_break_interval_to_system_source` 就这么来的。
+- 全量 `pytest`：**4143 passed, 1 skipped**。
+- 桌面设置面板底部新增出口说明（中英双语）：面板只摆了十来项，其余两百多项不用翻文件
+  ——聊天里问一句就能查、能改的会代改，并给出 `settings.toml` 与 `/config explain` 两条路。
+- 修一条把数字写死的旧断言：`/config list` 的项数改为从真源表派生，并逐条断言每个
+  可写键都出现在清单里——真正要守的是“列出的集合 == 可写的集合”，不是那个数字。
+- 提示词新增“用户不懂配置时”一节：不知道就查、分清两种情形、查不到就说没有。
+
 ## [2.3.2] — 2026-10-31
 
 本次补齐电脑管家八件事中的三件：**清理磁盘 / 查杀病毒 / 性能诊断**（排前两版一直空着的 6.1、6.2、6.4）。

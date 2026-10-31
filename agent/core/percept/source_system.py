@@ -56,6 +56,7 @@ class SystemSource:
         disk_threshold: float = 10.0,
         alert_cooldown: int = 600,
         disk_trend_days: int = 7,
+        work_break_interval: int = 7200,
     ) -> None:
         """
         Args:
@@ -67,6 +68,9 @@ class SystemSource:
                 这是 ``MonitorConfig`` 的既有口径，本源不改它）。
             alert_cooldown: 同类告警冷却秒数（由 ``SystemMonitor`` 内部记账）。
             disk_trend_days: 磁盘趋势预测天数。
+            work_break_interval: 连续工作多少秒提醒休息。久坐提醒的判定在
+                ``SystemMonitor._do_check`` 里，而本源是它唯一的驱动点——
+                不把配置传到这儿，这个字段就会像以前一样“存得进去、改了没用”。
         """
         self.interval_s = float(interval_s)
         self._monitor = monitor
@@ -77,6 +81,7 @@ class SystemSource:
             "disk_threshold": float(disk_threshold),
             "alert_cooldown": int(alert_cooldown),
             "disk_trend_days": int(disk_trend_days),
+            "work_break_interval": int(work_break_interval),
         }
         self.unavailable = ""      # 依赖层面原因（psutil 缺失/安装失败）
         self.published = 0
@@ -146,6 +151,7 @@ class SystemSource:
                         disk_threshold=self._thresholds["disk_threshold"],
                         alert_cooldown=self._thresholds["alert_cooldown"],
                         disk_trend_days=self._thresholds["disk_trend_days"],
+                        work_break_interval=self._thresholds["work_break_interval"],
                     ),
                     on_alert=lambda _a: None,   # 不用回调：本源自己拉快照
                 )
