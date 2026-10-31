@@ -194,6 +194,33 @@ def test_scan_rejects_unknown_kind():
     assert "未知" in err
 
 
+def test_param_validation_precedes_platform_check(monkeypatch):
+    """没有 PowerShell 时，参数错误仍要先报出来。
+
+    实测（GitHub Actions ubuntu-latest）：原实现先查 PowerShell 再校参数，于是
+    ``kind='turbo'`` 只会得到「当前平台没有 PowerShell」——把真正的调用错误藏了
+    起来。把 ``powershell_path`` 打成 None 就能在**任何平台**重放这个场景，不依赖
+    CI 跑在 Linux 上。
+    """
+    monkeypatch.setattr(psrun, "powershell_path", lambda: None)
+    for kwargs, expect in (
+        ({"kind": "turbo"}, "未知"),
+        ({"kind": "full", "allow_full": False}, "全盘"),
+        ({"kind": "custom", "path": ""}, "path"),
+    ):
+        job, err = defender.start_scan(**kwargs)
+        assert job is None
+        assert expect in err, f"{kwargs} 应先报参数错误，实际：{err}"
+
+
+def test_platform_check_still_blocks_valid_request(monkeypatch):
+    """参数对了但平台不支持时，必须如实说没 PowerShell，而不是假装开始扫。"""
+    monkeypatch.setattr(psrun, "powershell_path", lambda: None)
+    job, err = defender.start_scan(kind="quick")
+    assert job is None
+    assert "PowerShell" in err
+
+
 def test_scan_status_unknown_job():
     data = defender.scan_status("scan-19000101-000000")
     assert data["state"] == "unknown"

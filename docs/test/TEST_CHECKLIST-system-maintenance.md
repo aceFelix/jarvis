@@ -8,9 +8,9 @@
 > 计划文档 [PLAN-system-maintenance](../roadmap/PLAN-system-maintenance.md)；
 > 配置项见 [配置指南·系统维护层](../../config-docs/configuration.md)。
 >
-> 自动化单测（**137 例，已全绿**）：
+> 自动化单测（**139 例，已全绿**）：
 > `tests/core/test_cleaner_rules.py`（29）、`tests/core/test_disk_scanner.py`（19 + 1 skip）、
-> `tests/core/test_disk_cleaner.py`（19）、`tests/core/test_system_health.py`（26）、
+> `tests/core/test_disk_cleaner.py`（19）、`tests/core/test_system_health.py`（28）、
 > `tests/tools/test_maintenance_tools.py`（26）、`tests/core/test_auto_clean.py`（18）。
 > 本册是**实机人工走查**那一半 —— 单测能钉住逻辑，钉不住“真机上 PowerShell 到底怎么回”。
 >

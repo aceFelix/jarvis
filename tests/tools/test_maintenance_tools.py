@@ -14,11 +14,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from types import SimpleNamespace
+
+import pytest
 
 from agent.core.context import ToolContext
 from agent.core.maintenance.rules import parse_rule
 from agent.tools.extensions import maintenance as mt
+
+# 预览列规则要拿得到内置规则库；而那套规则全是 Windows 路径（%LOCALAPPDATA% 等），
+# POSIX 上会被如实拒掉。需要真实规则库内容的用例挂此门禁。
+_WINDOWS_ONLY = pytest.mark.skipif(
+    os.name != "nt", reason="内置规则库为 Windows 语义（%VAR% / 盘符）"
+)
 
 
 def _ctx(**settings_over) -> ToolContext:
@@ -148,6 +157,7 @@ def test_disk_clean_call_rejects_empty_ids():
     assert "全清" in str(out.data)
 
 
+@_WINDOWS_ONLY
 def test_disk_clean_preview_lists_rules():
     out = _run(mt.DiskCleanTool().call({"ids": ["user_temp", "winsxs_cleanup"]}, _ctx()))
     assert not out.is_error

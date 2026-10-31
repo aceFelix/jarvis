@@ -297,15 +297,19 @@ def start_scan(
     Returns:
         ``(job, 错误说明)``。启动失败时 job 为 None。
     """
-    exe = psrun.powershell_path()
-    if exe is None:
-        return None, "当前平台没有 PowerShell，无法调用 Defender"
+    # 参数校验放在平台检查之前：传错参数是调用方的明确错误，与当前平台有没有
+    # PowerShell 无关。反过来的话，Linux 上传 kind='turbo' 只会得到「没有
+    # PowerShell」，把真正的调用错误藏了起来。
+    if kind not in ("quick", "custom", "full"):
+        return None, f"未知扫描类型：{kind}"
     if kind == "full" and not allow_full:
         return None, "全盘扫描默认关闭（[maintenance].allow_full_scan），请显式开启或改用快速扫描"
     if kind == "custom" and not path:
         return None, "指定路径扫描必须给 path"
-    if kind not in ("quick", "custom", "full"):
-        return None, f"未知扫描类型：{kind}"
+
+    exe = psrun.powershell_path()
+    if exe is None:
+        return None, "当前平台没有 PowerShell，无法调用 Defender"
 
     if kind == "quick":
         scan_cmd = "Start-MpScan -ScanType QuickScan"

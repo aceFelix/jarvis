@@ -173,6 +173,28 @@ monitor 的 1 秒阻塞采样截断），两边数字跟着抖。
 - 单测 119 → 137 例（新增 `tests/core/test_auto_clean.py` 18 例）；全量
   **4074 passed, 1 skipped**。
 
+### 修复：Linux CI 上 13 条测试整片失败
+
+开发机（Windows）全绿，推到 GitHub 后 `ci.yml` 的 ubuntu 矩阵报 `13 failed,
+4024 passed, 38 skipped`。三类报错、一个根子：**这套能力是 Windows 专属，
+测试却没做平台门禁**。详见 [修复复盘](docs/fixlogs/maintenance-tests-linux-ci-fix.md)。
+
+- **9 条规则库用例**：内置 19 条里 15 条 `paths` 型，路径全是 `%LOCALAPPDATA%` /
+  `%SYSTEMROOT%` / `%SYSTEMDRIVE%`。POSIX 上这些环境变量不存在，`expand_path`
+  按设计保留占位符、后续校验判为非绝对路径而拒绝——**这是正确的 fail-closed
+  行为，不是缺陷**。所以给这类用例打 `_WINDOWS_ONLY` 门禁，而不是把期望值换成
+  `/tmp` 去迁就平台（那样绿了也不再验证真正会出事的场景）。
+- **3 条扫描参数用例**：`defender.start_scan()` 原来先查 `powershell_path()`
+  再校参数，于是 Linux 上 `kind='turbo'` 只得到「没有 PowerShell」，把调用方的
+  参数错误藏了起来。改为**参数校验在前、平台检查在后**——这也不是只为测试：
+  Windows 上 PowerShell 被策略禁用时，同样会把所有参数错误退化成同一个环境错误。
+- **1 条预览用例**（`KeyError: 'supported'`）是前两类的下游效应，随之消失。
+- 修顺序必须配一条**跨平台**用例，否则下次谁把顺序改回去，Windows 本地照样全绿：
+  新增 `test_param_validation_precedes_platform_check` 与
+  `test_platform_check_still_blocks_valid_request`，把 `powershell_path` 打成
+  `None` 来重放「没有 PowerShell」场景，不限平台。
+- 单测 137 → 139 例；全量 **4076 passed, 1 skipped**（Windows 上 0 新增 skip）。
+
 ---
 
 ## [2.3.1] — 2026-10-30

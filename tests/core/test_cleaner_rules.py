@@ -23,6 +23,14 @@ from agent.core.maintenance.rules import (
     parse_rule,
 )
 
+# 内置规则库与它承载的路径全是 Windows 语义（%LOCALAPPDATA%、盘符、反斜杠分隔）。
+# POSIX 上没有这些环境变量，expand_path 会原样保留占位符继而判为非绝对路径——
+# 那是**正确行为**，不是缺陷。所以这类用例打平台门禁，而不是把期望值改成假路径
+# 去迁就平台（那样在 Linux 上通过、却不再验证真实的 Windows 场景）。
+_WINDOWS_ONLY = pytest.mark.skipif(
+    os.name != "nt", reason="规则库与内置规则均为 Windows 语义（%VAR% / 盘符）"
+)
+
 
 def _base(**over) -> dict:
     """一条最小合法规则，测试里按需覆盖字段。"""
@@ -45,6 +53,7 @@ def _base(**over) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@_WINDOWS_ONLY
 def test_parse_minimal_rule():
     rule = parse_rule(_base())
     assert rule.id == "t1"
@@ -54,16 +63,19 @@ def test_parse_minimal_rule():
     assert rule.paths and all(os.path.isabs(p) for p in rule.paths)
 
 
+@_WINDOWS_ONLY
 def test_high_risk_is_not_selected_by_default():
     """high 风险默认不勾——PLAN 第八节坑 1 的直接规避。"""
     rule = parse_rule(_base(risk="high"))
     assert rule.default_selected() is False
 
 
+@_WINDOWS_ONLY
 def test_medium_risk_is_selected():
     assert parse_rule(_base(risk="medium")).default_selected() is True
 
 
+@_WINDOWS_ONLY
 def test_paths_accepts_single_string():
     """``paths`` 写单个字符串也要能用（TOML 手写时常这样）。"""
     rule = parse_rule(_base(paths="%SYSTEMROOT%\\Temp"))
@@ -123,6 +135,7 @@ def test_reject_relative_path():
         parse_rule(_base(paths=["relative\\dir"]))
 
 
+@_WINDOWS_ONLY
 def test_reject_root_path():
     """盘根绝不许进清单：一次误操作就是整盘。"""
     with pytest.raises(ValueError, match="盘根"):
@@ -173,11 +186,12 @@ def test_expand_unknown_var_kept_verbatim():
     assert "%JARVIS_NO_SUCH_VAR_XYZ%" in got
 
 
+@_WINDOWS_ONLY
 def test_expand_tilde():
     assert expand_path("~\\sub").startswith(str(os.path.expanduser("~")))
 
 
-@pytest.mark.skipif(os.name != "nt", reason="%ALLDRIVES% 只在 Windows 上有意义")
+@_WINDOWS_ONLY
 def test_expand_all_drives(monkeypatch):
     monkeypatch.setattr(rules_mod, "_local_drives", lambda: ["C:", "D:"])
     got = expand_path_list("%ALLDRIVES%\\$Recycle.Bin")
@@ -218,6 +232,7 @@ def test_whitelist_rejects_arbitrary_binaries():
 # ---------------------------------------------------------------------------
 
 
+@_WINDOWS_ONLY
 def test_load_builtin_rulebook_has_all_rules():
     """内置规则库必须一条都没被拒——被拒意味着 TOML 写错了。"""
     book = load_rulebook()
@@ -247,6 +262,7 @@ def test_load_rulebook_bad_toml_reports_not_raises(tmp_path):
     assert book.rejected and "解析失败" in book.rejected[0][1]
 
 
+@_WINDOWS_ONLY
 def test_load_rulebook_duplicate_id_keeps_first(tmp_path):
     f = tmp_path / "dup.toml"
     f.write_text(
@@ -263,6 +279,7 @@ def test_load_rulebook_duplicate_id_keeps_first(tmp_path):
     assert any("重复" in why for _rid, why in book.rejected)
 
 
+@_WINDOWS_ONLY
 def test_load_rulebook_one_bad_rule_does_not_kill_others(tmp_path):
     """一张表里写错一条不该让整套清理瘫痪。"""
     f = tmp_path / "mixed.toml"
