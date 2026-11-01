@@ -4,11 +4,12 @@
 客户端管理），但完全接管指令分发：
 
 - ``message`` 不再走手机端"共享 REPL 上下文"路径，而是转发给
-  workbench 的 ChatEngine 指令队列（与 pywebview 工作台同一引擎）；
+  ``engine`` 的 ChatEngine 指令队列（与桌面壳同一个引擎实例）；
 - 注册 request/response 型桌面指令（sessions/models/voices/metrics/state/settings），
-  能力口径与 ``agent.ui.workbench.api.WorkbenchAPI`` 一一对齐；
+  能力口径与 ``agent.serve.engine.api.WorkbenchAPI`` 一一对齐；
 - 事件泵线程消费引擎事件队列，逐条 broadcast 给所有 WS 客户端，
-  事件名与 payload 保持 workbench 原样（前端渲染逻辑可对齐 app.js）。
+  事件名与 payload 是 ``agent/serve/protocol.py`` 定义的契约（jarvis-desktop 的
+  ``contracts.ts`` 按此镜像，改事件名等于改对外协议）。
 
 绑定收敛为 127.0.0.1 + 随机端口（桌面壳经 stdout 握手 JSON 获取），
 不对局域网暴露——这是与手机协同模式（0.0.0.0 + 固定端口）的关键差异。
@@ -44,9 +45,9 @@ from agent.serve.rpc_email import EmailRpcMixin
 from agent.serve.rpc_extensions import ExtensionsRpcMixin
 from agent.serve.rpc_percept import PerceptRpcMixin
 from agent.serve.rpc_tasks import TasksRpcMixin
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.metrics import collect_metrics
-from agent.ui.workbench.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.metrics import collect_metrics
+from agent.serve.engine.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
 
 # 附件上限（与桌面壳前端同一口径）：防单条消息超大 payload 打爆 WS/上下文。
 # 超限在入队前快速失败（reply ok=False），不进引擎队列。@author aceFelix

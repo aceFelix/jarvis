@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # 仅类型标注：运行时不导入，避免 engine ↔ checkpoint_ops 循环
-    from agent.ui.workbench.engine import ChatEngine
+    from agent.serve.engine.engine import ChatEngine
 
 
 def make_manager(engine: ChatEngine):

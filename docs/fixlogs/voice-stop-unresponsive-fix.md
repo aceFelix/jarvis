@@ -37,7 +37,7 @@ REPL 终端 `/voice` 不受影响（Ctrl+C / ESC 行为正常），问题只在 
   「打断意图」（`voice.interrupt` 只想中断当前录音继续聆听）；且待机阶段一旦标志
   置位就直接退出会话，打断按钮会误杀会话。
 - **涉及模块**：`agent/voice/voice_loop.py`（录音/播放阻塞调用 + 意图判定）、
-  `agent/ui/workbench/engine.py`（指令消费循环与语音任务同循环，无需改动但为现象载体）。
+  `agent/serve/engine/engine.py`（指令消费循环与语音任务同循环，无需改动但为现象载体）。
 
 ## 修复方案
 

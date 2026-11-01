@@ -4,7 +4,7 @@
 
 同一个物理事实（CPU/内存/磁盘）原先由两处代码各读一遍：
 
-- ``agent/ui/workbench/metrics.py`` —— 右栏三条进度条，2 秒一次、非阻塞
+- ``agent/serve/engine/metrics.py`` —— 右栏三条进度条，2 秒一次、非阻塞
 - ``agent/core/daemon/monitor.py`` —— 阈值告警，10/60 秒一次、``cpu_percent(interval=1)`` 阻塞
 
 两套实现不只是代码重复，还**互相污染**：``psutil.cpu_percent(interval=None)`` 返的是
@@ -119,7 +119,7 @@ class SystemSnapshot:
     def to_metrics_payload(self) -> dict[str, Any]:
         """右栏 metrics 事件的前端格式（键集合与历史版本完全一致）。
 
-        消费方：``agent/ui/workbench/metrics.py`` → serve ``metrics`` 事件 / RPC。
+        消费方：``agent/serve/engine/metrics.py`` → serve ``metrics`` 事件 / RPC。
         """
         return {
             "cpu": round(self.cpu_percent, 1),

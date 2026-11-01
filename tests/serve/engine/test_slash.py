@@ -26,9 +26,9 @@ import threading
 from types import SimpleNamespace
 
 from agent.config.settings import Settings
-from agent.ui.workbench import slash_bridge
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine import slash_bridge
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
 
 
 def _make_engine() -> tuple[ChatEngine, queue.Queue, queue.Queue]:

@@ -75,8 +75,8 @@ from agent.serve.server import DesktopBridgeServer  # noqa: E402
 from agent.tools.bash import BashTool  # noqa: E402
 from agent.tools.track_goal import TrackGoalTool  # noqa: E402
 from agent.ui.cli import RichCLI  # noqa: E402
-from agent.ui.workbench.api import WorkbenchAPI  # noqa: E402
-from agent.ui.workbench.engine import ChatEngine  # noqa: E402
+from agent.serve.engine.api import WorkbenchAPI  # noqa: E402
+from agent.serve.engine.engine import ChatEngine  # noqa: E402
 
 # 控制台可能是 GBK，遇到渲染不了的字符用「?」顶上而不是整个脚本崩掉
 if hasattr(sys.stdout, "reconfigure"):

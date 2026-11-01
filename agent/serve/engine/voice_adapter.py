@@ -11,7 +11,7 @@ error 通道。音频（STT 录音 / TTS 播放）留在本进程本地 pyaudio�
 
 from __future__ import annotations
 
-from agent.ui.workbench.bridge import _EventEmitter
+from agent.serve.engine.bridge import _EventEmitter
 from agent.voice.voice_events import VoiceEventsBase
 
 # 半双工语音 WS 事件名（与 agent/serve/protocol.py 的 EVT_VOICE_* 字面量对齐；

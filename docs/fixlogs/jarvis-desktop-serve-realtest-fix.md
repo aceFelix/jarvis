@@ -88,7 +88,7 @@ jarvis-desktop 立项落地后首次实机使用，连续暴露五个问题：
 | `jarvis-desktop/src/preload/index.ts` / `index.d.ts` | 暴露 `log()` 日志桥 + 类型声明 |
 | `jarvis-desktop/src/main/index.ts` | `ipcMain.on(RendererLog)` 落 desktop.log |
 | `jarvis/agent/serve/app.py` | `_prewarm_native_libs()` 预加载原生库绕开 DllMain 死锁 |
-| `jarvis/agent/ui/workbench/engine.py` | 标题改名改发 `session_renamed` |
+| `jarvis/agent/serve/engine/engine.py` | 标题改名改发 `session_renamed` |
 | `jarvis/agent/ui/workbench/assets/app.js` | 工作台前端处理 `session_renamed` |
 | `jarvis/agent/serve/protocol.py` | 事件清单文档串同步 |
 | `jarvis/agent/session_manager.py` | `_sync_meta_name` / `_move_or_copy_pointer` |

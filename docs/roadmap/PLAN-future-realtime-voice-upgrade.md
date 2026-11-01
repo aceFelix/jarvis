@@ -62,7 +62,7 @@ Python 侧零新增 ASR、不抢麦克风；桌面 `on_status("standby")` 已映
 |---|---|
 | `agent/voice/realtime_engine.py` | `_standby` 门控 + `enter_standby()` + 吞轮（cancel + 本地丢音频）+ 待机期抑制 rescue |
 | `agent/voice/realtime_tools.py` | 新内置工具 `enter_standby`；`standby_enabled` 时 `end_conversation` 回调改指向待机 |
-| `agent/ui/workbench/engine.py` | `_handle_start_talk_duplex` 透传 `standby_enabled` |
+| `agent/serve/engine/engine.py` | `_handle_start_talk_duplex` 透传 `standby_enabled` |
 | `agent/voice/realtime_talk.py` | 终端适配器同步透传 |
 | `agent/config/settings.py` + `configs/settings.example.toml` | `[realtime_talk] standby_enabled` / `standby_wake_words` |
 | `jarvis-desktop` 渲染层 | 可选：待机文案细化为"待命中·说贾维斯唤醒" |
@@ -147,5 +147,5 @@ Python 侧零新增 ASR、不抢麦克风；桌面 `on_status("standby")` 已映
 - 稳定性升级（重连/抖动缓冲/客户端 VAD/淡出打断）见 [PLAN-p1-realtime-stability.md](PLAN-p1-realtime-stability.md)。
 - 半双工/回声/唤醒既有实现：`agent/voice/voice_loop.py`、`agent/voice/voice_config.py`。
 - 实时引擎与桌面桥接：`agent/voice/realtime_engine.py`、`agent/voice/realtime_bridge_audio.py`、
-  `agent/ui/workbench/engine.py::_handle_start_talk_duplex`。
+  `agent/serve/engine/engine.py::_handle_start_talk_duplex`。
 - 退下标记不泄漏上屏复盘：`docs/fixlogs/`（`<standby/>` 显示路径剥标）。

@@ -54,18 +54,18 @@
   - `_rpc_projects_list` → `api.list_projects()`；
   - `_rpc_projects_forget`：校验 path 后转发 `api.forget_project(path)`。
 
-### 3.3 JSBridge `agent/ui/workbench/api.py`
+### 3.3 JSBridge `agent/serve/engine/api.py`
 - `set_project(path)`：`_post({"cmd":"set_workdir","path":path})`，入队即返回；
 - `get_project()` / `list_projects()` / `forget_project(path)`：读写 `projects.toml`；
   `list_projects` 每项附 `exists=Path(p).is_dir()` 供前端置灰；
 - `list_sessions()` 每项补 `workdir` 字段（`SessionMeta.workdir` 现成）。
 
-### 3.4 引擎 `agent/ui/workbench/engine.py`
+### 3.4 引擎 `agent/serve/engine/engine.py`
 - `_dispatch` 加 `set_workdir` 分支 → `project_switch.handle_set_workdir`；
 - 新字段 `_workdir_override`（镜像 `_model_override`）：会话未装配时记账，
   `_ensure_session` 装配末尾自然生效。
 
-### 3.5 新模块 `agent/ui/workbench/project_switch.py`
+### 3.5 新模块 `agent/serve/engine/project_switch.py`
 `async handle_set_workdir(engine, path)` 主链：
 
 1. `expanduser` + `is_absolute` + `is_dir` 二次校验；非法只 emit `warn`，不推事件；
@@ -225,7 +225,7 @@
 **现场诊断（报错案例）**：实机截图里聊天流出现 4 条「后端不支持指令 project.get /
 projects.list（…请重启后端后重试）」。根因不是代码缺陷：`desktop.log` 显示后端
 进程 pid=31964 于 20:16:10 启动，而 `agent/serve/server.py` 与
-`agent/ui/workbench/project_switch.py` 的最后修改时间为 21:01:41 / 21:17:48 ——
+`agent/serve/engine/project_switch.py` 的最后修改时间为 21:01:41 / 21:17:48 ——
 Python 子进程不热重载（渲染层 Vite HMR 却即时生效），旧进程没有 `project.*`
 注册。**处置：从托盘菜单退出桌面壳（关窗只隐藏、不会重启后端）后重新启动**。
 该项无需改代码，壳侧「未注册指令立即回 ok=false」的兜底文案已经把原因说清了。

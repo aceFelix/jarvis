@@ -1,15 +1,19 @@
-"""工作台对话引擎：工作线程中的 QueryLoop 宿主。
+"""对话引擎（ChatEngine）：工作线程中的 QueryLoop 宿主。
 
-pywebview 要求主线程跑窗口，因此把对话引擎放进守护线程：
+引擎跑在自己的守护线程上，宿主进程的主线程留给 WebSocket 服务与握手：
 
-- 独立 asyncio 事件循环，消费前端指令队列（send/load/new/stop 等）
+- 独立 asyncio 事件循环，消费宿主指令队列（send/load/new/stop 等）
 - 组装方式对齐 ``main.repl()``：provider → registry → orchestrator → loop，
   但去掉终端专属环节（启动动画/剪贴板/桥接广播），MCP 保持接入
 - 会话持久化复用 ``session_manager._auto_save``（与 REPL 同一套存盘格式），
-  历史会话可被左栏列表读取并恢复
+  历史会话可被桌面壳的会话列表读取并恢复
 - 旁路能力按功能拆同包模块（控本文件行数）：voice_adapter（语音事件适配）、
   mcp_runtime（MCP 接入与启动预热）、model_switch（模型热切换）、
   render（附件解析与渲染）
+
+线程模型沿用自 2026-08 的 pywebview 三栏窗口（当时是“窗口必须占主线程，所以
+引擎只能跑在守护线程”）；窗口壳于 2026-10 删除后结论未变——serve 的主线程要
+伺候 WS 与 stdin 监控，引擎同样不能占它。
 
 @author aceFelix
 """
@@ -26,11 +30,11 @@ from agent.config.settings import Settings
 from agent.core.message import Message, TextContent
 from agent.core.logging import get_logger
 from agent.utils.query_lock import acquire_lock_cancellable
-from agent.ui.workbench.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
+from agent.serve.engine.bridge import WorkbenchRealtimeUI, WorkbenchUI, _EventEmitter
 # 附件/渲染纯函数拆到 render.py（控本文件行数）；此处再导出保持
 # tests/ui 既有导入路径（from engine import _messages_to_render）不变。
 # @author aceFelix
-from agent.ui.workbench.render import (  # noqa: F401
+from agent.serve.engine.render import (  # noqa: F401
     _MAX_ATTACH_FILE_CHARS,
     _compose_with_files,
     _messages_to_render,
@@ -39,7 +43,7 @@ from agent.ui.workbench.render import (  # noqa: F401
 # 语音适配器与语音 WS 事件名拆到 voice_adapter.py（控本文件行数）；此处导入
 # 保持 ``engine.ServeVoiceAdapter`` 的既有引用路径（tests/voice 直接导入）。
 # @author aceFelix
-from agent.ui.workbench.voice_adapter import (  # noqa: F401
+from agent.serve.engine.voice_adapter import (  # noqa: F401
     _EVT_VOICE_STARTED,
     _EVT_VOICE_STOPPED,
     ServeVoiceAdapter,
@@ -47,7 +51,7 @@ from agent.ui.workbench.voice_adapter import (  # noqa: F401
 # 引擎旁路能力（MCP 预热 / 模型热切换）实现在同包模块，见各自模块头注释。
 # 方法名与行为保持不变（测试与调用方直接调 engine._prewarm 等）。
 # @author aceFelix
-from agent.ui.workbench import (
+from agent.serve.engine import (
     checkpoint_ops,
     mcp_runtime,
     remote_bridge,

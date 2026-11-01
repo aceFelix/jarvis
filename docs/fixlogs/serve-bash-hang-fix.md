@@ -46,7 +46,7 @@
   引擎事件循环线程，阻塞期间同环串行的 `_command_loop` 无法消费 `answer_user`
   指令 → 自死锁直到 600s 超时（与 voice 饿死同类问题，本次一并修复）。
 - **涉及模块**：`agent/tools/bash.py`、`agent/core/sandbox/executor.py`、
-  `agent/ui/workbench/bridge.py`、`agent/core/orchestrator.py`、
+  `agent/serve/engine/bridge.py`、`agent/core/orchestrator.py`、
   `agent/core/error_recovery.py`。
 
 ## 修复方案
@@ -107,13 +107,13 @@
 |---|---|
 | `jarvis/agent/tools/bash.py` | `_call_normal` 子进程 `stdin=DEVNULL` + CancelledError 回收子进程 |
 | `jarvis/agent/core/sandbox/executor.py` | 3 处 `create_subprocess_exec` 加 `stdin=DEVNULL` |
-| `jarvis/agent/ui/workbench/bridge.py` | 新增 `ask_user_async`（to_thread 等待，不饿死引擎循环） |
+| `jarvis/agent/serve/engine/bridge.py` | 新增 `ask_user_async`（to_thread 等待，不饿死引擎循环） |
 | `jarvis/agent/core/orchestrator.py` | 权限询问站点优先 `ask_user_async` |
 | `jarvis/agent/core/error_recovery.py` | 询问站点优先 `ask_user_async` |
-| `jarvis/agent/ui/workbench/engine.py` | `_send_task` 句柄 + `abort_current_reply()` + `_command_loop` 捕 CancelledError 继续服务 |
+| `jarvis/agent/serve/engine/engine.py` | `_send_task` 句柄 + `abort_current_reply()` + `_command_loop` 捕 CancelledError 继续服务 |
 | `jarvis/agent/serve/protocol.py` | `CMD_REPLY_ABORT` 常量 + 入 `DESKTOP_COMMANDS`（18 条） |
 | `jarvis/agent/serve/server.py` | 注册 `reply.abort` rpc |
-| `jarvis/agent/ui/workbench/api.py` | 新增 `abort_reply()` |
+| `jarvis/agent/serve/engine/api.py` | 新增 `abort_reply()` |
 | `jarvis/tests/ui/test_serve_stdin_abort.py` | 新增：stdin DEVNULL / 取消回收 / ask_user_async / 引擎 abort 回归 |
 | `jarvis/tests/serve/test_serve_protocol.py` | 新增：reply.abort 注册 + 指令总数 18 契约 |
 | `jarvis-desktop/src/shared/contracts.ts` | `Cmd.ReplyAbort` 镜像 |

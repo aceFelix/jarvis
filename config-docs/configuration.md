@@ -614,7 +614,7 @@ email_imap_mailbox = "INBOX"
 | `--no-boot` | 跳过启动动画 |
 | `--quick` | 快速启动（跳过 MCP/LSP） |
 | `--serve` | 启动 headless WebSocket 后端（仅监听 `127.0.0.1` + 随机端口，供 jarvis-desktop 等外部前端接入） |
-| `--gui` / `--talk` | ❌ 已退役（2026-10）：三栏 pywebview 工作台窗口已删除，执行仅打印下线说明与自启清理指引；参数仍保留解析但不再出现在 `--help`（图形化桌面请用 jarvis-desktop） |
+| `--gui` / `--talk` | ❌ 已删除（2026-11-01）：三栏 pywebview 工作台窗口 2026-10 退役后，这两个参数曾作为“给老用户读一句下线说明”的垫子保留了一个月，现连同提示一并移除；敲它们会走 argparse 的 unknown argument 分支（图形化桌面请用 jarvis-desktop） |
 | `--no-update-check` | 跳过启动时的版本更新检查（等价 `[update] check = false`） |
 
 ---

@@ -24,32 +24,52 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # 仅类型标注：运行时不导入，避免 engine ↔ project_switch 循环
-    from agent.ui.workbench.engine import ChatEngine
+    from agent.serve.engine.engine import ChatEngine
 
 
-async def handle_set_workdir(engine: ChatEngine, path: str) -> None:
+async def handle_set_workdir(
+    engine: ChatEngine,
+    path: str,
+    *,
+    start_new_session: bool = True,
+    announce: bool = True,
+) -> bool:
     """运行时切换工作目录（serve project.set → 引擎线程内串行执行）。
 
     Args:
         engine: 工作台对话引擎实例。
         path: 目标项目目录（须为已存在的绝对路径；serve 侧已做一次校验，
             这里二次校验兜底——引擎可能收到非 serve 来源的指令）。
+        start_new_session: True（默认）= 手动切项目的语义「切项目就开新会话」；
+            False = 只换目录、保住当前对话。后者专供 ``_handle_load`` 恢复
+            历史会话使用：那条对话是用户点名要打开的对象，不能因换目录被清掉。
+        announce: True（默认）= 推面向用户的气泡（``info`` / ``warn`` / ``_ui.info``）；
+            False = 只推 ``project_switched`` 让宿主更新项目区，不弹任何提示。
+            恢复会话时用户的意图是“打开会话”而非“切项目”，弹切换提示是噪音；
+            失败文案也由调用方按自己的场景给（比“项目路径非法”贴切）。
+
+    Returns:
+        True 表示目录已生效（含“本来就同目录”的幂等分支）；False 表示未切换
+        （路径非法 / 提示词重建失败），此时 settings.workdir 保持原值，调用方
+        可据此给出更贴场景的提示。
 
     @author aceFelix
     """
     path = (path or "").strip()
     if not path:
-        return
+        return False
     # 1. 二次校验：绝对路径 + 目录存在。非法只 warn，不推 project_switched
     #    （前端「待生效」标记保留，用户可重选），也不落 projects.toml。
     try:
         resolved = Path(path).expanduser()
     except (OSError, ValueError) as e:
-        engine._emitter.emit("warn", f"项目路径非法: {type(e).__name__}: {e}")
-        return
+        if announce:
+            engine._emitter.emit("warn", f"项目路径非法: {type(e).__name__}: {e}")
+        return False
     if not resolved.is_absolute() or not resolved.is_dir():
-        engine._emitter.emit("warn", f"项目路径非法（需为已存在的绝对目录）：{path}")
-        return
+        if announce:
+            engine._emitter.emit("warn", f"项目路径非法（需为已存在的绝对目录）：{path}")
+        return False
     path = str(resolved)
     name = resolved.name
     s = engine._settings
@@ -57,7 +77,7 @@ async def handle_set_workdir(engine: ChatEngine, path: str) -> None:
     # 2. 与当前 workdir 相同（重复点选/竞态）：不重建，只回执让前端收敛
     if str(s.workdir) == path:
         engine._emitter.emit("project_switched", {"workdir": path, "name": name})
-        return
+        return True
 
     from agent.config import projects_registry
 
@@ -70,8 +90,9 @@ async def handle_set_workdir(engine: ChatEngine, path: str) -> None:
         engine._workdir_override = path
         _persist(projects_registry, path, engine)
         engine._emitter.emit("project_switched", {"workdir": path, "name": name})
-        engine._emitter.emit("info", f"已切换到项目：{name}")
-        return
+        if announce:
+            engine._emitter.emit("info", f"已切换到项目：{name}")
+        return True
 
     # 3b. 已装配：先用新 workdir 重建提示词（未提交 settings），成功才就地
     #     换 workdir → 更新 loop → 重挂 harness → 开新会话 → 落库。任一步失败
@@ -86,8 +107,11 @@ async def handle_set_workdir(engine: ChatEngine, path: str) -> None:
         if s.system_prompt_append:
             system_prompt = system_prompt + "\n\n" + s.system_prompt_append
     except Exception as e:  # noqa: BLE001 - 提示词重建失败：不提交切换
-        engine._emitter.emit("warn", f"项目切换失败（提示词重建）: {type(e).__name__}: {e}")
-        return
+        if announce:
+            engine._emitter.emit(
+                "warn", f"项目切换失败（提示词重建）: {type(e).__name__}: {e}"
+            )
+        return False
 
     s.workdir = path
     engine._workdir_override = ""
@@ -102,11 +126,15 @@ async def handle_set_workdir(engine: ChatEngine, path: str) -> None:
         ).start()
 
     # 切项目 = 开新会话：清空上下文、换 session 名（旧会话仍按 SessionMeta.workdir
-    # 归在旧项目下可回看）。
-    engine._handle_new_session()
+    # 归在旧项目下可回看）。恢复历史会话时由调用方传 start_new_session=False 跳过
+    # —— 否则刚载入的那条对话会被当场清掉。
+    if start_new_session:
+        engine._handle_new_session()
     _persist(projects_registry, path, engine)
     engine._emitter.emit("project_switched", {"workdir": path, "name": name})
-    engine._ui.info(f"已切换到项目：{name}")
+    if announce:
+        engine._ui.info(f"已切换到项目：{name}")
+    return True
 
 
 def _persist(projects_registry, path: str, engine: ChatEngine) -> None:

@@ -10,7 +10,8 @@
 > 下线，窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` +
 > `assets/`）与 `agent/daemon/autostart.py` 均已删除（开机自启的本质就是开机拉起
 > `jarvis --gui`）。图形化桌面唯一入口为 **jarvis-desktop**（自带开机自启）；
-> `agent/ui/workbench/` 引擎层仍保留，为 serve 与桌面壳共用。判断依据与影响面见
+> 对话引擎层**没有退役**，它已从 `agent/ui/workbench/` 迁到 `agent/serve/engine/`
+> 并改用中性名（2026-11），仍是 serve 与桌面壳共用的后端。判断依据与影响面见
 > [`docs/fixlogs/workbench-gui-retired.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/workbench-gui-retired.md)。
 >
 > ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` 已在 2026-10 由 W2 感知总线收编，`holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
@@ -35,7 +36,7 @@
 
 > 💤 休眠 = 代码完整保留且测试覆盖，但启动接线随 `daemon.py` 移除，尚无生产装配点。
 > ✅ 在用（主动感知三件套）= 2026-09 由 serve 宿主 `ProactiveHub` 重新装配，到期经 `proactive_notify` 事件推给 jarvis-desktop 桌面壳播报，并行用本机 CosyVoice 做待机 TTS 朗读（二期，`proactive_tts_enabled`，忙时跳过）；**仅 `--serve` / 桌面壳运行期间生效**（终端侧 2026-10 另接 `CliReminderHost`，仅文本上屏不播 TTS）。
-> 注：右栏 CPU/内存/磁盘三件套由 [`workbench/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/metrics.py) 包装、经 serve 事件供桌面壳右栏。**2026-10-31 起采样本身已收口**：`metrics.py` 与 `monitor.py` 都不再自己调 psutil，统一读 [`core/system_sampler.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/system_sampler.py) 的进程级共享采样器（默认 1 秒节流）。此前两套实现不只是代码重复——`psutil.cpu_percent(interval=None)` 返的是「距上次调用」的平均值，右栏 2 秒窗口会被 monitor 的 1 秒阻塞采样截断，两边数字互相干扰；现在采样与判定彻底分层：采样器出 `SystemSnapshot`，`monitor.py` 只留报警状态机（持续时长/600s 冷却/恢复通知）。休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）已于 2026-10-26 由感知总线收编（面板上 `system_enabled` / `calendar_enabled`，默认关），`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
+> 注：右栏 CPU/内存/磁盘三件套由 [`engine/metrics.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/engine/metrics.py) 包装、经 serve 事件供桌面壳右栏。**2026-10-31 起采样本身已收口**：`metrics.py` 与 `monitor.py` 都不再自己调 psutil，统一读 [`core/system_sampler.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/system_sampler.py) 的进程级共享采样器（默认 1 秒节流）。此前两套实现不只是代码重复——`psutil.cpu_percent(interval=None)` 返的是「距上次调用」的平均值，右栏 2 秒窗口会被 monitor 的 1 秒阻塞采样截断，两边数字互相干扰；现在采样与判定彻底分层：采样器出 `SystemSnapshot`，`monitor.py` 只留报警状态机（持续时长/600s 冷却/恢复通知）。休眠的 `monitor.py`（阈值告警/趋势预测）、`calendar_source.py`（日历源）已于 2026-10-26 由感知总线收编（面板上 `system_enabled` / `calendar_enabled`，默认关），`holidays.py` 待二期接线；`vision_watcher.py` 已于 2026-10（阶段 9 W2 第 4 步）由感知源 `agent/core/percept/source_vision.py` 接入统一事件总线。
 
 ## 二、桌面入口（当前形态：jarvis-desktop）
 
@@ -98,8 +99,8 @@ install / uninstall / status`），本质是让系统开机静默拉起 `jarvis 
 | macOS | LaunchAgent plist（`launchctl load`） | ❌ 不再提供 |
 | Linux | 从未支持（提示手动 systemd） | ❌ 不再提供 |
 
-需要开机启动请在 **jarvis-desktop** 的设置内开启。存量用户的手动清理指引（执行
-`jarvis --gui` 也会打印同一份说明）：
+需要开机启动请在 **jarvis-desktop** 的设置内开启。存量用户的手动清理指引
+（`--gui` / `--talk` 已于 2026-11-01 删除，不再由命令行代为打印）：
 
 ```powershell
 # Windows：删 Startup 快捷方式与自启辅助文件

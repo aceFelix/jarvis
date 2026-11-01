@@ -170,7 +170,7 @@ rules:
 | `agent/core/policy/budget.py`（新增） | 打扰预算 + 重要度评分 + 聚合/静默 |
 | `agent/core/daemon/proactive.py` | `on_notify` 前插入 budget 过滤；away mode 分流 |
 | `agent/permissions/*` | 规则放宽语义升级（带 spec allow 可放宽 ASK）+ 路径归一匹配 |
-| `agent/ui/workbench/engine.py` | 待批清单面板 + 租约管理 |
+| `agent/serve/engine/engine.py` | 待批清单面板 + 租约管理 |
 | `agent/config/settings.py` + `configs/permissions.yaml` | `[policy]` 配置项（运行时层字段）与放宽规则示例注释 |
 | `tests/test_permissions_relax.py`（新增） | allow 放宽/保守红线/路径 glob 回归 |
 
@@ -492,7 +492,7 @@ class PerceptEvent:
 |---|---|
 | `agent/voice/realtime_tools.py` | `select_tools_for_turn()`（tool-RAG） |
 | `agent/voice/realtime_engine.py` | 每轮重挂工具子集；"要动手"意图 → 转交后台 |
-| `agent/ui/workbench/engine.py` | 后台执行结果的异步卡片回报 |
+| `agent/serve/engine/engine.py` | 后台执行结果的异步卡片回报 |
 | `agent/core/memory/facts.py`（新增） | 结构化事实存储 + 时效 + 冲突链 |
 | `agent/core/memory/profile_refiner.py` | 提炼结果同时写入结构化事实 |
 | `tests/voice/test_tool_rag.py`、`tests/core/test_facts_memory.py`（新增） | 选择命中率、时效降权、冲突消解 |

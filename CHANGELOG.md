@@ -2,6 +2,66 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [2.3.4] — 2026-11-01
+
+这一版收两处**误导**。一处在交互上：项目区写着 A、你打开的会话却属于 B。
+一处在目录结构上：一个从不渲染界面的引擎层，因为历史上服务过已退役的窗口壳，
+一直挂在 `agent/ui/` 下，还得在 `agent/ui/__init__.py` 里写一段「这是例外」的注释来圆谎。
+
+### 新增能力
+
+- **打开历史会话，项目区跟着走（桌面壳）**
+  左栏「历史会话」里点一条旧会话，下方「项目」区会切到那条会话当初所在的目录。
+  会话本来就记着 `SessionMeta.workdir`，恢复它却不恢复目录，就会出现「面板写着 A
+  项目、对话内容全是 B 项目」——用户据此判断“我现在在哪”会误判；接着发消息，读写
+  文件和跑命令还会落在 A 里。
+
+  落地复用切项目的同一条主链（重建系统提示词 + 重挂 harness + 置顶最近项目），但
+  **不开新会话、不弹“已切换到项目”**：用户的动作是“打开这条会话”，不是“切项目”，
+  刚载入的对话不能因换目录被清掉。会话目录已被删除或改名时，保持当前项目并提示一
+  句，历史消息照常可看——不能因为目录没了就看不了旧对话。
+
+  桌面壳侧**零代码改动**：`project_switched` 事件本来就会写回当前项目、重拉项目区与
+  会话列表，高亮自然跟上。
+
+  终端 `/load` 未同步此行为（REPL 仍只恢复消息与轮数）。
+
+### 移除
+
+- **删掉 `--gui` / `--talk` 两个参数与退役提示**
+  这两个参数在 2026-10 窗口壳退役后并没有立刻删，而是作为一块垫子留着：历史
+  版本写入的开机自启快捷方式指向 `jarvis --gui`，在 wscript 静默运行下若直接报
+  unknown argument，用户根本看不到原因。所以它会捕获这两个参数、打一段下线说明与
+  自启清理路径再返回 0。
+
+  垫子到期了，连同 `announce_workbench_retired()` 整块移除。代价是：若仍有旧自启项
+  在跑，它现在会静默失败而非报错——存量自启残留的处理方式见 desktop 指南与
+  `workbench-gui-retired.md` 第七节，那两处本来就是权威位置。
+
+  顺带把引擎层从终端 UI 层里**掘出来**：`agent/ui/workbench/` → `agent/serve/engine/`。
+  这 19 个文件从来没渲染过界面，是 `jarvis --serve` 与桌面壳共用的对话引擎
+  （ChatEngine + WorkbenchAPI + 指标采集），只因历史上服务于已退役的窗口壳才被
+  放在 `agent/ui/` 下。迁完后 `agent/ui/` 只剩纯终端渲染零件。
+
+  `WorkbenchAPI` / `WorkbenchUI` 这两个类名**刻意未改**：它们是 `--serve` 的 WS
+  协议契约名，jarvis-desktop 的 `contracts.ts` 按此镜像，改名只会制造一处无收益的
+  跨仓不一致。测试同步归位：`tests/ui/test_workbench_*.py` 等 15 个引擎用例迁到
+  `tests/serve/engine/` 并去掉 `workbench_` 前缀，`tests/ui/` 只剩 5 个终端用例。
+
+  `api.py` 里「暴露给前端 JS 的 pywebview API」「窗口控制 window_minimize /
+  window_close」这些早已不成立的描述一并删掉——那两个方法本体在 2026-10 就不存在了，
+  只有 docstring 还留着，比不写更误导。
+
+### 工程
+
+- 全量 `pytest`：**4148 passed, 1 skipped**（会话与项目区联动新增 7 例：
+  `tests/serve/engine/test_session_workdir_link.py` 5 例 + `test_project_switch.py` 2 例）。
+- 清掉 3 处 lint 告警：`api.py` 一个从未被引用的局部变量、`slash_bridge.py` 的返回
+  类型注解改在 `TYPE_CHECKING` 下导入（延迟导入的约定不变，注解不求值、运行时零开销），
+  以及测试里一个未使用的 `tempfile` 导入。
+- 跨仓口径对齐：jarvis-desktop 的 `contracts.ts` / `metricsStore.ts` 与四份文档里
+  「数据源见 jarvis 侧 `agent/ui/workbench/xxx.py`」的注释同步改到新址。
+
 ## [2.3.3] — 2026-11-01
 
 这一版解决同一个毛病的两面：**配置项写着，但改了不起作用，或者根本没人读**。

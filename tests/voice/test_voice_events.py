@@ -103,7 +103,7 @@ class TestVoiceEventsProtocol:
 
 class TestServeVoiceAdapter:
     def _adapter(self) -> tuple[object, _FakeEmitter]:
-        from agent.ui.workbench.engine import ServeVoiceAdapter
+        from agent.serve.engine.engine import ServeVoiceAdapter
         em = _FakeEmitter()
         return ServeVoiceAdapter(em), em
 
@@ -306,11 +306,11 @@ class TestServeProtocolVoice:
     def test_engine_literals_match_protocol(self) -> None:
         """语音事件字面量应与 protocol 常量一致（防漂移）。
 
-        字面量定义在 agent/ui/workbench/voice_adapter.py（自 engine 拆出），
+        字面量定义在 agent/serve/engine/voice_adapter.py（自 engine 拆出），
         此处直接盯定义点。@author aceFelix
         """
         from agent.serve import protocol
-        from agent.ui.workbench import voice_adapter
+        from agent.serve.engine import voice_adapter
         assert voice_adapter._EVT_VOICE_STARTED == protocol.EVT_VOICE_STARTED
         assert voice_adapter._EVT_VOICE_STOPPED == protocol.EVT_VOICE_STOPPED
         assert voice_adapter._EVT_VOICE_STATE == protocol.EVT_VOICE_STATE
@@ -320,7 +320,7 @@ class TestServeProtocolVoice:
 
     def test_api_exposes_voice_methods(self) -> None:
         """WorkbenchAPI 应暴露 start_voice/stop_voice/interrupt_voice。"""
-        from agent.ui.workbench.api import WorkbenchAPI
+        from agent.serve.engine.api import WorkbenchAPI
         for name in ("start_voice", "stop_voice", "interrupt_voice"):
             assert callable(getattr(WorkbenchAPI, name))
 

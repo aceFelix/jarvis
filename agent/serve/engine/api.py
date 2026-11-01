@@ -1,7 +1,13 @@
-"""工作台 JSBridge：暴露给前端 JS 的 pywebview API。
+"""服务端指令/事件门面：暴露给前端的 API 方法集合。
 
-JS 通过 ``pywebview.api.*`` 调用，全部为轻量只读/入队操作，
-不阻塞 GUI 线程。能力分四组：
+**这不是界面代码。** 模块路径里带 ``ui`` 与类名里的 ``Workbench`` 都是历史
+遗留：它只管「前端能调什么」，不管长什么样。真正的调用方是
+``agent/serve`` 的 WebSocket 分发器——jarvis-desktop 桌面壳与终端都走这条
+路径。原 pywebview 三栏窗口壳已于 2026-10 退役，本类随之不再承担 ``js_api``
+角色，只有窗口才需要的自绘标题栏控制方法（``window_minimize`` /
+``window_close``）已一并删除。
+
+全部为轻量只读/入队操作，不阻塞调用方线程。能力分组：
 
 - 事件拉取：poll_events（前端轮询引擎事件）
 - 文本对话：send_message / new_session / list_sessions / load_session
@@ -9,8 +15,6 @@ JS 通过 ``pywebview.api.*`` 调用，全部为轻量只读/入队操作，
 - 半双工语音：start_voice / stop_voice / interrupt_voice
 - 左栏数据：list_models / set_model / list_voices / set_voice / add_voice /
   delete_voice / get_state（音色目录含适配模型与联动预告，与 REPL /tts-voice 同源）
-- 窗口控制：window_minimize / window_close（无边框自绘标题栏；不提供全屏，
-  启动即铺满工作区且真全屏会盖住任务栏）
 
 @author aceFelix
 """
@@ -21,8 +25,8 @@ import queue
 from typing import Any
 
 from agent.config.settings import Settings
-from agent.ui.workbench import model_admin
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine import model_admin
+from agent.serve.engine.engine import ChatEngine
 
 
 class WorkbenchAPI:
@@ -146,7 +150,7 @@ class WorkbenchAPI:
         只读操作（读引擎消息快照 + shadow git describe），不入指令队列；
         实现见 checkpoint_ops.preview。@author aceFelix
         """
-        from agent.ui.workbench import checkpoint_ops
+        from agent.serve.engine import checkpoint_ops
 
         try:
             return checkpoint_ops.preview(self._engine, int(user_tail_count))
@@ -250,7 +254,6 @@ class WorkbenchAPI:
 
         @author aceFelix
         """
-        s = self._settings
         return {
             "provider": self._engine.current_vendor,
             "model": self._engine.current_model,
@@ -340,7 +343,7 @@ class WorkbenchAPI:
         原生控件 + 已安装技能），与 run_slash 执行护栏口径一致。
         @author aceFelix
         """
-        from agent.ui.workbench import slash_bridge
+        from agent.serve.engine import slash_bridge
 
         return slash_bridge.build_desktop_commands(self._settings)
 
@@ -350,12 +353,12 @@ class WorkbenchAPI:
         """执行一条扩展服务动作（serve extensions.exec 的数据源）。
 
         payload = ``{"category": ..., "action": ..., ...}``；业务实现集中在
-        ``agent.ui.workbench.extensions_api``（五类：mcp/tools/skills/plugins/
+        ``agent.serve.engine.extensions_api``（五类：mcp/tools/skills/plugins/
         harness）。属同步函数，serve 侧用 ``asyncio.to_thread`` 调用（插件/harness
         安装含网络 IO）。异常（非法分类/动作）向上抛，由 serve 转成 ok=false 回执。
         @author aceFelix
         """
-        from agent.ui.workbench import extensions_api
+        from agent.serve.engine import extensions_api
 
         return extensions_api.run_extension(self._settings, self._engine, payload)
 

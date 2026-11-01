@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import queue
-import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +27,7 @@ from agent.core.context import ToolContext
 from agent.core.query_loop import QueryLoop
 from agent.core.tool import ToolRegistry
 from agent.llm.anthropic_provider import AnthropicProvider
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.engine import ChatEngine
 
 
 class _NoopOrchestrator:
@@ -130,7 +129,7 @@ def _drain_until(event_q: queue.Queue, predicate, timeout: float):
 
 def _run_abort_latency_scenario(engine_loop_provider, tmp_path: Path, monkeypatch) -> float:
     """搭真实引擎跑指定 provider，thinking 流中 abort，返回取消延迟（秒）。"""
-    from agent.ui.workbench import checkpoint_ops
+    from agent.serve.engine import checkpoint_ops
 
     class _NoopCkpt:
         available = staticmethod(lambda: False)

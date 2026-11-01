@@ -4,6 +4,9 @@
 就地重建（换提示词 + 重挂 harness + 开新会话 + emit project_switched）。重型依赖
 （build_system_prompt / harness）打桩，持久化经 Path.home 重定向隔离真实目录。
 
+另覆盖 2026-11 为「恢复会话时联动切目录」新增的两个开关：
+``start_new_session=False``（换目录但不开新会话）与 ``announce=False``（不弹气泡）。
+
 @author aceFelix
 """
 
@@ -16,8 +19,8 @@ import pytest
 
 import agent.prompts.system as sp_mod
 from agent.config.settings import Settings
-from agent.ui.workbench.engine import ChatEngine
-from agent.ui.workbench import project_switch
+from agent.serve.engine.engine import ChatEngine
+from agent.serve.engine import project_switch
 
 
 def _make_engine() -> tuple[ChatEngine, queue.Queue]:
@@ -57,9 +60,11 @@ async def test_invalid_path_warns_no_switch(home, monkeypatch) -> None:
     engine._settings.workdir = str(home / "current")
     before = engine._settings.workdir
 
-    await project_switch.handle_set_workdir(engine, "relative/dir")
-    await project_switch.handle_set_workdir(engine, str(home / "nope"))
+    ok1 = await project_switch.handle_set_workdir(engine, "relative/dir")
+    ok2 = await project_switch.handle_set_workdir(engine, str(home / "nope"))
 
+    # 返回值告诉调用方“没切”，便于给贴场景的提示
+    assert ok1 is False and ok2 is False
     events = _drain(event_queue)
     assert not [e for e in events if e["type"] == "project_switched"]
     assert any(e["type"] == "warn" for e in events)
@@ -171,3 +176,46 @@ async def test_prompt_rebuild_failure_aborts_switch(home, monkeypatch) -> None:
     assert not [e for e in events if e["type"] == "project_switched"]
     assert any(e["type"] == "warn" for e in events)
     assert loop.system_updates == []
+
+
+async def test_keep_session_skips_new_session(home, monkeypatch) -> None:
+    """start_new_session=False（恢复历史会话场景）：换目录但不开新会话。"""
+    engine, event_queue = _make_engine()
+    engine._settings.workdir = str(home / "old")
+    engine._query_loop = _FakeLoop()
+    target = home / "proj-b"
+    target.mkdir()
+    monkeypatch.setattr(sp_mod, "build_system_prompt", lambda w, r, **k: f"SYS@{w}")
+    monkeypatch.setattr(ChatEngine, "_register_harness", lambda self_, r, w: None)
+    new_session = {"called": 0}
+    monkeypatch.setattr(
+        ChatEngine,
+        "_handle_new_session",
+        lambda self_: new_session.__setitem__("called", new_session["called"] + 1),
+    )
+
+    ok = await project_switch.handle_set_workdir(engine, str(target), start_new_session=False)
+
+    assert ok is True
+    assert new_session["called"] == 0  # 关键：当前对话未被清掉
+    assert engine._settings.workdir == str(target)
+    switched = [e for e in _drain(event_queue) if e["type"] == "project_switched"]
+    assert switched[0]["payload"] == {"workdir": str(target), "name": "proj-b"}
+
+
+async def test_announce_false_suppresses_bubbles(home) -> None:
+    """announce=False：成功不弹 info，失败也不弹 warn（文案由调用方按场景给）。"""
+    engine, event_queue = _make_engine()
+    engine._settings.workdir = str(home / "old")
+    engine._query_loop = None  # 走未装配分支，不触重型装配
+    target = home / "proj-c"
+    target.mkdir()
+
+    ok = await project_switch.handle_set_workdir(engine, str(target), announce=False)
+    assert ok is True
+    assert [e["type"] for e in _drain(event_queue)] == ["project_switched"]
+
+    # 非法路径且静默：不推 warn，但返回 False 让调用方知情
+    ok2 = await project_switch.handle_set_workdir(engine, "relative/dir", announce=False)
+    assert ok2 is False
+    assert _drain(event_queue) == []

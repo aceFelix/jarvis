@@ -4,8 +4,8 @@
 > 2026-09 二期接入桌面项目工作区，后整体退役——pywebview 窗口壳
 > （`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` 与
 > `assets/`）、开机自启（`agent/daemon/autostart.py`）与 `realtime_ui` 可选依赖均已删除，
-> `jarvis --gui` / `--talk` 仅保留退役提示。图形化桌面唯一入口为独立仓库
-> **jarvis-desktop**；`agent/ui/workbench/` 引擎层现役（serve 与桌面壳共用）。
+> `jarvis --gui` / `--talk` 已于 2026-11-01 连参数带提示一并删除。图形化桌面唯一入口为独立仓库
+> **jarvis-desktop**；`agent/serve/engine/` 引擎层现役（serve 与桌面壳共用）。
 >
 > 🔻 **2026-11-01 补充**：文中「热键模块已保留，二期接」的说法已失效——热键是为本工作台
 > 召唤窗口而设，工作台退役后它成了孤儿，故连同 `agent/daemon/` 整包一并删除；桌面热键
@@ -74,7 +74,7 @@
 
 ### 一期：工作台骨架 + 文本对话 + /talk 整合（不碰 /voice）✅ 已落地（2026-08-30）
 
-1. **窗口进程模型**：`agent/ui/workbench/`（新包）
+1. **窗口进程模型**：`agent/serve/engine/`（新包）
    - 主进程承载 pywebview（三栏 HTML/CSS/JS），QueryLoop 跑在工作线程
    - 沿用事件队列 + JSBridge 模式（参考 realtime_window）
    - 入口：`jarvis` 参数新增 `--gui`（新窗口），桌面 VBS 改指向它（换名 `start_workbench.vbs`）
@@ -121,7 +121,7 @@
 
 ## 七、一期落地复盘（2026-08-30）
 
-- `agent/ui/workbench/` 新包 7 个 Python 模块 + 4 个前端资源落地；测试 18 用例，全量回归 1638 passed。
+- `agent/serve/engine/` 新包 7 个 Python 模块 + 4 个前端资源落地；测试 18 用例，全量回归 1638 passed。
 - 实现口径与计划的差异：
   - 单实例聚焦未降级为锁文件轮询，直接用端口 47812 监听（锁文件仅作兜底诊断）；**不可设 SO_REUSEADDR**（Windows 会双绑定）。
   - /talk 整合：工作台左栏实时模式直接内嵌 `RealtimeTalk`（非复用 `WebviewRealtimeTalkUI` 独立窗）；`agent/ui/realtime_window/` 包保留，仅 REPL `/talk` 在用，待后续整合下线。

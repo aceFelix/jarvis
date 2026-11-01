@@ -1,7 +1,7 @@
 """jarvis serve 主入口 —— headless API 服务模式。
 
 供 jarvis-desktop（Electron 桌面壳）等外部前端接入：不渲染任何本地 UI，
-装配与 pywebview 工作台完全相同的引擎零件（ChatEngine + WorkbenchAPI +
+装配 ``agent/serve/engine/`` 里的引擎零件（ChatEngine + WorkbenchAPI +
 MetricsCollector），经 DesktopBridgeServer 以 WS 事件流对外服务。
 
 进程契约（Electron 主进程侧）：
@@ -26,9 +26,9 @@ from agent.config.settings import Settings
 from agent.serve import protocol
 from agent.serve.hub import ProactiveHub
 from agent.serve.server import DesktopBridgeServer
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
-from agent.ui.workbench.metrics import MetricsCollector
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
+from agent.serve.engine.metrics import MetricsCollector
 
 
 def _watch_stdin(on_eof: Callable[[], None]) -> None:
@@ -55,8 +55,8 @@ async def _serve_main(settings: Settings) -> None:
 
     @author aceFelix
     """
-    # 装配：与已退役的 pywebview 三栏窗口壳共用同一套 workbench 零件
-    # （ChatEngine + WorkbenchAPI + MetricsCollector），仅宿主换成 WS；
+    # 装配：引擎零件全在 agent/serve/engine/（ChatEngine + WorkbenchAPI +
+    # MetricsCollector），本文件只把它们接到 WS 宿主上；
     # 额外接 ProactiveHub（主动播报中枢，复活 59f746a 休眠的主动感知套件）
     event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
     command_queue: queue.Queue[dict[str, Any]] = queue.Queue()

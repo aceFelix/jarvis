@@ -99,7 +99,7 @@
 | `agent/config/settings.py` | 新增 `realtime_event_log: bool = False` + 键列表 + `[realtime_talk] event_log` 映射 |
 | `configs/settings.example.toml` / `agent/configs/settings.example.toml` | 新增 `[realtime_talk]` 段 |
 | `agent/commands/handlers/voice_commands.py` | `/talk` 装配点透传 `event_log` |
-| `agent/ui/workbench/engine.py` | 工作台装配点透传 `event_log` |
+| `agent/serve/engine/engine.py` | 工作台装配点透传 `event_log` |
 
 ### 实现中修正的一处瑕疵
 
@@ -181,7 +181,7 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; python -m pytest te
 | `agent/config/settings.py` | `realtime_event_log` 字段与 TOML 映射 |
 | `configs/settings.example.toml` / `agent/configs/settings.example.toml` | `[realtime_talk]` 段 |
 | `agent/commands/handlers/voice_commands.py` | `/talk` 装配点透传 |
-| `agent/ui/workbench/engine.py` | 工作台装配点透传 |
+| `agent/serve/engine/engine.py` | 工作台装配点透传 |
 | `tests/voice/test_realtime_observability.py` | 新建，9 个测试类 |
 | `tests/voice/test_talk_terminal.py` | 补 `event_log` 透传断言 |
 | `docs/architecture/06-语音系统.md` | 新增"环境音转写与事件时间线"整节 |

@@ -84,7 +84,7 @@ API 服务连接失败或超时。
 
 ## 3. 关键事实：这不是新问题，桌面壳早就修过了
 
-`agent/ui/workbench/model_switch.py` 的 `force` 参数，注释写得很清楚：
+`agent/serve/engine/model_switch.py` 的 `force` 参数，注释写得很清楚：
 
 ```python
         force: 目标与当前同名时仍按现配置重建 provider —— models.edit 改了

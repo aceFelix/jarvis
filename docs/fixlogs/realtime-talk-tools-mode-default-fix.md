@@ -78,7 +78,7 @@ JSON Schema 结构干净（无 `anyOf`/`$ref`/非法 type），且合成工具�
 | `agent/config/settings.py` | `realtime_tools_mode` 默认回退 `"builtin"`，注释含实机故障描述与「勿改为 all」警示 |
 | `agent/voice/realtime_talk.py` | 构造参数 `tools_mode` 与 `default_instructions()` 默认回退 `"builtin"`；模块头注释恢复并强化警告（含 294 schema 与救援死循环证据） |
 | `agent/commands/handlers/voice_commands.py` | 终端 /talk getattr 兜底回退 `"builtin"` |
-| `agent/ui/workbench/engine.py` | 桌面全双工/PyAudio 两条路径 3 处 getattr 兜底回退 `"builtin"` |
+| `agent/serve/engine/engine.py` | 桌面全双工/PyAudio 两条路径 3 处 getattr 兜底回退 `"builtin"` |
 | `agent/configs/settings.example.toml` | `[realtime_talk] tools_mode` 示例回退 `"builtin"`，加显著警告 |
 | `docs/guide/voice.md` | Function Calling 条目与配置示例回退，标注 all 会挂死 |
 | `jarvis-desktop/docs/guide/features-voice.md` | 同步为「默认 builtin，勿改 all」警示 |

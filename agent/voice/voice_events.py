@@ -6,7 +6,7 @@ voice_loop（STT→LLM→TTS）不再直接依赖终端 RichCLI，而是把一�
 
 - REPL 适配器（``repl_adapter.RichCLIVoiceAdapter``）：把事件映射回终端
   RichCLI 输出与内部渲染状态，保持 ``/voice`` 命令原有体验；
-- serve 适配器（``agent.ui.workbench.engine.ServeVoiceAdapter``）：把事件
+- serve 适配器（``agent.serve.engine.engine.ServeVoiceAdapter``）：把事件
   转成 WS 事件外抛给桌面壳（jarvis-desktop），实现图形化半双工语音。
 
 状态机（``on_state`` 的取值）::

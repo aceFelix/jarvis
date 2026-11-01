@@ -56,7 +56,7 @@
 
 | 位置 | 改动 |
 |---|---|
-| `jarvis/agent/ui/workbench/mcp_runtime.py` | `connect_mcp` 在**成功**与**全部失败**两条落定分支设置 `_mcp_status` 后各 `engine._emitter.emit("mcp_ready", engine._mcp_status)`；未启用 / 无配置 / 异常路径不推（None 即真实态） |
+| `jarvis/agent/serve/engine/mcp_runtime.py` | `connect_mcp` 在**成功**与**全部失败**两条落定分支设置 `_mcp_status` 后各 `engine._emitter.emit("mcp_ready", engine._mcp_status)`；未启用 / 无配置 / 异常路径不推（None 即真实态） |
 | `jarvis/agent/serve/protocol.py` | 新增事件常量 `EVT_MCP_READY = "mcp_ready"` + 协议文档事件清单补一条（payload = `state.get` 的 mcp 快照）；事件泵透传，无需改 server |
 | `jarvis-desktop/src/renderer/src/api/dispatcher.ts` | 新增 `case 'mcp_ready'`：payload 结构合法则 `useRightStore.setMcp(...)` 直写快照（免再发一次 `state.get`）；结构非法时退回 `conn.refreshState()` 主动拉一次，避免谎报 |
 

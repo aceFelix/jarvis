@@ -1,7 +1,7 @@
 # 修复复盘：桌面壳有 MCP 工具却不用（ToolSearch 钥匙工具漏注册）
 
 - **日期**：2026-09-29
-- **模块**：`agent/ui/workbench/engine.py`（workbench/serve 共用装配路径）、`agent/prompts/system.py`
+- **模块**：`agent/serve/engine/engine.py`（workbench/serve 共用装配路径）、`agent/prompts/system.py`
 - **作者**：aceFelix
 
 ## 1. 问题现象
@@ -75,7 +75,7 @@
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/ui/workbench/engine.py` | `_ensure_session` 补注册 `ToolSearch`（延迟加载钥匙工具，对齐 main.py） |
+| `agent/serve/engine/engine.py` | `_ensure_session` 补注册 `ToolSearch`（延迟加载钥匙工具，对齐 main.py） |
 | `agent/prompts/system.py` | MCP 段点明延迟加载 + ToolSearch 加载路径 + 禁止 Bash/curl 代替 |
 | `tests/ui/test_workbench_engine_mcp.py` | 新增 ToolSearch 注册开/关两条回归 |
 | `docs/architecture/07-UI层.md` | 引擎装配步骤补 ToolSearch 注册环节 |

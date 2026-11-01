@@ -26,7 +26,7 @@
    session config（`realtime_engine.py` L104/L119/L290）；默认贾维斯话术
    （`_INSTRUCTIONS_BUILTIN/_ALL`）定义在 `realtime_talk.py`，仅 `RealtimeTalk.__init__`
    在 instructions 为空时回退。
-4. **对比两条启动路径**（`agent/ui/workbench/engine.py`）：
+4. **对比两条启动路径**（`agent/serve/engine/engine.py`）：
    - PyAudio 路径（L916）构造 `RealtimeTalk` → 有回退 → 人设正常；
    - **桌面全双工路径 `_handle_start_talk_duplex`（L997）直接构造父类 `RealtimeEngine`，
      从不传 `instructions`** → 空 → 模型回落「小云」。根因确认。
@@ -45,7 +45,7 @@
 - `agent/voice/realtime_talk.py`：新增 `default_instructions(tools_mode)` 模块函数
   （builtin → `_INSTRUCTIONS_BUILTIN`，all → `_INSTRUCTIONS_ALL`）；
   `RealtimeTalk.__init__` 改为调用它（行为不变）。
-- `agent/ui/workbench/engine.py` `_handle_start_talk_duplex`：构造 `RealtimeEngine` 时
+- `agent/serve/engine/engine.py` `_handle_start_talk_duplex`：构造 `RealtimeEngine` 时
   传 `instructions=default_instructions(getattr(s, "realtime_tools_mode", "builtin"))`，
   与该路径已有的工具装配（BUILTIN_TOOLS / build_all_tools）同模式同口径。
 
@@ -68,7 +68,7 @@ AI 气泡已建时插到它前面」，修复用户转写气泡排在 AI 回复�
 | 文件 | 改动说明 |
 |---|---|
 | `agent/voice/realtime_talk.py` | 新增 `default_instructions()`；`RealtimeTalk.__init__` 改用它 |
-| `agent/ui/workbench/engine.py` | `_handle_start_talk_duplex` 构造 `RealtimeEngine` 时传贾维斯指令 |
+| `agent/serve/engine/engine.py` | `_handle_start_talk_duplex` 构造 `RealtimeEngine` 时传贾维斯指令 |
 | `agent/ui/workbench/assets/app.js` | `user_transcript` 插到流式 AI 气泡前（同轮顺带修复用户气泡顺序） |
 
 ## 经验总结

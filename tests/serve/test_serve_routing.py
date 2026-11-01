@@ -31,8 +31,8 @@ from agent.config.settings import Settings
 from agent.core.daemon.deadline import Deadline
 from agent.core.daemon.scheduler import ScheduleTask
 from agent.serve.server import DesktopBridgeServer
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
 
 
 class _FakeWS:

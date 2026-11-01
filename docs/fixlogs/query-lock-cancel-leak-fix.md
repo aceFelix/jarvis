@@ -58,7 +58,7 @@ PR #1 的 CI 转绿后，在开发机（Windows）连续跑全量回归：
    事件序列里 `info`（已停止回复）有、`assistant_done` 无，与第 2 步的推断完全吻合。
 5. **横向扫同类写法**。`run_in_executor(... , lock.acquire)` 全仓共 4 处，
    且**四处都是 acquire 在 try/finally 之外**：
-   `agent/ui/workbench/engine.py`（桌面 send）、`agent/ui/workbench/slash_bridge.py`
+   `agent/serve/engine/engine.py`（桌面 send）、`agent/serve/engine/slash_bridge.py`
    （桌面技能轮）、`agent/bridge/server.py`（手机桥接）、`agent/wechat/server.py`（微信）。
 6. **顺带澄清**：既有用例 `test_engine_abort_current_reply` 的抖动不是测试写得差，
    而是同一竞态在默认线程池调度下的自然表现；负载只是提高了中奖概率。
@@ -77,8 +77,8 @@ loop），但**取消语义没有处理**。`asyncio.Task.cancel()` 只能取消
 **为什么本地平时测不出来**：单文件跑的时候线程池空闲，`acquire()` 几乎立即返回，
 窗口宽度接近 0；全量并行时线程池排队，窗口被拉长到足以让 `abort` 落在里面。
 
-涉及模块：`agent/ui/workbench/engine.py`（`_handle_send` / `_command_loop` /
-`abort_current_reply`）、`agent/ui/workbench/slash_bridge.py`（技能轮）、
+涉及模块：`agent/serve/engine/engine.py`（`_handle_send` / `_command_loop` /
+`abort_current_reply`）、`agent/serve/engine/slash_bridge.py`（技能轮）、
 `agent/bridge/server.py`、`agent/wechat/server.py`、共享的 `threading.Lock` 实例。
 
 ## 四、修复方案
@@ -140,8 +140,8 @@ CI 侧本批只改 jarvis 仓（缺陷与测试都在 `agent/` 与 `tests/` 下�
 | 文件 | 改动说明 |
 |---|---|
 | `agent/utils/query_lock.py` | 新增 `acquire_lock_cancellable()`：`asyncio.shield` 保住内层 future，被取消时给内层挂 done 回调自动归还线程池事后取得的锁 |
-| `agent/ui/workbench/engine.py` | `_handle_send` 等锁移入 `try/finally`，改 `locked` 标志决定是否释放；注释说明取消落在等锁窗口的后果 |
-| `agent/ui/workbench/slash_bridge.py` | 技能轮等锁同构改造，`finally` 保留句柄恢复与 `_after_turn()` |
+| `agent/serve/engine/engine.py` | `_handle_send` 等锁移入 `try/finally`，改 `locked` 标志决定是否释放；注释说明取消落在等锁窗口的后果 |
+| `agent/serve/engine/slash_bridge.py` | 技能轮等锁同构改造，`finally` 保留句柄恢复与 `_after_turn()` |
 | `agent/bridge/server.py` | `run_query` 等锁移入 `try/finally`，移除不再使用的 `loop` 局部变量 |
 | `agent/wechat/server.py` | `_exec_query` 同构改造，补方法级文档说明等锁期间可被取消 |
 | `tests/test_query_lock.py` | 新增 3 例：正常持有、取消后自动归还（线程占锁构造）、多等待者串行与锁复用 |

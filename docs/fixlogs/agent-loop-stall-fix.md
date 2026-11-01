@@ -201,7 +201,7 @@ Completion 渲染」内联代码，统一抽为 `slash_completer._build_completi
 （列宽/描述色/回退位置作为参数）。拆分属于行为不变的重构，因此额外各加一例
 “委托结果与模块函数等价”的护栏测试，防拆分期间发生漂移。
 
-> 尚未处理的超限文件（本次未触碰，列入待拆清单）：`agent/ui/workbench/engine.py` 1240、
+> 尚未处理的超限文件（本次未触碰，列入待拆清单）：`agent/serve/engine/engine.py` 1240、
 > `agent/cli_anything/market.py` 898、`agent/prompts/system.py` 810、`agent/serve/server.py` 807。
 >
 > 后续进展（阶段 10 收尾切片，2026-10-21）：`agent/prompts/system.py` 已拆为

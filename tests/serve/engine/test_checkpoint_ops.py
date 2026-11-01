@@ -23,9 +23,9 @@ from types import SimpleNamespace
 
 from agent.config.settings import Settings
 from agent.core.message import Message, TextContent, ToolResultContent
-from agent.ui.workbench import checkpoint_ops
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine import checkpoint_ops
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
 
 
 def _user(text: str, cid: str = "") -> Message:

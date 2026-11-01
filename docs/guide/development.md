@@ -80,14 +80,17 @@ agent/
 │   ├── dashscope_provider.py # DashScope SDK 原生协议
 │   ├── zai_provider.py       # 智谱 ZhipuAi SDK 原生协议
 │   └── mock.py        # Mock Provider（测试用）
-├── ui/                # 用户界面
+├── ui/                # 用户界面（纯终端渲染，不含图形化代码）
 │   ├── cli.py         # Rich 终端 REPL + 命令补全
 │   ├── boot_animation.py # 启动动画（方舟反应炉粒子动画 + 定格帧分流）
 │   ├── markdown_renderer.py # Markdown 终端渲染
 │   ├── model_picker.py # 交互式模型选择器
 │   ├── session_picker.py # 交互式会话选择器
-│   ├── terminal_picker.py # 交互式终端选择器
-│   └── workbench/     # 工作台引擎层（serve 与 jarvis-desktop 共用）
+│   └── terminal_picker.py # 交互式终端选择器
+├── serve/             # headless API 服务（--serve，供给 jarvis-desktop 等外部前端）
+│   ├── app.py / server.py / hub.py / protocol.py # WS 宿主：握手、指令路由、事件广播
+│   ├── rpc_email / rpc_extensions / rpc_percept / rpc_tasks / config_hooks
+│   └── engine/        # 对话引擎层（serve 与 jarvis-desktop 共用，2026-11 自 ui/workbench/ 迁入）
 │       ├── engine.py  # ChatEngine（指令分发、懒装配、会话持久化）
 │       ├── api.py     # WorkbenchAPI（桌面指令 / 事件门面）
 │       ├── bridge.py  # UI 协议→事件适配（WorkbenchUI/WorkbenchRealtimeUI）
