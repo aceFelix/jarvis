@@ -186,7 +186,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 系统维护 `/disk` `/clean` `/health` | ✅ | ⛔ 仅 Windows（PowerShell + SecurityCenter2 + 盘符 + cleanmgr） | ⛔ 仅 Windows |
 | jarvis-desktop 桌面壳安装包 | ✅ NSIS `.exe` | ⛔ 暂未提供 | ⛔ 暂未提供 |
 
-> ⚠️ 本项目在 **Windows** 上完成全部开发与实机验证；macOS / Linux 为代码层适配、未跑完整实机，建议优先 Windows。**系统维护层（清理/查毒/体检）与桌面壳安装包目前仅 Windows**；上表逐项受限/不支持处已标出，依赖细节见 [安装指南](docs/guide/installation.md#平台系统依赖)。
+> ⚠️ 本项目在 **Windows** 上完成全部开发与实机验证；macOS / Linux 为代码层适配、未跑完整实机，建议优先 Windows。**系统维护层（清理/查毒/体检）与桌面壳安装包目前仅 Windows**；上表逐项受限/不支持处已标出，依赖细节见 [安装指南](docs/guide/installation.md#平台系统依赖)。“仅 Windows、POSIX 如实拒绝”不只是文字声明：CI（Linux）会逐条对账内置清理规则库，验证它在 POSIX 上确实只拒掉那些 Windows 语义路径、其余校验闸照旧生效（`tests/test_release_contract.py`）。
 
 ## 文档地图
 

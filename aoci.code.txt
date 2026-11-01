@@ -12,7 +12,7 @@ README.md[SG7M]: F:项目落地页：为什么需要、核心能力表、快速�
 USER_GUIDE.md[SU5L]: F:终端用户人设化指南（新手第一站）：我是谁、快速上手、日常使用、命令速查、语音、电脑操作、桌面入口、权限模式、模型管理、多 Agent、CLI-Anything、插件技能、副作用撤销与任务脊柱、清理查毒体检、配置详解。 | R:code:README.md,code:docs/architecture/19-系统维护层.md | A:- | S:桌面入口指 jarvis-desktop；加命令同步改正文；/init 是首启三问口径；清理默认关但只读报告仍可用；自动清理只说 auto_ok 两条；--gui/--talk 于 2026-11-01 删除，敲会报 unknown argument。
 pyproject.toml[FV5S]: F:jarvis-agent 的项目清单：依赖、可选 extras、console 入口、打包 package-data、pytest 配置与 PyPI 元数据。 | R:code:npm/package.json,code:agent/__init__.py,code:agent/config/cleaners.toml | A:- | S:version 是 npm 与运行时共读的唯一真源；extras 的 ui/realtime 已随孤儿包删除，别再补回；cleaners.toml 靠 package-data 的 config/*.toml 打包，漏了装包后规则库找不到。
 uv.lock[FV4L]: F:Lock file produced by uv, pinning the resolved dependency versions and hashes for the jarvis-agent project across every extra | R:code:pyproject.toml | A:- | S:依赖变动须重新生成；W2 的 mediapipe、psutil 已在锁内，感知源刻意零新增依赖。
-CHANGELOG.md[SV5L]: F:版本更新日志：按语义化版本记录各版本的新增能力、修复、新配置项与能力边界。 | R:code:README.md,code:docs/fixlogs/file-change-not-recoverable-fix.md | A:- | S:版本号三处须一致（pyproject/npm/agent.__version__），否则发版失败；未发布先记「未发布」段；删能力也单列「移除」小节，不只记新增。
+CHANGELOG.md[SV5L]: F:版本更新日志：按语义化版本记录各版本的新增能力、修复、新配置项与能力边界。 | R:code:README.md,code:docs/fixlogs/file-change-not-recoverable-fix.md | A:- | S:版本号三处须一致（pyproject/npm/agent.__version__），否则发版失败；未发布先记「未发布」段；已发布段落带日期即冻结，新改动另起版本段；删能力也单列「移除」小节。
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/.github/workflows/===
 ci.yml[OQ6T]: F:GitHub Actions CI that runs a syntax check and pytest on Python 3.11-3.14 for pushes and PRs to main | R:code:.github/workflows/publish.yml | A:jobs.test | S:Compiles the whole agent/ package rather than a hardcoded module list, so newly added files are always syntax-checked
@@ -527,7 +527,7 @@ minimax系列模型官方sdk.md[SN4S]: F:Vendor note: the official MiniMax Pytho
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/npm/===
 README.md[SV4S]: F:npm wrapper readme: the @acefelix/jarvis package page mirroring the GitHub product README for the npm registry. | R:- | A:- | S:It is a product-README mirror, not the maintainer guide; license now Apache-2.0.
 install.js[XV4M]: F:postinstall script: detects a Python interpreter and installs the jarvis-agent package, preferring uv and offering extras. | R:- | A:- | S:Non-TTY CI installs [all] silently; the realtime window menu option is gone with pywebview retired.
-package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本、bin 入口与安装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本必须等于 pyproject 版本（现 2.3.2），漏改则装出的 --version 与包版本不一致。
+package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本、bin 入口与安装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本必须等于 pyproject 版本，漏改则装出的 --version 与包版本不一致。
 run.js[XV4S]: F:Launcher script: locates the installed jarvis entry point and forwards the command-line arguments to it. | R:- | A:- | S:A wrapper launcher must resolve the real entry point and pass arguments through unchanged.
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/packaging/===

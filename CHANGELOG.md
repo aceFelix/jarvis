@@ -29,17 +29,29 @@
 
 ### 测试（发布 / 打包契约）
 
-- 新增 `tests/test_release_contract.py`（5 例，纯本地、无网络/端口，0.45s），把发版前“本应成立却无人把关”
+- 新增 `tests/test_release_contract.py`（5 例，纯本地、无网络/端口，0.35s），把发版前“本应成立却无人把关”
   的不变量钉死：
   - **三处版本号一致**（pyproject ↔ npm/package.json ↔ `agent.__version__`）——`publish.yml` 只校前两处，
     `__version__` 那行“不在 CI 校验范围”的第三处由本测兼顶；
   - **配置目录覆盖每个 `Settings` 字段**（新字段忘进目录 = 用户问了答不上）；
-  - **随包声明式文件存在且被 package-data 匹配**（`cleaners.toml` 等）+ **内置规则库无一条被静默拒绝**。
+  - **随包声明式文件存在且被 package-data 匹配**（`cleaners.toml` 等）；
+  - **内置规则库在 POSIX 上的去向逐条对账**（详见下方“修复（回归）”条目）——Windows 上的“零静默拒绝 +
+    关键 id 名单”已由 `tests/core/test_cleaner_rules.py` 把关，本文件刻意不重复它。
 - `ci.yml` 新增“Install smoke”步：从干净临时目录跑 `jarvis --help` + 断言装出来的包带上了 `cleaners.toml`
   （确保 import 的是 site-packages 里那份而非源码树）——这类“漏打包”缺陷源码树里的单测测不到。
 - 说明：本批只做“装配契约 + 安装冒烟”两把锁；已核对现有 `tests/serve/test_serve_protocol.py` 已
   双向覆盖 `DESKTOP_COMMANDS`↔`_rpc_types` 与指令数，故未重复；QueryLoop / orchestrator / tool_dispatch
   已由单测充分覆盖，不再加重叠的端到端对话测。
+- 修复（回归）：新增的 `test_builtin_rulebook_parses_clean` 在 Linux CI 误红——内置规则库 15 条
+  `paths` 型规则用 `%LOCALAPPDATA%` 等 Windows 环境变量，POSIX 展不开被 fail-closed 闸如实拒绝
+  （属正确行为），测试却把它当成了跨平台不变量。**初版修法给整条用例打 `_WINDOWS_ONLY` skip，
+  随即推翻**：`rules.py` 四道校验闸里只有一道受平台影响，skip 会把命令白名单、`risk`/`kind` 合法性、
+  `auto_ok` 互斥这三道 Linux 本来能抓的闸一起关掉。改为 `test_builtin_rulebook_rejects_only_platform_paths`：
+  在 Linux 上**正向断言**被拒的恰好是全部 `paths` 型、`command` 型全部通过、kind 与声明逐条一致、
+  声明里每条不得静默消失，同时反向坐实 README 平台矩阵那句“POSIX 如实拒绝”（README 中/英与
+  `docs/architecture/19-系统维护层.md` 已回指）。本地用 `mock.patch.dict(os.environ, …, clear=True)`
+  在 Windows 上精确复现 POSIX 行为（`loaded=4 / rejected=15`，拒因与 CI 日志逐字一致），并用 5 类
+  变异确认断言真能拦截。复盘见 `docs/fixlogs/release-contract-rulebook-linux-skip-fix.md`。
 
 ## [2.3.4] — 2026-11-01
 

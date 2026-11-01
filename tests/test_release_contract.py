@@ -19,11 +19,30 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# 内置清理规则库承载的路径全是 Windows 语义（%LOCALAPPDATA% / 盘符 / 反斜杠）。POSIX
+# 上没有这些环境变量，expand_path 会原样保留 %VAR% 占位符，继而 fail-closed 闸判为
+# 「展开后不是绝对路径」把 paths 型规则整条拒掉——那是**正确行为**（维护层本就仅
+# Windows），不是缺陷。但「如实拒绝」不等于「随便拒绝」，所以这里不用 skip 把整条测试
+# 关掉（那样会把与平台无关的三道校验闸一起丢掉），而是让它在 POSIX 上断言「拒绝恰好
+# 等于平台性拒绝的集合」。（aceFelix，2026-11-02）
+#
+# 分工：Windows 上的「零静默拒绝 + 关键 id 名单」已由
+# tests/core/test_cleaner_rules.py::test_load_builtin_rulebook_has_all_rules 把关，本文件
+# **不重复**它；这里只补它管不到的那一半——Linux CI 上规则库到底被怎么处理。
+_IS_WINDOWS = os.name == "nt"
+
+#: POSIX 上唯一允许出现的拒绝原因（来源 rules.py「展开后不是绝对路径」那道校验）。新增
+#: 合法的平台性拒绝原因时在此登记，别让它们被当成「规则库写坏了」而误红。
+_PLATFORM_REJECTION_MARKERS = ("不是绝对路径",)
 
 
 # ---- 版本号一致性（覆盖 publish.yml 不管的第三处） ----
@@ -96,16 +115,71 @@ def test_package_data_ships_runtime_files() -> None:
         )
 
 
-# ---- 内置规则库不能"某条静默解析失败"或被清空 ----
+# ---- 内置规则库：POSIX 上的拒绝必须严格等于「平台性拒绝」----
 
-def test_builtin_rulebook_parses_clean() -> None:
-    """内置 cleaners.toml 应能整表加载、无一条被静默拒绝（规则数只设下限不设死值）。
+_ON_POSIX = pytest.mark.skipif(_IS_WINDOWS, reason="POSIX 上才有平台性拒绝")
 
-    静默丢规则是最糟的失败模式：用户以为有条规则在跑，其实早被跳过。
-    断言 ``rejected`` 为空即可同时守住"规则库被改坏/改空"和"某条写法不合法"。
+
+def _declared_rules() -> dict[str, str]:
+    """读内置 cleaners.toml 的原始声明，返回 ``{规则 id: kind}``。
+
+    校验闸会把写坏的条目拒掉，所以「文件里声明了什么」和「加载出什么」必须逐条对得上，
+    才谈得上「没有静默丢规则」。
+    """
+    from agent.core.maintenance.rules import DEFAULT_RULES_PATH
+
+    data = tomllib.loads(DEFAULT_RULES_PATH.read_text(encoding="utf-8"))
+    return {
+        str(raw.get("id") or "<无 id>").strip(): str(raw.get("kind") or "paths").strip()
+        for raw in data["cleaner"]
+    }
+
+
+def _split_book(book) -> tuple[dict[str, str], dict[str, str]]:
+    """把一次加载结果拆成 (已加载 id→kind, 被拒 id→原因)。"""
+    loaded = {r.id: r.kind for r in book.rules}
+    rejected = dict(book.rejected)
+    return loaded, rejected
+
+
+@_ON_POSIX
+def test_builtin_rulebook_rejects_only_platform_paths() -> None:
+    """POSIX：paths 型规则因 Windows 语义**如实**被拒，command 型仍全部通过校验。
+
+    这条把 README 平台支持矩阵里「系统维护层仅 Windows（POSIX 如实拒绝）」钉成可执行
+    证据，同时保住与平台无关的三道校验闸（见模块头注释）——规则库被删空、字段非法、
+    命令不在白名单，在 Linux 上照样红。
     """
     from agent.core.maintenance.rules import load_rulebook
 
-    book = load_rulebook()
-    assert not book.rejected, f"内置规则库存在被拒绝的规则: {book.rejected}"
-    assert len(book.rules) >= 15, f"内置规则库条数异常偏低（疑似被清空）: {len(book.rules)}"
+    declared = _declared_rules()
+    declared_paths = {rid for rid, kind in declared.items() if kind == "paths"}
+    declared_commands = {rid for rid, kind in declared.items() if kind == "command"}
+    loaded, rejected = _split_book(load_rulebook())
+
+    # 1. 拒绝集合必须「恰好」是 paths 型：少了说明规则被平台悄悄吃进 POSIX（规则库全是
+    #    Windows 语义，任何一条 paths 都不该在 POSIX 上展开成功），多了说明有非法规则混入。
+    assert set(rejected) == declared_paths, (
+        f"POSIX 上被拒的应恰为全部 paths 型规则：多拒 {sorted(set(rejected) - declared_paths)}，"
+        f"漏拒 {sorted(declared_paths - set(rejected))}"
+    )
+    # 2. 拒绝原因只许是平台性的；出现别的写法问题就是真缺陷，必须红。
+    for rid, reason in sorted(rejected.items()):
+        assert any(mk in reason for mk in _PLATFORM_REJECTION_MARKERS), (
+            f"{rid} 的拒绝原因不是平台性的，属规则库写法缺陷: {reason}"
+        )
+    # 3. 与平台无关的校验闸必须照旧生效：命令白名单、risk/kind、auto_ok 互斥都在
+    #    构建 CleanerRule 之前跑完，command 型一条都不许被拒。
+    assert {rid for rid, kind in loaded.items() if kind == "command"} == declared_commands, (
+        f"command 型规则在 POSIX 上与平台无关，应全部通过校验；实际 loaded="
+        f"{sorted(loaded)} rejected={sorted(rejected)}"
+    )
+    # 4. 已加载的条不能错挂 kind，也不能有声明外的条目。
+    for rid, kind in loaded.items():
+        assert declared.get(rid) == kind, f"{rid} 加载后的 kind={kind!r} 与声明不符"
+    assert not set(loaded) - set(declared), f"出现声明外的规则 id: {sorted(set(loaded) - set(declared))}"
+    # 5. 声明里的每条都必须在 loaded 或 rejected 中出现——静默丢弃即红。
+    assert set(loaded) | set(rejected) == set(declared), (
+        f"存在被静默丢弃、两边都不在的规则: "
+        f"{sorted(set(declared) - set(loaded) - set(rejected))}"
+    )

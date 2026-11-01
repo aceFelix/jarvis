@@ -185,7 +185,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | System maintenance `/disk` `/clean` `/health` | ✅ | ⛔ Windows-only (PowerShell + SecurityCenter2 + drive letters + cleanmgr) | ⛔ Windows-only |
 | jarvis-desktop installer | ✅ NSIS `.exe` | ⛔ not provided yet | ⛔ not provided yet |
 
-> ⚠️ All development and real-machine verification happen on **Windows**; macOS / Linux are code-level adaptations without full real-machine testing — Windows is recommended first. **System maintenance (clean / AV / health) and the desktop installer are Windows-only today**; per-row limits are flagged above. Dependency details: [Installation Guide](docs/guide/installation.md#平台系统依赖) (Chinese).
+> ⚠️ All development and real-machine verification happen on **Windows**; macOS / Linux are code-level adaptations without full real-machine testing — Windows is recommended first. **System maintenance (clean / AV / health) and the desktop installer are Windows-only today**; per-row limits are flagged above. Dependency details: [Installation Guide](docs/guide/installation.md#平台系统依赖) (Chinese). “Windows-only, honestly rejected on POSIX” is not just prose: CI (Linux) reconciles the built-in cleaner rulebook entry by entry, proving it rejects exactly those Windows-semantics paths while every other validation gate stays in force (`tests/test_release_contract.py`).
 
 ## Documentation Map
 

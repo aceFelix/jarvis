@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-01T03:30:41Z",
+  "updated_at": "2026-11-01T07:33:00Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -47,9 +47,9 @@
     },
     "CHANGELOG.md": {
       "role": "index",
-      "sha256": "520d58e6d3d5306396cfeb9e71affccc84159be22043a91bf5befd275e3adf91",
-      "size": 35280,
-      "normalized_sha256": "520d58e6d3d5306396cfeb9e71affccc84159be22043a91bf5befd275e3adf91"
+      "sha256": "50bebca0bdca2cb01c857ca283cd1e43fe02b2984e9fda3d83a885286539ac25",
+      "size": 36409,
+      "normalized_sha256": "50bebca0bdca2cb01c857ca283cd1e43fe02b2984e9fda3d83a885286539ac25"
     },
     "LICENSE": {
       "role": "index",
@@ -83,9 +83,9 @@
     },
     "agent/__init__.py": {
       "role": "index",
-      "sha256": "430e1d273c97080385773d6d3149c01b3c1ac506fbc5167edda80acde0aecfd9",
+      "sha256": "c79ed6387a14f44a828b5dd1de76577be5271ca9a6674ce4f0700273adb3b7eb",
       "size": 314,
-      "normalized_sha256": "430e1d273c97080385773d6d3149c01b3c1ac506fbc5167edda80acde0aecfd9"
+      "normalized_sha256": "c79ed6387a14f44a828b5dd1de76577be5271ca9a6674ce4f0700273adb3b7eb"
     },
     "agent/bootstrap.py": {
       "role": "index",
@@ -2156,9 +2156,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "994e2819ad83ea3f1f9acca6047788505f760dc48810a5fdf5c60419ceb209fe",
-      "size": 231428,
-      "normalized_sha256": "994e2819ad83ea3f1f9acca6047788505f760dc48810a5fdf5c60419ceb209fe"
+      "sha256": "34a697222e9b965cdaeaa03820a05e24235454338f30a8d821f9d3d85265c4b6",
+      "size": 231458,
+      "normalized_sha256": "34a697222e9b965cdaeaa03820a05e24235454338f30a8d821f9d3d85265c4b6"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -3278,9 +3278,9 @@
     },
     "npm/package.json": {
       "role": "index",
-      "sha256": "11ec884ac346de3b3d62a9dc5ee2f8696aac4b66a7808a73d7da9b4e55e26818",
+      "sha256": "ceb0e31d294159d0a8fa45f0645c63b976351b1ccefb0e1e718af800095472a8",
       "size": 898,
-      "normalized_sha256": "11ec884ac346de3b3d62a9dc5ee2f8696aac4b66a7808a73d7da9b4e55e26818"
+      "normalized_sha256": "ceb0e31d294159d0a8fa45f0645c63b976351b1ccefb0e1e718af800095472a8"
     },
     "npm/run.js": {
       "role": "index",
@@ -3308,9 +3308,9 @@
     },
     "pyproject.toml": {
       "role": "index",
-      "sha256": "711affe6e568043e95dbf4b566e1c8f187d031ab5af65b35235e3de0bb74b307",
+      "sha256": "e298c0e06a572b7ba3dca39e1b6132723b763d63733afb4b35759f532048f898",
       "size": 4428,
-      "normalized_sha256": "711affe6e568043e95dbf4b566e1c8f187d031ab5af65b35235e3de0bb74b307"
+      "normalized_sha256": "e298c0e06a572b7ba3dca39e1b6132723b763d63733afb4b35759f532048f898"
     },
     "scripts/check_md_links.py": {
       "role": "index",
