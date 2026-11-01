@@ -39,7 +39,7 @@ ProactiveHub，并把老 `NotificationMixin` 的三通道播报（终端日志 +
   `deadline_*` 字段；到期/通知投 `proactive_notify` 事件进 serve 事件队列。
   含简报补播窗口（启动时今天 `briefing_time` 已过且 ≤ `briefing_catchup_window_min`
   分钟、默认 120 → 延迟 5 秒补播一次，等桌面壳 WS 连上）。
-- **`agent/ui/workbench/engine.py`** `ChatEngine` 新增可选 `registry_hook`：
+- **`agent/serve/engine/engine.py`** `ChatEngine` 新增可选 `registry_hook`：
   在 `build_default_registry()` 之后、系统提示词生成之前调用，宿主据此挂载
   额外工具；workbench 宿主不传，行为零变化。
 - **`agent/serve/app.py`** `_serve_main` 装配 hub，`registry_hook` 内注册

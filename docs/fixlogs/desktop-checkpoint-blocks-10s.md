@@ -53,7 +53,7 @@ LLM 计时: 首包思考 0.45s | 首字正文 9.39s | 全程 12.62s | 思考 202
 
 ### 3.1 直接原因：同步 git 快照阻塞发送
 
-`agent/ui/workbench/engine.py` 的 `_handle_send()` 在每轮对话开始前创建会话检查点：
+`agent/serve/engine/engine.py` 的 `_handle_send()` 在每轮对话开始前创建会话检查点：
 
 ```python
 ckpt_mgr = checkpoint_ops.make_manager(self)
@@ -145,7 +145,7 @@ if ckpt_id is None and ckpt_task is not None:
 | 文件 | 改动说明 |
 |---|---|
 | `agent/llm/openai_provider.py` | 新增分段计时：首包思考 / 首字正文 / 全程 + 思考/正文字数 |
-| `agent/ui/workbench/engine.py` | 检查点改为线程池异步 + 0.4s 宽限 + 轮末取；新增本地前处理计时 |
+| `agent/serve/engine/engine.py` | 检查点改为线程池异步 + 0.4s 宽限 + 轮末取；新增本地前处理计时 |
 | `tests/llm/test_openai_provider.py` | 新增 `TestStreamTimingLog` 2 例 |
 | `tests/ui/test_serve_stdin_abort.py` | 引擎用例关闭检查点（避免真 git + 时序污染） |
 

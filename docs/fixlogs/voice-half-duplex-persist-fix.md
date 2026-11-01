@@ -31,7 +31,7 @@
 | 文件 | 改动说明 |
 |---|---|
 | `agent/voice/voice_loop.py` | `voice_loop()` 新增关键字参数 `on_turn_end`：对话循环里每轮 `_voice_loop_round` 返回后，若本轮 `ctx.messages` 有增长（正常回复或被打断的半轮）即调用；回调异常静默。未传时行为零变化（REPL） |
-| `agent/ui/workbench/engine.py` | `_voice_main` 传 `on_turn_end=self._after_turn`——语音轮与文本轮走同一套自动保存 + 标题生成 |
+| `agent/serve/engine/engine.py` | `_voice_main` 传 `on_turn_end=self._after_turn`——语音轮与文本轮走同一套自动保存 + 标题生成 |
 | `tests/voice/test_voice_loop_turn_end.py` | 新增 3 用例：消息增长触发回调 / 无增长不触发 / 回调异常静默且循环干净退出 |
 | `jarvis-desktop/docs/guide/features-voice.md` | 「语音对话进会话历史」条目补半双工路径说明 |
 

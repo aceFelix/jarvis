@@ -456,7 +456,7 @@ python -m pytest -q                # 2136 passed
 | `agent/voice/realtime_mcp.py` | 新建：MCP 工具装配（`init_mcp_tools` / `load_mcp_tools_async`），`session.update` 后写时间线 |
 | `agent/voice/realtime_events.py` | `note_client()` 客户端指令时间线、`recent` 事件链缓冲（24 条 + `_CHAIN_EVENTS` 白名单 + `_chain_label()`）、`cancel_hint()`、`dump_cancel_diag()` 取消快照落盘 |
 | `agent/config/settings.py` | `realtime_half_duplex` 字段 + 键列表 + TOML 映射 |
-| `agent/commands/handlers/voice_commands.py`、`agent/ui/workbench/engine.py` | 透传 `half_duplex` |
+| `agent/commands/handlers/voice_commands.py`、`agent/serve/engine/engine.py` | 透传 `half_duplex` |
 | `tests/voice/test_realtime_response_lifecycle.py` | 新增 `TestHalfDuplex`（**19 项**，含响应起始静音、悬挂保护、忽略 speech_started、工具轮静音、静音帧/真实音频、**本地语音活动跟踪 4 项**）；**（第五次修正）** 新增“`speech_stopped` 不得抢先静音”“非有效轮次清残留窗口”，未静音断言改为“不是全零静音帧”；原插话用例改为全双工 |
 | `tests/voice/test_realtime_observability.py` | 客户端指令时间线、取消回溯、链过滤与落盘断言（**7 项**） |
 | `tests/voice/test_talk_terminal.py` | `half_duplex` 透传断言（2 项） |
@@ -465,6 +465,6 @@ python -m pytest -q                # 2136 passed
 | `agent/voice/realtime_talk.py` | 改为终端适配器 `RealtimeTalk(RealtimeEngine)`：PyAudio 设备 + ESC watcher + 工具装配（`tools_mode` 分流，MCP 前置加载），常量再导出保持兼容 |
 | `agent/voice/realtime_bridge_audio.py` | 新建：`BridgeMic`（上行帧缓冲，超限丢最旧/欠载补静音）+ `BridgeSpk`（回调转发 + flush） |
 | `agent/serve/protocol.py`、`agent/serve/server.py` | `talk.start` 加 `duplex?`；新指令 `talk.audio`（64KB 校验、fire-and-forget）与新事件 `talk_audio` |
-| `agent/ui/workbench/engine.py` | `_handle_start_talk` 分发 + `_handle_start_talk_duplex`（Bridge 音频 + `half_duplex=False/use_aec=False`）+ `feed_talk_audio` 投递 |
+| `agent/serve/engine/engine.py` | `_handle_start_talk` 分发 + `_handle_start_talk_duplex`（Bridge 音频 + `half_duplex=False/use_aec=False`）+ `feed_talk_audio` 投递 |
 | `agent/config/settings.py` | 新增 `realtime_rescue/turn_detection/silence_ms/tools_mode`；`voice_barge_in` 默认 False；`stt_model` 默认 `qwen3-asr-flash-realtime`（删 `stt_silence_threshold`） |
 | jarvis-desktop（独立仓库） | 新增 `src/renderer/src/audio/talkCapture.ts`、`talkPlayback.ts`；`contracts.ts`/`dispatcher.ts`/`backendStore.ts` 接线 `talk.audio`/`talk_audio` 与 toggleTalk |

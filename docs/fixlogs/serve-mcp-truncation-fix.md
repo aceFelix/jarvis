@@ -1,7 +1,7 @@
 # 修复复盘：桌面壳 MCP 工具缺失 + anthropic 协议截断轮静默结束
 
 - **日期**：2026-09-20
-- **模块**：`agent/ui/workbench/engine.py`（workbench/serve 共用装配路径）、`agent/core/query_loop.py`
+- **模块**：`agent/serve/engine/engine.py`（workbench/serve 共用装配路径）、`agent/core/query_loop.py`
 - **作者**：aceFelix
 
 ## 1. 问题现象
@@ -74,7 +74,7 @@
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/ui/workbench/engine.py` | 新增 `_connect_mcp`；`_ensure_session` 补 MCP 接入；`__init__` 增 `_mcp_client` 引用 |
+| `agent/serve/engine/engine.py` | 新增 `_connect_mcp`；`_ensure_session` 补 MCP 接入；`__init__` 增 `_mcp_client` 引用 |
 | `agent/core/query_loop.py` | 截断恢复兼容 anthropic 原生 `max_tokens` |
 | `tests/ui/test_workbench_engine_mcp.py` | 新增 MCP 接入四路径回归 |
 | `tests/test_query_loop_run.py` | 新增 max_tokens 续写回归 |

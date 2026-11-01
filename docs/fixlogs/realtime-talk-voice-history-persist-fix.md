@@ -44,8 +44,8 @@
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/ui/workbench/bridge.py` | `WorkbenchRealtimeUI` 增加转写配对缓冲（`_staged_user/_staged_ai/_speech_since_flush/_last_ai_text`）：正常顺序配对、滞后纠序、开场白单独落库、回声过滤、打断轮旧问句先落库、`flush_pending_transcripts()` 收尾兜底 |
-| `agent/ui/workbench/engine.py` | 构造 `WorkbenchRealtimeUI` 传入 `owner=self`；新增 `commit_voice_turn(user, ai)`：按 [问, 答] 追加 Message 并触发 `_after_turn`；两条语音路径 `_talk_main` 的 finally 增加 flush（停止瞬间残留半轮补存） |
+| `agent/serve/engine/bridge.py` | `WorkbenchRealtimeUI` 增加转写配对缓冲（`_staged_user/_staged_ai/_speech_since_flush/_last_ai_text`）：正常顺序配对、滞后纠序、开场白单独落库、回声过滤、打断轮旧问句先落库、`flush_pending_transcripts()` 收尾兜底 |
+| `agent/serve/engine/engine.py` | 构造 `WorkbenchRealtimeUI` 传入 `owner=self`；新增 `commit_voice_turn(user, ai)`：按 [问, 答] 追加 Message 并触发 `_after_turn`；两条语音路径 `_talk_main` 的 finally 增加 flush（停止瞬间残留半轮补存） |
 | `tests/ui/test_workbench_voice_persist.py` | 新增 12 用例：配对/滞后纠序/开场白/回声过滤/打断轮/flush 幂等/无 owner 透传/commit 集成（消息追加+存盘触发）/noop 守卫 |
 | `jarvis-desktop/docs/guide/features-voice.md` | 全双工语音通路节补「语音对话进会话历史」说明 |
 

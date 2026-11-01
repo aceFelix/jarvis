@@ -14,7 +14,7 @@ pywebview 的三栏 GUI 工作台属于**重复建设**：两套前端要各自�
 
 ## 二、关键判断：`workbench/` 不等于「三栏 GUI」
 
-`agent/ui/workbench/` 共 5104 行，直觉上会被当成 GUI 实现整体淘汰，**但这是错的**。
+`agent/serve/engine/` 共 5104 行，直觉上会被当成 GUI 实现整体淘汰，**但这是错的**。
 `jarvis --serve` 的后端就装配在这套零件上，[`agent/serve/app.py`](../../agent/serve/app.py)
 原文写着：
 
@@ -63,8 +63,8 @@ plugins / harness 五类，**没有任何 UI 宿主或 entrypoints 字段**，�
 |---|---|
 | `agent/ui/workbench/app.py` 等 4 文件 + `assets/` | 删除 |
 | `agent/daemon/autostart.py`（687 行） | 删除：开机自启整个建立在 `jarvis --gui` 上（VBS 拉 `pyw -m agent.main --gui`），停 GUI 就必须停自启；桌面应用自带开机自启设置 |
-| `agent/ui/workbench/__init__.py` | 不再导出 `run_workbench`，docstring 改为「serve 与桌面壳共用的引擎层」 |
-| `agent/ui/workbench/api.py` | 删 `_window` / `set_window` / `window_minimize` / `window_close`（只有窗口才需要，serve 与测试均无引用） |
+| `agent/serve/engine/__init__.py` | 不再导出 `run_workbench`，docstring 改为「serve 与桌面壳共用的引擎层」 |
+| `agent/serve/engine/api.py` | 删 `_window` / `set_window` / `window_minimize` / `window_close`（只有窗口才需要，serve 与测试均无引用） |
 | `agent/main.py` | `--gui` / `--talk` 改 `help=argparse.SUPPRESS` 保留解析，新增 `announce_workbench_retired()` 打印下线说明与自启清理指引 |
 | `pyproject.toml` | 删 `realtime_ui` extra（`pywebview>=5.0`）与 `all` 中一行；`uv lock` 随之移除 pywebview 及 pyobjc-framework-webkit / pythonnet / qtpy 等传递依赖 |
 | `npm/install.js` | 删「实时聊天窗口」可选项 |
@@ -166,7 +166,7 @@ T-359–T-362（含 GBK 无 `UnicodeEncodeError`、`--help` 隐藏、零副作�
 `docs/architecture.md`/`docs/development.md` 与 `scripts/gen_icon.py`、`src/main/index.ts`、
 `src/renderer/src/{api/dispatcher.ts,stores/chatStore.ts,stores/leftStore.ts,
 styles/main.css}`、`test/renderer/dispatcher.test.ts` 注释：把「与 pywebview 工作台
-同口径」改为「历史口径」，引擎层引用则明确为 `agent/ui/workbench/` |
+同口径」改为「历史口径」，引擎层引用则明确为 `agent/serve/engine/` |
 
 同步修正的实测口径（旧文档均为过期值）：`protocol.py` 桌面指令 **51** 条（原写 30/48）、
 `tests/serve` **105** 项、`tests/ui` **238** 项（原写 82/126）。

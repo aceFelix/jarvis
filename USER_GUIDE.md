@@ -350,8 +350,9 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
 > 📌 **三栏 GUI 工作台已退役（2026-10-14）**：`jarvis --gui` / `--talk` 下线，
 > pywebview 窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py`
 > 与 `assets/`）已从仓库删除——两套前端重复建设，图形化统一交给 jarvis-desktop。
-> 两个参数仍能被识别，执行时只打印下线提示与旧自启项的清理路径。
-> 注意：`agent/ui/workbench/` 目录本身**没有退役**，它是 `--serve` 与桌面壳共用的引擎层；
+> 两个参数已于 2026-11-01 一并删除，敲它们现在会报 unknown argument。
+> 注意：对话引擎层本身**没有退役**，它已从 `agent/ui/workbench/` 迁到
+> `agent/serve/engine/`，仍是 `--serve` 与桌面壳共用的后端引擎；
 > 判断依据与影响面见 [workbench-gui-retired](docs/fixlogs/workbench-gui-retired.md)。
 
 > 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线。

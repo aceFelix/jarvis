@@ -37,9 +37,9 @@
 |---|---|
 | `jarvis/agent/model_manager.py` | 从 `_switch_model` 抽出 `_build_switched_provider(settings, provider, name) -> (provider, desc, used_settings)`：按目标模型决定「重建 provider 还是复用」，并回报**描述该 provider 端点的 settings 快照**；`_switch_model` 改为复用（返回与文案不变） |
 | `jarvis/agent/core/query_loop.py` | 新增 `switch_model(provider, model)`：就地换 `_provider` / `_model`（仿 `_try_failover`），**不重建 loop** —— 会话 token 累计、`_thinking_override`、消息上下文全保留；复位 `_failover_tried`，返回旧 provider 供调用方 `close()`。历史裁剪纯函数迁到 `agent/core/memory/prune.py`（顺带解掉 `layered_context → query_loop` 的反向依赖） |
-| `jarvis/agent/ui/workbench/model_switch.py`（新） | `handle_switch_model(engine, name)`：provider 构造 → `loop.switch_model` → 旧 provider `close()` → 更新引擎状态 → 推 `model_switched` + `info`；构造失败推 `warn` 且**不**推事件 |
-| `jarvis/agent/ui/workbench/engine.py` | 新增 `current_model` / `current_vendor` 只读属性（装配后取 `_model`，未装配取 `_model_override`，兜底启动配置）、`_provider_settings` 端点快照、`switch_model` 指令分发与 `_handle_switch_model` 薄包装；`_ensure_session` 末尾补落地「装配期间到达的切换」。另按单文件 ≤800 行拆出 `voice_adapter.py` / `mcp_runtime.py` |
-| `jarvis/agent/ui/workbench/api.py` | `set_model`：写盘成功后 `_post({"cmd": "switch_model", "name"})`；`list_models` / `get_cost` / `get_state` 的模型与厂商改取 `engine.current_model` / `current_vendor` |
+| `jarvis/agent/serve/engine/model_switch.py`（新） | `handle_switch_model(engine, name)`：provider 构造 → `loop.switch_model` → 旧 provider `close()` → 更新引擎状态 → 推 `model_switched` + `info`；构造失败推 `warn` 且**不**推事件 |
+| `jarvis/agent/serve/engine/engine.py` | 新增 `current_model` / `current_vendor` 只读属性（装配后取 `_model`，未装配取 `_model_override`，兜底启动配置）、`_provider_settings` 端点快照、`switch_model` 指令分发与 `_handle_switch_model` 薄包装；`_ensure_session` 末尾补落地「装配期间到达的切换」。另按单文件 ≤800 行拆出 `voice_adapter.py` / `mcp_runtime.py` |
+| `jarvis/agent/serve/engine/api.py` | `set_model`：写盘成功后 `_post({"cmd": "switch_model", "name"})`；`list_models` / `get_cost` / `get_state` 的模型与厂商改取 `engine.current_model` / `current_vendor` |
 | `jarvis-desktop`（`backendStore.selectModel` / `dispatcher` / `leftStore`） | 点选先乐观记 `pendingModel`、失败撤销；`model_switched` → 清匹配标记 + 刷模型列表/用量/状态；**成功气泡改由引擎 `info` 事件唯一上屏**（去掉本地弹窗，避免双气泡） |
 | `jarvis/agent/ui/workbench/assets/app.js` | 同上（工作台前端）：去掉本地「下次对话生效」气泡，`dispatchEvent` 增 `model_switched` → 刷模型列表 |
 
@@ -84,9 +84,9 @@ provider」的比较基准，而 settings 已被启动时的自定义模型覆�
 
 | 位置 | 改动 |
 |---|---|
-| `jarvis/agent/ui/workbench/model_switch.py` | `handle_switch_model(engine, name, force=False)`：force 时跳过「同名即当前」短路，照常重建 provider，info 文案改「模型配置已更新」；非 force 的行为与文案不变 |
-| `jarvis/agent/ui/workbench/engine.py` | 指令分发透传 `force` → `_handle_switch_model` |
-| `jarvis/agent/ui/workbench/model_admin.py`（新） | 模型管理聚合（list/add/edit/remove）：`edit_model` 只在目标就是当前模型时入队 `{"cmd": "switch_model", "name", "force": True}` |
+| `jarvis/agent/serve/engine/model_switch.py` | `handle_switch_model(engine, name, force=False)`：force 时跳过「同名即当前」短路，照常重建 provider，info 文案改「模型配置已更新」；非 force 的行为与文案不变 |
+| `jarvis/agent/serve/engine/engine.py` | 指令分发透传 `force` → `_handle_switch_model` |
+| `jarvis/agent/serve/engine/model_admin.py`（新） | 模型管理聚合（list/add/edit/remove）：`edit_model` 只在目标就是当前模型时入队 `{"cmd": "switch_model", "name", "force": True}` |
 | `jarvis/agent/serve/server.py` | `_rpc_models_edit` / `_rpc_models_remove` 注册与字段校验（`api_format` / `model_type` 非空才落白名单） |
 | `jarvis/agent/serve/protocol.py` | 新增 `models.edit` / `models.remove` 常量与指令表；顺带修掉 `models.add` 长期漏在 `DESKTOP_COMMANDS` 集合外（指令数 26 → 27，并补「已注册 RPC 必须已声明」的反向防漏测试） |
 | `jarvis-desktop`（`LeftSidebar` / `ModelForm` / `backendStore` / `leftStore`） | 模型项双击进编辑表单、右键显删除按钮；`editModel` / `removeModel` 发指令后刷列表并提示（`hot_switched` / `was_current` 两个文案分支） |

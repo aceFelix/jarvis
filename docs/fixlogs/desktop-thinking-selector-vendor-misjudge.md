@@ -100,7 +100,7 @@ deepseek 端点才有区分意义。
 ## 相关代码索引
 
 - [`settings.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/config/settings.py) — `_apply_toml` 归一化、`last_model` 恢复
-- [`api.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/api.py) — `_thinking_levels` / `get_state`
+- [`api.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/engine/api.py) — `_thinking_levels` / `get_state`
 - [`thinking.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/thinking.py) — `THINKING_CONFIGS` / `supported_efforts`
 - [`anthropic_provider.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/anthropic_provider.py) — `_derive_name`（deepseek 兼容端点派生名）
 - [`ChatArea.tsx`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis-desktop/src/renderer/src/components/ChatArea.tsx) — 选择器置灰判定

@@ -97,7 +97,7 @@ min_salience = 0.3
      但记一条 `reversible=False` 的副作用账，`/undo` 据此如实报"已离开本机，撤不回"。
    - 拆出理由：hub 已承担事件队列 + 感知总线 + 任务脊柱接线，加完提醒编排会破 800 行上限。
 
-5. `agent/tools/extensions/email_tool.py` + `agent/ui/workbench/api.py`
+5. `agent/tools/extensions/email_tool.py` + `agent/serve/engine/api.py`
    - 抽 `send_email_now(settings, args)`：不经模型、不跑 `check_permissions` 的直发入口。
      桌面「管家服务 → 邮件发送」表单原本自己写了一份 `asyncio.run(SendEmailTool().call(...))`，
      静默改道若再写一份就是两份实现；现在两边同引一处。
@@ -147,7 +147,7 @@ email 通道触发发信、`sms` 忽略且警告只刷一次、发信成功入�
 | `agent/serve/hub.py` | `_on_fire` → `_deliver_reminder`（过闸 + 按通道投递）、`_reminder_channels`、`_send_quiet_email` |
 | `agent/serve/quiet_delivery.py`（新增） | 通道解析 / 邮件正文 / 发送与不可逆副作用入账 |
 | `agent/tools/extensions/email_tool.py` | 抽 `send_email_now()` |
-| `agent/ui/workbench/api.py` | `send_email` 改调 `send_email_now`（去掉重复实现） |
+| `agent/serve/engine/api.py` | `send_email` 改调 `send_email_now`（去掉重复实现） |
 | `agent/config/settings.py`、`settings_domains.py`、`configs/settings.example.toml` | `reminder_channels` / `quiet_email_to` 两个字段 |
 | `tests/policy/test_notify_budget.py` | 降级投递 4 例 |
 | `tests/serve/test_hub_reminder_delivery.py`（新增） | 接线与通道 11 例 |

@@ -186,7 +186,7 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 | `docs/architecture/12-配置系统.md` | `[realtime_talk]` 映射表与字段说明 |
 | `tests/voice/test_talk_terminal.py` | 补 `echo_suppress_with_aec` 透传断言（默认开 / 显式关） |
 | `agent/commands/handlers/voice_commands.py` | 透传 `echo_suppress_with_aec` |
-| `agent/ui/workbench/engine.py` | 透传 `echo_suppress_with_aec` |
+| `agent/serve/engine/engine.py` | 透传 `echo_suppress_with_aec` |
 | `tests/voice/_fakes.py` | 新建：共享测试替身 |
 | `tests/voice/conftest.py` | 新建：共享 fixture |
 | `tests/voice/test_realtime_response_lifecycle.py` | 新建：响应生命周期 / 自打断诊断 / 回声门控用例 |

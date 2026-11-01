@@ -1,4 +1,4 @@
-﻿# 设计：斜杠命令透传（slash.exec + slash_bridge）
+# 设计：斜杠命令透传（slash.exec + slash_bridge）
 
 - 日期：2026-10
 - 范围：jarvis（serve(protocol|server) / workbench(api|engine|slash_bridge 新模块)、
@@ -37,7 +37,7 @@ diff 视图）后续可逐步升级为原生控件而非卡片。
 ### 1. 桥逻辑全部外置，引擎主体零膨胀
 
 `engine.py` 已超千行（code-structure 红线），故新建独立模块
-[slash_bridge.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/ui/workbench/slash_bridge.py)
+[slash_bridge.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/engine/slash_bridge.py)
 承载全部桥接逻辑（约 290 行），engine 只加两行路由
 （`elif action == "slash_exec": await slash_bridge.run_slash(...)`）。
 `router` 的 `CommandContext` / `dispatch_command` 在函数内**惰性导入**：顶层导入会在
@@ -90,7 +90,7 @@ stdin，serve 模式下会抢坏指令通道。双保险：
 
 ## 测试交付
 
-- 后端 [tests/ui/test_workbench_slash.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/ui/test_workbench_slash.py)
+- 后端 [tests/serve/engine/test_slash.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/tests/serve/engine/test_slash.py)
   11 用例：api 形态校验入队、捕获输出、三个交互原语抛错、picker patch/还原、
   三种拒绝路径（非命令/未就绪/白名单外）、白名单执行+输出捕获、未知命令、
   交互错误护栏、技能模式（含锁持有断言）、`_dispatch` 路由、上下文映射；

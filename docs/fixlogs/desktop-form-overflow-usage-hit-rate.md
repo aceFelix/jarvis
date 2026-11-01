@@ -81,7 +81,7 @@
 |---|---|---|
 | 新增 `Usage.cache_hit_rate` | `agent/llm/base.py` | 会话累计命中率的唯一实现（百分数 0~100，无输入 token 返回 0），协议口径注释随实现落地 |
 | `/cost` 改为调用该属性 | `agent/commands/handlers/core_commands.py` | 删掉内联的十几行分母判断，行为不变 |
-| `cost.get` 透传 | `agent/ui/workbench/engine.py::session_usage` | 四类 token 外附 `cache_hit_rate`（一位小数），引擎未装配时为 0.0 |
+| `cost.get` 透传 | `agent/serve/engine/engine.py::session_usage` | 四类 token 外附 `cache_hit_rate`（一位小数），引擎未装配时为 0.0 |
 | 协议文档 | `agent/serve/protocol.py` | `cost.get` 返回字段补 `cache_hit_rate` |
 
 ### 3.3 用量卡展示（jarvis-desktop）

@@ -402,16 +402,18 @@
 > 本仓库第 35 节 serve 用例覆盖（引擎与退役前完全同一套零件）。图形化实时聊天（/talk
 > 音频桥）用例同样见 jarvis-desktop。
 
-### 16.1 退役入口提示与参数隐藏（2026-10 新增）
-| 编号 | 测试目的 | 测试步骤 | 通过标准 |
-|------|---------|---------|---------|
-| T-359 | 退役提示 | Windows PowerShell（GBK）下执行 `jarvis --gui` | 退出码 0；打印「退役」说明 + jarvis-desktop 指引 + 自启清理路径（JARVIS.lnk / start_workbench.vbs）；**无 UnicodeEncodeError** |
-| T-360 | --talk 同口径 | `jarvis --talk` | 与 T-359 同一分支，输出一致 |
-| T-361 | 退役参数隐藏 | `jarvis --help` | 不出现 `--gui` / `--talk`（`argparse.SUPPRESS`），`--serve` 仍在列 |
-| T-362 | 退役分支零副作用 | 比对执行前后的 `~/.jarvis/settings.toml` mtime | 未加载、未写配置（拦截点在 `load_settings` 之前，旧自启项不会白跑初始化） |
+### 16.1 退役入口参数（已废除）
 
-自动化用例：`tests/ui/test_workbench_engine_api.py::test_retired_args_hidden_from_help` 与
-`::test_gui_entry_announces_retirement`（后者含 `out.encode("gbk")` 断言钉住 GBK 可编码约束）。
+> 原 T-359～T-362（退役提示 / `--talk` 同口径 / 参数隐藏 / 退役分支零副作用）
+> 随 `--gui` / `--talk` 两个参数于 2026-11-01 彻底删除一并废除：不再有退役分支，
+> 自然也就没有“捕获它并打印说明”这回事。
+>
+> 自动化用例改为反向守卫：`tests/serve/engine/test_engine_api.py::`
+> `test_retired_gui_and_talk_flags_are_gone` 断言这两个参数现在会走 argparse 的
+> unknown argument 分支（否则说明有人把它们悄悄加回来了）。
+>
+> 存量开机自启的手动清理路径仍在 [`workbench-gui-retired`](../fixlogs/workbench-gui-retired.md)
+> 第七节与 [desktop 指南](../guide/desktop.md) 里，只是不再由 `jarvis --gui` 代为打印。
 
 ### 16.2 语音互斥锁（替代原托盘多模式互斥）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -433,7 +435,7 @@
 > 原 T-171～T-174（`python -m agent.daemon.autostart install / status / uninstall / desktop`）
 > 随 `agent/daemon/autostart.py` 于 2026-10 删除一并废除：本仓库不再提供自启注册能力，
 > 开机启动请在 jarvis-desktop 设置内开启；存量残留的手动清理见
-> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md) 第七节（`jarvis --gui` 也会打印同一份指引）。
+> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md) 第七节。
 
 ### 16.5 快速启动
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -779,7 +781,7 @@
 
 ## 35. serve 模式（外部前端接入）
 
-> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用工作台引擎层（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 34 + 路由 42 + 集成 2 + hub 27 = 105 项）；工作台引擎层单测见 `tests/ui/`（238 项，含模型管理 `test_workbench_model_admin.py`、引擎热切换 `test_workbench_engine_model_switch.py`、斜杠桥 `test_workbench_slash.py`、扩展面板 `test_workbench_extensions.py` 等）。原窗口壳用例 `test_workbench_single_instance.py`、`test_workbench_chat_fold.py` 与 `test_autostart_cli.py` 已随 2026-10 退役删除，中栏降噪（思考块/工具组折叠）契约改由 jarvis-desktop vitest 覆盖。
+> `jarvis --serve` headless API 服务，供 jarvis-desktop 等外部前端经 WebSocket 接入；复用对话引擎层（ChatEngine/WorkbenchAPI/MetricsCollector）。自动化用例见 `tests/serve/`（协议 34 + 路由 42 + 集成 2 + hub 27 = 105 项）；对话引擎层单测见 `tests/serve/engine/`（含模型管理 `test_model_admin.py`、引擎热切换 `test_engine_model_switch.py`、斜杠桥 `test_slash.py`、扩展面板 `test_extensions.py` 等；2026-11 连引擎层从 `agent/ui/workbench/` 迁入 `agent/serve/engine/` 时一并从 `tests/ui/` 归位）。原窗口壳用例 `test_workbench_single_instance.py`、`test_workbench_chat_fold.py` 与 `test_autostart_cli.py` 已随 2026-10 退役删除，中栏降噪（思考块/工具组折叠）契约改由 jarvis-desktop vitest 覆盖。
 
 ### 35.1 启动与握手
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -803,17 +805,18 @@
 |------|---------|---------|---------|
 | T-330 | message 流式 | 发 `{"type":"message","text":"你好"}` | 回执 ok=true；随后 `assistant_text` 流式增量 + `assistant_done` |
 | T-331 | message 空文本 | 发 `{"type":"message","text":""}` | 回执 ok=false，error="空消息" |
-| T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` / `sessions.rename`(name,new_name) / `sessions.delete`(name) | list 返回会话数组（每项含 current 标记，与引擎当前会话名相等者为 true）；open 触发 `session_loaded`；new 触发 `session_new`；rename 触发 `session_renamed`（目标名占用/源不存在回 `warn`；改当前会话名取消自动标题任务）；delete 触发 `session_deleted`（删当前会话另触 `session_new`） |
+| T-332 | sessions 指令 | `sessions.list` / `sessions.open`(name) / `sessions.new` / `sessions.rename`(name,new_name) / `sessions.delete`(name) | list 返回会话数组（每项含 current 标记，与引擎当前会话名相等者为 true）；open 触发 `session_loaded`，并把 workdir 切回该会话目录（见 T-414）；new 触发 `session_new`；rename 触发 `session_renamed`（目标名占用/源不存在回 `warn`；改当前会话名取消自动标题任务）；delete 触发 `session_deleted`（删当前会话另触 `session_new`） |
 | T-333 | models 指令 | `models.list` / `models.select`(name) / `models.add`(name,vendor,api_format,base_url,api_key,model_type) / `models.edit`(name［,new_name,vendor,api_format,base_url,api_key,model_type］) / `models.remove`(name) | list 返回模型数组（含 current，current 取引擎实时模型；每项另带 source(builtin/custom) / editable / removable / config **不回传明文 api_key**，只给 `has_key`）；select 返回 bool 且持久化**并触发引擎热切换**（写盘成功后列表 current 立刻跟随、无需重启；写盘失败 result=false 且不入队切换）；add 返回 `{name, vendor, api_format, base_url, model_type}` 且写用户级 `~/.jarvis/models.toml` 的 `[llm.custom_models."<name>"]`（base_url 留空按厂商推断、api_key 入系统 keyring）、随后 `models.list` 可见；edit 返回 `{name, vendor, api_format, base_url, model_type, hot_switched}`（name 必填、非空枚举落白名单；内置模型传 new_name、目标名已占用、名字不存在回 ok=false 且不动磁盘/内存；api_key 留空 = **保持原 Key**；改的是当前运行模型时强制重建 provider 并置 hot_switched=true）；remove 返回 `{name, was_current}`（仅用户级自定义段真的存在时才删：内置模型、磁盘无该段均回 ok=false；删当前模型**不动运行中的 provider** 仅提示另选）；缺 name / 非法 api_format / 非法 model_type 回 ok=false |
 | T-334 | voices/metrics/state | `voices.list`/`voices.select`/`voices.add`/`voices.delete`/`metrics.get`/`state.get` | voices.list 返回全量目录（内置+自定义，当前置顶，每项 `{name, voice_id, description, vendor, model, linked, current, custom}`）；select 回执 dict `{ok, name, voice_id, linked_model, old_model}`（立即写盘、不兼容自动联动 tts_model；目录未命中 ok=true 但 result.ok=false）；add 回 `{ok, name}`（name/voice_id 必填、内置名遮蔽拒绝、upsert 即编辑）；delete 仅 custom 可删（内置回 ok=false）；metrics/state 各自返回对应结构（metrics 含 cpu/memory/disk） |
 | T-335 | answer_user / talk | `answer_user`(text) 回填 ask_user；`talk.start`/`talk.stop` | ask_user 弹窗被回填；talk 触发 `talk_started`/`talk_stopped` |
 | T-342 | project.set 合法切换 | 发 `{"type":"project.set","path":"<已存在的绝对目录>"}` | 回执 ok=true + `{workdir,name}`；随后推 `project_switched` 事件（payload `{workdir,name}`）；引擎自动 `_handle_new_session()`（切项目=开新会话）、项目级 `.jarvis/MEMORY.md`、`.jarvis/skills/` 重新挂接；`~/.jarvis/projects.toml` 自动置顶 last_active |
 | T-343 | project.set 非法路径 | `path` 为空串/相对路径/不存在目录 | raise → 回执 ok=false，**不**推 `project_switched`、**不**写 projects.toml（`_workdir_override`/`s.workdir` 保持不变）；单测 `tests/serve/test_serve_protocol.py::test_project_set_rejects_invalid_paths` |
-| T-344 | project.set 同路径收敛 | 当前 workdir 已为 X 时再发 `project.set(X)` | 仅推一次 `project_switched` 事件供前端收敛（不重建 prompt/不新开 session）；单测 `tests/ui/test_project_switch.py` |
+| T-344 | project.set 同路径收敛 | 当前 workdir 已为 X 时再发 `project.set(X)` | 仅推一次 `project_switched` 事件供前端收敛（不重建 prompt/不新开 session）；单测 `tests/serve/engine/test_project_switch.py` |
 | T-345 | project.get / projects.list | 拉当前项目信息与最近项目列表 | project.get 返 `{workdir,name,persisted}`（persisted=false 代表 serve 启动默认值尚未写入 projects.toml）；projects.list 返 `[{path,name,last_opened,exists}]` 按 last_opened 倒序（exists=false 项前端置灰） |
 | T-346 | projects.forget | 删一个存在的最近项 + 一个不存在的 | 存在 → ok=true + result=true，`projects.toml` 无该记录、若为 last_active 则清空；不存在 → ok=true + result=false（幂等）；**不删磁盘目录** |
 | T-347 | list_sessions workdir 字段 | `sessions.list` | 每项多一字段 `workdir`（取自 SessionMeta.workdir），供前端按项目分组/过滤；旧无该字段的会话归为空串不丢弃 |
 | T-348 | serve 启动 last_active 恢复 | 写入 `projects.toml` 后重启 serve | `agent/serve/__main__.py` 与 `jarvis --serve` 都优先取 `get_last_active_existing()`（存在且目录仍在）作为默认 workdir；目录已不存在则回退到命令行 cwd；实现「重开回到上次项目」 |
+| T-414 | 打开会话联动切项目目录 | 在 A 项目下 `sessions.open` 一条 workdir 为 B 的旧会话 | 先推 `session_loaded`（消息回放），随后推 `project_switched`（payload 为 B）；`s.workdir` 变 B、系统提示词按 B 重建、harness 对 B 重挂、`projects.toml` 置顶 B；**不开新会话**（`_session_name` 仍为该会话名、刚载入的消息不被清）、**不弹**「已切换到项目」气泡。会话目录已删/改名 → `s.workdir` 保持不变、对话照常载入，只推一条 `info` 说明；老会话 workdir 为空 → 不推 `project_switched`。单测 `tests/serve/engine/test_session_workdir_link.py` |
 
 ### 35.4 事件泵与兼容性
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -821,9 +824,9 @@
 | T-336 | 事件泵广播 | 引擎产生事件后观察 WS | 每 50ms 轮询，`{"type","payload"}` 原样广播为 `{"event","data"}` |
 | T-337 | 指标推送 | 连接后静置 | 每 ~2 秒收到 `metrics` 事件 |
 | T-338 | 手机 PWA 旧协议回归 | 用 BridgeServer 原 `query`/`abort` 协议连接 | 行为不变、向后兼容 |
-| T-339 | MCP 就绪补刷事件 | 启动 `--serve` 连上桌面壳，静候后台 MCP 预热（约 9s） | MCP 连接落定后推一次 `mcp_ready` 事件（payload=`state.get` 的 mcp 快照 `{connected,failed,tools}`）；右栏「运行健康」从 `init` 时的「MCP 未启用」自动刷新为真实连接态（单测 `test_workbench_engine_mcp.py`） |
+| T-339 | MCP 就绪补刷事件 | 启动 `--serve` 连上桌面壳，静候后台 MCP 预热（约 9s） | MCP 连接落定后推一次 `mcp_ready` 事件（payload=`state.get` 的 mcp 快照 `{connected,failed,tools}`）；右栏「运行健康」从 `init` 时的「MCP 未启用」自动刷新为真实连接态（单测 `test_engine_mcp.py`） |
 | T-340 | 语音 `<standby/>` 不泄漏上屏 | 语音模式说「退下吧」，观察桌面/终端气泡 | 告别语气泡**不出现字面 `<standby/>`**（全量 `on_ai_text` 与流式 `on_ai_text_delta` 均剥标）；仍正常进入待机（退下检测读原始消息不受影响）；单测 `test_voice_standby_display.py` |
-| T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_workbench_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/serve-toolsearch-registration-fix.md) |
+| T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/serve-toolsearch-registration-fix.md) |
 
 ## 36. 消息回溯与检查点（2026-10，shadow git）
 
@@ -849,7 +852,7 @@
 
 ### 36.3 三通道 query 锁的取消语义（2026-10，等锁窗口）
 
-> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/ui/test_serve_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/query-lock-cancel-leak-fix.md)。
+> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/serve/engine/test_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/query-lock-cancel-leak-fix.md)。
 
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
@@ -879,7 +882,6 @@
 | P1 | T-092 | 截图 | 15s |
 | P1 | T-128 | 语音闭环 | 30s |
 | P1 | T-133 | 实时双工启动 | 20s |
-| P1 | T-359 | 退役入口提示（--gui） | 5s |
 | P1 | T-321 | serve 启动握手 | 15s |
 | P2 | T-196 | 跨设备协同 | 30s |
 | P2 | T-203 | 安全沙箱 | 20s |

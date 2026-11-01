@@ -1,7 +1,7 @@
 # 优化复盘：MCP 连接前移启动后台预热，首条消息秒进
 
 - **日期**：2026-09-25
-- **模块**：`agent/ui/workbench/engine.py`（workbench/serve 共用引擎）
+- **模块**：`agent/serve/engine/engine.py`（workbench/serve 共用引擎）
 - **作者**：aceFelix
 
 ## 1. 问题现象
@@ -63,8 +63,8 @@
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/ui/workbench/engine.py` | 新增 `_prewarm` 与 `_registry/_registry_ready/_prewarm_task`；`_ensure_session` 复用预热 registry + 30s 兜底；`_shutdown` 取消后 await 预热任务 |
-| `agent/ui/workbench/render.py` | 新增：附件/历史渲染纯函数自 engine 拆出（engine 超 800 行上限，顺拆） |
+| `agent/serve/engine/engine.py` | 新增 `_prewarm` 与 `_registry/_registry_ready/_prewarm_task`；`_ensure_session` 复用预热 registry + 30s 兜底；`_shutdown` 取消后 await 预热任务 |
+| `agent/serve/engine/render.py` | 新增：附件/历史渲染纯函数自 engine 拆出（engine 超 800 行上限，顺拆） |
 | `tests/ui/test_workbench_engine_mcp.py` | 新增预热三用例 |
 | `tests/ui/test_workbench_engine_api.py`、`tests/ui/test_serve_stdin_abort.py` | 启动引擎用例关 enable_mcp 保 hermetic |
 | `docs/architecture/07-UI层.md` | 懒装配章节补预热顺序与降级口径 |

@@ -1,7 +1,7 @@
 # 修复复盘：桌面/终端语音轮缺收尾信号，气泡「疯狂输出思考、停不下来」
 
 - **日期**：2026-10-12
-- **模块**：`agent/voice/`（voice_events / voice_loop）、`agent/ui/workbench/voice_adapter.py`、`jarvis-desktop` dispatcher
+- **模块**：`agent/voice/`（voice_events / voice_loop）、`agent/serve/engine/voice_adapter.py`、`jarvis-desktop` dispatcher
 - **作者**：aceFelix
 
 ## 1. 问题现象
@@ -70,7 +70,7 @@
 
 ### 4.3 serve 适配器：映射为 `assistant_done`
 
-`agent/ui/workbench/voice_adapter.py`：`ServeVoiceAdapter.on_turn_done()` →
+`agent/serve/engine/voice_adapter.py`：`ServeVoiceAdapter.on_turn_done()` →
 `self._emitter.emit("assistant_done", "")`，**复用文本轮的同一收尾事件**，让桌面前端
 走既有 `assistant_done` 分支（解除闸门 + 定稿 + 清 busy + 刷用量）。
 
@@ -109,7 +109,7 @@
 |---|---|
 | `agent/voice/voice_events.py` | 协议 + 基类 + 收集实现新增 `on_turn_done()` |
 | `agent/voice/voice_loop.py` | 主循环 `_voice_loop_round` 用 try/finally 包裹，finally 无条件发 `on_turn_done()` |
-| `agent/ui/workbench/voice_adapter.py` | `ServeVoiceAdapter.on_turn_done` → `assistant_done` 事件 |
+| `agent/serve/engine/voice_adapter.py` | `ServeVoiceAdapter.on_turn_done` → `assistant_done` 事件 |
 | `jarvis-desktop/src/renderer/src/api/dispatcher.ts` | `voice_ai_text` 补定稿+清忙碌；`voice_stopped` 补解闸门+定稿+清忙碌 |
 | `tests/voice/test_voice_events.py` | 新增 ServeVoiceAdapter/协议 turn_done 断言 |
 | `tests/voice/test_voice_loop_turn_end.py` | 新增 3 例 turn_done 单测；`_run_voice_loop` 改返回 events 对象 |
