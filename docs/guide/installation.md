@@ -134,6 +134,12 @@ sudo apt install python3-tk                        # pyautogui 截屏依赖
 sudo dnf install portaudio-devel gtk3-devel
 ```
 
+> **能力级平台差异**：上表只说“跑起来需要装什么”；哪些能力在哪个系统上完整 / 受限 / 不支持，见 [README 平台支持矩阵](../../README.md#平台支持)。要点：
+> - **系统维护层**（`/disk` `/clean` `/health`）依赖 PowerShell + `SecurityCenter2` + 盘符 + `cleanmgr`，**仅 Windows**（POSIX 上如实拒绝）；
+> - **jarvis-desktop 桌面壳安装包**目前也只发布 Windows NSIS `.exe`；
+> - GUI 的窗口管理在非 Windows 上依赖 `pygetwindow`，能力受限；
+> - 语音（`/voice` · `/talk`）三平台可用，但都需 portaudio 系统库与 DashScope Key。
+
 ## 依赖健康检查
 
 安装完成后或遇到功能不可用时，运行 `--doctor` 一键诊断所有依赖状态：

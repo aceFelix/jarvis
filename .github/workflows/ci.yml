@@ -46,6 +46,15 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+      - name: Install smoke (entry point + packaged rule file)
+        # 从干净临时目录跑，确保 import 到的是 pip 装进 site-packages 的那份（而非仓库
+        # 源码树），证明"装出来的包"入口能起、且随包带上了运行时规则库 cleaners.toml——
+        # 这类"漏打包"缺陷源码树里的单测永远测不到。
+        run: |
+          cd "$(mktemp -d)"
+          jarvis --help > /dev/null
+          python -c "import agent, pathlib; p = pathlib.Path(agent.__file__).parent / 'config' / 'cleaners.toml'; assert p.is_file(), 'cleaners.toml 未随包安装'; print('install-smoke OK', agent.__version__)"
+
       - name: Test summary
         if: always()
         run: |

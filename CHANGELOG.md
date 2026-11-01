@@ -2,6 +2,45 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布]
+
+本次不改行为，只把**对外数字承诺**拉回与源码一致（全部真值由 AST / `tomllib` / 运行时实测得出）。
+
+### 文档（事实性订正）
+
+- **内置工具数**：`100+ 内置工具` → `70+ 内置工具（接入 MCP / harness 可扩展至 100+）`。
+  真值：`agent/tools` 下 Tool 子类 74 个，`build_default_registry()` 实装 46（核心 21 + 延迟 25），
+  接 MCP / harness 后实测可达 159——原“100+ 内置”把外部扩展误计入内置。
+  涉及 `README.md`、`README.en.md`、`npm/README.md`、`pyproject.toml` 描述、`docs/blueprint/BLUEPRINT.md`、
+  `docs/guide/concepts.md`、`docs/roadmap/PLAN-butler-autonomy-upgrade.md`。
+- **配置可问总数**：`207` / `205` → `202`（`Settings` 字段实数与 `build_catalog()` 均为 202）。
+  涉及 `README.md`、`config-docs/configuration.md`、`docs/test/config-self-service-testing.md`。
+- **可代改口径**：`40 项直接改` → `28 项直接改（auto）/ 29 项改前先确认（confirm）`，禁改 1 项（真源表共 58）；
+  `/config list` 实展 57 项。涉及 `README.md`、`README.en.md`、`config-docs/configuration.md`。
+- **英文 README 滞后补齐**：感知源 `Five` → `Seven`（与 `factory.IMPLEMENTED_SOURCES` 7 个对齐），并补上中文已有的
+  “配置不用翻文件”能力行。
+
+### 文档（跨平台能力矩阵）
+
+- `README.md` / `README.en.md` 原来一句笼统的“全部功能 ✅/✅/✅”换成**按能力细分的跨平台矩阵**，
+  明确标出：系统维护层（`/disk` `/clean` `/health`，依赖 PowerShell + `SecurityCenter2` + 盘符 + `cleanmgr`）与
+  jarvis-desktop 安装包为 **Windows-only**；窗口感知/GUI 窗口管理在非 Windows 依赖 `pygetwindow` 受限；
+  日历源在非 Windows 仅 ICS（无 Outlook COM）。`docs/guide/installation.md` 同步补“能力级平台差异”指引。
+
+### 测试（发布 / 打包契约）
+
+- 新增 `tests/test_release_contract.py`（5 例，纯本地、无网络/端口，0.45s），把发版前“本应成立却无人把关”
+  的不变量钉死：
+  - **三处版本号一致**（pyproject ↔ npm/package.json ↔ `agent.__version__`）——`publish.yml` 只校前两处，
+    `__version__` 那行“不在 CI 校验范围”的第三处由本测兼顶；
+  - **配置目录覆盖每个 `Settings` 字段**（新字段忘进目录 = 用户问了答不上）；
+  - **随包声明式文件存在且被 package-data 匹配**（`cleaners.toml` 等）+ **内置规则库无一条被静默拒绝**。
+- `ci.yml` 新增“Install smoke”步：从干净临时目录跑 `jarvis --help` + 断言装出来的包带上了 `cleaners.toml`
+  （确保 import 的是 site-packages 里那份而非源码树）——这类“漏打包”缺陷源码树里的单测测不到。
+- 说明：本批只做“装配契约 + 安装冒烟”两把锁；已核对现有 `tests/serve/test_serve_protocol.py` 已
+  双向覆盖 `DESKTOP_COMMANDS`↔`_rpc_types` 与指令数，故未重复；QueryLoop / orchestrator / tool_dispatch
+  已由单测充分覆盖，不再加重叠的端到端对话测。
+
 ## [2.3.4] — 2026-11-01
 
 这一版收两处**误导**。一处在交互上：项目区写着 A、你打开的会话却属于 B。

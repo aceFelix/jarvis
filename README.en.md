@@ -41,7 +41,7 @@
 
 | The pain today | JARVIS's answer |
 |---|---|
-| Many AI chat tools, but few can **actually operate your computer** | 100+ built-in tools: files, commands, browser, mouse/keyboard control, screenshot reading, camera, email — a ReAct loop plans and executes autonomously, GUI automation clicks and drags like a human |
+| Many AI chat tools, but few can **actually operate your computer** | 70+ built-in tools (100+ once MCP / harness servers are added): files, commands, browser, mouse/keyboard control, screenshot reading, camera, email — a ReAct loop plans and executes autonomously, GUI automation clicks and drags like a human |
 | Cloud assistants **don't know your machine**, and your data isn't yours | Local-first: it lives in your OS, reads your files, drives your apps; memory, logs and configs stay in local `~/.jarvis`, keys go into the OS credential manager |
 | Most assistants **forget you every session** | Three-layer memory: session persistence + long-term memory + profile distillation (auto-learns your habits) — it knows you better the longer you use it |
 
@@ -122,11 +122,11 @@
 
 | Capability | In one sentence | Docs |
 |---|---|---|
-| 🖥️ **Terminal-native Agent** | Rich terminal REPL + 100+ tools + ReAct orchestration, Ctrl+C interrupts at any stage | [Concepts](docs/guide/concepts.md) · [Commands](docs/guide/commands.md) |
+| 🖥️ **Terminal-native Agent** | Rich terminal REPL + 70+ tools (100+ with MCP/harness) + ReAct orchestration, Ctrl+C interrupts at any stage | [Concepts](docs/guide/concepts.md) · [Commands](docs/guide/commands.md) |
 | 🎙️ **Listens & speaks** | `/voice` turn-by-turn voice chat, `/talk` full-duplex realtime (speak to interrupt), TTS announces proactive reminders | [Voice](docs/guide/voice.md) |
 | 🖱️ **Operates your PC** | Mouse/keyboard/screenshot/window tools + visual template locating, drives any software like a human | [GUI Automation](docs/guide/ecosystem.md#gui-自动化) |
 | 🗓️ **Proactive butler** | Daily briefing, timed reminders, deadline tracking, system monitoring — it acts without being asked | [Proactive System](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
-| 👀 **Working-context perception** | Five event sources (foreground window / folder pile-up / repo state / important mail / camera presence) feed one event bus; the notify budget decides when it is actually worth speaking up (**every source off by default**, you are told once after connecting if you never chose, and everything collected is exportable for self-audit) | [Percept sources](docs/guide/desktop.md#感知源阶段-9--w2已接线) |
+| 👀 **Working-context perception** | Seven event sources (foreground window / folder pile-up / repo state / important mail / camera presence / upcoming calendar / system resources) feed one event bus; the notify budget decides when it is actually worth speaking up (**every source off by default**, you are told once after connecting if you never chose, and everything collected is exportable for self-audit) | [Percept sources](docs/guide/desktop.md#感知源阶段-9--w2已接线) |
 | 🛎️ **Butler services** | jarvis-desktop title-bar entry: email service (view/edit the current mailbox + configure SMTP + send mail) calls the backend tools directly (more to come) | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧰 **Extension services** | jarvis-desktop title-bar entry: a right-column panel managing MCP servers (add/edit/remove + enable/disable), built-in tools, skills, plugins and harness tools (marketplace search/install/uninstall/toggle) in one place | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧠 **Three-layer memory** | Session persistence + long-term memory + profile distillation, knows you better over time | [Memory](docs/guide/concepts.md#记忆系统) |
@@ -134,6 +134,7 @@
 | 🧭 **Butler runtime layer** | Path-scoped no-confirmation rules in permissions.yaml + authorization leases (stop interrupting me) + notify budget (cut the noise) + `/away` unattended queue for approval | [W1 runtime layer](docs/architecture/16-W1判断层.md) (中文) |
 | 🧾 **The layer that makes it safe to let go** | Outbound mail waits in a 30-second send window (`/undo cancel` stops it, and equivalent outbound commands like `curl` stop being auto-allowed while a hold is open), files it wrote for you roll back per turn with `/undo`; long-lived goals survive across sessions via the task spine (zero LLM calls while it waits), and **one sentence is enough to create one** — `/tasks add …` or just ask J.A.R.V.I.S | [W3 execution layer](docs/architecture/18-W3兑现层.md) (中文) |
 | 🧩 **Open ecosystem** | MCP, plugin marketplace, Skill packs, CLI-Anything (turn any software into a tool), multi-agent collaboration | [Ecosystem](docs/guide/ecosystem.md) |
+| ⚙️ **Config without editing files** | All 202 config items are askable: don't know what one does or where to change it — just say "the CPU threshold is too high"; it looks it up and tells you what the setting does, its current value, and **whether it should change it or you should** (28 it changes directly, 29 only after confirming first; the rest it just names the file and section for you). `/config explain <keyword>` for the same self-check | [Config system](docs/architecture/12-配置系统.md) (中文) |
 | 🔐 **Security baseline** | Five-layer permissions + four-level sandbox + operation audit + keyring encryption, hard-blocks dangerous ops | [Concepts](docs/guide/concepts.md#五层权限系统) |
 
 **Provider freedom**: 11 vendors supported (Alibaba DashScope / DeepSeek / OpenAI / Zhipu / Anthropic / Kimi / MiniMax / SiliconFlow / Xiaomi MiMo / Google Gemini / custom-compatible services); double-click to edit in `/models`, hot-switch while running.
@@ -164,11 +165,27 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 
 ## Platform Support
 
-| | Windows | macOS | Linux |
-|---|---|---|---|
-| Full features (chat / voice / GUI control / serve backend / jarvis-desktop shell) | ✅ **Fully developed & verified** | ✅ Code-adapted | ✅ Code-adapted |
+> Legend: ✅ verified on that OS by real-machine testing | 🟡 code-adapted and works once deps are present, but not fully tested on that OS | ⚠️ partially available (limits noted) | ⛔ not supported / not provided yet
 
-> ⚠️ All development and real-machine verification happens on Windows; macOS / Linux are code-level adaptations without full real-machine testing. Windows is recommended first. Per-feature differences: [Installation Guide](docs/guide/installation.md#平台系统依赖) (Chinese).
+| Capability | Windows | macOS | Linux |
+|---|:---:|:---:|:---:|
+| Chat + ReAct tool orchestration + three-layer memory | ✅ | 🟡 | 🟡 |
+| File / command / Web / email built-in tools | ✅ | 🟡 | 🟡 |
+| Browser automation (Playwright) | ✅ | 🟡 | 🟡 |
+| GUI automation (mouse / keyboard / screenshot / window) | ✅ | 🟡 | ⚠️ window mgmt limited (pygetwindow) |
+| Camera capture / gesture vision (mediapipe) | ✅ | 🟡 | 🟡 |
+| Realtime voice `/voice` · `/talk` (STT+TTS+AEC) | ✅ | 🟡 needs portaudio | 🟡 needs `portaudio19-dev` (all three need a DashScope key) |
+| Proactive butler (briefing / reminders / deadlines / system monitor) | ✅ | 🟡 | 🟡 |
+| W2 perception event bus | ✅ | 🟡 | 🟡 |
+| Foreground-window source | ✅ | 🟡 no process name | ⚠️ depends on pygetwindow, limited |
+| Calendar source (upcoming events) | ✅ Outlook COM / ICS | 🟡 ICS only (no Outlook COM) | 🟡 ICS only |
+| Sandbox execution | ✅ Job Object | 🟡 sandbox-exec | 🟡 rlimits |
+| MCP / Skill / Plugin / harness / multi-agent / serve backend | ✅ | 🟡 | 🟡 |
+| One session, many ends (phone PWA / WeChat ClawBot) | ✅ | 🟡 | 🟡 |
+| System maintenance `/disk` `/clean` `/health` | ✅ | ⛔ Windows-only (PowerShell + SecurityCenter2 + drive letters + cleanmgr) | ⛔ Windows-only |
+| jarvis-desktop installer | ✅ NSIS `.exe` | ⛔ not provided yet | ⛔ not provided yet |
+
+> ⚠️ All development and real-machine verification happen on **Windows**; macOS / Linux are code-level adaptations without full real-machine testing — Windows is recommended first. **System maintenance (clean / AV / health) and the desktop installer are Windows-only today**; per-row limits are flagged above. Dependency details: [Installation Guide](docs/guide/installation.md#平台系统依赖) (Chinese).
 
 ## Documentation Map
 
