@@ -116,7 +116,7 @@ def test_desktop_commands_count():
     wechat.connect/disconnect/status/pairing（36→43）。
     2026-10 消息级回溯（撤回+文件回滚）：+checkpoint.preview / checkpoint.rewind
     （43→45）。
-    2026-10 斜杠命令透传：+slash.exec（45→46，实现见 ui/workbench/
+    2026-10 斜杠命令透传：+slash.exec（45→46，实现见 serve/engine/
     slash_bridge.py，结果走 slash_result 事件）；同月补全目录
     +slash.commands（46→47，只读返回桌面可执行命令列表）。
     2026-10 桌面管家服务：+email.send（47→48，标题栏「管家服务 → 邮件发送」
@@ -125,7 +125,7 @@ def test_desktop_commands_count():
     （48→50，查看/修改当前发件邮箱与 SMTP 配置，读写 settings.toml 的 [email]
     表，授权码不回传明文、留空=保持，见 agent/config/email_settings.py）。
     2026-10 桌面扩展服务：+extensions.exec（50→51，一条通用指令承载五类扩展
-    MCP/内置工具/技能/插件/harness 的清单与增删改启停，见 ui/workbench/
+    MCP/内置工具/技能/插件/harness 的清单与增删改启停，见 serve/engine/
     extensions_api.py）。
     2026-10 W2 感知层第 5 步：+percept.status.get / percept.config.set（51→53，
     桌面「感知源」面板的在采什么/采到了什么与逐源开关，改完由宿主重装配总线，

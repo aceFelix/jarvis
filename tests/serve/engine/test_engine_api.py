@@ -19,8 +19,8 @@ from types import SimpleNamespace
 from agent import session_manager as session_manager_mod
 from agent.config.settings import Settings
 from agent.core.message import Message, TextContent, ToolResultContent, ToolUseContent
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine, _messages_to_render
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine, _messages_to_render
 
 
 # ---- 历史消息渲染 ----
@@ -457,51 +457,26 @@ def test_api_get_state_includes_runtime_fields() -> None:
 
 # ---- 命令行参数 ----
 
-def test_parse_args_gui_and_talk():
-    """--gui / --talk 已退役但参数仍可解析：兼容旧开机自启项的调用。"""
-    from agent.main import parse_args
-
-    assert parse_args(["--gui"]).gui is True
-    assert parse_args(["--talk"]).talk is True
-    assert parse_args([]).gui is False and parse_args([]).talk is False
-
-
-def test_retired_args_hidden_from_help(capsys):
-    """退役参数不得出现在 --help（argparse.SUPPRESS），避开被当成可用功能。"""
-    import pytest
-
-    from agent.main import parse_args
-
-    with pytest.raises(SystemExit):
-        parse_args(["--help"])
-    out = capsys.readouterr().out
-    assert "--gui" not in out and "--talk" not in out
-    assert "--serve" in out
-
-
-def test_gui_entry_announces_retirement(capsys):
-    """命中退役参数：只打印下线说明与自启清理指引并返回 0，不加载配置也不拉 GUI。
-
-    拦截点在 load_settings 之前，故本用例不会读写用户真实配置。
-    """
-    from agent.main import main
-
-    assert main(["--gui"]) == 0
-    out = capsys.readouterr().out
-    assert "退役" in out
-    assert "jarvis-desktop" in out
-    # 旧自启项常见残留路径必须提示到
-    assert "JARVIS.lnk" in out and "start_workbench.vbs" in out
-    # 文案必须可被 Windows GBK 控制台编码：该分支正在 Rich 建立之前走裸
-    # print，遇 ℹ 等不可编码字符会抛 UnicodeEncodeError 把提示本身弄崩
-    out.encode("gbk")
-
-
 def test_parse_args_serve():
     """--serve 被识别（headless API 服务，供 jarvis-desktop 接入），默认关闭。"""
     from agent.main import parse_args
 
     assert parse_args(["--serve"]).serve is True
     assert parse_args([]).serve is False
-    # 与已退役的 --gui/--talk 同时给出时仍能解析，但执行时退役提示优先返回
-    assert parse_args(["--serve", "--gui"]).serve is True
+
+
+def test_retired_gui_and_talk_flags_are_gone():
+    """--gui / --talk 已于 2026-11-01 彻底移除。
+
+    这两个参数只在 2026-10 窗口壳退役后作为“给老用户读一句下线说明”的垫子
+    留着；现在连垫子也撤了，敲它们会走 argparse 的 unknown argument 分支。
+    本用例守的是“别再悄悄加回来”——真要恢复 GUI 入口，应该是一套新设计，
+    而不是把旧参数与旧提示原样复活。
+    """
+    import pytest
+
+    from agent.main import parse_args
+
+    for flag in ("--gui", "--talk"):
+        with pytest.raises(SystemExit):
+            parse_args([flag])

@@ -24,9 +24,9 @@ import agent.wechat as wechat_pkg
 from agent.bridge.server import BridgeServer
 from agent.bridge.ui import BridgeUI
 from agent.config.settings import Settings
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
-from agent.ui.workbench import remote_bridge
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
+from agent.serve.engine import remote_bridge
 from agent.wechat.server import WeChatBridge
 from agent.wechat.ui import WeChatUI
 

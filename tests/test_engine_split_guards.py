@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import pathlib
 
-from agent.ui.workbench.engine import ChatEngine
-from agent.ui.workbench.engine_session import EngineSessionMixin
-from agent.ui.workbench.engine_status import EngineStatusMixin
-from agent.ui.workbench.engine_talk import EngineTalkMixin
-from agent.ui.workbench.engine_voice import EngineVoiceMixin
+from agent.serve.engine.engine import ChatEngine
+from agent.serve.engine.engine_session import EngineSessionMixin
+from agent.serve.engine.engine_status import EngineStatusMixin
+from agent.serve.engine.engine_talk import EngineTalkMixin
+from agent.serve.engine.engine_voice import EngineVoiceMixin
 from agent.voice import realtime_const
 from agent.voice.realtime_engine import RealtimeEngine
 from agent.voice.realtime_recv import RealtimeRecvMixin

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # 仅用于类型标注：运行时不导入，避免 engine ↔ mcp_runtime 循环
-    from agent.ui.workbench.engine import ChatEngine
+    from agent.serve.engine.engine import ChatEngine
 
 
 async def prewarm(engine: ChatEngine) -> None:

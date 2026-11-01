@@ -205,7 +205,7 @@ def test_metrics_and_monitor_share_one_snapshot(monkeypatch):
     _mod, calls = _install_psutil(monkeypatch, cpu=42.34)
 
     from agent.core.daemon.monitor import MonitorConfig, SystemMonitor
-    from agent.ui.workbench.metrics import collect_metrics
+    from agent.serve.engine.metrics import collect_metrics
 
     payload = collect_metrics()
     monitor = SystemMonitor(MonitorConfig(), on_alert=lambda _a: None)

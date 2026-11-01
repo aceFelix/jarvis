@@ -23,7 +23,7 @@ import pytest
 from agent.config.settings import Settings
 from agent.core.extensions import mcp_client
 from agent.core.extensions import plugins as plugins_mod
-from agent.ui.workbench import extensions_api
+from agent.serve.engine import extensions_api
 
 
 # ---- 公共替身 ----

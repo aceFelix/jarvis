@@ -21,13 +21,13 @@ import threading
 from datetime import datetime
 from typing import Any
 from agent.core.message import Message
-from agent.ui.workbench.render import (  # noqa: F401
+from agent.serve.engine.render import (  # noqa: F401
     _MAX_ATTACH_FILE_CHARS,
     _compose_with_files,
     _messages_to_render,
     _parse_images,
 )
-from agent.ui.workbench import (
+from agent.serve.engine import (
     mcp_runtime,
     model_switch,
     project_switch,
@@ -179,7 +179,7 @@ class EngineSessionMixin:
         await mcp_runtime.connect_mcp(self, registry)
 
     async def _handle_load(self, name: str) -> None:
-        """恢复历史会话：载入消息并把历史渲染给前端。"""
+        """恢复历史会话：载入消息、渲染给前端，并把工作目录切回它当初所在的目录。"""
         from agent.core.memory.store import load_session
 
         session = load_session(name)
@@ -196,6 +196,40 @@ class EngineSessionMixin:
             "name": self._session_name,
             "messages": _messages_to_render(self._messages),
         })
+        # 联动项目区放在 session_loaded 之后：先把消息渲染出去，再换目录。
+        # 顺序反过来也不会出错，但这个顺序下 project_switched 触发的
+        # refreshSessions 能直接拿到已更新的 _session_name，列表选中态不会跳一下。
+        await self._restore_session_workdir(getattr(session.meta, "workdir", ""))
+
+    async def _restore_session_workdir(self, workdir: str) -> None:
+        """把工作目录切回历史会话当初所在的目录（桌面左栏项目区随之联动）。
+
+        为什么必须真换 workdir 而不是只把面板高亮过去：项目区是用户判断
+        “我现在在哪”的唯一依据。跨目录打开旧会话时若只载消息不换目录，面板会
+        显示当前项目、而对话里提到的文件路径属于另一个项目；接着发消息，读写
+        文件与命令也会落在错误的目录里。
+
+        与手动切项目（serve ``project.set``）的区别：
+        - 不开新会话（``start_new_session=False``）—— 刚载入的对话必须保住；
+        - 不弹气泡（``announce=False``）—— 用户的动作是“打开会话”而非“切项目”，
+          成功不提示，失败由本方法给一句贴场景的话。
+
+        一律不回滚已载入的对话：目录失效（被删/改名/挪走）只是项目区不动，
+        看历史消息不受影响。
+
+        @author aceFelix
+        """
+        target = (workdir or "").strip()
+        if not target or target == str(self._settings.workdir or ""):
+            # 老会话没记目录 / 本来就在这个目录：无事可做，不推多余事件。
+            return
+        ok = await project_switch.handle_set_workdir(
+            self, target, start_new_session=False, announce=False
+        )
+        if not ok:
+            self._emitter.emit(
+                "info", f"该会话原目录已不可用，项目区保持当前目录：{target}"
+            )
 
     def _handle_new_session(self) -> None:
         """新建会话：清空消息与轮数，前端同步清空气泡。"""

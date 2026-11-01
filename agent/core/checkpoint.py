@@ -422,7 +422,7 @@ def manager_from_settings(
 ) -> CheckpointManager:
     """按 Settings 的 ``[checkpoint]`` 字段构造管理器（三个宿主共用的唯一口径）。
 
-    为什么要有这个工厂：REPL（``main.py``）、工作台（``ui/workbench/checkpoint_ops.py``）
+    为什么要有这个工厂：REPL（``main.py``）、工作台（``serve/engine/checkpoint_ops.py``）
     与副作用账本（``core/actions/journal.py``）都要建一个指向同一目录的管理器，
     参数取值完全一致。三处各写一份时，任何一处改默认值（比如配额、超时）
     就会与其他两处不一致：``/undo`` 回滚看不到 ``/rewind`` 打的快照就是最坏后果。

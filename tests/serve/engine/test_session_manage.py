@@ -20,7 +20,7 @@ import queue
 
 from agent.config.settings import Settings
 from agent.core.memory import store as store_mod
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.engine import ChatEngine
 
 
 def _make_engine(session_name: str = "session-old") -> tuple[ChatEngine, queue.Queue]:

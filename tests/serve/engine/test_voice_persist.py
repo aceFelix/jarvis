@@ -19,8 +19,8 @@ import queue
 import pytest
 
 from agent.config.settings import Settings
-from agent.ui.workbench.bridge import WorkbenchRealtimeUI, _EventEmitter
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.bridge import WorkbenchRealtimeUI, _EventEmitter
+from agent.serve.engine.engine import ChatEngine
 
 
 class _OwnerSpy:

@@ -19,7 +19,7 @@ import agent.core.extensions.mcp_client as mcp_mod
 import agent.core.tool as tool_mod
 from agent.config.settings import Settings
 from agent.core.tool import ToolRegistry
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.engine import ChatEngine
 
 
 def _make_engine() -> tuple[ChatEngine, queue.Queue]:

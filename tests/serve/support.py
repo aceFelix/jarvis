@@ -15,8 +15,8 @@ from typing import Any
 
 from agent.config.settings import Settings
 from agent.serve.server import DesktopBridgeServer
-from agent.ui.workbench.api import WorkbenchAPI
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.api import WorkbenchAPI
+from agent.serve.engine.engine import ChatEngine
 
 
 def make_desktop_server(

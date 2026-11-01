@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # 仅类型标注：运行时不导入，避免 engine ↔ model_switch 循环
-    from agent.ui.workbench.engine import ChatEngine
+    from agent.serve.engine.engine import ChatEngine
 
 
 async def handle_switch_model(engine: ChatEngine, name: str, force: bool = False) -> None:

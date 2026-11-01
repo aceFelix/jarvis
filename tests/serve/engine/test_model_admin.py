@@ -1,7 +1,7 @@
 """workbench model_admin 单测：模型配置的列表 / 修改 / 删除核心语义。
 
 背景：桌面壳左栏模型面板支持「双击模型项改配置、右键模型项删模型」（交互
-对齐会话列表）。后端把这些操作收敛到 agent/ui/workbench/model_admin.py，
+对齐会话列表）。后端把这些操作收敛到 agent/serve/engine/model_admin.py，
 与 REPL /models 的「修改配置 / 删除模型」同口径，但有一处刻意差异：
 桌面壳不回显密钥，编辑表单 api_key 留空表示「保持原 Key 不变」
 （REPL 预填明文，留空即清空）。
@@ -29,7 +29,7 @@ import agent.config.keyring_store as ks
 import agent.config.model_registry as mr
 import agent.config.models_config as mc
 from agent.config.settings import Settings
-from agent.ui.workbench import model_admin
+from agent.serve.engine import model_admin
 
 
 class _FakeEngine:

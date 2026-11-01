@@ -259,7 +259,7 @@ CMD_WECHAT_DISCONNECT = "wechat.disconnect"
 CMD_WECHAT_STATUS = "wechat.status"
 CMD_WECHAT_PAIRING = "wechat.pairing"
 # slash.exec（斜杠命令透传，2026-10）：把桌面聊天输入的 / 前缀命令转进引擎
-# 指令队列，复用终端命令路由 dispatch_command（实现见 ui/workbench/
+# 指令队列，复用终端命令路由 dispatch_command（实现见 serve/engine/
 # slash_bridge.py）。白名单放行、交互禁令（禁抢 stdin 的 picker/input）与
 # 输出捕获都在桥内；命令执行结果以 slash_result 事件回推。
 CMD_SLASH_EXEC = "slash.exec"
@@ -284,7 +284,7 @@ CMD_EMAIL_CONFIG_SET = "email.config.set"
 # （MCP 服务 / 内置工具 / 技能 / 插件 / harness）的清单与增删改启停，避免一动作一
 # 指令把协议常量撑爆。payload = {"category": "mcp"|"tools"|"skills"|"plugins"|
 # "harness", "action": "<动作名>", ...其余参数}；result = {"ok": bool, "data": ...,
-# "message"?: str}。业务实现集中在 agent/ui/workbench/extensions_api.py，server 侧
+# "message"?: str}。业务实现集中在 agent/serve/engine/extensions_api.py，server 侧
 # 用 asyncio.to_thread 执行（插件/harness 安装含网络 IO，MCP 写本地文件）。
 # @author aceFelix
 CMD_EXTENSIONS = "extensions.exec"

@@ -30,7 +30,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent.ui.workbench.engine import ChatEngine
+    from agent.serve.engine.engine import ChatEngine
 
 
 class _StatusUI:

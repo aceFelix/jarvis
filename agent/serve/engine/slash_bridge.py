@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
@@ -43,6 +43,11 @@ from agent.utils.query_lock import acquire_lock_cancellable
 # 注：agent.commands.router 会拉起全部 handlers（进而 import agent.ui.cli），
 # 放模块顶层 import 有循环依赖风险（engine 导入本模块时 ui 包尚未初始化完），
 # 故 CommandContext / dispatch_command 均在各函数内惰性导入。
+# 例外：返回类型注解只需静态可见，故 CommandContext 另外在 TYPE_CHECKING 下按
+# 类型导入——本文件有 ``from __future__ import annotations``，注解不求值，运行时
+# 零开销，同时让静态检查器不再把它报成未定义名。
+if TYPE_CHECKING:
+    from agent.commands.router import CommandContext
 
 # 白名单：token（命令首个词，小写）在此集合才透传执行。/c 是 /cost 缩写别名。
 # 维护口径：新增条目须确认处理器不依赖终端交互（stdin picker/input/ask_user）。

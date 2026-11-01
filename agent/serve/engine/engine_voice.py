@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from agent.ui.workbench.voice_adapter import (  # noqa: F401
+from agent.serve.engine.voice_adapter import (  # noqa: F401
     _EVT_VOICE_STARTED,
     _EVT_VOICE_STOPPED,
     ServeVoiceAdapter,

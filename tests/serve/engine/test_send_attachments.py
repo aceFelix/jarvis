@@ -21,7 +21,7 @@ import pytest
 from agent.config.settings import Settings
 from agent.core.context import ToolContext
 from agent.core.message import ImageContent, Message, TextContent, ToolResultContent
-from agent.ui.workbench.engine import ChatEngine, _messages_to_render
+from agent.serve.engine.engine import ChatEngine, _messages_to_render
 
 
 def _make_engine() -> tuple[ChatEngine, queue.Queue]:

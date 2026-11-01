@@ -29,7 +29,7 @@ from agent.serve import protocol
 
 if TYPE_CHECKING:  # 仅为 IDE/类型检查声明宿主属性，运行期不引入循环导入
     from agent.config.settings import Settings
-    from agent.ui.workbench.api import WorkbenchAPI
+    from agent.serve.engine.api import WorkbenchAPI
 
 
 class EmailRpcMixin:

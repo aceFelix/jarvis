@@ -27,7 +27,7 @@ from unittest import mock
 
 from agent.config.settings import Settings
 from agent.core.tool import ToolRegistry
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.engine import ChatEngine
 
 
 class _FakeProvider:

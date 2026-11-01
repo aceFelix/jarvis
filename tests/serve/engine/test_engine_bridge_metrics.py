@@ -18,12 +18,12 @@ import time
 import pytest
 
 from agent.core.system_sampler import reset_default_sampler
-from agent.ui.workbench.bridge import (
+from agent.serve.engine.bridge import (
     WorkbenchRealtimeUI,
     WorkbenchUI,
     _EventEmitter,
 )
-from agent.ui.workbench.metrics import MetricsCollector, collect_metrics
+from agent.serve.engine.metrics import MetricsCollector, collect_metrics
 
 
 # ---- 指标采集 ----

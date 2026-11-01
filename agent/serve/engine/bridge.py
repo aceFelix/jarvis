@@ -1,17 +1,18 @@
-"""工作台 UI 桥接：UIProtocol / RealtimeTalkUI 的事件队列实现。
+"""UI 协议桥接：UIProtocol / RealtimeTalkUI 的事件队列实现。
 
-QueryLoop 与 RealtimeTalk 只依赖 UI 协议，不感知 GUI 细节：
-两个适配器把所有 UI 调用转成事件推入队列，前端 JS 轮询渲染。
+QueryLoop 与 RealtimeTalk 只依赖 UI 协议，不感知宿主细节：两个适配器把所有
+UI 调用转成 ``{"type","payload"}`` 事件推入队列，由宿主（``agent/serve/``）
+经 WebSocket 广播给 jarvis-desktop。本模块不碰网络，也不存在前端代码。
 
-事件类型约定（与前端 app.js 一一对应）：
+事件类型约定（``agent/serve/protocol.py`` 与桌面壳 ``contracts.ts`` 必须同口径）：
 
 文本对话（QueryLoop）：
 - assistant_text / assistant_thinking / tool_use / tool_result
-- info / warn / error / ask_user（询问转前端弹窗）
-- assistant_done（一轮结束，前端收尾气泡）
+- info / warn / error / ask_user（询问转桌面壳弹窗）
+- assistant_done（一轮结束，桌面壳收尾气泡）
 
 实时语音（RealtimeTalk，沿用原 realtime_window 事件协议——该窗口包已于
-2026-09 删除，协议由工作台与 serve/桌面壳继续沿用）：
+2026-09 删除，协议由 serve/桌面壳继续沿用）：
 - status / volume / user_speaking / ai_speaking
 - user_transcript / ai_transcript / ai_transcript_delta
 

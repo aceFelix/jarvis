@@ -26,8 +26,8 @@ import pytest
 from agent.config.settings import Settings
 from agent.core.context import ToolContext
 from agent.tools.bash import BashTool
-from agent.ui.workbench.bridge import WorkbenchUI, _EventEmitter
-from agent.ui.workbench.engine import ChatEngine
+from agent.serve.engine.bridge import WorkbenchUI, _EventEmitter
+from agent.serve.engine.engine import ChatEngine
 
 
 # ---- BashTool：stdin=DEVNULL + 取消回收 ----
