@@ -44,6 +44,30 @@
   jarvis-desktop 安装包为 **Windows-only**；窗口感知/GUI 窗口管理在非 Windows 依赖 `pygetwindow` 受限；
   日历源在非 Windows 仅 ICS（无 Outlook COM）。`docs/guide/installation.md` 同步补“能力级平台差异”指引。
 
+### 修复（模型切换：跨厂商往返后端点停在上一个厂商）
+
+- 现象：DeepSeek 返回 `503 Service is too busy` 后，用户 `/model qwen3.7-flash` 切去 DashScope（正常），
+  再 `/model deepseek-flash` 切回，请求却被发到 `dashscope.aliyuncs.com/compatible-mode/v1`，拿回
+  `404 The model deepseek-flash does not exist`——看着像“模型不存在 / 厂商坏了”，实际是 jarvis
+  把请求发错了地址（DeepSeek 全程没有参与这次失败）。
+- 根因：`_build_switched_provider` 靠“自定义条目与当前 provider 端点的差异”决定是否重建，而自定义
+  条目的 `base_url` / `api_key` **正常就是留空的**（添加时留空即按厂商推断、不落盘；keyring 接管后
+  密钥不写明文），`api_format` 两边又同为 `openai`——三条判据全部短路，于是只换模型名、不换端点。
+  `_infer_model_vendor` / `_infer_base_url` 与那三条判据是同批（`4b77351`，2026-07-30）引入的，却从未
+  被切换路径调用。
+- 修复：新增 `_switch_target_changed_vendor`（按 **host** 判厂商归属是否变更，不比全串——
+  `api.deepseek.com` 与 `…/v1` 算同一家）与 `_vendor_api_key`（按目标厂商查 keyring，取不到降级为
+  继承当前 key）；重建时端点/密钥走“显式配置 > 按厂商推断 > 继承当前”。**三种情况保守复用**：
+  厂商推不出来、端点由 SDK 自管、当前 host 不在厂商表里（用户自配网关）——最后一条与
+  `fixlogs/init-not-applied-to-session-fix.md` 定下的“留空先沿用原值”口径一致，不把流量从代理上拐走。
+- 影响版本：v2.2.2 ～ v2.3.4（该判据自 2026-07-30 就在，**升级不解决**）。临时绕过：给该自定义模型
+  条目显式补上 `base_url`（已验证有效）。
+- 测试：新增 `TestSwitchVendorEndpointNotSticky` 6 例（跨厂商切回 / 同厂商少 `/v1` / 自建网关 /
+  厂商推不出 / keyring key 跟随 / keyring 异常降级），并给该测试文件加模块级 autouse fixture 隔离
+  keyring（隔离点选在底层 `load_api_key` 而非被测函数，保证降级分支仍可测）；该文件 62 passed。
+  4 类变异均被抓到，其中“host 比对退化回全串”会额外打红 3 条既有测试——反证该设计是既有契约
+  的要求。复盘见 [fixlogs/model-switch-vendor-endpoint-fix.md](docs/fixlogs/model-switch-vendor-endpoint-fix.md)。
+
 ### 测试（发布 / 打包契约）
 
 - 新增 `tests/test_release_contract.py`（5 例，纯本地、无网络/端口，0.35s），把发版前“本应成立却无人把关”
@@ -245,7 +269,7 @@
 
   | 删除项 | 规模 |
   |---|---|
-  | `hotkey.py`（keyboard / pynput 跳平台） | 137 行 |
+  | `hotkey.py`（keyboard / pynput 跨平台） | 137 行 |
   | `hotkey_native.py`（Windows RegisterHotKey） | 270 行 |
   | `platform_utils.py`（只为它服务的平台探测） | 47 行 |
   | `tests/daemon/test_hotkey.py` | 72 行 |

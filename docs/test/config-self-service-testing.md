@@ -234,6 +234,8 @@ P2 把面板早就能改、但真源表里没有的 6 项补上了；它们现�
 | 8.15 | 上一步紧接着那句 | 走的是**刚配的那个端点**（不是启动时旧的）。测试把守：`_apply_to_session` 传递 `baseline`（旧端点快照），否则差异被自己抹掉→复用旧 provider |
 | 8.16 | `/models` 添加一个 DeepSeek 模型，Base URL 留空 | 写进去的地址是 `https://api.deepseek.com/v1`，与 `/init` 配的**完全一致**（厂商表单一来源，不再漂移） |
 | 8.17 | 编辑一个 base_url 为 `http://localhost:8000/v1` 的模型，base_url 留空保存 | **保持原地址**（不被换成厂商默认），与 `api_key` 留空保持原值同理 |
+| 8.18 | 跨厂商往返：`/model <别家模型>` 再说一句话，然后 `/model` 切回原模型（该条目 base_url 留空） | 仍能正常对话，**不得报 404「模型不存在」**。报错时先看 traceback 里的请求 URL：打到了别家域名就是端点串了。测试把守：`TestSwitchVendorEndpointNotSticky::test_blank_entry_switches_back_to_own_vendor`；复盘见 [fixlogs/model-switch-vendor-endpoint-fix.md](../fixlogs/model-switch-vendor-endpoint-fix.md) |
+| 8.19 | 上一步的模型 base_url 指向**自建网关**（如 `http://localhost:8000/v1`）时做同样的跨厂商往返 | 流量**仍走网关**，不被“修好”成厂商官方地址（与 8.17 同一口径）。测试把守：`test_custom_gateway_host_is_not_a_vendor_change` |
 
 ## 8A. 配置问答：不懂配置时问得出答案（P5，2026-10）
 

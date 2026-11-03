@@ -72,7 +72,7 @@ jarvis --serve      # headless 后端（供 jarvis-desktop 等外部前端接入
 
 | 删除项 | 规模 |
 |---|---|
-| `agent/daemon/hotkey.py`（keyboard / pynput 跳平台） | 137 行 |
+| `agent/daemon/hotkey.py`（keyboard / pynput 跨平台） | 137 行 |
 | `agent/daemon/hotkey_native.py`（Windows RegisterHotKey） | 270 行 |
 | `agent/daemon/platform_utils.py`（只为它服务的平台探测） | 47 行 |
 | `tests/daemon/test_hotkey.py` | 72 行 |

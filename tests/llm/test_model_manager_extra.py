@@ -119,6 +119,22 @@ def _patch_build_provider(monkeypatch, provider=None) -> mock.MagicMock:
     return m
 
 
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch) -> None:
+    """全文件隔离系统 keyring：切换判据不得取决于测试机存过哪家的凭据。
+
+    隔离点选在底层 `load_api_key`（外部 I/O）而不是 `_vendor_api_key`（被测逻辑）：
+    既不碰真实凭据，又能测到「按厂商取 key」本身的分支。
+    不然同一份代码在存过 deepseek key 的机器上会把「复用」断言判成「重建」，
+    属测试依赖本地环境。
+
+    @author aceFelix
+    """
+    import agent.config.keyring_store as ks
+
+    monkeypatch.setattr(ks, "load_api_key", lambda vendor: None)
+
+
 class TestInferModelVendorExtra:
     """厂商推断剩余分支。"""
 
@@ -606,6 +622,126 @@ class TestBuildSwitchedProvider:
         build_mock.assert_called_once()  # 端点在快照上已变 → 必须重建
         assert new_provider is not provider
         assert (used.base_url, used.api_key) == ("https://other.com", "other-key")
+
+
+class TestSwitchVendorEndpointNotSticky:
+    """回归（2026-11-03 实机）：切回 base_url 留空的自定义模型时，端点不能停在上一个厂商。
+
+    现象：DeepSeek 过载 → `/model qwen3.7-flash`（切到 DashScope）→ `/model deepseek-flash`
+    → 请求打到 https://dashscope.aliyuncs.com/compatible-mode/v1 拿 404。
+    旧判据拿 cfg["base_url"]（正常为空）比字符串，三条差异全部短路 → 复用上一个厂商的
+    provider。修复后按「厂商归属是否变更」判定，并对同厂商不同写法、自建网关保守复用。
+    """
+
+    DS_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DEEP_URL = "https://api.deepseek.com/v1"
+
+    @classmethod
+    def _running_on_dashscope(cls, name: str, entry: dict) -> Settings:
+        """构造「运行中 provider 已指向 DashScope」的快照，custom 条目按入参给定。"""
+        s = _make_settings(
+            provider="dashscope",
+            api_format="openai",
+            base_url=cls.DS_URL,
+            api_key="dash-key",
+            model="qwen3.7-flash",
+            models={name: "DeepSeek", "qwen3.7-flash": "通义千问"},
+        )
+        s.custom_models = {name: entry}
+        return s
+
+    @staticmethod
+    def _blank_entry() -> dict:
+        """/models 添加时的正常形态：端点与 key 都留空（由推断和 keyring 接管）。"""
+        return {
+            "api_format": "openai", "base_url": "", "api_key": "",
+            "model_type": "multimodal",
+        }
+
+    def test_blank_entry_switches_back_to_own_vendor(self, monkeypatch) -> None:
+        """核心修复：留空条目跨厂商切回 → 必须重建，且端点回到自己那家。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="qwen3.7-flash")
+        s = self._running_on_dashscope("deepseek-flash", self._blank_entry())
+
+        new_provider, _desc, used = _build_switched_provider(s, provider, "deepseek-flash")
+
+        build_mock.assert_called_once()
+        assert new_provider is not provider
+        assert used.base_url == self.DEEP_URL  # 不再是 DashScope
+        assert "dashscope" not in used.base_url
+
+    def test_same_vendor_other_url_spelling_still_reuses(self, monkeypatch) -> None:
+        """同厂商但当前地址少 /v1 → 仍复用（判据比 host 不比全串，避免无谓重建）。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="deepseek-old")
+        s = self._running_on_dashscope("deepseek-flash", self._blank_entry())
+        s.base_url = "https://api.deepseek.com"  # 少 /v1，但仍是同一家
+        s.api_key = "deep-key"  # key 也对得上，排除 key 判据干扰
+
+        new_provider, _desc, used = _build_switched_provider(s, provider, "deepseek-flash")
+
+        build_mock.assert_not_called()
+        assert new_provider is provider
+        assert used is s
+
+    def test_custom_gateway_host_is_not_a_vendor_change(self, monkeypatch) -> None:
+        """当前走用户自配网关（host 不在厂商表里）→ 保守复用，不把流量拐到官方地址。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        s = self._running_on_dashscope("deepseek-flash", self._blank_entry())
+        s.base_url = "https://gw.internal.example.com/v1"
+
+        new_provider, _desc, _used = _build_switched_provider(s, provider, "deepseek-flash")
+
+        build_mock.assert_not_called()
+        assert new_provider is provider  # 仍走代理，不被“修好”成官方端点
+
+    def test_uninferable_vendor_falls_back_to_reuse(self, monkeypatch) -> None:
+        """模型名推不出厂商 → 保持旧行为（继承当前端点），不新增「切不过去」的失败。"""
+        build_mock = _patch_build_provider(monkeypatch)
+        provider = StubProvider(model="old")
+        s = self._running_on_dashscope("my-tiny-llm", self._blank_entry())
+
+        new_provider, _desc, _used = _build_switched_provider(s, provider, "my-tiny-llm")
+
+        build_mock.assert_not_called()
+        assert new_provider is provider
+
+    def test_keyring_key_follows_target_vendor(self, monkeypatch) -> None:
+        """keyring 里有目标厂商的 key → 重建时带上它，不沿用上一家的 key（防 401）。"""
+        import agent.config.keyring_store as ks
+
+        _patch_build_provider(monkeypatch)
+        monkeypatch.setattr(
+            ks, "load_api_key",
+            lambda vendor: "deep-key" if vendor == "deepseek" else None,
+        )
+        provider = StubProvider(model="old")
+        s = self._running_on_dashscope("deepseek-flash", self._blank_entry())
+
+        _new, _desc, used = _build_switched_provider(s, provider, "deepseek-flash")
+
+        assert used.api_key == "deep-key"
+        assert used.base_url == self.DEEP_URL
+
+    def test_keyring_failure_degrades_to_current_key(self, monkeypatch) -> None:
+        """keyring 不可用（CI 无 Secret Service）→ 降级继承当前 key，不硬失败。"""
+        import agent.config.keyring_store as ks
+
+        _patch_build_provider(monkeypatch)
+
+        def boom(vendor: str) -> str:
+            raise RuntimeError("no secret service")
+
+        monkeypatch.setattr(ks, "load_api_key", boom)
+        provider = StubProvider(model="old")
+        s = self._running_on_dashscope("deepseek-flash", self._blank_entry())
+
+        _new, _desc, used = _build_switched_provider(s, provider, "deepseek-flash")
+
+        assert used.api_key == "dash-key"  # 继承，而不是抛错
+        assert used.base_url == self.DEEP_URL  # 端点仍被修对
 
 
 class TestSwitchModel:

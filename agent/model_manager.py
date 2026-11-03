@@ -448,6 +448,49 @@ def _remove_custom_model_from_toml(name: str) -> None:
     remove_custom_model(name)
 
 
+def _vendor_api_key(vendor: str) -> str:
+    """按厂商从系统 keyring 取 API Key；取不到返回空串（由调用方决定回落）。
+
+    为什么跨厂商切换时必须连带查 key：`keyring_store` 的策略是「TOML 不再写入 api_key
+    明文（由 keyring 接管）」（S-01），所以自定义模型条目里的 `api_key` **正常就是空的**。
+    旧代码拿它做差异判据、空则继承当前 key，于是切回原厂商时带着别家的 key——
+    端点修好之后只会从 404 变成 401。查不到不报错：仍由调用方继承 `settings.api_key`。
+
+    @author aceFelix
+    """
+    if not vendor or vendor in ("other", "custom"):
+        return ""
+    try:
+        from agent.config.keyring_store import load_api_key
+
+        return load_api_key(vendor) or ""
+    except Exception:  # noqa: BLE001 - keyring 不可用（无 Secret Service / CI）降级为继承
+        return ""
+
+
+def _switch_target_changed_vendor(
+    target_vendor: str, api_fmt: str, cfg: dict[str, Any], base: Settings
+) -> bool:
+    """判定「目标模型所属厂商」与「运行中 provider 所属厂商」是否已不是同一家。
+
+    只在 cfg 未显式写 base_url（即依赖推断）时参与重建判定。三个不重建的安全边界：
+    - 厂商推不出来（custom/other 或模型名不带前缀）：无事实依据，不折腾；
+    - 该厂商端点由 SDK 自管（`_infer_base_url` 返回空串）：无 host 可比；
+    - 当前 base_url 的 host 不在厂商表里（用户自配网关/代理）：不能拿它当
+      「厂商不对」的证据，否则会把本该走代理的流量拐到官方地址。
+
+    @author aceFelix
+    """
+    if cfg.get("base_url") or not target_vendor or target_vendor in ("other", "custom"):
+        return False
+    from agent.config.vendors import host_of, is_known_vendor_host
+
+    expected_url = _infer_base_url(target_vendor, api_fmt)
+    if not expected_url or not is_known_vendor_host(base.base_url):
+        return False
+    return host_of(expected_url) != host_of(base.base_url)
+
+
 def _build_switched_provider(
     settings: Settings,
     provider: object,
@@ -458,9 +501,9 @@ def _build_switched_provider(
 ) -> tuple[object, str, Settings]:
     """按目标模型构造 provider（REPL /model 与工作台热切换共用）。
 
-    自定义模型：与「当前 provider 端点」在 api_format / base_url / api_key 上
-    有差异才重建 provider，否则复用原 provider 并同步 model_type（同厂商不同
-    模型可能是 text/multimodal）。
+    自定义模型：先解析该模型**应有**的端点与密钥（显式配置 > 按归属厂商推断 > 留空则
+    继承当前），再与「当前 provider 端点」比较 api_format / base_url / api_key，有差异
+    才重建，否则复用原 provider 并同步 model_type（同厂商不同模型可能是 text/multimodal）。
     内置模型：一律按 default_* 字段恢复原始端点重建，避免从自定义模型切回时
     误连到自定义端点。
 
@@ -504,25 +547,47 @@ def _build_switched_provider(
         # 兼容旧字段名 provider_type
         api_fmt = cfg.get("api_format") or cfg.get("provider_type", "openai")
         current_ptype = base.api_format.lower()
-        # force 时一律重建：见上方 docstring，编辑运行中的模型不能靠差异判断
-        needs_new_provider = bool(force)
+        # 目标模型「应有」的密钥：显式配置 > 按归属厂商查 keyring > 留空（继承当前）。
+        # keyring 接管后 cfg.api_key 正常就是空的，旧代码拿它做判据等于永不触发。
+        target_vendor = _infer_model_vendor(model_name, cfg)
+        expected_api_key = cfg.get("api_key") or _vendor_api_key(target_vendor)
 
-        if not needs_new_provider and api_fmt.lower() != current_ptype:
-            needs_new_provider = True
-        elif not needs_new_provider and cfg.get("base_url") and cfg["base_url"] != base.base_url:
-            needs_new_provider = True
-        elif not needs_new_provider and cfg.get("api_key") and cfg["api_key"] != base.api_key:
-            needs_new_provider = True
+        # cfg 未写 base_url 时不能直接比全串：官方地址写法本就可能和当前不一致
+        # （`api.deepseek.com` vs `…/v1`），比全串会把同厂商误判成需要重建；而用户自配
+        # 网关时按厂商推断会拿错地址。所以这里判的是「厂商归属变了没有」：
+        #   同厂商 → 保持复用（省重建）；跨厂商 → 必须重建（修 404）；
+        #   当前 host 不在厂商表里（自建代理/内网端点）→ 保守不动，不把流量从代理上拐走。
+        # 旧实现这里直接拿 cfg.get("base_url") 参与比较，而它正常为空（/models 添加时
+        # 留空即按厂商推断），于是三条判据全部短路 → 复用上一个厂商的 provider →
+        # 把 deepseek-flash 发到 dashscope 的 compatible-mode 端点拿回 404。
+        vendor_changed = _switch_target_changed_vendor(target_vendor, api_fmt, cfg, base)
+
+        # 四条差异判据，任一成立即重建：协议类型 / 显式配置的端点 / 应有密钥 / 厂商归属变更。
+        # force 则无条件重建（见上方 docstring：编辑运行中的模型不能靠差异判断）。
+        # 写成并列变量而不是 if-elif 链：这里本来就是“或”语义，链式写法会掩盖
+        # 判据之间的平等关系（也是 ruff SIM114 报的点）。
+        differs_format = api_fmt.lower() != current_ptype
+        differs_explicit_url = bool(cfg.get("base_url")) and cfg["base_url"] != base.base_url
+        differs_key = bool(expected_api_key) and expected_api_key != base.api_key
+        needs_new_provider = bool(force) or any((
+            differs_format,
+            differs_explicit_url,
+            differs_key,
+            vendor_changed,
+        ))
 
         mtype = cfg.get("model_type", "multimodal")
         if needs_new_provider:
-            # 克隆 settings 并覆盖为自定义模型配置
+            # 克隆 settings 并覆盖为自定义模型配置：端点用「显式配置 > 按厂商推断 >
+            # 继承当前」（推断不出保持旧行为，不增加「切不过去」的新失败），密钥用上面
+            # 解析出的应有值。
+            expected_base_url = cfg.get("base_url") or _infer_base_url(target_vendor, api_fmt)
             custom_settings = replace(
                 settings,
                 provider=cfg.get("provider", api_fmt),
                 api_format=api_fmt,
-                base_url=cfg.get("base_url") or settings.base_url,
-                api_key=cfg.get("api_key") or settings.api_key,
+                base_url=expected_base_url or settings.base_url,
+                api_key=expected_api_key or settings.api_key,
             )
             new_provider = _build_provider(custom_settings, model_type=mtype)
             used_settings = custom_settings

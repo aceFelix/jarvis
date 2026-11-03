@@ -179,3 +179,37 @@ def default_api_format(vendor_key: str) -> str:
     """
     vendor = find(vendor_key)
     return str(vendor.get("api_format", "openai") or "openai") if vendor else "openai"
+
+
+def host_of(url: str) -> str:
+    """取接入地址的 host（小写、去首尾空白与路径）；空/无法解析返回空串。
+
+    为什么只比 host 而不比整个 URL：同一厂商的接入地址写法可以不同都算“那家”——
+    `https://api.deepseek.com` 与 `https://api.deepseek.com/v1` 只差一个版本路径，
+    拿全串相等当“同端点”会把本来该复用的 provider 判成需要重建。
+
+    @author aceFelix
+    """
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+
+        return (urlparse(str(url).strip()).netloc or "").lower()
+    except ValueError:
+        return ""
+
+
+def is_known_vendor_host(url: str) -> bool:
+    """该地址的 host 是否命中厂商表里的某一家。
+
+    用于“留空则按厂商推断”这条兼容路径上的保守判定：表里没有的 host（用户自建的
+    网关/代理、企业内网端点）**不能**被当作“厂商不对”而重建，否则会把流量从用户自己
+    配的代理拐到官方地址上去（绕过代理，行为变更比原 bug 更糟）。
+
+    @author aceFelix
+    """
+    host = host_of(url)
+    if not host:
+        return False
+    return any(host_of(str(v.get("default_base_url", ""))) == host for v in VENDORS)
