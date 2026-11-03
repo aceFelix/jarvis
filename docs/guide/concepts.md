@@ -99,7 +99,8 @@ Jarvis 支持多层记忆持久化：
 - **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
   后台异步提炼（默认 600 秒节流，可用 `profile_refine_interval` 配置，不影响响应速度）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
-  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory refine` 立即提炼。
+  写入带确定性查重：同一条事实反复提炼会被归并到已有条目（置信取大），不会记很多遍；历史积压的重复可用 `/memory dedup yes` 一次性整理。
+  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory dedup` 归并重复 / `/memory refine` 立即提炼。
   可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼。
   `/memory sync` 可把本地画像同步到 aceFelix 知识图谱（先预览后确认，图谱为唯一事实源）
 - **知识图谱画像桥**：`[profile_bridge] enabled = true` 后，启动时经 MCP 拉取 aceFelix

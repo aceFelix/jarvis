@@ -4,7 +4,24 @@
 
 ## [未发布]
 
-本次不改行为，只把**对外数字承诺**拉回与源码一致（全部真值由 AST / `tomllib` / 运行时实测得出）。
+### 修复（画像记忆重复入库）
+
+- **同一条事实被记很多遍**（如“习惯深夜工作”在 `~/.jarvis/memory/profile.json` 里出现 6 次）：
+  旧实现只靠提炼 prompt 里“重复放 updates”的软约束去重，LLM 经常无视（把旧事实当新事实再报），
+  叠加“已有画像”展示上限 50 条使溢出部分对模型不可见，重复事实被反复入库。修法：存储层加确定性
+  查重闸 `ProfileStore.merge_or_add()`（归一化全等或字符二元组相似度 ≥0.85 即并入已有条目，置信取大、
+  manual 优先保留），提炼展示上限 50→80，prompt 明确“语义相同禁进 new”，每轮提炼写盘后再做一次
+  全量归并 `dedup_all()` 清掉修复前积压的重复。新增 `docs/fixlogs/profile-duplicate-memory-fix.md`。
+
+### 新增（/memory dedup 命令）
+
+- **`/memory dedup [yes]`**：两段式归并画像库已积压的深重复记忆（先只读预览重复组与可归并条数，
+  `yes` 才执行，manual 手动条目优先保留），与 `/memory clear`、`/memory sync` 同确认体例。
+  `/memory add` 改走查重入口，重复口述同一件事并入已有条目而非新增。登记点：router 无需改（`/memory`
+  前缀已路由到 handle_memory），已同步 `slash_completer`、`docs/guide/commands.md`、
+  `docs/guide/concepts.md`、`docs/architecture/09-记忆与压缩.md`。新增 14 例单测（合计 69 例画像测试通过）。
+
+以下文档订正不改行为，只把**对外数字承诺**拉回与源码一致（全部真值由 AST / `tomllib` / 运行时实测得出）。
 
 ### 文档（事实性订正）
 

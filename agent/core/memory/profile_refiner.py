@@ -38,8 +38,9 @@ REFINE_INTERVAL_SECONDS = 600
 # 喂给 LLM 的消息窗口与单条截断（控制提炼成本）
 _MAX_MESSAGES = 40
 _MAX_CHARS_PER_MSG = 300
-# 冲突裁决时展示的现有画像条数上限
-_MAX_EXISTING_ENTRIES = 50
+# 冲突裁决时展示的现有画像条数上限（2026-11 去重修复：50 时溢出部分对模型
+# 不可见，重复事实被当新条目反复入库；提到 80 配合存储层确定性查重双保险）
+_MAX_EXISTING_ENTRIES = 80
 
 # 节流状态（模块级，进程内共享）
 _last_refine_ts: float = 0.0
@@ -52,6 +53,7 @@ class RefineReport:
 
     added: int = 0
     updated: int = 0        # 替换旧条目数
+    merged: int = 0         # 命中存储层查重被合并的条数（深重复拦截）
     skipped: bool = False   # True = 未触发（节流/消息不足/mock 等）
     reason: str = ""
     error: str = ""
@@ -202,8 +204,9 @@ def _build_prompt(dialog_text: str, existing: list[ProfileEntry]) -> str:
 3. content 用第三人称简体中文陈述（如"习惯深夜工作"），单条不超过 40 字
 4. category 从以下选择: {cats}
 5. confidence 取 0.3~0.95：明确自述的取高，从行为推断的取低
-6. 与"已有画像"矛盾或重复的信息，放到 updates 并给出 replace_id（用新表述替换旧条目）
-7. 没有值得记的就返回空数组——宁缺毋滥
+6. 与"已有画像"矛盾或重复（含措辞不同但语义相同）的信息，一律放 updates 并给出最接近条目的 replace_id，禁止再放进 new
+7. 拿不准是否重复时，选已有画像里语义最接近的一条放 updates，不要两条都写
+8. 没有值得记的就返回空数组——宁缺毋滥
 
 ## 已有画像
 {existing_lines}
@@ -318,15 +321,20 @@ def refine_session(
                 confidence=float(item.get("confidence", 0.5)),
                 source_session=session_id,
             )
-            store.upsert(entry)
-            report.added += 1
+            # 存储层确定性查重：LLM 把旧事实当新事实报（updates 不遵守/
+            # 超展示上限看不见）时在这道闸合并，不再产生重复条目
+            _, merged = store.merge_or_add(entry)
+            if merged:
+                report.merged += 1
+            else:
+                report.added += 1
 
         for item in data.get("updates", []) or []:
             if not isinstance(item, dict):
                 continue
             replace_id = str(item.get("replace_id", ""))
             if not replace_id or not store.get(replace_id):
-                continue  # LLM 幻觉出不存在的 id → 当新条目处理
+                continue  # LLM 幻觉出不存在的 id → 当新条目处理（仍走查重闸）
             if store.delete(replace_id):
                 entry = ProfileEntry.new(
                     content=str(item.get("content", "")),
@@ -334,8 +342,17 @@ def refine_session(
                     confidence=float(item.get("confidence", 0.5)),
                     source_session=session_id,
                 )
-                store.upsert(entry)
-                report.updated += 1
+                _, merged = store.merge_or_add(entry)
+                if merged:
+                    report.merged += 1
+                else:
+                    report.updated += 1
+
+        # 本轮写盘后再做一次全量归并：历史积压的深重复条目（修复前写入的）
+        # 随任意一次提炼顺带清理，不需要额外维护任务
+        retro = store.dedup_all()
+        if retro:
+            report.merged += retro
 
         # 上限淘汰
         max_entries = int(getattr(settings, "profile_max_entries", 200))
@@ -343,9 +360,10 @@ def refine_session(
         if pruned:
             report.reason = f"淘汰低价值条目 {pruned} 条"
 
-        if report.added or report.updated:
+        if report.added or report.updated or report.merged:
             logger.info(
-                "画像提炼完成: session=%s +%d ~%d", session_id, report.added, report.updated
+                "画像提炼完成: session=%s +%d ~%d 合并重复 %d",
+                session_id, report.added, report.updated, report.merged,
             )
     except Exception as e:  # 提炼失败绝不影响主流程
         report.error = f"{type(e).__name__}: {e}"

@@ -490,3 +490,166 @@ class TestSettingsMapping:
         msgs = [_msg("user", "hi")] * 5
         refiner._last_refine_ts = 0.0
         assert refiner.maybe_refine_async(msgs, "s", s) is False
+
+
+# ─────────────────────────────────────────────────────────────
+# 深重复去重（2026-11 修复：完全相同的记忆被反复提炼入库）
+# ─────────────────────────────────────────────────────────────
+
+class TestContentDedup:
+    """归一化与相似度判据。"""
+
+    def test_normalize_fullwidth_space_and_punct(self):
+        from agent.core.memory.profile_store import normalize_profile_content
+        # 全角转半角、去空白、剥句尾标点
+        assert normalize_profile_content("Ｈｅｌｌｏ Ｗｏｒｌｄ。") == "helloworld"
+        assert normalize_profile_content("习惯深夜工作 ") == "习惯深夜工作"
+
+    def test_similarity_identical_is_one(self):
+        from agent.core.memory.profile_store import profile_content_similarity
+        assert profile_content_similarity("习惯深夜工作", "习惯深夜工作") == 1.0
+
+    def test_similarity_near_duplicate_high(self):
+        from agent.core.memory.profile_store import profile_content_similarity
+        # 仅尾字差异，应判为深重复（≥0.85）
+        assert profile_content_similarity("习惯深夜工作", "习惯深夜工作。") >= 0.85
+
+    def test_similarity_distinct_low(self):
+        from agent.core.memory.profile_store import profile_content_similarity
+        # 措辞差异的语义近条不应被自动合并（交个提炼 LLM）
+        s = profile_content_similarity(
+            "职业是Agent开发者", "职业是Agent应用开发工程师")
+        assert s < 0.85
+
+
+class TestMergeOrAdd:
+    def test_exact_duplicate_merges_not_adds(self, tmp_path):
+        store = ProfileStore(tmp_path / "profile.json")
+        first = ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s1")
+        kept, merged = store.merge_or_add(first)
+        assert merged is False and len(store) == 1
+        # 同一事实再次以高置信写入 → 合并，置信取大，不新增
+        again = ProfileEntry.new("习惯深夜工作", "schedule", 0.6, "s2")
+        kept2, merged2 = store.merge_or_add(again)
+        assert merged2 is True
+        assert len(store) == 1
+        assert kept2.id == first.id
+        assert kept2.confidence == pytest.approx(0.9)  # 取较大值，不被低置信拉低
+
+    def test_source_session_manual_preserved_on_merge(self, tmp_path):
+        store = ProfileStore(tmp_path / "profile.json")
+        manual = ProfileEntry.new("用火狐浏览器", "tool_usage", 0.99, "manual")
+        store.merge_or_add(manual)
+        _, merged = store.merge_or_add(
+            ProfileEntry.new("用火狐浏览器", "tool_usage", 0.7, "refine"))
+        assert merged is True
+        assert store.entries()[0].source_session == "manual"
+
+    def test_distinct_entries_not_merged(self, tmp_path):
+        store = ProfileStore(tmp_path / "profile.json")
+        store.merge_or_add(ProfileEntry.new("职业是Agent开发者", "identity", 0.9))
+        _, merged = store.merge_or_add(
+            ProfileEntry.new("职业是Agent应用开发工程师", "identity", 0.9))
+        assert merged is False
+        assert len(store) == 2
+
+
+class TestDedupAll:
+    def test_retroactive_cleanup_merges_existing_dups(self, tmp_path):
+        # 模拟修复前写入的重复库：同一句记了三遍
+        store = ProfileStore(tmp_path / "profile.json")
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s1"))
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s2"))
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s3"))
+        assert len(store) == 3
+        merged = store.dedup_all()
+        assert merged == 2
+        assert len(store) == 1
+        # 幂等：再次归并无新增可合并
+        assert store.dedup_all() == 0
+
+    def test_duplicate_group_report_preview_no_write(self, tmp_path):
+        path = tmp_path / "profile.json"
+        store = ProfileStore(path)
+        store.upsert(ProfileEntry.new("用火狐浏览器", "tool_usage", 0.85, "s1"))
+        store.upsert(ProfileEntry.new("用火狐浏览器", "tool_usage", 0.85, "s2"))
+        store.upsert(ProfileEntry.new("用WPS处理文档", "tool_usage", 0.6, "s3"))
+        groups = store.duplicate_group_report()
+        assert len(groups) == 1 and len(groups[0]) == 2
+        # 预览不写盘：盘上仍是 3 条
+        assert len(ProfileStore(path)) == 3
+
+
+class TestRefineDedupIntegration:
+    def test_rereported_existing_fact_merges(self, tmp_path, monkeypatch):
+        """核心场景：LLM 把旧事实当新事实再报一次，不得产生重复条目。"""
+        store = ProfileStore(tmp_path / "profile.json")
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s_old"))
+
+        # 提炼返回里把"习惯深夜工作"放进 new（LLM 未走 updates）
+        reply = json.dumps({
+            "new": [{"category": "schedule", "content": "习惯深夜工作", "confidence": 0.9}],
+            "updates": [],
+        }, ensure_ascii=False)
+        monkeypatch.setattr(refiner, "_build_refine_provider",
+                            lambda s: _FakeProvider(reply))
+        report = refiner.refine_session(
+            [_msg("user", "我经常熬夜")], "s_new", Settings(profile_enabled=True),
+            store=store)
+        assert report.error == ""
+        assert report.added == 0     # 未当新增
+        assert report.merged >= 1    # 被查重闸合并
+        assert len(store) == 1
+
+
+class TestMemoryDedupCommand:
+    def _ctx(self, ui, settings):
+        from types import SimpleNamespace
+        return SimpleNamespace(ui=ui, settings=settings)
+
+    def _run(self, cmd, store_path, seed=None):
+        import asyncio
+        from agent.commands.handlers.session_commands import handle_memory
+        from agent.core.memory import profile_store as ps_mod
+        settings = Settings(profile_enabled=True)
+        monkey_store = ProfileStore(store_path)
+        for c in (seed or []):
+            monkey_store.upsert(ProfileEntry.new(c, "schedule", 0.9, "s"))
+        orig = ps_mod.ProfileStore
+        ps_mod.ProfileStore = lambda: monkey_store
+        try:
+            ui = _FakeUI()
+            asyncio.run(handle_memory(self._ctx(ui, settings), cmd))
+            return ui, monkey_store
+        finally:
+            ps_mod.ProfileStore = orig
+
+    def test_dedup_preview_lists_without_yes(self, tmp_path):
+        path = tmp_path / "p.json"
+        ui, store = self._run(
+            "/memory dedup", path,
+            seed=["习惯深夜工作", "习惯深夜工作", "习惯深夜工作"])
+        assert any("可归并 2 条" in m for m in ui.messages)
+        assert len(store) == 3  # 预览未真删
+
+    def test_dedup_yes_merges(self, tmp_path):
+        path = tmp_path / "p.json"
+        ui, store = self._run(
+            "/memory dedup", path,
+            seed=["习惯深夜工作", "习惯深夜工作", "习惯深夜工作"])
+        ui2, store2 = self._run("/memory dedup yes", path, seed=None)
+        # 第二次 _run 新建实例从盘读回上次预演（未改），这里直接对已有 3 条执行 yes
+        assert any("已归并" in m for m in ui2.messages)
+        assert len(store2) == 1
+
+    def test_dedup_no_dups_hint(self, tmp_path):
+        ui, _ = self._run("/memory dedup", tmp_path / "p.json",
+                          seed=["习惯深夜工作", "用火狐浏览器"])
+        assert any("没有可归并" in m for m in ui.messages)
+
+    def test_add_duplicate_merges(self, tmp_path):
+        path = tmp_path / "p.json"
+        self._run("/memory add 习惯深夜工作", path)
+        ui, store = self._run("/memory add 习惯深夜工作", path)
+        assert any("已并入相似记忆" in m for m in ui.messages)
+        assert len(store) == 1

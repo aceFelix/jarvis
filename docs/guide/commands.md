@@ -56,7 +56,7 @@
 
 | 命令 | 说明 |
 |---|---|
-| `/memory` | 画像记忆管理（查看/add/del/clear/refine；`file` 看长期记忆文件） |
+| `/memory` | 画像记忆管理（查看/add/del/clear/dedup/refine/sync；`dedup yes` 归并重复记忆，`file` 看长期记忆文件） |
 | `/skills` | 列出已加载的技能包 |
 
 ## 语音功能

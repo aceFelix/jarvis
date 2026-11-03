@@ -59,6 +59,62 @@ def profile_store_path() -> Path:
     return d / "profile.json"
 
 
+# ─────────────────────────────────────────────────────────────
+# 深拷贝查重（2026-11 修复：完全相同的记忆被反复提炼入库）
+# 去重不能只靠提炼 prompt 里"重复放 updates"的软约束——LLM 经常无视，
+# 存储层必须有确定性兜底：归一化相同或字符二元组高度相似即视为同一事实。
+# @author aceFelix
+# ─────────────────────────────────────────────────────────────
+
+# 归一化时剥掉的句尾标点（"习惯深夜工作。" 与 "习惯深夜工作" 是同一事实）
+_TRAILING_PUNCT = "。，、；;，.!！?？～~"
+
+# 近重复判定阈值：x2 中文串阈值 ≈0.72，"职业是Agent开发者" vs
+# "职业是Agent应用开发工程师"（0.50）属措辞差异，不该自动合并——
+# 语义级去重交给提炼 LLM 的 updates，本层只拦"几乎原样重复"。
+_SIM_MERGE_THRESHOLD = 0.85
+
+
+def normalize_profile_content(text: str) -> str:
+    """画像查重归一化：全角转半角、去全部空白、转小写、剥句尾标点。
+
+    仅用于比较，不改写存储的原文。
+    """
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        # 全角 ASCII（U+FF01~U+FF5E）→ 半角；全角空格单独处理
+        if code == 0x3000:
+            continue
+        if 0xFF01 <= code <= 0xFF5E:
+            ch = chr(code - 0xFEE0)
+        if ch.isspace():
+            continue
+        out.append(ch)
+    s = "".join(out).lower()
+    return s.rstrip(_TRAILING_PUNCT)
+
+
+def profile_content_similarity(a: str, b: str) -> float:
+    """两条画像内容的相似度（字符二元组 Jaccard，0~1）。
+
+    中文取集合交并比对语序不敏感、无需分词依赖；长度 <2 的短串退化
+    为归一化全等判定。先做严格全等短路，避免每次合并比较都算集合。
+    """
+    na, nb = normalize_profile_content(a), normalize_profile_content(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    if len(na) < 2 or len(nb) < 2:
+        return 0.0
+    ga = {na[i:i + 2] for i in range(len(na) - 1)}
+    gb = {nb[i:i + 2] for i in range(len(nb) - 1)}
+    inter = len(ga & gb)
+    union = len(ga | gb)
+    return inter / union if union else 0.0
+
+
 @dataclass
 class ProfileEntry:
     """一条画像记忆。"""
@@ -127,7 +183,7 @@ class ProfileStore:
     # ---- 写入 ----
 
     def upsert(self, entry: ProfileEntry) -> None:
-        """新增或按 id 更新（提炼管线与 /memory add 共用）。"""
+        """新增或按 id 更新（/memory add 等显式写入用；提炼写入走 merge_or_add）。"""
         with self._lock:
             for i, e in enumerate(self._entries):
                 if e.id == entry.id:
@@ -138,6 +194,111 @@ class ProfileStore:
                     return
             self._entries.append(entry)
             self._save_locked()
+
+    def merge_or_add(self, entry: ProfileEntry) -> tuple[ProfileEntry, bool]:
+        """带确定性查重的写入：命中深重复条目则合并并返回，否则原样新增。
+
+        命中规则：归一化全等，或字符二元组相似度 ≥ _SIM_MERGE_THRESHOLD。
+        合并策略（保守，不覆盖旧条目的原文与类别）：
+        - confidence 取两者较大值（同一事实再被确认一次，只增信不换写）
+        - updated_at 刷新、created_at 保留最早
+        - source_session：manual 优先保留；否则留先到者
+        返回 (存活的条目, 是否发生合并)。提炼管线与手动入口共用本方法，
+        这是"同一句话说 N 遍记 N 条"的最后一道闸。@author aceFelix
+        """
+        with self._lock:
+            for e in self._entries:
+                if e.id == entry.id:
+                    continue
+                if profile_content_similarity(e.content, entry.content) >= _SIM_MERGE_THRESHOLD:
+                    merged = ProfileEntry(
+                        id=e.id,
+                        category=e.category,
+                        content=e.content,
+                        confidence=max(e.confidence, entry.confidence),
+                        source_session=(
+                            e.source_session if e.source_session == "manual"
+                            else (entry.source_session if not e.source_session else e.source_session)
+                        ),
+                        created_at=min(e.created_at, entry.created_at) or entry.created_at,
+                        updated_at=time.time(),
+                        last_referenced_at=max(e.last_referenced_at, entry.last_referenced_at),
+                        ref_count=e.ref_count + entry.ref_count,
+                    )
+                    for i, old in enumerate(self._entries):
+                        if old.id == e.id:
+                            self._entries[i] = merged
+                            break
+                    self._save_locked()
+                    return merged, True
+            self._entries.append(entry)
+            self._save_locked()
+            return entry, False
+
+    def dedup_all(self) -> int:
+        """一次性整理：把库里已存在的深重复条目分组归并，返回合并掉的条数。
+
+        分组按 merge_or_add 同款判据；每组保留 confidence × 最新者为主条目
+        （与 entries() 排序口径一致），其余并入主条目。用于 /memory dedup
+        与画像迁移清理，manual 来源优先作为主条目。
+        """
+        with self._lock:
+            groups: list[list[ProfileEntry]] = []
+            for e in self._entries:
+                placed = False
+                for g in groups:
+                    if profile_content_similarity(g[0].content, e.content) >= _SIM_MERGE_THRESHOLD:
+                        g.append(e)
+                        placed = True
+                        break
+                if not placed:
+                    groups.append([e])
+            merged_away = 0
+            new_entries: list[ProfileEntry] = []
+            now = time.time()
+            for g in groups:
+                if len(g) == 1:
+                    new_entries.append(g[0])
+                    continue
+                # 主条目：manual 优先，其次 (confidence, updated_at) 最高
+                primary = max(
+                    g,
+                    key=lambda e: (e.source_session == "manual", e.confidence, e.updated_at),
+                )
+                primary.updated_at = max(e.updated_at for e in g)
+                primary.created_at = min(e.created_at for e in g if e.created_at) or now
+                primary.confidence = max(e.confidence for e in g)
+                primary.ref_count = sum(e.ref_count for e in g)
+                primary.last_referenced_at = max(e.last_referenced_at for e in g)
+                if not primary.source_session:
+                    primary.source_session = next(
+                        (e.source_session for e in g if e.source_session and e.source_session != "manual"),
+                        "",
+                    )
+                new_entries.append(primary)
+                merged_away += len(g) - 1
+            if merged_away:
+                self._entries = new_entries
+                self._save_locked()
+            return merged_away
+
+    def duplicate_group_report(self) -> list[list[ProfileEntry]]:
+        """只读预演：按 merge_or_add 同款判据分组，返回长度 >1 的重复组。
+
+        供 /memory dedup 预览使用，不写盘、不改内存。组内首个为主条目口径。
+        """
+        with self._lock:
+            groups: list[list[ProfileEntry]] = []
+            for e in self._entries:
+                placed = False
+                for g in groups:
+                    if profile_content_similarity(g[0].content, e.content) >= _SIM_MERGE_THRESHOLD:
+                        g.append(e)
+                        placed = True
+                        break
+                if not placed:
+                    groups.append([e])
+            return [g for g in groups if len(g) > 1]
 
     def delete(self, entry_id: str) -> bool:
         """删除条目。返回是否删除成功。"""

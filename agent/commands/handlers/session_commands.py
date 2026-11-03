@@ -248,10 +248,11 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /memory 系列命令。
 
     /memory              查看画像记忆（Phase 1a 自动提炼的用户偏好/习惯）
-    /memory add <文本>    手动添加画像条目
+    /memory add <文本>    手动添加画像条目（深重复则并入已有条目）
     /memory del <id>     删除指定条目
     /memory clear yes    清空全部画像（需 yes 二次确认）
     /memory refine       立即提炼当前会话（不等自动节流）
+    /memory dedup [yes]  画像去重整理（预览可归并的深重复条数，yes 执行）
     /memory sync         同步本地画像到知识图谱（先预览，/memory sync yes 确认写入）
     /memory file         查看长期记忆文件（MEMORY.md，旧功能保留）
     """
@@ -302,9 +303,13 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         from agent.core.memory.profile_store import ProfileEntry
 
         entry = ProfileEntry.new(rest, "other", confidence=0.99, source_session="manual")
-        ProfileStore().upsert(entry)
+        # 走查重入口：用户反复口述同一件事时并入已有条目，不再叠加重复记忆
+        kept, merged = ProfileStore().merge_or_add(entry)
         _rebuild_system_prompt(ctx)
-        ctx.ui.info(f"已记住: {rest}（[{entry.id}]）当前会话即生效")
+        if merged:
+            ctx.ui.info(f"已并入相似记忆: [{kept.id}] {kept.content}（未新增重复条目）")
+        else:
+            ctx.ui.info(f"已记住: {rest}（[{kept.id}]）当前会话即生效")
         return True
 
     if action == "del":
@@ -327,12 +332,32 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         ctx.ui.info(f"已清空画像记忆（{n} 条）")
         return True
 
+    if action == "dedup":
+        # 两段式与 clear/sync 同体例：先只读预演条数，yes 才真删改画像库
+        store = ProfileStore()
+        groups = store.duplicate_group_report()
+        if not groups:
+            ctx.ui.info("画像记忆没有可归并的深重复条目，无需整理。")
+            return True
+        total = sum(len(g) - 1 for g in groups)
+        if rest.lower() != "yes":
+            ctx.ui.info(f"发现 {len(groups)} 组深重复记忆，可归并 {total} 条：")
+            for g in groups:
+                ctx.ui.info("  「" + g[0].content + "」 × " + str(len(g)))
+            ctx.ui.info("确认整理请输入: /memory dedup yes（manual 手动条目优先保留）")
+            return True
+        n = store.dedup_all()
+        _rebuild_system_prompt(ctx)
+        ctx.ui.info(f"已归并 {n} 条重复记忆（{len(groups)} 组），画像库更清爽了。")
+        return True
+
     ctx.ui.warn(
-        "用法: /memory [add <内容> | del <id> | clear yes | refine | sync | file]\n"
+        "用法: /memory [add <内容> | del <id> | clear yes | dedup [yes] | refine | sync | file]\n"
         "  /memory              查看画像\n"
         "  /memory add <文本>    手动添加\n"
         "  /memory del <id>     删除条目\n"
         "  /memory clear yes    清空全部\n"
+        "  /memory dedup        归并深重复记忆（先预览，加 yes 执行）\n"
         "  /memory refine       立即提炼当前会话\n"
         "  /memory sync         同步画像到知识图谱（先预览，加 yes 确认写入）\n"
         "  /memory file         查看 MEMORY.md 长期记忆文件"
