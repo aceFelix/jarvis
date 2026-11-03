@@ -665,6 +665,8 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 画像记忆提炼源头治理（阶段 13·升级计划） | [roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) |
 | 画像记忆重复入库修复 | [fixlogs/profile-duplicate-memory-fix.md](../fixlogs/profile-duplicate-memory-fix.md) |
 | 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md) |
+| 语音能力厂商解耦（阶段一计划） | [plans/voice-provider-decoupling.md](../plans/voice-provider-decoupling.md) |
+| 语音厂商协议同构度矩阵（S1 调研） | [research/voice-provider-matrix.md](../research/voice-provider-matrix.md) |
 | 架构设计（19 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
 | 全部路线图 | [roadmap/](../roadmap/) |
 
