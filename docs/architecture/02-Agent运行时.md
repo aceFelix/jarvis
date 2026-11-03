@@ -106,8 +106,14 @@ def ensure_tool_pairing(messages: list[Message]) -> list[Message]:
    - 多 Agent 邮箱自动同步（`team_notify.inject_teammate_notifications()`）
 5. **异常处理**：
    - `ProviderError` 且包含 context 超长关键词 → `layered.compact_reactive()` 后重试
-   - **网络错误自动重试**：每轮最多重试 1 次（1.5s 退避）
-   - Provider 故障转移：切到备选厂商模型（重建 provider 时同步思考模式覆盖状态）
+   - **网络类错误自动重试**：每轮最多重试 1 次（1.5s 退避）。判据取 `ProviderError.category`
+     （`network`），异常未带分类时才回退到文案匹配——以前是靠匹配「网络错误」四个字选分支，
+     改一句提示语就会让重试静默失效
+   - Provider 故障转移：切到备选厂商模型（重建 provider 时同步思考模式覆盖状态）；
+     **厂商 5xx/过载直接走这里**，不再占用同厂商重试那一轮（旧行为要先白耗一次 1.5s 退避
+     + 一次注定失败的请求）
+   - **思考面板收尾在 `_stream_once` 的 `finally`**：失败轮可以一个字正文都不到，只靠
+     「第一条正文增量」收尾会把面板永久停在首帧（见 07-UI层）
    - `stop_reason="length"` → 输出截断，自动续写
    - **工具执行被取消 / 抛异常** → 先补齐 `tool_result` 占位再退出，确保历史不留悬空调用（见「配对不变量」）
 6. **Hook: ASSISTANT_RESPONSE** — 钩子可后处理响应
@@ -179,8 +185,12 @@ async for event in self._provider.stream(...):
   [fixlogs/agent-loop-stall-fix](../fixlogs/agent-loop-stall-fix.md)）
 - **空回复保护**：空 assistant 消息不加入历史，避免污染后续请求
 - **单轮失败不炸主循环**：错误回灌给模型让它自我修正
-- **网络重试**：网络错误每轮自动重试 1 次
-- **故障转移**：`_try_failover()` 切到备选厂商（`_thinking_override` 同步到新 provider）
+- **网络重试**：网络类错误每轮自动重试 1 次（按 `ProviderError.category` 判定，不再匹配文案）
+- **故障转移**：`_try_failover()` 切到备选厂商（`_thinking_override` 同步到新 provider）；
+  厂商 5xx/过载不走网络重试，直接到这里求切厂商
+- **日志可观测**：`agent` 命名空间上挂了与 `jarvis` 同一对 handler，所以
+  `logging.getLogger(__name__)` 的模块（共 19 个，含本文件所在的 `query_loop`）也能落盘；
+  复盘见 [fixlogs/provider-busy-error-classification-fix.md](../fixlogs/provider-busy-error-classification-fix.md)
 - **手动切模型**：`switch_model()` 就地换 `_provider` / `_model`（REPL `/model` 与工作台/桌面壳
   `models.select` 共用同一链路：不重建 QueryLoop，会话 token 累计 / 思考模式覆盖 / 消息上下文
   全保留，旧 provider 交调用方 `close()`；见 [07-UI层.md](07-UI层.md) 「模型热切换」）

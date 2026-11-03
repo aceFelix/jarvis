@@ -31,6 +31,15 @@ class UIProtocol(Protocol):
     def assistant_thinking(self, text: str) -> None:
         """流式思考增量回调（深度思考/思维链）。UI 可选实现。"""
         ...
+
+    def end_thinking(self) -> None:
+        """思考阶段收尾：流式异常/中断时也要调用，UI 可选实现。
+
+        为什么单开一个方法：面板收尾以前只隐含在「第一条正文增量到达」那条路径里，
+        而失败轮（如厂商 503）可以一个字正文都没有，面板就永远停在首帧。详见
+        docs/fixlogs/provider-busy-error-classification-fix.md。
+        """
+        ...
     def tool_use(self, tool_name: str, tool_input: dict[str, Any], tool_use_id: str) -> None: ...
     def tool_result(
         self, tool_name: str, tool_use_id: str, content: str, *, is_error: bool = False

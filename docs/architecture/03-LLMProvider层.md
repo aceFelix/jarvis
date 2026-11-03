@@ -387,6 +387,22 @@ def classify(exc) -> ClassifiedError:
 **解决痛点**：此前智谱 405 返回原始 HTML，用户看不懂。现在统一输出
 「原始错误 + [分类标题] + 操作建议」（如检查 API Key / 切换到其他模型）。
 
+**厂商侧 5xx 单独一档（2026-11-03 实机修正）**：DeepSeek 过载时返回
+`503 service_unavailable_error`「Service is too busy」，旧实现把 502/503/504 塞进了
+`NETWORK` 兜底，于是界面叫用户「检查网络连接 / base_url / HTTP_PROXY」——而请求明明
+已经发出并拿到了对方响应。现在 `classify()` 在关键词表**之前**先按状态码判厂商过载
+（`SERVER_ERROR` + 标题「厂商服务暂不可用」+ 建议 `/model` 切走或配 `vendor_fallback`）。
+放前面还避开两处误伤：504 的 `Gateway Timeout` 不会被 `timeout` 分支抢成用户侧超时；
+关键词表里的 `token` 也不会把带 token 字样的 5xx 误判成上下文超长。5xx 的 `category`
+由这条分支与后面的通用 `SERVER_ERROR` 分支**双路保证**，差异只在文案（500/501 仍走
+「服务端错误」）。
+
+**category 必须随异常递到调用方**：`to_provider_error()` 把分类一并装进
+`ProviderError.category`（四个 Provider 的抛出点统一走它），`effective_category()` 在异常
+没带分类时回退到文案匹配（兼容外部裸构造）。以前只有文案往下传，`QueryLoop` 只能靠匹配
+「网络错误」四个字选恢复动作——改一句提示语就会让重试静默失效、测试还全绿。复盘见
+[fixlogs/provider-busy-error-classification-fix.md](../fixlogs/provider-busy-error-classification-fix.md)。
+
 ## 十、工具调用统一抽象
 
 各协议的工具调用格式不同，Provider 层负责转换：

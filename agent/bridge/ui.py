@@ -228,6 +228,12 @@ class BroadcastUI:
         """思维链：只显示在电脑终端，不同步到手机（避免手机端信息过载）。"""
         self._desktop_ui.assistant_thinking(text)
 
+    def end_thinking(self) -> None:
+        """思考收尾：转给终端 UI，避免失败轮（如厂商 503、正文一字未到）把面板定格在首帧。"""
+        end = getattr(self._desktop_ui, "end_thinking", None)
+        if callable(end):
+            end()
+
     def tool_use(self, tool_name: str, tool_input: dict, tool_use_id: str) -> None:
         """工具调用：电脑终端显示 + 手机端同步（手机端默认折叠）。"""
         self._desktop_ui.tool_use(tool_name, tool_input, tool_use_id)

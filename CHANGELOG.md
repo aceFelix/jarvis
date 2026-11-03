@@ -68,6 +68,49 @@
   4 类变异均被抓到，其中“host 比对退化回全串”会额外打红 3 条既有测试——反证该设计是既有契约
   的要求。复盘见 [fixlogs/model-switch-vendor-endpoint-fix.md](docs/fixlogs/model-switch-vendor-endpoint-fix.md)。
 
+### 修复（厂商 5xx 被当成“你的网络问题”，以及它背后的六处缺陷）
+
+- 现象：DeepSeek 过载返回 `503 Service is too busy`，jarvis 却让用户「检查网络连接 /
+  base_url / HTTP_PROXY」；而且当天反复出现却**在 `~/.jarvis/jarvis.log` 里搜不到一条 503**。
+  两者都不是厂商的错：`classify()` 把 `status in (502,503,504)` 塞进了 NETWORK 兜底，抢在专为
+  5xx 写的 `SERVER_ERROR` 分支之前（正确文案就在其十几行之后，从未执行）；而全仓 **19 个模块**
+  用 `logging.getLogger(__name__)` 取裸 logger，handler 却只挂在 `jarvis` 那一个名字上，于是
+  消息只命中 Python 的 lastResort（原样甩到 stderr、不写文件）。
+- 分类与恢复：新增厂商 5xx/过载分支（**状态码优先于关键词表**，同时避开 504 的 `timeout` 与
+  关键词表里 `token` 的两处误伤），文案明确“这不是你的网络/base_url/代理”，并给出 `/model` 切走
+  与 `vendor_fallback` 两条可操作路径；`NETWORK` 兜底摘掉 502/503/504。
+- **拆掉“拿用户可见文案当控制流开关”**：`ProviderError` 新增 `category`，四个 Provider 的抛出点
+  统一走 `to_provider_error()`；`query_loop` 的网络重试判据改用 `effective_category()`（category
+  优先，无分类时才回退文案匹配）。旧写法是 `if "网络错误" in error_str`——改一句提示语就让重试
+  静默失效且测试全绿；而厂商 5xx 误入该分支会先白耗 1.5s 退避 + 一次注定失败的请求才轮到
+  `_try_failover()`，现在直接走故障转移。
+- 日志可观测：handler 同时挂到 `agent` 命名空间根（幂等、`propagate=False`、保留各模块 logger
+  name），一处修好 19 个模块；`set_debug()` 排除 `FileHandler`（它是 `StreamHandler` 的子类，
+  以前关 DEBUG 会把**文件** handler 一并降到 WARNING，`LLM 计时` 这类 INFO 从此静默不落盘）。
+- 升级提醒误报：editable 安装下 `current_version()` 拿到的 dist-info 版本停在装包那天，横幅变成
+  “发现新版本 2.3.4（当前 2.2.2）”，而提示又硬编码“运行 /update 或 `pip install -U`”——后者会把
+  安装换成 PyPI 正式版、**直接覆盖源码树里尚未发布的修改**。现在版本优先取 `agent.__version__`，
+  升级文案按 `upgrade_command()` 分渠道生成（editable 下改为“请用 git pull”）。
+- 思考面板定格：面板收尾以前只挂在 `assistant_text()` 第一行（正文第一个增量），所以上面那种
+  “正文一个字都没来”的失败轮（实测日志 `思考 69 字 / 正文 0 字`）会把面板永久停在首帧。现在
+  `RichCLI.end_thinking()`（幂等）登记进 `UIProtocol`，由 `_stream_once` 的 `finally` 调用，
+  异常/中断/取消都收口；委托型 UI（bridge / wechat）转发。
+- 顺带修掉一条潜伏的测试竞态（本轮 P5 抬高负载后才撞上）：`maybe_refine_async` 起的 daemon
+  线程在用例结束后还会活约 1.6s（默认 `Settings()` 的 `api_format` 是 `openai`，真去建
+  `AsyncOpenAI`），漂进后续 13 个用例；若线程启动被延迟到下下个用例装好 monkeypatch 之后，就会
+  借用那个 fake 并把它撑脏，导致 `test_full_pipeline` 全量跑偶发独红、单跑必绿。现补两道自收闸
+  （真 LLM 工厂“调了就记名、收尾就红” + 用例收尾 drain 线程），并把不变量写成显式用例。
+- 实测结论（“慢”不属于 jarvis 的那一半原因）：同一 `system_chars=40179 / tools=1 / msgs=2` 下首字正文
+  1.45s / 23.63s / 52.43s，且慢的那次“思考 0 字”——**慢在厂商侧排队**，不是本地 prompt 变大；
+  88 个 MCP 工具因 `deferred` 从未进过请求（日志里 `tools` 最大 37）。
+- 测试：新增 27 例（`test_llm_base_errors.py` +7、`test_query_loop_run.py` +4、`test_logging.py` +4、
+  `tests/ui/test_cli_thinking.py` +4（新文件）、`test_update.py` +5、`test_remote_bridge.py` +2（委托型
+  UI 转发）、`test_profile_memory.py` +1）；
+  全量 **4199 passed / 0 failed / 2 skipped**（修竞态前首次全量是 `1 failed, 4195 passed`，触发率
+  约 1/4）；变异矩阵 **V1-V9 + M-A/M-B 均被抓到**（其中 V1 只让文案用例红、category 用例全绿，
+  实证状态码与关键词是互补双路）。复盘见
+  [fixlogs/provider-busy-error-classification-fix.md](docs/fixlogs/provider-busy-error-classification-fix.md)。
+
 ### 测试（发布 / 打包契约）
 
 - 新增 `tests/test_release_contract.py`（5 例，纯本地、无网络/端口，0.35s），把发版前“本应成立却无人把关”

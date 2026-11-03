@@ -513,9 +513,9 @@ class OpenAIProvider(LLMProvider):
             )
             yield Stop(reason=finish_reason or "stop", usage=final_usage)
         except Exception as e:
-            from agent.llm.errors import classify
-            classified = classify(e)
-            raise ProviderError(classified.user_message) from e
+            from agent.llm.errors import to_provider_error
+            # 带上分类结果：旧写法只传文案，query_loop 就只能匹配「网络错误」字样选分支
+            raise to_provider_error(e) from e
         finally:
             # 必须显式关闭流（2026-10 关键修复）。
             # openai 的 AsyncStream 不会因为 async for 跑完就自动关闭：没关的

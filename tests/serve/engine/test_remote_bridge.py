@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import agent.bridge as bridge_pkg
 import agent.wechat as wechat_pkg
 from agent.bridge.server import BridgeServer
-from agent.bridge.ui import BridgeUI
+from agent.bridge.ui import BridgeUI, BroadcastUI
 from agent.config.settings import Settings
 from agent.serve.engine.api import WorkbenchAPI
 from agent.serve.engine.engine import ChatEngine
@@ -306,6 +306,32 @@ def test_wechat_ui_end_turn_calls_assistant_done():
     WeChatUI(desktop_ui=object()).end_turn()
 
 
+def test_wechat_ui_end_thinking_forwards_to_desktop():
+    """end_thinking → 转给终端宿主收尾思考面板（2026-11-03 P7：失败轮不能停在首帧）。
+
+    覆盖三个分支：宿主有方法→调一次；宿主无方法（只实现必需方法的代理 UI）→ no-op
+    不报错；宿主抛异常→必须静默，不能掩盖正在向上抛的对话异常。
+    @author aceFelix
+    """
+    ended: list = []
+
+    class _Desktop:
+        def end_thinking(self):
+            ended.append(True)
+
+    WeChatUI(desktop_ui=_Desktop()).end_thinking()
+    assert ended == [True]
+    # 宿主无 end_thinking：不抛异常
+    WeChatUI(desktop_ui=object()).end_thinking()
+
+    class _Broken:
+        def end_thinking(self):
+            raise RuntimeError("面板收尾失败")
+
+    WeChatUI(desktop_ui=_Broken()).end_thinking()  # 失败必须静默
+    assert ended == [True]
+
+
 def test_wechat_exec_query_ends_turn_after_run():
     """_exec_query 跑完 query 后调 ctx.ui.end_turn（桌面收尾本轮气泡）。"""
 
@@ -443,6 +469,26 @@ def test_bridge_ui_finish_emits_desktop_assistant_done():
     assert done == [True]
     # 终端宿主无 assistant_done：不抛异常
     BridgeUI(desktop_ui=object()).finish()
+
+
+def test_broadcast_ui_end_thinking_forwards_to_desktop():
+    """BroadcastUI.end_thinking → 只转给电脑终端宿主（思维链不同步到手机）。
+
+    与 assistant_thinking 同口径：只转终端、不 `_broadcast`；宿主没实现时 no-op，
+    不能让收尾把对话弄挂。（手机端用的 BridgeUI 不向终端转发思维链，面板不会开，
+    所以它不需要 end_thinking——QueryLoop 那里 getattr 判空就是为这种 UI 准备的。）
+    @author aceFelix
+    """
+    ended: list = []
+
+    class _Desktop:
+        def end_thinking(self):
+            ended.append(True)
+
+    BroadcastUI(desktop_ui=_Desktop(), bridge=object()).end_thinking()
+    assert ended == [True]
+    # 宿主无 end_thinking：不抛异常
+    BroadcastUI(desktop_ui=object(), bridge=object()).end_thinking()
 
 
 def test_engine_remote_query_begin_registers_current_task():

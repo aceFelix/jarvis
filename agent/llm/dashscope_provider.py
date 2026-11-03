@@ -445,8 +445,9 @@ class DashScopeProvider(LLMProvider):
                 if isinstance(item, Exception):
                     if isinstance(item, ProviderError):
                         raise item
-                    from agent.llm.errors import classify
-                    raise ProviderError(classify(item).user_message) from item
+                    from agent.llm.errors import to_provider_error
+                    # 带上分类结果，避免下游靠匹配用户可见文案选恢复动作
+                    raise to_provider_error(item) from item
                 yield item
                 if isinstance(item, Stop):
                     break

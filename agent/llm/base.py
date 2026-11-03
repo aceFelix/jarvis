@@ -20,7 +20,24 @@ from agent.core.tool import JSONSchema
 
 
 class ProviderError(RuntimeError):
-    """LLM 调用错误（网络/鉴权/限流/超时）。"""
+    """LLM 调用错误（网络/鉴权/限流/超时/厂商过载）。
+
+    `category` 取 `agent.llm.errors.ErrorCategory` 的值（如 ``network`` /
+    ``server_error``），供调用方按**分类**选恢复动作（重试、切厂商、直接结束）。
+
+    为什么要多这个字段（2026-11-03 实机）：旧实现只往下传一句用户可见文案，分类在
+    `raise ProviderError(classified.user_message)` 那一步就被丢成了字符串，于是
+    `query_loop` 只能用「文案里有没有‘网络错误’四个字」来判断该重试还是该切厂商——
+    改一个字就让分支静默失效，测试还全绿。
+
+    空串表示未分类（外部直接构造异常时），调用方应回退到关键词匹配以保持旧行为。
+
+    @author aceFelix
+    """
+
+    def __init__(self, message: str, category: str = "") -> None:
+        super().__init__(message)
+        self.category = category
 
 
 @dataclass

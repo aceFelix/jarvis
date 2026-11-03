@@ -25,6 +25,7 @@ v0.1 实现最核心的闭环:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -421,8 +422,17 @@ class QueryLoop:
                                 f"（{layered.total_tokens()} tokens）"
                             )
                         continue  # 重试本轮
-                # 网络错误：自动重试一次（1.5s 退避），最多重试 1 次
-                if "网络错误" in error_str and not self._network_retried:
+                # 网络类错误：自动重试一次（1.5s 退避），最多重试 1 次。
+                # 判据改用分类，不再匹配「网络错误」这四个字：旧写法把**用户可见文案**
+                # 当控制流开关，谁改一句提示语就会让这条分支静默失效、测试还全绿。
+                # 2026-11-03 的实机后果是反过来的那一头：503 被 classify 误判成网络错误，
+                # 于是先白耗一次 1.5s 退避 + 一次注定失败的请求，才轮到下面的厂商故障转移。
+                from agent.llm.errors import ErrorCategory, effective_category
+
+                if (
+                    effective_category(e) == ErrorCategory.NETWORK.value
+                    and not self._network_retried
+                ):
                     self._network_retried = True
                     # 记下第一次失败的真实原因（含 cause 链）：重试成功后这里
                     # 是唯一的现场，不记就再也查不到了。
@@ -731,6 +741,17 @@ class QueryLoop:
                 msgs.append(Message(role="assistant", content=content_blocks))
             raise
         finally:
+            # 思考面板收尾：UI 那边的自动收尾挂在 assistant_text 的第一行里，而「正文
+            # 一个字都没到」的失败轮（实机 503：思考 69 字、正文 0 字）走不到那里，于是
+            # 面板停在首帧——用户只看到「用户」两字，剩下的思考内容已在缓冲里却不再刷新，
+            # Live 也从未 stop。放 finally 里保证异常/中断/取消都收口；实现幂等，且收尾
+            # 失败不能掩盖正文里真正的 ProviderError / CancelledError。（aceFelix，2026-11-03）
+            end_thinking = getattr(ctx.ui, "end_thinking", None)
+            if callable(end_thinking):
+                # suppress 而不是 try/except-pass：与仓内同类收尾清理（imap logout、
+                # transport close）保持同一写法；收尾失败必须静默，不能掩盖正文里的真异常
+                with contextlib.suppress(Exception):
+                    end_thinking()
             # 正常耗尽时 aclose 是空操作；被打断/异常退出时确保生成器及早关闭。
             # 关闭本身失败不能外抛：否则会掩盖正文里真正的 ProviderError / 用户的
             # CancelledError（CancelledError 继承 BaseException，需单独子句）。

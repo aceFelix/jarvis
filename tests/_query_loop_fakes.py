@@ -138,6 +138,8 @@ class FakeUI:
         self.warns: list[str] = []
         self.errors: list[str] = []
         self.thinkings: list[str] = []
+        # 思考收尾次数：QueryLoop 在 finally 里调，失败轮（正文一字未到）也必须收尾。
+        self.end_thinking_calls = 0
 
     def info(self, text: str) -> None:
         self.infos.append(text)
@@ -153,6 +155,10 @@ class FakeUI:
 
     def assistant_thinking(self, text: str) -> None:
         self.thinkings.append(text)
+
+    def end_thinking(self) -> None:
+        """思考收尾（UIProtocol 里的可选方法），记次数供断言。"""
+        self.end_thinking_calls += 1
 
     def tool_use(self, tool_name, tool_input, tool_use_id) -> None:
         pass

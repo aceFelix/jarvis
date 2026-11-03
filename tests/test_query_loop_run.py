@@ -357,6 +357,105 @@ class TestRunProviderError:
         assert provider.stream_calls == 1
         assert any("LLM 调用失败" in e for e in ui.errors)
 
+    async def test_renamed_wording_does_not_silently_kill_retry(self, registry, monkeypatch):
+        """P1 核心：文案改了，只要带着分类，网络重试仍照常生效。
+
+        旧实现靠匹配「网络错误」四个字选分支，改一句提示语就会让重试静默失效、
+        测试还全绿。这条用“完全不含那四个字”的文案 + category=network 直接反证。
+        """
+        monkeypatch.setattr("agent.core.query_loop.asyncio.sleep", _noop_sleep)
+
+        from agent.llm.errors import ErrorCategory
+
+        provider = ScriptedProvider([
+            ProviderError("提示语已改写，不再包含旧关键词", ErrorCategory.NETWORK.value),
+            [TextDelta("重试成功"), Stop(reason="stop")],
+        ])
+        loop = make_loop(provider, FakeOrchestrator(), registry)
+        ui = FakeUI()
+        ctx, _ = make_ctx(ui=ui)
+
+        stats = await loop.run("你好", ctx)
+
+        assert stats.stopped_reason == "stop"
+        assert provider.stream_calls == 2
+        assert any("网络异常" in w for w in ui.warns)
+
+    async def test_upstream_busy_goes_straight_to_failover(self, registry, monkeypatch):
+        """厂商过载不白跑同厂商重试，直接切备选（2026-11-03 实机行为的回归）。
+
+        旧行为：503 被误分类成网络错误 → 先花 1.5s 退避 + 一次注定失败的请求，
+        第 2 次才轮到故障转移。修好后第一次失败就应该走 failover。
+        """
+        from agent.llm.errors import ErrorCategory
+
+        new_provider = ScriptedProvider([[TextDelta("备选厂商回复"), Stop(reason="stop")]])
+        monkeypatch.setattr("agent.bootstrap._build_provider", lambda *a, **k: new_provider)
+
+        provider = ScriptedProvider([
+            ProviderError("\n[ 厂商服务暂不可用 ]\n", ErrorCategory.SERVER_ERROR.value),
+        ])
+        loop = make_loop(
+            provider,
+            FakeOrchestrator(),
+            registry,
+            vendor_fallback="deepseek",
+            custom_models={
+                "ds-model": {"vendor": "deepseek", "base_url": "http://x", "api_key": "k"}
+            },
+        )
+        ui = FakeUI()
+        ctx, _ = make_ctx(ui=ui)
+
+        stats = await loop.run("你好", ctx)
+
+        assert stats.stopped_reason == "stop"
+        assert provider.stream_calls == 1  # 没白耗一次同厂商重试
+        assert loop._provider is new_provider
+        assert not any("网络异常" in w for w in ui.warns)
+
+    async def test_upstream_busy_wording_alone_skips_network_retry(self, registry) -> None:
+        """即使没有 category，真实过载文案也不会被当成网络错误去重试。"""
+        provider = ScriptedProvider([
+            ProviderError("原始错误: HTTP 503\n\n[ 厂商服务暂不可用 ]\n查 HTTP_PROXY 没有意义"),
+        ])
+        loop = make_loop(provider, FakeOrchestrator(), registry)
+        ui = FakeUI()
+        ctx, _ = make_ctx(ui=ui)
+
+        stats = await loop.run("你好", ctx)
+
+        assert stats.stopped_reason == "provider_error"
+        assert provider.stream_calls == 1
+        assert not any("网络异常" in w for w in ui.warns)
+
+    async def test_provider_error_still_ends_thinking_panel(self, registry) -> None:
+        """P7：失败轮（正文一字未到）也必须收尾思考面板。
+
+        回归（2026-11-03 实机）：DeepSeek 503 那轮日志是「思考 69 字 | 正文 0 字」，
+        而面板收尾以前只隐含在 assistant_text 的第一行里，走不到那条路径的失败轮
+        就把终端定格成 `│ 用户 │` 两个字（Live 也从未 stop）。
+        """
+        from agent.llm.base import ThinkingDelta
+
+        def _thinking_then_fail(_messages):
+            """生成器脚本项：先产出思考增量，再在流内抛错——真实还原「正文一字未到」。"""
+            yield ThinkingDelta("用户")
+            yield ThinkingDelta("问现在几点了。")
+            raise ProviderError("原始错误: HTTP 503\n\n[ 厂商服务暂不可用 ]")
+
+        provider = ScriptedProvider([_thinking_then_fail])
+        loop = make_loop(provider, FakeOrchestrator(), registry)
+        ui = FakeUI()
+        ctx, _ = make_ctx(ui=ui)
+
+        stats = await loop.run("几点了", ctx)
+
+        assert stats.stopped_reason == "provider_error"
+        assert ui.thinkings == ["用户", "问现在几点了。"]
+        # 收尾发生在 finally：与本轮有没有正文、有没有异常都无关
+        assert ui.end_thinking_calls == 1
+
 
 # ---------------------------------------------------------------------------
 # 边界场景

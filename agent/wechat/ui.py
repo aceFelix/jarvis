@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 
@@ -89,6 +90,19 @@ class WeChatUI:
                 self._desktop_ui.assistant_thinking(text)
             except Exception:
                 pass
+
+    def end_thinking(self) -> None:
+        """思考收尾：转给终端 UI（微信本来就不发思维链），保证失败轮面板不收定格。
+
+        未实现 `end_thinking` 的宿主 getattr 判空后 no-op；收尾自身失败必须静默，
+        不能掩盖正在向上抛的对话异常。
+        @author aceFelix
+        """
+        if self._desktop_ui is not None:
+            end = getattr(self._desktop_ui, "end_thinking", None)
+            if callable(end):
+                with contextlib.suppress(Exception):
+                    end()
 
     def tool_use(self, tool_name: str, tool_input: dict, tool_use_id: str) -> None:
         """工具调用开始：终端显示，微信不发。"""

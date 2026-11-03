@@ -307,6 +307,20 @@ class RichCLI(UIProtocol):
 
         self._thinking_buf = ""
 
+    def end_thinking(self) -> None:
+        """公开收尾入口：把当前思考阶段收口（幂等，未启动时为空操作）。
+
+        为什么需要这个入口（2026-11-03 实机）：面板收尾以前只挂在 `assistant_text()`
+        的第一行，也就是「正文第一个增量到达」这条路径。503 那种正文一个字都没来的
+        失败轮（实测日志：思考 69 字、正文 0 字）永远走不到那里，于是 Live 面板停在
+        首帧——用户只看见 `│ 用户 │` 两个字，剩下的思考内容已在缓冲里却再也不刷新，
+        而 Live 也从未 stop。调用方（QueryLoop._stream_once）把它放在 finally 里，
+        保证异常/中断/取消都能收口。
+
+        @author aceFelix
+        """
+        self._end_thinking()
+
     # 代码截断：超过此行数时截断并提示
     _MAX_CODE_LINES = 30
 

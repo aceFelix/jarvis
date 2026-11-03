@@ -4,8 +4,11 @@ E-01 改进项：解决 LLM 错误信息不友好（如智谱 405 返回原始 H
 
 设计：
 - classify() 根据 HTTP 状态码和错误消息关键词分类
-- 返回 (category, user_message) —— category 用于日志分类，user_message 直接给用户看
+- 返回 (category, user_message) —— category 供下游选恢复动作，user_message 直接给用户看
 - user_message 包含 原始错误 + 通俗解释 + 操作建议
+
+category 必须一路带到 ProviderError（用 `to_provider_error()`），否则下游只能靠匹配
+文案子串选动作——那种耦合会让“改一句提示语”变成“静默关掉一条恢复路径”。
 
 @author aceFelix
 """
@@ -14,9 +17,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent.utils.mask import mask_error_message
+
+if TYPE_CHECKING:  # 仅为类型注解引入，避开与 base 的循环导入（运行时在函数内 import）
+    from agent.llm.base import ProviderError
 
 
 class ErrorCategory(str, Enum):
@@ -92,6 +98,31 @@ def classify(exc: Exception) -> ClassifiedError:
     raw = mask_error_message(_extract_raw(exc))
     raw_lower = raw.lower()
     status = getattr(exc, "status_code", 0) or 0
+
+    # ── 厂商侧 5xx / 过载（HTTP 状态码是强证据，因此优先于关键词表）──
+    # 为什么单独一条、而且放在最前面（2026-11-03 实机）：DeepSeek 过载时返回
+    # `503 service_unavailable_error`「Service is too busy」，旧实现把 502/503/504 归进了
+    # 下面的 NETWORK 兜底，于是界面叫用户「检查网络连接 / base_url / HTTP_PROXY」，而
+    # 用户网络明明正常、请求也确实发出去并拿到了对方响应。专为 5xx 写的 SERVER_ERROR
+    # 分支就在十几行之后，却因为被抢先命中而一次都没执行过。
+    # 放最前面还避开两处误伤：504 的文案里常带 "timeout"，若让 timeout 分支先命中，
+    # 就把厂商网关超时说成用户侧超时；关键词表里还有个 "token"，可能把带 token 字样的
+    # 5xx 误判成上下文超长。
+    if status in (502, 503, 504) or any(kw in raw_lower for kw in (
+        "service_unavailable", "service is too busy", "server busy", "overloaded",
+        "bad gateway", "gateway time", "temporarily unavailable", "upstream"
+    )):
+        return ClassifiedError(
+            category=ErrorCategory.SERVER_ERROR,
+            raw_message=raw,
+            user_message=_build(
+                raw, "厂商服务暂不可用",
+                "模型服务商自己返回了 5xx/过载——请求已经发出并拿到了对方响应，"
+                "所以这不是你的网络、base_url 或代理的问题（查 HTTP_PROXY 没有意义）。\n"
+                "可稍后重试，或运行 /model <其他厂商模型> 暂时切走。\n"
+                "想让 jarvis 在厂商报错时自动切到备选，请在配置里设置 vendor_fallback。"
+            ),
+        )
 
     # ── 鉴权失败 ──
     if status == 401 or any(kw in raw_lower for kw in (
@@ -192,7 +223,7 @@ def classify(exc: Exception) -> ClassifiedError:
     if any(kw in raw_lower for kw in (
         "timeout", "connection", "refused",
         "network", "resolve"
-    )) or status in (502, 503, 504):
+    )):
         return ClassifiedError(
             category=ErrorCategory.NETWORK,
             raw_message=raw,
@@ -247,3 +278,49 @@ def _build(raw: str, title: str, explanation: str) -> str:
         f"\n[ {title} ]\n"
         f"{explanation}"
     )
+
+
+def effective_category(exc: BaseException) -> str:
+    """取 ProviderError 的 category；缺失时从用户文案回退推断。
+
+    为什么必须留回退：仓内与测试里都存在 `ProviderError("网络错误: timeout")` 这种裸
+    构造（ScriptedProvider 场景），它们没有 category。若只认 category，这些调用点的
+    重试行为会静默变化。回退仅用于兜底：有 category 时一律以 category 为准。
+
+    回退表里的文案必须与 classify() 各分支的标题一致（两边改动要同步）。
+
+    @author aceFelix
+    """
+    cat = str(getattr(exc, "category", "") or "")
+    if cat:
+        return cat
+    text = str(exc).lower()
+    if any(kw in text for kw in ("网络错误", "请求超时", "连接被中断")):
+        return ErrorCategory.NETWORK.value
+    if "请求限流" in text:
+        return ErrorCategory.RATE_LIMIT.value
+    if any(kw in text for kw in ("厂商服务暂不可用", "服务端错误")):
+        return ErrorCategory.SERVER_ERROR.value
+    if "鉴权失败" in text:
+        return ErrorCategory.AUTH.value
+    if "模型不可用" in text:
+        return ErrorCategory.MODEL_NOT_FOUND.value
+    if "上下文过长" in text:
+        return ErrorCategory.CONTEXT_TOO_LONG.value
+    return ""
+
+
+def to_provider_error(exc: Exception) -> ProviderError:
+    """把原始异常分类后包成 ProviderError，并**带上 category**。
+
+    四个 Provider 的 except 分支以前各写一遍
+    `raise ProviderError(classify(e).user_message)`，分类结果就在这一步被丢成了字符串。
+    统一收到这个工厂里：新加 Provider 不会漏传 category，下游（query_loop）也能拿到
+    结构化分类，而不是去匹配中文文案。（aceFelix，2026-11-03）
+
+    @author aceFelix
+    """
+    from agent.llm.base import ProviderError
+
+    classified = classify(exc)
+    return ProviderError(classified.user_message, classified.category.value)

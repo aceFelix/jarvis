@@ -9,6 +9,8 @@ Refiner JSON 容错解析、对话截取过滤、异步触发节流。
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
@@ -19,6 +21,60 @@ from agent.core.memory.profile_store import (
     ProfileStore,
 )
 from agent.core.memory import profile_refiner as refiner
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm_client(monkeypatch):
+    """禁止本文件用例构造真 LLM 客户端（上面那条泄漏线程能活 1.6s 的原因）。
+
+    默认 `Settings()` 的 `api_format` 是 `openai`（不是 mock），所以
+    `_build_refine_provider` 会真去 `agent.bootstrap._build_provider` 建 `AsyncOpenAI`：
+    实测一次 1624 ms（全部耗在后台线程里，就是泄漏线程的寿命），而在配了
+    `OPENAI_API_KEY` 的机器上还会从测试里发出真实请求、读写用户真实画像库。
+
+    抛异常本身不够——`refine_session` 会把异常吃掉变成 `report.error`，在子线程里没人
+    看见，所以这里只登记调用、在收尾时断言（收尾顺序在 `_no_refine_worker_leak` 之后，
+    线程已 drain 完，不会漏记）。mock 分支在进工厂前就返回 None，不受影响。
+
+    @author aceFelix
+    """
+    from agent import bootstrap
+
+    hits: list[str] = []
+
+    def _forbidden(*args, **kwargs):
+        hits.append("_build_provider")
+        raise AssertionError("测试禁止构造真 LLM provider，请隔离 _build_refine_provider")
+
+    monkeypatch.setattr(bootstrap, "_build_provider", _forbidden)
+    yield
+    if hits:
+        pytest.fail("用例期间调到了真 LLM 工厂（后台提炼线程逃逸到真网络路径）")
+
+
+@pytest.fixture(autouse=True)
+def _no_refine_worker_leak():
+    """收口后台提炼线程，不让它滑到后续用例里（2026-11-03 偶发独红的根因闸）。
+
+    `maybe_refine_async` 起的是 daemon 线程且无 join 入口。2026-11-03 用临时看门狗
+    插件实测：用例结束后该线程还会活约 1.6 s——默认 `Settings()` 的 `api_format` 是
+    `openai`（不是 mock），于是线程里真的在跑 `_build_refine_provider` → 构造
+    `AsyncOpenAI` → 直到报 `Missing credentials` 才退；它漂进了本文件 13 个后续用例。
+
+    危害不只是脏数据：只要线程启动被 GIL 延迟到下一个用例装好 monkeypatch 之后，它就会
+    读到**那个用例**装在 `refiner._build_refine_provider` 上的 fake，把它的
+    `thinking_state` 多撑一轮——`test_full_pipeline` 在全量跑时偶发断言失败、单跑必绿就
+    是这个竞态（把窗口撑开后已稳定复现，泄漏线程单独就贡献了 [False, True] 两项）。
+
+    @author aceFelix
+    """
+    yield
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if not [t for t in threading.enumerate() if t.name == "profile-refiner"]:
+            return
+        time.sleep(0.02)
+    pytest.fail("profile-refiner 后台线程未在 5s 内退出，会拿到后续用例的 monkeypatch")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -176,12 +232,34 @@ class TestMaybeRefineAsync:
         msgs = [_msg("user", "hi")] * 3
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is False
 
-    def test_throttle_second_call_skipped(self):
-        refiner._last_refine_ts = 0.0  # 重置节流状态
+    def test_throttle_second_call_skipped(self, monkeypatch):
+        # 必须隔离真 provider：不隔离时后台线程会去建真的 AsyncOpenAI 客户端（实测 1.6s），
+        # 有 OPENAI_API_KEY 的机器上还会从测试里发出真实请求、并读写用户真实画像库
+        monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: None)
+        # 重置节流状态（用 monkeypatch 写入，用例结束自动还原，不再泄漏给后续用例）
+        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
         msgs = [_msg("user", "hi")] * 10
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is True
         # 间隔内第二次调用直接跳过
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is False
+
+    def test_worker_thread_does_not_outlive_test(self, monkeypatch):
+        """守住本文件 autouse fixture 依赖的那条不变量：节流触发后台线程后，线程必须
+        在本用例内退出，而不是漂到后面的用例里去读它们装的 patch。
+
+        @author aceFelix
+        """
+        monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: None)
+        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
+        assert refiner.maybe_refine_async(
+            [_msg("user", "hi")] * 10, "s", self._settings()
+        ) is True
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if not [t for t in threading.enumerate() if t.name == "profile-refiner"]:
+                return
+            time.sleep(0.02)
+        pytest.fail("后台提炼线程未在用例内退出")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -485,10 +563,10 @@ class TestSettingsMapping:
         assert s.profile_inject_token_limit == 300
         assert s.profile_refine_model == ""
 
-    def test_maybe_refine_async_respects_min_messages_default(self):
+    def test_maybe_refine_async_respects_min_messages_default(self, monkeypatch):
         s = Settings()  # 默认 6 条
         msgs = [_msg("user", "hi")] * 5
-        refiner._last_refine_ts = 0.0
+        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
         assert refiner.maybe_refine_async(msgs, "s", s) is False
 
 

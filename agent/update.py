@@ -39,24 +39,32 @@ _UPGRADE_TIMEOUT_SECONDS = 600
 
 
 def current_version() -> str:
-    """获取当前安装的 jarvis 版本。
+    """获取**当前正在运行**的 jarvis 版本。
 
-    优先读已安装包的元数据（importlib.metadata），未安装为包（直接跑源码）时
-    回退到 ``agent.__version__``。
+    优先 ``agent.__version__``（实际被执行的代码里写的那个），元数据只当回退。
+
+    为什么要把顺序倒过来（2026-11-03 实机）：旧实现先读 `importlib.metadata.version()`，
+    而 editable 安装（`pip install -e`）下那份 dist-info 停在装包那天，于是启动横幅出现
+    「发现新版本 2.3.4（当前 2.2.2）」——用户跑的代码其实已经是 2.3.4，那个“当前版本”
+    是个假数字，还会把用户推向 `/update`（对 editable 环境有害，见 `start_background_check`）。
+    正常 pip 安装下两处本来就要求一致（发版时三处双写 + 版本一致测试），所以优先读
+    代码内版本对普适安装也没有影响。
 
     @return 版本字符串，最坏情况返回 "0.0.0"
     """
+    try:
+        from agent import __version__ as running_version
+    except ImportError:
+        # 极早期 / 异常打包下 `agent.__version__` 可能取不到，交给下面的元数据回退
+        running_version = ""
+    if running_version:
+        return running_version
     try:
         from importlib.metadata import version
 
         return version(_PACKAGE)
     except Exception:
-        try:
-            from agent import __version__
-
-            return __version__
-        except Exception:
-            return "0.0.0"
+        return "0.0.0"
 
 
 def _dist_available() -> bool:
@@ -259,6 +267,17 @@ def run_upgrade() -> tuple[bool, str]:
     return proc.returncode == 0, output
 
 
+def format_command(cmd: list[str]) -> str:
+    """把命令列表拼成可直接粘贴执行的命令行（含空格的路径加引号）。
+
+    Windows venv 下 `sys.executable` 常带空格（如 `Program Files`），直接 join 拼出来的
+    命令用户粘回去执行不了。
+
+    @author aceFelix
+    """
+    return " ".join(f'"{part}"' if " " in part else part for part in cmd)
+
+
 def start_background_check(ui) -> None:
     """启动时后台检查新版本并提示（非阻塞）。
 
@@ -270,11 +289,25 @@ def start_background_check(ui) -> None:
     def _run() -> None:
         try:
             has_update, cur, latest = check_for_update()
-            if has_update:
+            if not has_update:
+                return
+            # 文案必须按安装渠道给：以前这里硬编码「运行 /update，或手动执行
+            # pip install -U」，可 editable（开发模式）下 /update 会被 run_upgrade 拒绝，
+            # 而用户真去手动执行 `pip install -U` 更糟——它把 editable 安装换成 PyPI
+            # 正式版，**直接覆盖掉源码树里尚未发布的修改**。渠道判断系统里本来就有
+            # （`upgrade_command` 对 editable/unknown 返回 None），只是这条提示路径
+            # 没去用它。（2026-11-03）@author aceFelix
+            cmd = upgrade_command()
+            if cmd is None:
                 ui.info(
-                    f"发现新版本 {latest}（当前 {cur}）。"
-                    f'运行 /update 升级，或手动执行 pip install -U "jarvis-agent"。'
+                    f"发现新版本 {latest}（当前 {cur}）。当前是开发模式（源码）环境，"
+                    f"自动升级会覆盖本地代码，请用 git pull 更新。"
                 )
+                return
+            ui.info(
+                f"发现新版本 {latest}（当前 {cur}）。"
+                f"运行 /update 升级，或手动执行：{format_command(cmd)}。"
+            )
         except Exception:
             pass
 

@@ -419,8 +419,9 @@ class AnthropicProvider(LLMProvider):
 
                 yield Stop(reason=stop_reason, usage=usage)
         except Exception as e:
-            from agent.llm.errors import classify
-            raise ProviderError(classify(e).user_message) from e
+            from agent.llm.errors import to_provider_error
+            # 带上分类结果，避免下游靠匹配用户可见文案选恢复动作
+            raise to_provider_error(e) from e
 
     async def close(self) -> None:
         await self._client.close()

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from agent.llm.base import (
     LLMProvider,
+    ProviderError,
     Stop,
     TextDelta,
     ThinkingDelta,
@@ -20,7 +21,7 @@ from agent.llm.base import (
     ToolDef,
     Usage,
 )
-from agent.llm.errors import ErrorCategory, classify
+from agent.llm.errors import ErrorCategory, classify, effective_category, to_provider_error
 from agent.llm.thinking import THINKING_CONFIGS, ThinkingConfig, apply_thinking
 
 
@@ -171,9 +172,44 @@ class TestClassify:
         ce = classify(_Err("Connection timed out after 30s"))
         assert ce.category == ErrorCategory.NETWORK
 
-    def test_network_503(self) -> None:
+    def test_upstream_busy_503_is_not_blamed_on_user_network(self) -> None:
+        """503 是厂商过载，不是网络错误：归类 SERVER_ERROR，且不得叫用户查代理。
+
+        回归（2026-11-03 实机）：DeepSeek 返回 `503 service_unavailable_error`
+        「Service is too busy」，旧实现把 502/503/504 归进 NETWORK 兜底，于是界面让用户
+        「检查网络连接 / base_url / HTTP_PROXY」——而请求明明已发出并拿到了对方响应。
+        专为 5xx 写的 SERVER_ERROR 分支就在十几行之后，却一次都没执行过。
+        """
         ce = classify(_Err("", 503))
-        assert ce.category == ErrorCategory.NETWORK
+        assert ce.category == ErrorCategory.SERVER_ERROR
+        assert "厂商服务暂不可用" in ce.user_message
+        # 核心不变量：不得用祈使句把排查方向指向用户本地。文案里允许以**否定**形式提到
+        # 代理（「查 HTTP_PROXY 没有意义」正是对旧误导的主动澄清），所以不能简单断言
+        # 「不含 HTTP_PROXY」——那条会误杀掉真正帮到用户的句式。
+        assert "请检查网络连接" not in ce.user_message
+        assert "base_url 配置是否正确" not in ce.user_message
+        assert "查 HTTP_PROXY 没有意义" in ce.user_message
+
+    def test_upstream_5xx_all_classified_as_server_error(self) -> None:
+        """502/503/504 全部归厂商（旧实现只认 503，502/504 同样会被误分类）。"""
+        for status in (502, 503, 504):
+            ce = classify(_Err("Service Unavailable", status))
+            assert ce.category == ErrorCategory.SERVER_ERROR, status
+
+    def test_gateway_timeout_504_not_mistaken_for_local_timeout(self) -> None:
+        """504 文案常带 "Gateway Timeout"：必须归厂商，不能被 timeout 分支抢走。
+
+        这是厂商过载分支放在关键词表之前的原因：一旦先命中 timeout，厂商网关
+        超时会被说成「等待 API 响应超时」，又把锅丢回用户侧。
+        """
+        ce = classify(_Err("Gateway Timeout", 504))
+        assert ce.category == ErrorCategory.SERVER_ERROR
+        assert "请求超时" not in ce.user_message
+
+    def test_busy_keyword_without_status_still_upstream(self) -> None:
+        """有些网关不给状态码，只把「Service is too busy」写在正文里。"""
+        ce = classify(_Err("Error code: 503 - Service is too busy, try later"))
+        assert ce.category == ErrorCategory.SERVER_ERROR
 
     def test_server_error_500(self) -> None:
         ce = classify(_Err("", 500))
@@ -298,3 +334,42 @@ class TestApplyThinking:
         kwargs: dict = {"model": "gpt-4o"}
         apply_thinking(kwargs, ThinkingConfig(field=""), True)
         assert kwargs == {"model": "gpt-4o"}
+
+
+# ─────────────────────────────────────────────────────────────
+# 分类必须随异常一起递到调用方
+# ─────────────────────────────────────────────────────────────
+
+
+class TestProviderErrorCategory:
+    """to_provider_error / effective_category（P1：拆掉文案与恢复分支的耦合）。
+
+    旧写法 `raise ProviderError(classify(e).user_message)` 把分类丢成了字符串，
+    query_loop 只能去匹配「网络错误」四个字选重试还是切厂商。
+    """
+
+    def test_to_provider_error_carries_category(self) -> None:
+        err = to_provider_error(_Err("", 503))
+        assert err.category == ErrorCategory.SERVER_ERROR.value
+        assert isinstance(err, ProviderError)
+
+    def test_effective_category_prefers_structured_field(self) -> None:
+        """有 category 时一律以它为准，哪怕文案写着别的分类。"""
+        err = ProviderError("网络错误: 其实是厂商过载", ErrorCategory.SERVER_ERROR.value)
+        assert effective_category(err) == ErrorCategory.SERVER_ERROR.value
+
+    def test_effective_category_falls_back_to_wording(self) -> None:
+        """外部裸构造（无 category）仍能识别——保证 ScriptedProvider 那类用法行为不变。"""
+        assert effective_category(
+            ProviderError("网络错误: timeout")
+        ) == ErrorCategory.NETWORK.value
+        assert effective_category(
+            ProviderError("\n[ 厂商服务暂不可用 ]\n")
+        ) == ErrorCategory.SERVER_ERROR.value
+        assert effective_category(
+            ProviderError("请求限流")
+        ) == ErrorCategory.RATE_LIMIT.value
+
+    def test_effective_category_empty_for_unrelated_text(self) -> None:
+        """既不分类也不匹配文案时返回空串，交由调用方走默认处理。"""
+        assert effective_category(ProviderError("api error: 500")) == ""
