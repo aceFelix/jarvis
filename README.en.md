@@ -134,7 +134,8 @@
 | 🧭 **Butler runtime layer** | Path-scoped no-confirmation rules in permissions.yaml + authorization leases (stop interrupting me) + notify budget (cut the noise) + `/away` unattended queue for approval | [W1 runtime layer](docs/architecture/16-W1判断层.md) (中文) |
 | 🧾 **The layer that makes it safe to let go** | Outbound mail waits in a 30-second send window (`/undo cancel` stops it, and equivalent outbound commands like `curl` stop being auto-allowed while a hold is open), files it wrote for you roll back per turn with `/undo`; long-lived goals survive across sessions via the task spine (zero LLM calls while it waits), and **one sentence is enough to create one** — `/tasks add …` or just ask J.A.R.V.I.S | [W3 execution layer](docs/architecture/18-W3兑现层.md) (中文) |
 | 🧩 **Open ecosystem** | MCP, plugin marketplace, Skill packs, CLI-Anything (turn any software into a tool), multi-agent collaboration | [Ecosystem](docs/guide/ecosystem.md) |
-| ⚙️ **Config without editing files** | All 202 config items are askable: don't know what one does or where to change it — just say "the CPU threshold is too high"; it looks it up and tells you what the setting does, its current value, and **whether it should change it or you should** (28 it changes directly, 29 only after confirming first; the rest it just names the file and section for you). `/config explain <keyword>` for the same self-check | [Config system](docs/architecture/12-配置系统.md) (中文) |
+| ⚙️ **Config without editing files** | All 207 config items are askable: don't know what one does or where to change it — just say "the CPU threshold is too high"; it looks it up and tells you what the setting does, its current value, and **whether it should change it or you should** (62 it can change on your behalf — 29 directly, 33 only after confirming first; the remaining 144 it just names the file and section for you). `/config explain <keyword>` for the same self-check | [Config system](docs/architecture/12-配置系统.md) (中文) |
+| 🩺 **Knows what it is missing** | `/health caps` probes 13 capabilities for real (packages / binaries / **browser kernel** / credentials; `--deep` actually launches a browser and captures one screenshot as evidence). Tools whose prerequisites are missing are **blocked before the call**, with what is missing, the measured evidence and how to fix it — and the receipt states "this call did not run; do not report it as verified". `/repair` lets it reinstall what is missing (four whitelisted actions + six gates: over 200MB asks even in yolo, `/away` always escalates to pending, **a fix only counts as done after a re-probe**). When the model has no vision the prompt switches to fallback verification routes, and screenshot receipts say "attached", never "seen" | [Capability self-check](docs/architecture/20-能力自检与自我修复.md) (中文) |
 | 🔐 **Security baseline** | Five-layer permissions + four-level sandbox + operation audit + keyring encryption, hard-blocks dangerous ops | [Concepts](docs/guide/concepts.md#五层权限系统) |
 
 **Provider freedom**: 11 vendors supported (Alibaba DashScope / DeepSeek / OpenAI / Zhipu / Anthropic / Kimi / MiniMax / SiliconFlow / Xiaomi MiMo / Google Gemini / custom-compatible services); double-click to edit in `/models`, hot-switch while running.
@@ -156,7 +157,8 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - Defaults to Alibaba DashScope (`qwen3.7-plus`, multimodal); or just `export DASHSCOPE_API_KEY=sk-xxx` and launch
 - No Python, just a GUI? Download the [jarvis-desktop installer](https://github.com/aceFelix/jarvis-desktop/releases/latest) (Windows — ships the frozen backend, no Python needed)
 - All config lives in `~/.jarvis/` (settings.toml + models.toml); `/mode` switches permission mode, `/think` tunes deep thinking
-- Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot
+- Something not working? `jarvis --doctor` diagnoses dependencies and config in one shot. Want to know what it can **actually** do right now? Run `/health caps` in a session (`--deep` makes it prove a claim by really launching the browser), and `/repair` lets it install the missing kernel itself
+- Optional capabilities come in 8 extras groups (`gui` `browser` `mcp` `camera` `vision` `voice` `daemon` `wechat`): `pip install "jarvis-agent[browser,gui,voice]"`. **The playwright browser kernel is not a pip dependency** — after installing the package you still need `python -m playwright install chromium`, or let `/health caps browser.selfcheck --repair` run it for you
 - Checks for a new release in the background on startup; when found, run `/update` to upgrade (disable with `--no-update-check`)
 - Mirrored on [GitCode](https://gitcode.com/acefelix/jarvis) and [GitHub](https://github.com/aceFelix/jarvis) — every commit is pushed to both
 
@@ -182,6 +184,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | Sandbox execution | ✅ Job Object | 🟡 sandbox-exec | 🟡 rlimits |
 | MCP / Skill / Plugin / harness / multi-agent / serve backend | ✅ | 🟡 | 🟡 |
 | One session, many ends (phone PWA / WeChat ClawBot) | ✅ | 🟡 | 🟡 |
+| Capability self-check `/health caps` · self-repair `/repair` | ✅ | 🟡 | 🟡 |
 | System maintenance `/disk` `/clean` `/health` | ✅ | ⛔ Windows-only (PowerShell + SecurityCenter2 + drive letters + cleanmgr) | ⛔ Windows-only |
 | jarvis-desktop installer | ✅ NSIS `.exe` | ⛔ not provided yet | ⛔ not provided yet |
 
@@ -201,7 +204,8 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 | Reversible actions (`/undo`) / cross-session task spine | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) (中文) |
 | Multi-agent / plugins / CLI-Anything / email | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) (中文) |
 | Config reference / vendor setup / FAQ | [config-docs/](config-docs/configuration.md) (中文) |
-| Architecture (18 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
+| Capability self-check / missing-dependency gating / self-repair (`/health caps`, `/repair`) | [docs/architecture/20-能力自检与自我修复.md](docs/architecture/20-能力自检与自我修复.md) (中文) |
+| Architecture (20 chapters) | [docs/architecture/](docs/architecture/00-索引.md) (中文) |
 | Testing / CI / publishing / directory layout | [docs/guide/development.md](docs/guide/development.md) (中文) |
 | Blueprint (vision · capability model · roadmap) | [docs/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 

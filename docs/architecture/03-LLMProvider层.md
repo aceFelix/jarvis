@@ -85,8 +85,10 @@ class LLMProvider(abc.ABC):
     # 思考模式统一控制
     def set_thinking_enabled(self, enabled: bool) -> None: ...  # 子类 override
     def is_thinking_enabled(self) -> bool: ...
-    # 模型类型动态切换（multimodal / text）
+    # 模型类型动态切换（multimodal / text / unknown）
     def set_model_type(self, model_type: str) -> None: ...
+    @property
+    def has_vision(self) -> bool: ...   # 图片到底会不会发出去（只读窗）
     async def close(self) -> None: ...
 ```
 
@@ -94,7 +96,11 @@ class LLMProvider(abc.ABC):
 - 出错 `raise ProviderError`，不 yield 半截序列
 - `ToolCall.input` 是完整 dict（不发参数 delta）
 - 以 `Stop` 事件结尾
-- `set_model_type()` 支持运行时切换模型类型（切换纯文本模型时跳过图片）
+- `set_model_type()` 支持运行时切换模型类型：同厂商不同模型可能是 text/multimodal，
+  切模型复用同一个 provider 实例时必须同步这个值（四个 provider 都有此方法，
+  2026-11-05 前 anthropic 没有，导致切完图片通路停在旧值）
+- 图片是否随消息发送只能问 `model_capability.model_has_vision()`：
+  **只有明确声明 multimodal 才算有视觉**，`unknown`（没人填过）按无视觉处理
 
 ## 五、Provider 注册表驱动（A-04）
 
@@ -109,7 +115,9 @@ class ProviderMeta:
     init_keys: tuple[str]    # 构造参数对应的 Settings 字段
     url_patterns: tuple[str] # base_url 子串 → 自动识别厂商
     thinking_key: str | None # 对应 THINKING_CONFIGS 的 key
-    model_type: str          # 是否支持多模态
+    # 没有 model_type 字段：视觉能力由「厂商 × 具体模型」两维决定，放在厂商级
+    # 只能给一个默认值，而任何默认值都会被当成事实（以前默认 multimodal
+    # 就等于「拿不准算有」）。唯一裁决点在 model_capability.py。
 
     def create(self, **kwargs): ...  # 延迟 import + 实例化
 ```
@@ -152,7 +160,8 @@ class ProviderMeta:
 - **工具调用**：OpenAI function calling 格式 → ToolCall 事件
 - **思考模式控制**：由 [thinking.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/llm/thinking.py) 配置表驱动（见「八、思考模式控制」）
 - **reasoning_content 处理**：检查 `is_thinking_enabled()` 后才 emit `ThinkingDelta`
-- **多模态图片**：image content → OpenAI image_url 格式；`model_type="text"` 时跳过图片
+- **多模态图片**：image content → OpenAI image_url 格式；无视觉能力（text / unknown）时
+  换成一句「图片已省略」的文字说明（不能静默抽掉，也不能整条丢弃）
 - **厂商参数差异化**：通过 `_derive_name()`（现由 `lookup_by_url()` 支持）识别厂商，
   按 `THINKING_CONFIGS` 注入对应思考参数
 - **文本态工具调用兜底**：模型偶发把工具调用以 DSML/XML 文本形式吐进 `content`（无结构化
@@ -303,7 +312,7 @@ elif event.type == "content_block_delta":
 在 [bootstrap.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/bootstrap.py) 的 `_build_provider()` 中通过 `PROVIDER_REGISTRY` 配置表选择：
 
 ```python
-def _build_provider(settings: Settings, model_type: str = "multimodal"):
+def _build_provider(settings: Settings, model_type: str = "unknown"):
     from agent.llm.provider_registry import PROVIDER_REGISTRY
     fmt = settings.api_format.lower()
     meta = PROVIDER_REGISTRY.get(fmt)
@@ -440,7 +449,10 @@ Provider 把它们统一转成 `ToolCall(id, name, input)` 事件，QueryLoop �
 | Zai | OpenAI 兼容 `image_url` 格式 |
 
 Provider 把内部 `ImageContent(data, media_type)` 转换成各自格式。
-`model_type="text"`（纯文本模型）时跳过所有图片块，避免 400 错误。
+判据统一是 `model_has_vision(model_type)`：**只有 `multimodal` 会送图**，`text` 与
+`unknown`（没人声明过）都换成一句「图片已省略」的文字说明——既避免纯文本端点
+拿 400，也不让模型在看不见图时还能声称“我看过”。措辞共用
+`model_capability.IMAGE_OMITTED_NOTE`，工具回执则统一来自 `core/images.image_receipt()`。
 
 ## 十二、自定义模型配置
 
@@ -451,7 +463,7 @@ Provider 把内部 `ImageContent(data, media_type)` 转换成各自格式。
 api_format = "zai"               # openai/anthropic/dashscope/dashscope_sdk/zai ...
 base_url = ""
 api_key = "sk-xxx"
-model_type = "text"              # text 纯文本 / multimodal 多模态
+model_type = "text"              # text 纯文本 / multimodal 多模态；没写=unknown（按无视觉处理）
 vendor = "zhipu"                 # 故障转移按 vendor 匹配
 ```
 

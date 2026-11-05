@@ -105,6 +105,19 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 | `wechat` | 微信 ClawBot 接入 | `pip install "jarvis-agent[wechat]"` |
 | `all` | 上面全部 | `pip install "jarvis-agent[all]"` |
 
+> ⚠️ **`pip install "jarvis-agent[browser]"` 装不上浏览器内核**。playwright 的 chromium
+> 不在 pip 包里（另约 296MB），装完还要跑一次：
+>
+> ```bash
+> python -m playwright install chromium
+> ```
+>
+> 漏了这一步的表现最容易误判：包明明在、代码能 import，但“浏览器就是打不开”。
+> 它属于能力自检的范畴，两个入口都会报出来：`jarvis --doctor`（启动期诊断），以及会话内的
+> `/health caps browser.selfcheck`（逐条前置条件的实测依据 + 可复制补法，也可用
+> `/health caps browser.selfcheck --repair` 让它代跑）。机制见
+> [能力自检与自我修复](../architecture/20-能力自检与自我修复.md)。
+
 > 原 `realtime_ui`（pywebview 三栏工作台窗口）已于 2026-10 随 `--gui` / `--talk`
 > 一并退役，图形化桌面由独立仓库 **jarvis-desktop** 提供（见
 > [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）。
@@ -157,6 +170,10 @@ jarvis --doctor
 | ⚙️ 配置状态 | `~/.jarvis/settings.toml` 是否存在 / API Key 是否配置（不显示 key 内容） / `permissions.yaml` 是否就绪 |
 
 > 包检查用 `importlib.util.find_spec` 探测，不实际 import，避免触发未安装包的副作用日志。
+>
+> `--doctor` 与 `/health caps` 读**同一份能力结论**（`agent/capabilities/`）：不另建一套
+> “能装 vs 能用”的判断，否则两套并存只会让人搞不清该信哪个。区别只在前者是启动期的
+> 包/系统依赖清单，后者多了逐能力的前置条件证据、冒烟档与修复入口。
 
 ## 版本更新
 

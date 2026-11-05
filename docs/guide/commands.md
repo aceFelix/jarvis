@@ -162,11 +162,31 @@
 | `/health threats` | 威胁检测记录与处置状态 |
 | `/health scan [quick\|full\|custom <路径>]` | 后台启动 Defender 扫描（全盘需 `allow_full_scan = true`） |
 | `/health status [job_id]` | 查扫描进度（异步，不阻塞对话） |
+| `/health caps` | 能力自查（静态档：包 / 二进制 / **浏览器内核** / 凭据 / 平台，共 13 项） |
+| `/health caps --deep` | 加跑冒烟档：**真起一次** headless 浏览器、真截一帧屏拿实测证据（十几秒到一两分钟，跑前会预告） |
+| `/health caps <能力名>` | 单项详情：每条前置条件的实测依据与补法（如 `browser.selfcheck`） |
+| `/health caps --json` · `--markdown` | 机器可读 / Markdown 输出（桌面端与审计脚本用） |
+| `/health caps --repair <能力名>` [`--yes`] | 按白名单动手修复（必须**指名能力**，不给“全表修复”）；**修完必须复测才算成**，一次失败只试一条路。超询问线时默认先回一句确认请求，加 `--yes` 预先授权；**但 `--yes` 越不过 `/away` 的升回待批** |
+| `/health caps --history` | 最近的修复记录（直读副作用账本里的 `Repair:` 条目，不另立台账） |
+| `/repair`（= `/repair status`） | 看自我修复闸门状态与最近几条修复 |
+| `/repair on` · `/repair off` | 代执行总闸（落盘 + 立即生效；关掉仍给可复制命令） |
+| `/repair disable <动作>` · `enable <动作>` | 只关/开某一类动作：`fetch-browser` / `fetch-model` / `pip-extras` / `config-fix`（写错会被指出来） |
 
 > ⚠️ **撤销入口是 `/clean --restore <batch_id>`，不是 `/undo`**。隔离区批次不走 W3 副作用账本。
 
 > 💡 **温度 / SMART / 卷影 / DISM 需管理员**：非管理员跑时这几块会如实标注
 > “需要以管理员身份运行才能读取”，不会显示 0 或假装有数据。
+
+> 🩺 **能力缺失的工具在调用前就被拦住**（不是执行后报错重试）：回执会写清缺哪一条、
+> 实测依据、可复制的补法，并附一句「本次调用没有执行，禁止当成已验证」。`--deep` 的
+> 结论会写回同一份缓存，所以“目录在、但内核真的起不来”也能反过来拦住工具。
+> 探测本身出错（`probe_failed`）**不算缺件**：不拦调用、也不给安装命令。
+> 详见 [能力自检与自我修复](../architecture/20-能力自检与自我修复.md)。
+
+> ⚖️ **`/repair` 与 `/health caps --repair` 是同一个闸门**（六道门按序：总闸 → 单动作开关 →
+> 是否可代执行 → 体积硬上限 → `/away` 升回待批 → 超 200MB 先问，**yolo 也问**）。预计超 30s
+> 自动转后台任务。**修复记录不进 `/undo`**——四个动作写的全在工作区外（`%LOCALAPPDATA%` /
+> `~/.jarvis` / venv），检查点快照不到，所以只记手工退法。
 
 > 已加载的 Skill 也可直接作为斜杠命令调用：`/<skill-name> [参数]`（动态技能分发）。
 
@@ -210,7 +230,7 @@
 api_format = "openai"
 base_url = "https://api.deepseek.com/v1"
 api_key = "sk-your-deepseek-key"
-model_type = "text"              # "text" 纯文本 / "multimodal" 多模态
+model_type = "text"              # "text" 纯文本 / "multimodal" 多模态；没写按无视觉处理
 
 [llm.custom_models."glm-4.7-flash"]
 provider = "zhipu"

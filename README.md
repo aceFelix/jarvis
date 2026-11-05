@@ -134,9 +134,10 @@
 | 📱 **多端同会话** | jarvis-desktop 桌面壳 / 手机扫码 / 微信 ClawBot，三端共享同一会话 | [桌面与多端](docs/guide/desktop.md) |
 | 🧭 **管家运行时层** | permissions.yaml 路径级免确认 + 授权租约免打断 + 打扰预算削废话 + /away 无人值守待批清单（静默时段里你亲口设的提醒改为**上屏不出声**，可配同时发邮件） | [W1 运行时层](docs/architecture/16-W1判断层.md) |
 | 🧾 **敢放手的一层** | 发出去的邮件先进 30 秒待发窗口（`/undo cancel` 可拦，窗口未结案期间 `curl` 这类外发命令也会临时改问人），**替你改的文件在写入前自动留底，`/undo` 一条命令还原文（只动改过的那几个文件，不影响同批其它改动）**；"替我盯着这件事，条件到了再往下做"有跨会话任务脊柱承载，**一句话就能建目标**（`/tasks add …` 或对贾维斯说，等待期间一次 LLM 都不调） | [W3 兑现层](docs/architecture/18-W3兑现层.md) |
-| ⚙️ **配置不用翻文件** | 202 个配置项全能问：不知道某项干什么、在哪改，直接说「CPU 阈值太高了」——它查完告诉你这段在干什么、现在是多少、**要我改还是你自己改**（28 项直接改、29 项改前先确认；其余只给文件与段名）；`/config explain <关键词>` 同口径可自查。撞到只能手改的项会说清「这项**存在**，只是我不能代改」，不再含糊成「不认识」 | [配置系统](docs/architecture/12-配置系统.md) |
+| ⚙️ **配置不用翻文件** | 207 个配置项全能问：不知道某项干什么、在哪改，直接说「CPU 阈值太高了」——它查完告诉你这段在干什么、现在是多少、**要我改还是你自己改**（62 项能代改：29 项直接改、33 项改前先确认；其余 144 项只给文件与段名）；`/config explain <关键词>` 同口径可自查。撞到只能手改的项会说清「这项**存在**，只是我不能代改」，不再含糊成「不认识」 | [配置系统](docs/architecture/12-配置系统.md) |
 | 🧩 **开放生态** | MCP 接入、插件市场、Skill 技能包、CLI-Anything 把任意软件变工具、多 Agent 协作 | [扩展生态](docs/guide/ecosystem.md) |
 | 🧹 **清理 / 查毒 / 体检** | `/disk` 出可回收清单且能回答**“空间到底被谁占了”**（`--top` 目录体积排行）；`/clean` 走**隔离区**（移走而非复制，随时 `/clean --restore` 还原），其中**崩溃转储与错误上报队列删了完全无感，开了即可无人值守自动清**（`/clean --auto-status` 看名单，`/clean --auto` 立即跑）；`/health` 七区块体检（资源/磁盘/安全/进程/启动项/电源/温度）。杀软判定看 `SecurityCenter2` 而不只是 Defender 自身字段——**装了第三方杀软不会被误报“没有实时防护”**；非管理员读不到的区块**如实标注需提权**，不显 0 | [系统维护层](docs/architecture/19-系统维护层.md) |
+| 🩺 **知道自己缺什么** | `/health caps` 把 13 项能力实测自查（包 / 二进制 / **浏览器内核** / 凭据；`--deep` 真起一次浏览器、真截一帧屏拿证据）。缺件的工具**在调用前就拦住**并说清缺哪一条、实测依据、怎么补，回执里硬写「本次调用没有执行，禁止当成已验证」；`/repair` 让它自己补回缺件（四个白名单动作 + 六道门：超 200MB 就算 yolo 也要问、`/away` 一律升回待批、**修完必须复测才算成**）；模型无视觉时提示词改给替代手段降级链，截图回执只说「附上」不说「看见」 | [能力自检层](docs/architecture/20-能力自检与自我修复.md) |
 | 🔐 **安全底线** | 五层权限 + 四级沙箱 + 操作审计 + keyring 加密存储，危险操作硬阻断 | [核心机制](docs/guide/concepts.md#五层权限系统) |
 
 **接入自由**：支持 11 家厂商（阿里云 DashScope / DeepSeek / OpenAI / 智谱 / Anthropic / Kimi / MiniMax / SiliconFlow / 小米 MiMo / Google Gemini / 自定义兼容服务），`/models` 双击即改、运行中热切换。
@@ -157,7 +158,8 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - 不想装 Python、只想用图形界面？直接下载 [jarvis-desktop 安装包](https://github.com/aceFelix/jarvis-desktop/releases/latest)（Windows，免装 Python 双击即用）
 - 所有配置在 `~/.jarvis/`（settings.toml + models.toml），`/mode` 切换权限模式，`/think` 调深度思考
 - **懒得改配置就直接说**：“太吵了”“每天 7:15 给我出简报”“把我切窗口的记录关掉”——它自己改配置并当场生效，回执含原值多少、怎么 `/undo` 回退；沙箱开关与凭据一律拒绝（那是它该守的护栏）
-- 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置
+- 遇到功能不可用？`jarvis --doctor` 一键诊断依赖与配置；想知道它现在**到底能干什么、缺什么**，开聊后打 `/health caps`（加 `--deep` 让它真起一次浏览器给你看证据），缺的内核可以 `/repair` 让它自己装回来
+- 只装了核心依赖时，GUI / 浏览器 / 摄像头 / 语音这些可选能力按 8 个 extras 组安装（`gui` `browser` `mcp` `camera` `vision` `voice` `daemon` `wechat`）：`pip install "jarvis-agent[browser,gui,voice]"`，全部分组见 [安装指南](docs/guide/installation.md)；**playwright 的浏览器内核不在 pip 依赖里**，装完包还要 `python -m playwright install chromium`，或直接让 `/health caps browser.selfcheck --repair` 代跑
 - 启动后台检查新版本，发现更新提示 `/update` 一键升级（`--no-update-check` 可关闭）
 - 本仓库在 [GitCode](https://gitcode.com/acefelix/jarvis) 与 [GitHub](https://github.com/aceFelix/jarvis) 双平台同步托管，每次提交两边一并推送
 
@@ -183,6 +185,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 安全沙箱执行 | ✅ Job Object | 🟡 sandbox-exec | 🟡 rlimits |
 | MCP / Skill / Plugin / harness / 多 Agent / serve 后端 | ✅ | 🟡 | 🟡 |
 | 多端同会话（手机 PWA / 微信 ClawBot） | ✅ | 🟡 | 🟡 |
+| 能力自检 `/health caps` · 自我修复 `/repair` | ✅ | 🟡 未跑完整实机 | 🟡 未跑完整实机（截屏冒烟依赖 X） |
 | 系统维护 `/disk` `/clean` `/health` | ✅ | ⛔ 仅 Windows（PowerShell + SecurityCenter2 + 盘符 + cleanmgr） | ⛔ 仅 Windows |
 | jarvis-desktop 桌面壳安装包 | ✅ NSIS `.exe` | ⛔ 暂未提供 | ⛔ 暂未提供 |
 
@@ -201,10 +204,11 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 | 授权租约 / 打扰预算 / 无人值守 | [docs/architecture/16-W1判断层.md](docs/architecture/16-W1判断层.md) |
 | 撤销行动（`/undo`）/ 跨会话任务脊柱 | [docs/architecture/18-W3兑现层.md](docs/architecture/18-W3兑现层.md) |
 | 清理磁盘 / 查毒 / 性能体检（`/disk` `/clean` `/health`） | [docs/architecture/19-系统维护层.md](docs/architecture/19-系统维护层.md) |
+| 能力自查 / 缺件拦截 / 自我修复（`/health caps` `/repair`） | [docs/architecture/20-能力自检与自我修复.md](docs/architecture/20-能力自检与自我修复.md) |
 | 让它自己改配置（说了就改 / 能改什么 / 为什么要确认） | [docs/architecture/12-配置系统.md](docs/architecture/12-配置系统.md) |
 | 多 Agent / 插件 / CLI-Anything / 邮件 | [docs/guide/ecosystem.md](docs/guide/ecosystem.md) |
 | 配置项 / 厂商接入 / 常见问题 | [config-docs/](config-docs/configuration.md) |
-| 架构设计（19 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
+| 架构设计（20 篇） | [docs/architecture/](docs/architecture/00-索引.md) |
 | 测试 / CI / 发布 / 目录结构 | [docs/guide/development.md](docs/guide/development.md) |
 | 蓝图（愿景 · 能力模型 · 演进路线） | [docs/blueprint/BLUEPRINT.md](docs/blueprint/BLUEPRINT.md) |
 
@@ -222,8 +226,10 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——**后端已交付（374 例单测，全量 3205 例）**，含目标入口三件套（`/tasks add|show|approve|pause|resume|cancel|advance|delete` 子命令、`TrackGoal` 工具、serve `tasks.exec`/`actions.exec` RPC，共用 `core/tasks/spine_ops.py`）；两条一键实机命令：“不经模型”那一半 `python scripts/smoke_w3_spine.py`（40 项），**“到点真的自己把活干了并且真的能撤”那一半 `python scripts/livecheck_w3.py`（12 项，真 LLM）** —— 后者已于 2026-10-22 全绿跑穿，当场发现并修掉四条断链（子代理不继承宿主权限规则、受阻却谎报已完成、后台改动不入账、`[actions]` 对后台无效）；延时窗口一段则于 2026-10-21 跑穿（修了两处：等价通路绕道、`/undo --task` 归属断链）；同日补上「批准并重试」的真通路（`tasks.exec approve`：按本步被拒工具 + 目标目录 + 30 分钟签限定范围租约），并在 jarvis-desktop 仓接完右栏「跨会话目标」与「副作用账本」两个区块（那边 524 例 vitest 全绿）；尚未发布，只剩桌面实机渲染需人工走查
 - [x] **阶段 11**：感知层收编（把休眠的 `CalendarSource` / `SystemMonitor` 接进事件总线：日程临近每条只报一次、资源阈值告警复用 monitor 冷却；面板同步放开这两个开关，唯一仍未收编的 `schedule` 因会重复播报而刻意不接）
 - [x] **阶段 12（系统维护切片）**：清理 / 查毒 / 性能诊断（蓝图 6.1 / 6.2 / 6.4）——已随 v2.3.2 发布：声明式规则库（19 条）+ 隔离区式可撤销清理 + Defender 编排（以 `SecurityCenter2` 的 `productState` 为权威源）+ 七区块体检 + 零感知垃圾无人值守自动清理；`/disk` `/clean` `/health` 三条命令、`DiskReport` / `DiskClean` / `SystemHealth` 三个工具、`[maintenance]` 十二个配置项；维护层 139 例 + 采样 19 例单测，全量 4076 passed；本机（非管理员、Defender 被第三方接管）跑穿隔离区闭环与体检。设计与实测数据见 [19-系统维护层](docs/architecture/19-系统维护层.md)
+- [x] **阶段 13**：能力自检与自我修复——新增 `agent/capabilities/`（13 项能力实测：静态探针 + 子进程冒烟档真起一次）、编排器**调用前能力门**（含两条不经它的逃逸路径）、`/health caps` 全族与 `/repair` 急停开关、`[repair]` 五项配置与四个白名单修复动作（超 200MB 先问、`/away` 升回待批、修完必复测、不进 `/undo`）；另补**模型能力面**（`model_type` 改三值，`unknown` 不再被当成“有视觉”）。能力层 151 例 + 模型能力面 80 例，五个变异全部被测试抓到；设计与取舍见 [20-能力自检与自我修复](docs/architecture/20-能力自检与自我修复.md)，执行计划与逐段实做记录见 [capability-selfcheck.md](docs/plans/capability-selfcheck.md)
 
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
+> 阶段 12 / 13 的**编号口径**（本文与蓝图曾各指一件事）见蓝图 §9.4 说明。
 
 ## 反馈声明
 
