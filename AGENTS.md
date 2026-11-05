@@ -111,3 +111,7 @@ Do not preload, guess, or reconstruct these specialized workflows. The relevant 
   3 个文件无条目，直到合完一个无关分支才被 `check` 撞出来。
 - **上一笔业务提交若是别人（或另一个 agent）做的，自己接手收尾时先跑一次 `check`**，
   别假定索引是绿的：漏刷不报错，只会静默降级。
+- **改托管文件时如果行数跨了档，同一次 `maintain` 里把 E 一起改。** 机器每次 apply
+  都会把实测行数和应有档位直接报给你（`E scale mismatch: ... update the E tag with
+  this write`），忽略它只是把 warning 攒给下一个人。2026-11-05 一次全量扫出 28 条
+  偏档、其中 14 条从没被任何人回头看——**告警是给了的，缺的是当场改。**
