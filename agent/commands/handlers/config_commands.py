@@ -48,6 +48,7 @@ from agent.config.config_specs import (
     read_value,
     validate_value,
 )
+from agent.llm.model_capability import describe_model_type
 from agent.ui.markdown_renderer import render_table, render_panel
 from agent.utils.mask import mask_key as _mask_key
 
@@ -223,8 +224,9 @@ def _show_custom_models(ui: RichCLI, settings: Any) -> None:
             continue
         vendor = cfg.get("vendor", "?")
         api_fmt = cfg.get("provider_type", "?")
-        mtype = cfg.get("model_type", "?")
-        mtype_label = "多模态" if mtype == "multimodal" else "纯文本"
+        # 三态：没写 model_type 的旧配置以前会被念成“多模态”
+        # @author aceFelix
+        mtype_label = describe_model_type(cfg.get("model_type"))
         api_key_val = _mask_key(cfg.get("api_key", "")) if cfg.get("api_key") else "(使用环境变量)"
         rows.append([name, vendor, api_fmt, mtype_label, api_key_val])
 

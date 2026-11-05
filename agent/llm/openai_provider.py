@@ -38,6 +38,13 @@ from agent.llm.base import (
     ToolDef,
     Usage,
 )
+# 图片能不能发出去 = 模型有没有视觉能力，这个判断只应该有一个出处（S5）。
+# @author aceFelix
+from agent.llm.model_capability import (
+    IMAGE_OMITTED_NOTE,
+    MODEL_TYPE_UNKNOWN,
+    model_has_vision,
+)
 
 
 def _messages_to_openai(
@@ -49,8 +56,9 @@ def _messages_to_openai(
     - assistant 的 tool_use -> message["tool_calls"]
     - user 的 tool_result -> role="tool" 的独立 message
 
-    skip_images=True 时（纯文本模型），图片块转为文本占位符，
-    避免 API 报错（很多文本模型不接受 image_url content part）。
+    skip_images=True 时（无视觉能力的模型），图片块转为文本占位符：纯文本
+    模型不接受 image_url content part，而 unknown 下送图还可能被判非法请求。
+    宁缺勿滥，且要把「省略了」告诉模型，不能默默抽掉。
 
     出口兜底：转换前先跑 ensure_tool_pairing，保证每个 tool_call 后面都有配对的
     role="tool" 消息（悬空调用会被 OpenAI 兼容接口整体拒收）。
@@ -118,9 +126,16 @@ def _messages_to_openai(
                 elif isinstance(b, ToolResultContent):
                     tool_results.append(b)
 
-            if has_user_image and skip_images and user_content:
-                # 纯文本模型：用文字描述替代图片
-                user_content[0]["text"] += "\n[附带图片（当前为纯文本模型，图片已省略）]"
+            if has_user_image and skip_images:
+                # 无视觉能力：用文字说明替掉图片，而不是默默抽走。
+                # 「纯图片消息」（没有文字块可挂）必须兜住：直接丢掉会让用户这一条
+                # 整条消失——模型侧连“收到过但没发图”的痕迹都没有，比省略更错。
+                # @author aceFelix
+                note = f"\n[附带图片{IMAGE_OMITTED_NOTE}]"
+                if user_content:
+                    user_content[0]["text"] += note
+                else:
+                    user_content.append({"type": "text", "text": note.lstrip("\n")})
 
             # 顺序铁律：role="tool" 消息必须紧跟 assistant 的 tool_calls，
             # 故先输出 tool 消息、再输出 user 消息。配对修复会把占位 tool_result
@@ -130,10 +145,10 @@ def _messages_to_openai(
             for b in tool_results:
                 if b.images:
                     if skip_images:
-                        # 纯文本模型：用文字描述替代图片
+                        # 无视觉能力：写清省略了几张图（措辞与另两家同源）
                         img_count = len(b.images)
                         tool_content = (
-                            b.content + f"\n[附带 {img_count} 张图片（当前为纯文本模型，图片已省略）]"
+                            b.content + f"\n[附带 {img_count} 张图片{IMAGE_OMITTED_NOTE}]"
                         )
                     else:
                         # OpenAI 规范要求 role="tool" 的 content 为 string；
@@ -225,7 +240,7 @@ class OpenAIProvider(LLMProvider):
         *,
         enable_thinking: bool = True,
         thinking_budget: int = 2000,
-        model_type: str = "multimodal",
+        model_type: str = MODEL_TYPE_UNKNOWN,
         dedicated_client: bool = False,
     ) -> None:
         try:
@@ -238,7 +253,7 @@ class OpenAIProvider(LLMProvider):
             self.default_model = model
         self._enable_thinking = enable_thinking
         self._thinking_budget = thinking_budget
-        self._model_type = model_type  # "text" 或 "multimodal"
+        self._model_type = model_type  # "text" / "multimodal" / "unknown"
         self._base_url = base_url or ""
         # _force_no_thinking: 强制关闭思考的兜底标志（即使 _enable_thinking=True 也不发 enable_thinking）
         # voice_loop 语音模式用 set_thinking_enabled(False) 统一控制，内部同时管理这两个标志。
@@ -308,11 +323,20 @@ class OpenAIProvider(LLMProvider):
         return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
-        """动态切换模型类型（multimodal / text）。
+        """动态切换模型类型（multimodal / text / unknown）。
 
         切换模型时可能复用同一个 provider 实例，但需要改变图片处理方式。
         """
         self._model_type = model_type
+
+    @property
+    def has_vision(self) -> bool:
+        """当前是否会把图片真送出去（只有明确 multimodal 算 True）。
+
+        给上层（回执 / 健康检查 / 桌面壳）看的只读窗口：它们需要知道
+        「图片到底走不走」，但不应该自己再写一份 ``== "text"`` 判断。
+        """
+        return model_has_vision(self._model_type)
 
     @staticmethod
     def _derive_name(base_url: str) -> str:
@@ -334,7 +358,12 @@ class OpenAIProvider(LLMProvider):
         temperature: float | None = None,
         known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
-        api_msgs = _messages_to_openai(messages, system, skip_images=(self._model_type == "text"))
+        # 无视觉能力（纯文本或未确认）时不发图片块：判据走 model_has_vision，
+        # 不在此处写 == "text"（那样 unknown 会被当成有视觉）。
+        # @author aceFelix
+        api_msgs = _messages_to_openai(
+            messages, system, skip_images=not model_has_vision(self._model_type)
+        )
         tool_schemas = [
             {
                 "type": "function",

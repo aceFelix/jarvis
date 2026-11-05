@@ -14,6 +14,7 @@ import threading
 from typing import Any, AsyncIterator
 
 from agent.core.message import (
+    ImageContent,
     Message,
     TextContent,
     ThinkingContent,
@@ -32,12 +33,22 @@ from agent.llm.base import (
     ToolDef,
     Usage,
 )
+# 图片去向的唯一裁决点（S5）：以前非多模态这一支把图片块静默丢掉，
+# 模型看到的是“什么都没有”，而不是“图片没发给我”。
+# @author aceFelix
+from agent.llm.model_capability import (
+    IMAGE_OMITTED_NOTE,
+    MODEL_TYPE_UNKNOWN,
+    model_has_vision,
+)
 
 
 def _messages_to_dashscope(messages: list[Message], system: str) -> list[dict[str, Any]]:
     """把 agent.core 消息翻译成 DashScope Generation 格式（content 为字符串）。
 
-    用于纯文本模型（qwen-plus / qwen-max / deepseek-v4-pro 等）。
+    用于无视觉能力的模型（qwen-plus / qwen-max / deepseek-v4-pro 等，以及未确认
+    类型的模型）。DashScope 的 Generation 接口不接受图片块，所以这里不送图；
+    但必须把「原本有 N 张图被省略」写回文本，否则模型无从知道自己错过了什么。
     """
     out: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for msg in messages:
@@ -70,15 +81,23 @@ def _messages_to_dashscope(messages: list[Message], system: str) -> list[dict[st
             if tool_results:
                 for tr in tool_results:
                     # ToolResultContent 的属性是 tool_use_id 和 content（不是 id/output）
+                    content = tr.content
+                    if tr.images:
+                        # 带图的结果不能只留前半句文字：写清省略了几张图。
+                        content = content + f"\n[附带 {len(tr.images)} 张图片{IMAGE_OMITTED_NOTE}]"
                     out.append({
                         "role": "tool",
                         "tool_call_id": tr.tool_use_id,
-                        "content": tr.content,
+                        "content": content,
                     })
-            # 普通 user 文本
+            # 普通 user 文本（+ 用户自己贴的图片在这里发不出去，写清被省略了几张）
             text_parts = [b.text for b in msg.content if isinstance(b, TextContent)]
-            if text_parts:
-                out.append({"role": "user", "content": "".join(text_parts)})
+            img_count = sum(1 for b in msg.content if isinstance(b, ImageContent))
+            if text_parts or img_count:
+                body = "".join(text_parts)
+                if img_count:
+                    body += f"\n[附带 {img_count} 张图片{IMAGE_OMITTED_NOTE}]"
+                out.append({"role": "user", "content": body})
         else:
             out.append({"role": msg.role, "content": msg.get_text()})
     return out
@@ -94,7 +113,6 @@ def _messages_to_dashscope_multimodal(
 
     skip_images=True 时（纯文本模式兜底），图片块转为文本占位符，避免 API 报错。
     """
-    from agent.core.message import ImageContent
 
     def _to_content_list(text: str = "", images: list | None = None) -> list[dict[str, Any]]:
         """构造 MultiModalConversation 的 content list。"""
@@ -184,7 +202,7 @@ class DashScopeProvider(LLMProvider):
         model: str | None = None,
         enable_thinking: bool = True,
         thinking_budget: int = 2000,
-        model_type: str = "multimodal",
+        model_type: str = MODEL_TYPE_UNKNOWN,
     ) -> None:
         import dashscope
 
@@ -237,8 +255,17 @@ class DashScopeProvider(LLMProvider):
         return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
-        """动态切换模型类型（multimodal / text）。"""
+        """动态切换模型类型（multimodal / text / unknown）。
+
+        它直接决定走哪个端点（MultiModalConversation 还是 Generation），所以切
+        型不能漏：漏一次就会把图片发进不接受图片的端点（或反过来）。
+        """
         self._model_type = model_type
+
+    @property
+    def has_vision(self) -> bool:
+        """当前是否会把图片真送出去（也只有明确 multimodal 算 True）。"""
+        return model_has_vision(self._model_type)
 
     async def stream(
         self,
@@ -254,9 +281,11 @@ class DashScopeProvider(LLMProvider):
         # 根据 model_type 选择 API：
         # - multimodal → MultiModalConversation.call()（multimodal-generation 端点）
         #   用于 qwen3.5-flash / qwen-vl-plus 等视觉模型，用 Generation.call() 会报 "400 url error"
-        # - text → Generation.call()（text-generation 端点）
-        #   用于 qwen-plus / qwen-max / deepseek-v4-pro 等纯文本模型
-        use_multimodal = self._model_type == "multimodal"
+        # - text / unknown → Generation.call()（text-generation 端点）
+        #   用于 qwen-plus / qwen-max / deepseek-v4-pro 等纯文本模型；unknown（没人
+        #   声明过视觉能力）也走这一支，判据走 model_has_vision 而不是 == "text"，
+        #   否则“不知道”又被当成“有”。
+        use_multimodal = model_has_vision(self._model_type)
         if use_multimodal:
             from dashscope import MultiModalConversation as _Api
             api_msgs = _messages_to_dashscope_multimodal(messages, system)

@@ -270,6 +270,11 @@ def upsert_custom_model(name: str, config: dict[str, str]) -> bool:
     @author aceFelix
     """
     path = user_models_path()
+    # 局部导入：config 层不反向依赖 llm 层（这个模块只取常量与纯函数，本身零
+    # SDK 依赖，import 成本约等于查一次 sys.modules）。
+    # @author aceFelix
+    from agent.llm.model_capability import normalize_model_type
+
     try:
         text, eol = _read_or_seed(path)
         body = [f'name = "{name}"']
@@ -279,7 +284,9 @@ def upsert_custom_model(name: str, config: dict[str, str]) -> bool:
             body.append(f'base_url = "{config["base_url"]}"')
         body += [
             f'provider_type = "{config.get("provider_type", "openai")}"',
-            f'model_type = "{config.get("model_type", "multimodal")}"',
+            # 没写就落 unknown，不落 multimodal：写盘是「把当前认知记下来」而不是
+            # 「替用户猜一个」。unknown 读回来会按无视觉处理，且在 /models 里看得见。
+            f'model_type = "{normalize_model_type(config.get("model_type"))}"',
             f'vendor = "{config.get("vendor", "dashscope")}"',
         ]
         text = upsert_table_block(text, f'[llm.custom_models."{name}"]', body)

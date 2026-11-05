@@ -29,14 +29,29 @@ from agent.llm.base import (
     Usage,
 )
 from agent.llm.cache_policy import CACHE_POLICIES
+# 图片能否随消息发出 = 模型有没有视觉能力，判据与 openai/dashscope/zai 同一出处。
+# 以前这一家完全没有 skip_images 分支：纯文本模型走 Anthropic 兼容端点时图片照送。
+# @author aceFelix
+from agent.llm.model_capability import (
+    IMAGE_OMITTED_NOTE,
+    MODEL_TYPE_UNKNOWN,
+    model_has_vision,
+)
 # 文本态工具调用兜底：DeepSeek 等 Anthropic 兼容端点偶发把工具调用以 DSML 文本吐进
 # text block（服务端没拦成 tool_use block），没有兜底时裸码会原样回显且工具不触发。
 # @author aceFelix
 from agent.llm.text_tool_calls import TextualToolCallGuard
 
 
-def _block_to_anthropic(block: Any) -> dict[str, Any]:
-    """把 agent.core 内容块翻译成 Anthropic content 格式。"""
+def _block_to_anthropic(block: Any, *, skip_images: bool = False) -> dict[str, Any]:
+    """把 agent.core 内容块翻译成 Anthropic content 格式。
+
+    skip_images=True（纯文本或未确认视觉能力）时，图片块换成一句文字省略说明：
+    默默抽掉会让模型以为屏幕上什么都没有，而它其实只是没收到。
+    （与 openai_provider 同一口径，措辞共用 IMAGE_OMITTED_NOTE）
+
+    @author aceFelix
+    """
     if isinstance(block, TextContent):
         return {"type": "text", "text": block.text}
     if isinstance(block, ToolUseContent):
@@ -48,6 +63,8 @@ def _block_to_anthropic(block: Any) -> dict[str, Any]:
         }
     if isinstance(block, ImageContent):
         # 用户直接传入的图片（/image /paste）
+        if skip_images:
+            return {"type": "text", "text": f"[附带图片{IMAGE_OMITTED_NOTE}]"}
         return {
             "type": "image",
             "source": {
@@ -59,7 +76,7 @@ def _block_to_anthropic(block: Any) -> dict[str, Any]:
     if isinstance(block, ToolResultContent):
         # 多模态: 带 images 时 content 序列化成 [text, image...] 列表，
         # 让支持视觉的 Claude 直接看到图片（如 ScreenShot 截图回传）。
-        if block.images:
+        if block.images and not skip_images:
             content_list: list[dict[str, Any]] = [
                 {"type": "text", "text": block.content}
             ]
@@ -80,17 +97,27 @@ def _block_to_anthropic(block: Any) -> dict[str, Any]:
                 "content": content_list,
                 "is_error": block.is_error,
             }
+        if block.images:
+            # 无视觉能力：tool_result 收成单串文本（OpenAI 系同样要求 tool 消息为
+            # string），并写清图片被省略了多少张。
+            text = block.content + f"\n[附带 {len(block.images)} 张图片{IMAGE_OMITTED_NOTE}]"
+        else:
+            text = block.content
         return {
             "type": "tool_result",
             "tool_use_id": block.tool_use_id,
-            "content": block.content,
+            "content": text,
             "is_error": block.is_error,
         }
     raise ValueError(f"Unknown content block: {block!r}")
 
 
-def _messages_to_anthropic(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
+def _messages_to_anthropic(
+    messages: list[Message], *, skip_images: bool = False
+) -> tuple[str, list[dict[str, Any]]]:
     """转换对话历史。system 消息提取出来单独返回（Anthropic API 要求）。
+
+    skip_images 逐块透传给 _block_to_anthropic（图片与带图 tool_result 在那一层翻译）。
 
     出口兜底：转换前先跑 ensure_tool_pairing，保证每个 tool_use 后面都有配对的
     tool_result（悬空调用会让请求在受理前就被拒收，用户表现为该会话永久失败，
@@ -107,7 +134,7 @@ def _messages_to_anthropic(messages: list[Message]) -> tuple[str, list[dict[str,
         # 过滤掉 ThinkingContent：思考内容是模型内部状态，
         # DeepSeek 等第三方 anthropic 兼容端点不支持 thinking block，
         # 传过去会报 "Unknown content block" 错误
-        blocks = [_block_to_anthropic(b) for b in msg.content
+        blocks = [_block_to_anthropic(b, skip_images=skip_images) for b in msg.content
                   if not isinstance(b, ThinkingContent)]
         if not blocks:
             # 空 content 会被 Anthropic 拒收（如只含 thinking 的消息）。补占位文本
@@ -127,7 +154,23 @@ class AnthropicProvider(LLMProvider):
 
     default_model = "claude-3-5-sonnet-20241022"
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model_type: str = MODEL_TYPE_UNKNOWN,
+    ) -> None:
+        """初始化 Anthropic 客户端。
+
+        Args:
+            api_key: Anthropic API Key。
+            base_url: 自定义 endpoint（DeepSeek 等 Anthropic 兼容端点）。
+            model_type: 视觉能力（"multimodal" / "text" / "unknown"），控制图片块
+                是否随消息发送。默认 unknown：这一家以前根本没有这个参数，
+                图片对任何模型都照送，“没确认过的就当作有”正是本次修的错。
+
+        @author aceFelix
+        """
         try:
             import anthropic  # type: ignore
         except ImportError as e:  # pragma: no cover
@@ -140,6 +183,7 @@ class AnthropicProvider(LLMProvider):
         if base_url:
             kwargs["base_url"] = base_url
         self._client = anthropic.AsyncAnthropic(**kwargs)
+        self._model_type = model_type  # "text" / "multimodal" / "unknown"
         # 根据 base_url 推断实际后端名（如 deepseek 走 anthropic 兼容协议时显示 deepseek）
         self._display_name = self._derive_name(base_url or "")
         # 思考模式标志：默认开启（与 OpenAI Provider 的 enable_thinking=True 保持一致）。
@@ -170,6 +214,22 @@ class AnthropicProvider(LLMProvider):
         if "anthropic.com" in url_lower:
             return "anthropic"
         return "anthropic_compatible"
+
+    def set_model_type(self, model_type: str) -> None:
+        """动态切换模型类型（multimodal / text / unknown）。
+
+        与其他三家同接口：`model_manager` 切模型时会复用同一个 provider 实例，
+        靠 ``hasattr(provider, "set_model_type")`` 同步图片处理口径——这一家以前
+        没有该方法，所以切完模型图片通路停在旧值上。
+
+        @author aceFelix
+        """
+        self._model_type = model_type
+
+    @property
+    def has_vision(self) -> bool:
+        """当前是否会把图片真送出去（只有明确 multimodal 算 True）。"""
+        return model_has_vision(self._model_type)
 
     def set_thinking_enabled(self, enabled: bool) -> None:
         """统一开关深度思考模式。
@@ -211,7 +271,9 @@ class AnthropicProvider(LLMProvider):
         known_tool_names: set[str] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         # 把 agent.core 消息合并进 system
-        sys_from_msgs, api_msgs = _messages_to_anthropic(messages)
+        sys_from_msgs, api_msgs = _messages_to_anthropic(
+            messages, skip_images=not model_has_vision(self._model_type)
+        )
         full_system = "\n\n".join(p for p in [system, sys_from_msgs] if p)
 
         tool_defs = [

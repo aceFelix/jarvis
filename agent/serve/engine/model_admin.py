@@ -23,10 +23,14 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from agent.config.settings import Settings
+from agent.llm.model_capability import BUILTIN_MODEL_TYPE, MODEL_TYPES, vision_form_default
 
 # 接口类型 / 模型类型枚举（与 serve `_rpc_models_add` 白名单、REPL 表单选项一致）
 VALID_API_FORMATS: tuple[str, ...] = ("openai", "anthropic", "dashscope", "zai")
-VALID_MODEL_TYPES: tuple[str, ...] = ("text", "multimodal")
+# 直接引用唯一裁决点的三值：以前这里自己抄了一份 ("text", "multimodal")，
+# 而 unknown 是历史配置读回来的合法值，拒绝它等于把旧配置当成非法输入。
+# @author aceFelix
+VALID_MODEL_TYPES: tuple[str, ...] = MODEL_TYPES
 
 
 def _infer_model_vendor(name: str, cfg: dict | None) -> str:
@@ -87,6 +91,10 @@ def _edit_defaults(settings: Settings, name: str, cfg: dict) -> dict[str, str]:
 
     内置模型未加过覆盖配置时，端点取自 ``default_*``（last_model 覆盖前的原始
     值），否则会把自定义模型的端点当成内置默认值填进去。
+
+    注意：返回的是「表单能选的值」（只有 text/multimodal 两项），不是模型的客观
+    状态。列表里要给用户看的标签请走 ``vision_tag``，不要拿这里的值反推——
+    unknown 在这会被映射成 text，那只是表单的保守默认位，不是一个结论。
     """
     vendor = (
         cfg.get("provider")
@@ -110,7 +118,13 @@ def _edit_defaults(settings: Settings, name: str, cfg: dict) -> dict[str, str]:
         "vendor": str(vendor),
         "api_format": str(api_format),
         "base_url": str(base_url),
-        "model_type": str(cfg.get("model_type") or "multimodal"),
+        # 表单只认 text/multimodal：把未确认的配置映射到保守那一边，而不是像以前
+        # 那样用 `or "multimodal"` 把 unknown 当成多模态预填进表单（用户没改一个字
+        # 就保存，会把一个猜的值当成自己确认过的）。
+        # @author aceFelix
+        "model_type": vision_form_default(
+            cfg.get("model_type") if cfg else BUILTIN_MODEL_TYPE
+        ),
         "has_key": bool(cfg.get("api_key") or settings.api_key),
     }
 

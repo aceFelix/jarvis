@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agent.llm.model_capability import vision_tag
 from agent.model_manager import (
     _MODEL_VENDOR_OPTIONS,
     _VENDOR_LABELS,
@@ -44,8 +45,7 @@ async def handle_models(ctx: "CommandContext", stripped: str) -> bool:
         for k, v in settings.models.items():
             if k in settings.custom_models and isinstance(settings.custom_models[k], dict):
                 cfg = settings.custom_models[k]
-                mtype = cfg.get("model_type", "multimodal")
-                prefix = "[文本]" if mtype == "text" else "[多模态]"
+                prefix = f"[{vision_tag(cfg.get('model_type'))}]"
                 desc = f"{prefix} {v}  ✎ 已自定义配置"
                 custom_names.add(k)
             else:
@@ -60,8 +60,7 @@ async def handle_models(ctx: "CommandContext", stripped: str) -> bool:
             if cname in builtin_names:
                 continue
             desc = cfg.get("name", cname)
-            mtype = cfg.get("model_type", "multimodal")
-            prefix = "[文本]" if mtype == "text" else "[多模态]"
+            prefix = f"[{vision_tag(cfg.get('model_type'))}]"
             vendor = _infer_model_vendor(cname, cfg)
             vendor_to_items[vendor].append((cname, cname, f"{prefix} {desc}"))
             custom_names.add(cname)
@@ -173,8 +172,9 @@ async def handle_model(ctx: "CommandContext", stripped: str) -> bool:
                 match_items.append((m, m, settings.models[m]))
             elif m in settings.custom_models:
                 cfg = settings.custom_models[m]
-                mtype = cfg.get("model_type", "multimodal") if isinstance(cfg, dict) else "multimodal"
-                prefix_label = "[文本]" if mtype == "text" else "[多模态]"
+                # 配置不是 dict（写坏了）也不能念成多模态：交给 vision_tag 归入未确认
+                raw = cfg.get("model_type") if isinstance(cfg, dict) else None
+                prefix_label = f"[{vision_tag(raw)}]"
                 match_items.append((m, m, f"{prefix_label} {cfg.get('name', m)}"))
         picked = pick_from_list(match_items, title=f"「{want}」匹配 {len(matches)} 个模型", current=ctx.model)
         if picked:

@@ -64,11 +64,20 @@ class TestMessagesToOpenAI:
         }
 
     def test_skip_images_only_image_no_text(self) -> None:
-        """纯文本模式下只有图片（无文本）→ 不产出 user 消息（无内容可发）。"""
+        """只有图片、没有文字的 turn：仍要留下一条带省略说明的 user 消息。
+
+        2026-11-05 行为变更（S5）：旧断言是 `len(out) == 1`（整条丢弃，理由“无内容
+        可发”）。但用户确实发了东西：整条消失后，模型连“这里原本有一张图”都不知
+        道，而回执与界面都显示已发送——那正是 S5 要消除的“两边各自以为对方知道”。
+        留下一句文字占位不违反任何协议约束（普通 text 块），代价为零。
+        同口径的新用例见 tests/llm/test_model_capability.py。
+        @author aceFelix
+        """
         img = ImageContent(data="AAA", media_type="image/png")
         msgs = [Message(role="user", content=[img])]
         out = _messages_to_openai(msgs, "sys", skip_images=True)
-        assert len(out) == 1  # 只有 system
+        assert len(out) == 2  # system + 一句省略说明
+        assert "图片已省略" in out[1]["content"][0]["text"]
 
     def test_skip_images_with_text_placeholder(self) -> None:
         """纯文本模式：图片 + 文本 → 文本后追加占位符。"""

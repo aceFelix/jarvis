@@ -12,6 +12,15 @@ from typing import Any
 
 from agent.config.settings import Settings
 from agent.core.query_loop import QueryLoop
+from agent.llm.model_capability import (
+    BUILTIN_MODEL_TYPE,
+    MODEL_TYPE_MULTIMODAL,
+    MODEL_TYPE_TEXT,
+    describe_model_type,
+    normalize_model_type,
+    resolve_model_type,
+    vision_form_default,
+)
 from agent.ui.cli import RichCLI
 
 
@@ -33,6 +42,18 @@ _MODEL_VENDOR_OPTIONS: list[tuple[str, str]] = [
 
 # 厂商 value → 显示名，用于 /models 列表分组标题。
 _VENDOR_LABELS: dict[str, str] = {value: label for value, label in _MODEL_VENDOR_OPTIONS}
+
+# 模型类型表单选项。添加、改自定义、改内置三处表单共用（以前各抄一份，
+# 改选项时容易漏掉一处，而三处的默认值确实曾不一致）。
+#
+# 为什么没有 unknown 这一项：选项是要用户拿主意的决定，而“我不知道”不是一个
+# 可执行的决定——没确认过的配置打开表单时映射到保守那一边（vision_form_default），
+# 用户看过一眼表单保存后它就从 unknown 变成确定值，这正是我们想要的。
+# @author aceFelix
+_MODEL_TYPE_OPTIONS: list[tuple[str, str]] = [
+    (MODEL_TYPE_MULTIMODAL, "多模态 - 支持图片识别"),
+    (MODEL_TYPE_TEXT, "纯文本 - 禁用视觉（省 token）"),
+]
 
 
 __all__ = [
@@ -159,11 +180,9 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
         {
             "name": "模型类型",
             "type": "select",
-            "options": [
-                ("multimodal", "多模态 - 支持图片识别"),
-                ("text", "纯文本 - 禁用视觉（省 token）"),
-            ],
-            "default": "text",
+            "options": _MODEL_TYPE_OPTIONS,
+            # 新模型保守给 text（见 docs/roadmap/PLAN-self-config.md P4 记录 ②）
+            "default": MODEL_TYPE_TEXT,
         },
     ]
 
@@ -202,7 +221,7 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
         from agent.config.settings import save_custom_model
         if save_custom_model(name, config):
             settings.custom_models[name] = config
-            mlabel = "多模态" if model_type == "multimodal" else "纯文本"
+            mlabel = describe_model_type(model_type)
             ui.info(f"模型「{name}」已添加并保存（{mlabel}）")
             return True
         else:
@@ -264,8 +283,9 @@ def _edit_custom_model(ui: RichCLI, settings: Settings, name: str) -> str | None
         {"name": "Base URL", "type": "text", "default": cfg.get("base_url", "")},
         {
             "name": "模型类型", "type": "select",
-            "options": [("multimodal", "多模态 - 支持图片识别"), ("text", "纯文本 - 禁用视觉（省 token）")],
-            "default": cfg.get("model_type", "text"),
+            "options": _MODEL_TYPE_OPTIONS,
+            # 历史配置可能没写 model_type → unknown，表单上落到保守的一边（text）
+            "default": vision_form_default(cfg.get("model_type")),
         },
     ]
 
@@ -349,12 +369,13 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> str | Non
         else:
             default_base_url = existing.get("base_url", default_base_url) or default_base_url
         default_api_key = existing.get("api_key", default_api_key) or default_api_key
-        default_model_type = existing.get("model_type", "multimodal")
+        # 已有覆盖配置但没写 model_type → unknown（不能替用户猜成多模态）
+        default_model_type = normalize_model_type(existing.get("model_type"))
     else:
         # 未覆盖时，若顶层 api_format 是 dashscope 或 zai，base_url 也用空（避免误导）
         if default_api_fmt in ("dashscope", "zai"):
             default_base_url = ""
-        default_model_type = "multimodal"
+        default_model_type = BUILTIN_MODEL_TYPE
 
     fields = [
         {
@@ -376,8 +397,8 @@ def _edit_builtin_model(ui: RichCLI, settings: Settings, name: str) -> str | Non
         {"name": "Base URL", "type": "text", "default": default_base_url},
         {
             "name": "模型类型", "type": "select",
-            "options": [("multimodal", "多模态 - 支持图片识别"), ("text", "纯文本 - 禁用视觉（省 token）")],
-            "default": default_model_type,
+            "options": _MODEL_TYPE_OPTIONS,
+            "default": vision_form_default(default_model_type),
         },
     ]
 
@@ -576,7 +597,8 @@ def _build_switched_provider(
             vendor_changed,
         ))
 
-        mtype = cfg.get("model_type", "multimodal")
+        # 没写或写法认不出来 → unknown（provider 会按无视觉处理），不再默认多模态
+        mtype = normalize_model_type(cfg.get("model_type"))
         if needs_new_provider:
             # 克隆 settings 并覆盖为自定义模型配置：端点用「显式配置 > 按厂商推断 >
             # 继承当前」（推断不出保持旧行为，不增加「切不过去」的新失败），密钥用上面
@@ -592,7 +614,7 @@ def _build_switched_provider(
             new_provider = _build_provider(custom_settings, model_type=mtype)
             used_settings = custom_settings
         else:
-            # 复用同一个 provider，但必须同步 model_type（同厂商不同模型可能是 text/multimodal）
+            # 复用同一个 provider，但必须同步 model_type（同厂商不同模型可能是 text/multimodal/unknown）
             if hasattr(new_provider, "set_model_type"):
                 new_provider.set_model_type(mtype)
             # 复用 → 端点配置仍是入参快照描述的那份
@@ -611,18 +633,38 @@ def _build_switched_provider(
             )
         else:
             clean_settings = settings
-        new_provider = _build_provider(clean_settings, model_type="multimodal")
+        # 内置模型走 resolve：有覆盖配置（/models 改内置模型写的就是 custom_models）
+        # 时拿用户声明的值，没有才用发货清单的 BUILTIN_MODEL_TYPE。
+        # 以前这里硬写 "multimodal"，等于把刚编辑过的覆盖配置当成不存在。
+        # @author aceFelix
+        new_provider = _build_provider(
+            clean_settings, model_type=resolve_model_type(clean_settings, model_name)
+        )
         used_settings = clean_settings
 
-    # 文本模型添加视觉禁用提示（desc 取自当前快照的模型表，与 UI 展示口径一致）
+    # 视觉能力提示（desc 取自当前快照的模型表，与 UI 展示口径一致）。
+    # 三态而不是两态：把 unknown 念成“多模态”是同一句谎的另一个说法。
+    # @author aceFelix
     model_desc = settings.models.get(model_name, "")
     if model_name in settings.custom_models:
-        cfg = settings.custom_models[model_name]
-        if cfg.get("model_type") == "text":
-            model_desc = f"纯文本（{model_desc or cfg.get('name', model_name)}）"
-        else:
-            model_desc = f"多模态（{model_desc or cfg.get('name', model_name)}）"
+        raw = settings.custom_models[model_name]
+        cfg = raw if isinstance(raw, dict) else {}
+        label = describe_model_type(cfg.get("model_type"))
+        model_desc = f"{label}（{model_desc or cfg.get('name', model_name)}）"
     return new_provider, model_desc, used_settings
+
+
+def _vision_flipped(old: object, new: object) -> bool:
+    """两个 provider 之间「图片能不能进模型」是否翻转。
+
+    供 REPL 切换与工作台热切换共用（两边都需要知道要不要重拼提示词）。
+
+    没有 ``has_vision`` 属性（测试替身、mock provider）时按「有视觉」处理：宁可
+    多拼一次提示词（代价是丢一段前缀缓存），也不要漏掉真需要降级约束的那次切换。
+
+    @author aceFelix
+    """
+    return bool(getattr(old, "has_vision", True)) != bool(getattr(new, "has_vision", True))
 
 
 def _switch_model(
@@ -660,6 +702,15 @@ def _switch_model(
     )
     # 记录当前模型名，供下次 _switch_model 判断是否需要重置
     new_provider._model = model_name
+
+    # 图片通路翻转 → 重拼 system prompt：视觉输入段是按切换前的模型拼的，切到
+    # 无视觉模型却留着「你能看图」的提示词，本次修复就只在 provider 层生效。
+    # 只在翻转时重拼：不翻转不该白白丢掉整段前缀缓存。
+    # @author aceFelix
+    if _vision_flipped(provider, new_provider) and registry is not None:
+        from agent.prompts.system import compose_system_prompt
+
+        system_prompt = compose_system_prompt(settings, registry, model_name=model_name)
 
     new_loop = QueryLoop(
         provider=new_provider,

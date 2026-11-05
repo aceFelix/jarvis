@@ -61,6 +61,8 @@ thinking_budget = 800
 # ---- 自定义模型（/models 添加，或按下面格式手写）----
 # provider_type = 接口协议（openai / anthropic / dashscope / zai）
 # model_type    = text（纯文本）/ multimodal（支持图片）
+#   这一项不写就是 unknown：jarvis 按「看不见图」处理（宁可少给一项能力，不猜多模态），
+#   且 /models 列表里会标成「视觉未确认」。确认支持图片就显式写 multimodal。
 # vendor        = 厂商名，用于 /models 列表分组与 keyring 取键
 # [llm.custom_models."my-model"]
 # name = "my-model"

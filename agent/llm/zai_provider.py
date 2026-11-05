@@ -31,6 +31,9 @@ from agent.llm.base import (
     Usage,
 )
 from agent.llm.openai_provider import _messages_to_openai, _parse_tool_args
+# 图片是否随消息发送的判据与 openai 同源（本模块直接复用 _messages_to_openai）。
+# @author aceFelix
+from agent.llm.model_capability import MODEL_TYPE_UNKNOWN, model_has_vision
 
 
 class ZaiProvider(LLMProvider):
@@ -52,7 +55,7 @@ class ZaiProvider(LLMProvider):
         *,
         enable_thinking: bool = True,
         thinking_budget: int = 2000,
-        model_type: str = "multimodal",
+        model_type: str = MODEL_TYPE_UNKNOWN,
     ) -> None:
         """初始化智谱 SDK 客户端。
 
@@ -62,7 +65,8 @@ class ZaiProvider(LLMProvider):
             model: 默认模型名。
             enable_thinking: 是否启用深度思考模式。
             thinking_budget: 思考 token 预算（智谱 SDK 当前主要用 reasoning_effort）。
-            model_type: "multimodal" 或 "text"，控制图片是否随消息发送。
+            model_type: "multimodal" / "text" / "unknown"，控制图片是否随消息发送；
+                只有 multimodal 会送图（unknown 按无视觉走降级）。
 
         @author aceFelix
         """
@@ -127,13 +131,18 @@ class ZaiProvider(LLMProvider):
         return self._thinking_effort or "on"
 
     def set_model_type(self, model_type: str) -> None:
-        """动态切换模型类型（multimodal / text）。
+        """动态切换模型类型（multimodal / text / unknown）。
 
         切换模型时可能复用同一个 provider 实例，但需要改变图片处理方式。
 
         @author aceFelix
         """
         self._model_type = model_type
+
+    @property
+    def has_vision(self) -> bool:
+        """当前是否会把图片真送出去（只有明确 multimodal 算 True）。"""
+        return model_has_vision(self._model_type)
 
     async def stream(
         self,
@@ -157,7 +166,9 @@ class ZaiProvider(LLMProvider):
 
         @author aceFelix
         """
-        api_msgs = _messages_to_openai(messages, system, skip_images=(self._model_type == "text"))
+        api_msgs = _messages_to_openai(
+            messages, system, skip_images=not model_has_vision(self._model_type)
+        )
         tool_schemas = [
             {
                 "type": "function",

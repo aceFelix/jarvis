@@ -36,8 +36,10 @@ class ProviderMeta:
     url_patterns: tuple[str, ...] = ()
     # 思考模式支持（None = 不支持，对应 THINKING_CONFIGS 中的 key）
     thinking_key: str | None = None
-    # 是否支持多模态（默认 True，纯文本模型为 "text"）
-    model_type: str = "multimodal"
+    # 刻意没有 model_type 字段：视觉能力是「厂商 × 具体模型」两维决定的，
+    # 放在厂商级只能给一个默认值，而任何默认值都会被当成事实（曾经
+    # 默认 multimodal 就等于「拿不准算有」）。唯一裁决点在 model_capability.py。
+    # @author aceFelix
 
     def create(self, **kwargs: Any):
         """延迟导入 Provider 类并实例化。
@@ -75,7 +77,10 @@ PROVIDER_REGISTRY: dict[str, ProviderMeta] = {
         api_format="anthropic",
         name="anthropic",
         module_path="agent.llm.anthropic_provider.AnthropicProvider",
-        init_keys=("api_key", "base_url"),
+        # model_type 一并下发：这条链上以前不传，所以 Anthropic 兼容端点（含
+        # DeepSeek）会把图片硬塞给纯文本模型，而 openai/dashscope/zai 都有 skip_images。
+        # @author aceFelix
+        init_keys=("api_key", "base_url", "model_type"),
     ),
 
     # ── OpenAI 及兼容（统一走 OpenAIProvider）──

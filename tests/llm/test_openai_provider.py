@@ -359,7 +359,12 @@ class TestMessagesToOpenAI:
         ]
         result = _messages_to_openai(msgs, "system", skip_images=True)
         tool_content = result[2]["content"]
-        assert "纯文本模型" in tool_content
+        # 旧断言写的是「纯文本模型」在文案里——而 skip_images=True 现在也涵盖
+        # model_type=unknown（没人声明过视觉能力），那句是在替模型下一个它
+        # 无法证实的结论。改钉「图片已省略 + 张数」：这两项才是真事实。
+        # @author aceFelix
+        assert "图片已省略" in tool_content
+        assert "1 张图片" in tool_content
 
 
 class TestParseToolArgs:

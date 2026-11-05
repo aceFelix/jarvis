@@ -78,6 +78,14 @@ async def handle_switch_model(engine: ChatEngine, name: str, force: bool = False
     engine._provider = new_provider
     engine._provider_settings = used_settings
     engine._model = name
+    # 图片通路翻转 → 重拼 system prompt：视觉输入段是按切换前的模型拼的，不重拼
+    # 就出现「provider 已省略图片、提示词还告诉模型你能看图」的裂缝（S5）。
+    # 只在翻转时重拼：不翻转不该白白丢掉整段前缀缓存。判据与 REPL 切换共用。
+    # @author aceFelix
+    from agent.model_manager import _vision_flipped
+
+    if _vision_flipped(provider, new_provider):
+        engine._rebuild_system_prompt()
     engine._emitter.emit("model_switched", {"model": name})
     if force:
         engine._ui.info(f"模型配置已更新：{name}（{desc}）" if desc else f"模型配置已更新：{name}")

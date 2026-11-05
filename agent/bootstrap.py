@@ -11,27 +11,30 @@ from typing import Any
 from agent.config.settings import Settings
 from agent.core.context import ToolContext
 from agent.core.message import Message
+from agent.llm.model_capability import MODEL_TYPE_UNKNOWN
 from agent.permissions import PermissionChecker
 from agent.permissions.rules import RuleSet, load_rules
 from agent.ui.cli import RichCLI
 
 
 def _model_type_for(settings: Settings, model_name: str | None = None) -> str:
-    """根据模型名推断 model_type（multimodal / text）。
+    """当前（或指定）模型的 model_type —— 转发到唯一裁决点。
 
-    自定义模型优先读取其 model_type 配置；内置模型默认 multimodal。
+    以前这里是自己算一份（自定义缺失默认 multimodal、内置一律 multimodal），
+    而同样的判断在 model_manager / serve / completer / 工具回执里各写了一遍。
+    现在只保留薄壳：调用面广（main / engine_session / tasks driver 都进这里），
+    把它们全改为直接依赖新模块属于另一次重构。
 
     @author aceFelix
     """
-    name = model_name or settings.model or ""
-    if name in settings.custom_models:
-        return settings.custom_models[name].get("model_type", "multimodal")
-    return "multimodal"
+    from agent.llm.model_capability import resolve_model_type
+
+    return resolve_model_type(settings, model_name)
 
 
 def _build_provider(
     settings: Settings,
-    model_type: str = "multimodal",
+    model_type: str = MODEL_TYPE_UNKNOWN,
     *,
     dedicated_client: bool = False,
 ):
@@ -43,7 +46,10 @@ def _build_provider(
 
     Args:
         settings: 模型域配置
-        model_type: 多模态能力（"text" / "multimodal"）
+        model_type: 视觉能力（"text" / "multimodal" / "unknown"）。默认是
+            ``unknown`` 而不是 ``multimodal``：漏传一个参数不应该变成「凭空
+            给模型长一双眼睛」（详见 ``agent/llm/model_capability.py``）。
+            所有真实调用点都显式传值，默认值只是给忘了传的人一个错的方向。
         dedicated_client: True 时给 provider 建**独占 HTTP 连接池**。
             后台任务（记忆画像提炼等）应当传 True：它们跑在独立线程里与
             主对话并发，共用同一连接池时，后台任务的流量与关闭会直接影响
