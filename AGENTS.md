@@ -101,3 +101,13 @@ Initialization, complete-index generation, Header generation, Entries generation
 
 Do not preload, guess, or reconstruct these specialized workflows. The relevant Guide, tool descriptions, model Prompt, and CLI help provide platform invocation, request format, batch limits, approval rules, index-format details, and recovery steps as needed.
 <!-- aoci:end -->
+
+## 交付纪律（项目自定，不属于上面的 AOCI 托管块）
+
+- **合入 master 并推送之后，必须再跑一次 `aoci check`。** 索引红着的时候，下一次会话
+  拿到的 `aoci_overview` 会自称不可靠，而这一步只要 6 秒。
+  实例（2026-11-05）：`3f87a0f`（两起 NameError + F821 门禁）落地时漏跑索引维护，
+  它改了 17 个文件（含 2 个新建），基线却停在那笔之前——master 上 15 条 Entry 陈旧、
+  3 个文件无条目，直到合完一个无关分支才被 `check` 撞出来。
+- **上一笔业务提交若是别人（或另一个 agent）做的，自己接手收尾时先跑一次 `check`**，
+  别假定索引是绿的：漏刷不报错，只会静默降级。
