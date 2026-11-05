@@ -29,6 +29,7 @@ from agent.prompts.text_blocks import (
     _PLATFORM_MACOS,
     _PLATFORM_WINDOWS,
     _SCHEDULE_SECTION,
+    _SECURITY_SECTION,
     _SELF_CONFIG_SECTION,
 )
 
@@ -244,6 +245,10 @@ def build_system_prompt(
     return "\n".join(
         [
             base,
+            # 安全与逆向段紧跟静态正文：它是行为定位而不是上下文，越靠前越不会被
+            # 后面的工具清单冲淡；同时它是静态文本，不破坏前缀缓存。
+            # @author aceFelix
+            _SECURITY_SECTION,
             memory_section(workdir),
             _profile_section(settings),
             # 会话记忆标题内嵌使用守则：记忆是历史快照不是事实——防止
