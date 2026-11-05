@@ -15,8 +15,6 @@
 
 from __future__ import annotations
 
-import base64
-import io
 import platform
 import tempfile
 import time
@@ -25,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.context import ToolContext
+# 图片回执措辞的唯一出处（与拍照、网页截图同源）：只说「附上」，不替模型说「看见」。
+# @author aceFelix
+from agent.core.images import encode_pil_image, image_receipt
 from agent.core.message import ImageContent
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
@@ -177,10 +178,10 @@ class ScreenShotTool(Tool):
         images: list[ImageContent] = []
         encode_note = ""
         try:
-            images = [self._encode_image(img, fmt, max_size)]
+            images = [encode_pil_image(img, fmt, max_size)]
         except Exception as e:
             # 编码失败不致命: 降级为纯路径文本模式（模型仍可凭路径 + 用户描述操作）
-            encode_note = f"\n（图片回传失败，降级为纯路径模式: {type(e).__name__})"
+            encode_note = f"\n（图片编码失败，降级为纯路径模式: {type(e).__name__})"
 
         summary = (
             f"已{scope}截图\n"
@@ -188,45 +189,10 @@ class ScreenShotTool(Tool):
             f"尺寸: {w} x {h}\n"
             f"时间: {ts}\n"
             f"OS: {platform.system()}\n"
-            f"图片已回传: {'是' if images else '否'}"
-            f"（{fmt}, 最长边<={max_size or '原图'}）{encode_note}"
+            + image_receipt(bool(images), fmt=fmt, max_size=max_size)
+            + encode_note
         )
         return ToolResult.ok(summary, images=images)
-
-    @staticmethod
-    def _encode_image(img: Any, fmt: str, max_size: int) -> ImageContent:
-        """把 PIL Image 缩放并编码为 base64 图片块。
-
-        - 默认缩放到最长边 max_size（保持比例），兼顾清晰度与 token 成本。
-          Claude 建议图片长边 <= 1568px，1280 是稳妥默认值。
-        - JPEG 体积远小于 PNG（屏幕内容偏照片式），默认用 JPEG quality 85。
-        - JPEG 不支持透明通道，RGBA/LA/P 模式自动转 RGB。
-
-        Args:
-            img: pyautogui.screenshot 返回的 PIL.Image.Image。
-            fmt: "jpeg" 或 "png"。
-            max_size: 最长边像素上限，0 表示不缩放。
-        """
-        work = img.copy()
-        if max_size and max(work.size) > max_size:
-            work.thumbnail((max_size, max_size))
-
-        if fmt == "png":
-            media_type = "image/png"
-            pil_format = "PNG"
-        else:
-            media_type = "image/jpeg"
-            pil_format = "JPEG"
-            if work.mode in ("RGBA", "LA", "P"):
-                work = work.convert("RGB")
-
-        buf = io.BytesIO()
-        save_kwargs: dict[str, Any] = {}
-        if pil_format == "JPEG":
-            save_kwargs["quality"] = 85
-        work.save(buf, format=pil_format, **save_kwargs)
-        data = base64.b64encode(buf.getvalue()).decode("ascii")
-        return ImageContent(data=data, media_type=media_type)
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         return "截图" + ("（局部）" if args and args.get("region") else "（全屏）")

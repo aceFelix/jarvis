@@ -128,17 +128,12 @@ def _show_profile(ui, settings) -> None:
 def _rebuild_system_prompt(ctx) -> None:
     """画像增删后重建 system prompt，让变更在当前会话立即生效。"""
     try:
-        from agent.prompts.system import build_system_prompt, reload_profile_cache
+        from agent.prompts.system import compose_system_prompt, reload_profile_cache
 
         reload_profile_cache()
-        enable_thinking = getattr(ctx.settings, "enable_thinking", True)
-        new_system = build_system_prompt(
-            ctx.settings.workdir, ctx.registry,
-            enable_thinking=enable_thinking, settings=ctx.settings,
-        )
-        if ctx.settings.system_prompt_append:
-            new_system = new_system + "\n\n" + ctx.settings.system_prompt_append
-        ctx.loop._system = new_system
+        # 口径（workdir / enable_thinking / append 段 / 视觉段）全部从 ctx.settings 现读，
+        # 走统一入口避免漏拼用户自定义段。
+        ctx.loop._system = compose_system_prompt(ctx.settings, ctx.registry)
     except Exception:
         pass  # 重建失败不影响命令本身
 

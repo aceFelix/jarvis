@@ -94,6 +94,15 @@ SLASH_COMMANDS = [
     ("/health threats", "看最近的威胁检测记录"),
     ("/health scan", "启动 Windows Defender 扫描（后台执行，不阻塞对话）"),
     ("/health status", "查扫描进度"),
+    ("/health caps", "能力自查：我现在能做什么、缺什么、怎么补（静态档，毫秒级）"),
+    ("/health caps --deep", "加跑冒烟：真起一次 headless 浏览器、真截一帧屏（十几秒到一两分钟）"),
+    ("/health caps browser.selfcheck", "看单项能力的每条前置条件实测证据"),
+    ("/health caps --json", "机器可读的能力矩阵（桌面端与审计脚本用）"),
+    ("/health caps --repair", "修一项缺件（要指名能力，超预算先问）；加 --yes 预先授权"),
+    ("/health caps --history", "看最近的修复记录（直读 actions.jsonl）"),
+    ("/repair", "自我修复闸门状态与台账"),
+    ("/repair off", "关掉全部代执行（仍会给修复命令，只是不代办）"),
+    ("/repair disable fetch-browser", "只关某一类修复动作"),
     ("/diff [path]","显示 git diff（工作区改动）"),
     ("/save [name]","保存当前会话"),
     ("/load <前缀>","前缀匹配加载会话（支持模糊输入）"),
@@ -293,13 +302,17 @@ class SlashCompleter(Completer):
         all_models: list[tuple[str, str]] = []  # [(name, desc), ...]
         try:
             from agent.config.settings import load_settings
+            # 与上一行同一套延迟导入口径（本模块顶层只依赖 prompt_toolkit）
+            from agent.llm.model_capability import vision_tag
+
             settings = load_settings()
             for name, desc in settings.models.items():
                 all_models.append((name, desc))
             for name, cfg in settings.custom_models.items():
                 if isinstance(cfg, dict):
-                    mtype = cfg.get("model_type", "multimodal")
-                    tag = "纯文本" if mtype == "text" else "多模态"
+                    # 三态标签：没写 model_type 的旧配置不能念成“多模态”
+                    # @author aceFelix
+                    tag = vision_tag(cfg.get("model_type"))
                     all_models.append((name, f"[{tag}] {cfg.get('name', name)}"))
         except Exception:
             pass

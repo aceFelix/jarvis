@@ -154,12 +154,14 @@ async def test_normal_input_returns_false(cmd_ctx):
 
 
 # ---- /think 参数模糊前缀匹配（免打全 low|medium|high） @author aceFelix ----
+# 打桩目标是 compose_system_prompt：拼提示词已收敛到统一入口，旧名不再是本模块的属性；
+# patch 一个不存在的名字不会让测“通过”，而是直接 AttributeError。
 
 
 @pytest.mark.asyncio
 async def test_think_fuzzy_prefix_single_hit(cmd_ctx):
     """/think l → low；/think med → medium；均经 loop 统一入口落地。"""
-    with patch("agent.commands.handlers.core_commands.build_system_prompt", return_value="sys"):
+    with patch("agent.commands.handlers.core_commands.compose_system_prompt", return_value="sys"):
         assert await dispatch_command(cmd_ctx, "/think l") is True
         cmd_ctx.loop.set_thinking_effort.assert_called_with("low")
         assert cmd_ctx.settings.thinking_effort == "low"
@@ -172,7 +174,7 @@ async def test_think_fuzzy_prefix_single_hit(cmd_ctx):
 @pytest.mark.asyncio
 async def test_think_numeric_shorthand(cmd_ctx):
     """/think 1/2/3 速记 low/medium/high；/think 0 仍为 off。"""
-    with patch("agent.commands.handlers.core_commands.build_system_prompt", return_value="sys"):
+    with patch("agent.commands.handlers.core_commands.compose_system_prompt", return_value="sys"):
         for arg, expect in (("1", "low"), ("2", "medium"), ("3", "high")):
             await dispatch_command(cmd_ctx, f"/think {arg}")
             cmd_ctx.loop.set_thinking_effort.assert_called_with(expect)

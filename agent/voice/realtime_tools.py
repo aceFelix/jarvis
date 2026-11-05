@@ -249,6 +249,27 @@ async def execute_tool(
             except Exception:
                 pass
 
+            # 能力前置门：语音链路自己拼工具调度，不经 ToolOrchestrator，所以主
+            # 会话加的拦不在这里生效。缺件时直接给回结构化错误，而不是让工具跑
+            # 出一个堆栈文本——语音模型拿到「unknown error」会倾向于编一个听得
+            # 过去的理由（“页面我没打开但功能应该是正常的”），拿到缺什么 + 补法才会如实告知。
+            # @author aceFelix
+            try:
+                from agent.capabilities import tool_block_reason
+
+                blocked = tool_block_reason(name)
+            except Exception:  # noqa: BLE001 - 自检故障不拦正常调用
+                blocked = ""
+            if blocked:
+                return json.dumps(
+                    {
+                        "error": blocked,
+                        "retry": False,
+                        "instruction": "把这个缺失如实告诉用户，不要声称已执行或已看到结果",
+                    },
+                    ensure_ascii=False,
+                )
+
             tool_result = await tool.call(args, ctx)
             # ToolResult.data → JSON 字符串
             data = tool_result.data

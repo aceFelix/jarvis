@@ -4,8 +4,12 @@
 _load_image_from_clipboard（mock 剪贴板，覆盖 Image / 文件路径列表 / None
 三种情况）、_pending_images 与 paste_clipboard_image 的 Ctrl+V 显式贴图逻辑。
 
+另覆盖图片编码底座 encode_pil_image（格式 / 缩放 / 透明通道 / 不改入参），以及
+“编码实现只能有一份”的结构约束：三个图片工具不得再内联副本，core 层不得
+反向 import tools 层。
+
 需要真实 Pillow 读写图片的用例（TestLoadImageFromPath /
-TestLoadImageFromClipboard）在 Pillow 未安装（CI 仅装 dev 依赖）时跳过；
+TestLoadImageFromClipboard / TestEncodePilImage）在 Pillow 未安装（CI 仅装 dev 依赖）时跳过；
 其余用例不依赖 PIL 照常运行。
 
 @author aceFelix
@@ -13,6 +17,9 @@ TestLoadImageFromClipboard）在 Pillow 未安装（CI 仅装 dev 依赖）时�
 
 from __future__ import annotations
 
+import base64
+import io
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -197,3 +204,122 @@ class TestPasteClipboardImage:
         assert images.paste_clipboard_image(ctx, ui) == 1
         assert [i.data for i in images._pending_images(ctx)] == ["first", "second"]
         assert "2 张" in ui.messages[0]
+
+
+@pytest.mark.skipif(
+    not _PIL_AVAILABLE, reason="Pillow 未安装（可选 gui/daemon extras），需真实 PIL 编解码图片"
+)
+class TestEncodePilImage:
+    """PIL 图片编码——截图 / 拍照 / 网页截图 / 贴图的共同底座。
+
+    这些断言锁的是体积与格式行为（缩到多长、什么时候转 RGB、能不能被
+    API 侧解开），而不是实现住在哪个文件里——后者由 TestEncoderIsShared 守。
+    """
+
+    @staticmethod
+    def _decode(content: ImageContent):
+        """把编码结果解回 PIL Image，用于验证格式与尺寸。"""
+        from PIL import Image
+
+        return Image.open(io.BytesIO(base64.b64decode(content.data)))
+
+    def test_jpeg_is_the_default_and_decodes(self) -> None:
+        from PIL import Image
+
+        content = images.encode_pil_image(Image.new("RGB", (16, 16), color="red"))
+        assert content.media_type == "image/jpeg"
+        assert self._decode(content).format == "JPEG"
+
+    def test_png_keeps_alpha_channel(self) -> None:
+        """PNG 不转 RGB：转了就丢透明通道，模型看到的图与工具截到的不一致。"""
+        from PIL import Image
+
+        content = images.encode_pil_image(
+            Image.new("RGBA", (16, 16), color=(0, 0, 0, 0)), fmt="png"
+        )
+        assert content.media_type == "image/png"
+        assert self._decode(content).mode == "RGBA"
+
+    def test_rgba_is_converted_for_jpeg(self) -> None:
+        """JPEG 不支持透明，RGBA/LA/P 必须先转 RGB，否则 PIL 直接报错。"""
+        from PIL import Image
+
+        for mode in ("RGBA", "LA", "P"):
+            content = images.encode_pil_image(Image.new(mode, (8, 8)), fmt="jpeg")
+            assert self._decode(content).mode == "RGB"
+
+    def test_scales_down_keeping_aspect_ratio(self) -> None:
+        """超上限时等比缩放（默认 1280）：长边 2000 → 1280，短边跟着变。"""
+        from PIL import Image
+
+        content = images.encode_pil_image(Image.new("RGB", (2000, 1000)))
+        assert self._decode(content).size == (1280, 640)
+
+    def test_max_size_zero_keeps_original(self) -> None:
+        """max_size=0 表示不缩放——不能当成“缩到 0 像素”。"""
+        from PIL import Image
+
+        content = images.encode_pil_image(Image.new("RGB", (2000, 100)), max_size=0)
+        assert self._decode(content).size == (2000, 100)
+
+    def test_small_image_is_not_upscaled(self) -> None:
+        """小图不拉长：拉长只会肥 token 不会变清楚。"""
+        from PIL import Image
+
+        content = images.encode_pil_image(Image.new("RGB", (32, 24)), max_size=1280)
+        assert self._decode(content).size == (32, 24)
+
+    def test_input_image_is_not_mutated(self) -> None:
+        """缩放走副本：原图尺寸不能变，否则连续复用同一张图的调用方会被隐性改坏。"""
+        from PIL import Image
+
+        img = Image.new("RGB", (2000, 100))
+        images.encode_pil_image(img, max_size=100)
+        assert img.size == (2000, 100)
+
+
+#: 持有过图片编码副本的三个工具模块
+_TOOL_MODULES = (
+    "agent.tools.system.screen",
+    "agent.tools.vision.camera",
+    "agent.tools.web.browser",
+)
+
+
+class TestEncoderIsShared:
+    """编码实现只能有一份，且它必须在 core 层。
+
+    为什么单独测这个：三份逐字相同的副本能共存这么久，靠的是一个当时写下来的理由
+    （browser.py 旧注释：“独立内联避免跨模块耦合”）。光重构不钉桩，下次有人图
+    方便又会内联一份。同时钉住另一件事：core/images.py 曾为了复用其中一份而反向
+    import ScreenShotTool（下层依赖上层），且 pyautogui 缺失时会被那句
+    ``except ImportError`` 误报成「缺少 Pillow」。
+    """
+
+    @staticmethod
+    def _module_source(module_name: str) -> str:
+        import importlib
+        import inspect
+
+        return inspect.getsource(importlib.import_module(module_name))
+
+    @pytest.mark.parametrize("module_name", _TOOL_MODULES)
+    def test_tool_module_has_no_private_copy(self, module_name: str) -> None:
+        src = self._module_source(module_name)
+        assert "def _encode_image" not in src, f"{module_name} 又内联了一份图片编码"
+        assert "encode_pil_image" in src, f"{module_name} 应该引用 core 层的共享实现"
+
+    @pytest.mark.parametrize("module_name", _TOOL_MODULES)
+    def test_tool_module_still_reports_via_shared_wording(self, module_name: str) -> None:
+        """回执措辞仍走同一出处（与图片编码同属“三处工具不得各写一份”）。"""
+        assert "image_receipt" in self._module_source(module_name)
+
+    def test_core_images_does_not_import_tools(self) -> None:
+        """依赖方向：core 层不得反向 import tools 层。"""
+        src = self._module_source("agent.core.images")
+        bad = [
+            line.strip()
+            for line in src.splitlines()
+            if re.match(r"^\s*(from|import)\s+agent\.tools", line)
+        ]
+        assert not bad, f"core/images.py 反向依赖 tools 层: {bad}"

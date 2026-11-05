@@ -18,6 +18,22 @@ from agent.core.result import ToolResult
 from agent.core.tool import Tool, ToolRegistry
 
 
+def _capability_note(tool_name: str) -> str:
+    """取该工具所属能力的状态行；能力表无声明或探测出错时返回空串。
+
+    自检不能反过来弄坏主流程：探测层自己是坏的（缺依赖、未预期异常）也必须
+    让 ToolSearch 正常返回，所以这里统一拦住异常、回空串。
+
+    @author aceFelix
+    """
+    try:
+        from agent.capabilities import tool_status_note
+
+        return tool_status_note(tool_name)
+    except Exception:  # noqa: BLE001 - 辅佐能力不得拖垮工具发现
+        return ""
+
+
 class ToolSearchTool(Tool):
     """搜索并加载延迟工具。
 
@@ -103,6 +119,13 @@ class ToolSearchTool(Tool):
             schema_str = json.dumps(tool.input_schema, ensure_ascii=False, indent=2)
             lines.append(f"## {tool.name}")
             lines.append(f"描述: {tool.description.split(chr(10), 1)[0]}")
+            # 能力前置状态：让模型在**决定调用之前**就知道这个工具现在跑不通。
+            # 以前这里只写“已加载到可用列表”，而“可用”其实只意味着包能 import——
+            # playwright 内核缺失时就是这句话让模型去撞一个必失败的调用，然后被自动重试。
+            # @author aceFelix
+            note = _capability_note(tool.name)
+            if note:
+                lines.append(note)
             lines.append(f"参数:\n```json\n{schema_str}\n```\n")
 
         return ToolResult.ok("\n".join(lines))

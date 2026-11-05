@@ -59,6 +59,31 @@ def record_denial(ctx: ToolContext, tool_name: str, reason: str) -> None:
     bucket.append({"tool": tool_name, "reason": (reason or "")[:200]})
 
 
+def capability_block_reason(tool_name: str, *, force: bool = False) -> str:
+    """能力前置门：该工具现在跑不跑得起来（空串 = 放行）。
+
+    为什么存在：以前“工具有没有”等价于“包能不能 import”，所以 playwright 包在、
+    浏览器内核根本没装时，`BrowserNavigate` 照样被当成可用工具——模型撞上后拿到
+    “未知错误”并自动重试两轮，一个任务因此绕了四十来次工具调用。现在调用前就给出
+    “缺什么 + 实测证据 + 可复制补法”，不拦就等于让模型去猜。
+
+    `force=True` 只给“即将产生外部副作用”且距上次判定已隔了一段真实时间的调用点
+    （不可逆动作到点执行）；普通工具调用走 TTL 缓存，不然一个任务上百次调用会把
+    探测成本乘上次数。
+
+    本函数**不能弄坏主流程**：探测层自己出错（缺依赖、未预期异常）时必须放行，
+    让工具自己跑一次——宁可漏拦，不可把正常调用误判成不可用。
+
+    @author aceFelix
+    """
+    try:
+        from agent.capabilities import tool_block_reason
+
+        return tool_block_reason(tool_name, force=force)
+    except Exception:  # noqa: BLE001 - 辅佐能力不得拖垮工具执行
+        return ""
+
+
 def take_denials(ctx: ToolContext) -> list[dict[str, Any]]:
     """取出宿主登记的拒绝列表（没开容器时给空表，调用方据此判“未受阻”）。"""
     bucket = ctx.extra.get(EXTRA_DENIALS) if ctx.extra is not None else None
@@ -310,8 +335,25 @@ class ToolOrchestrator:
         except Exception:
             effective_input = tu.input  # 钩子系统异常时不阻塞工具执行
 
+        # ---- 能力前置门（S2）----
+        # 位置刻意在“能不能做”（权限、W1、钩子）全部定案之后、不可逆延时窗口与
+        # 留底、执行之前：这里只回答“做了会不会必然失败”，被拦下的调用不产生任何
+        # 副作用。又因为它在窗口前面，根本跑不通的动作不会先挂着“待发”标签、
+        # 再在到点时给用户一条失败——那比当场说清缺什么更像事故；它在
+        # 自愈层（_recovery）前面，所以缺件失败天然不会被重试。
+        # @author aceFelix
+        blocked_reason = capability_block_reason(tool.name)
+        if blocked_reason:
+            if ctx.ui:
+                ctx.ui.warn(f"能力缺失，未执行 {tool.name}")
+            return ToolResultContent(
+                tool_use_id=tu.id,
+                content=blocked_reason,
+                is_error=True,
+            )
+
         # ---- W3.2 不可逆动作：先入延时窗口，本轮不真执行 ----
-        # 位置刻意在权限判定与 W1 闸门之后、钩子之后：窗口只"延后"执行，
+        # 位置刻意在权限判定与 W1 闸门之后、钩子与能力门之后：窗口只"延后"执行，
         # 不豁免任何一次确认；而钩子已经跑过，说明"允许做这件事"的所有判定
         # 都已成立，只是把"做"推迟到用户下一次能喊停的时机之前。
         # @author aceFelix
@@ -611,6 +653,17 @@ class ToolOrchestrator:
             settings=ctx.settings,
         )
         note: str
+        # 能力前置门在这里再跑一次，并且 **强制重探**：入延时窗口的那一刻判过，但
+        # 窗口里可能过了几十秒，环境完全可能变（用户刚卸载、venv 刚切换）；拿缓存
+        # 结论放行一个外发动作，等于自检没做过。更要紧的是这一条路径不经过
+        # _execute_one 的门，不加就等于给外发动作留一绕开自检的后门。
+        # @author aceFelix
+        held_block = capability_block_reason(rec.tool, force=True)
+        if held_block:
+            journal.set_state(rec.id, STATE_FAILED, error=held_block[:200])
+            if ctx.ui:
+                ctx.ui.warn(f"能力缺失，预约动作未执行：{rec.label}")
+            return
         try:
             result = await tool.call(dict(rec.args), fire_ctx)
         except Exception as e:  # noqa: BLE001 - 定时器回调里绝不能冒泡

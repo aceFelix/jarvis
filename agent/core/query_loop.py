@@ -68,6 +68,9 @@ from agent.llm.base import (
     Usage,
 )
 from agent.llm.base import ProviderError
+# 模型视觉能力的唯一裁决点（S5）：纯常量与纯函数，不依赖任何 SDK。
+# @author aceFelix
+from agent.llm.model_capability import normalize_model_type
 # 历史裁剪纯函数已迁到 agent/core/memory/prune.py（LayeredContext 与 QueryLoop
 # 共用）；此处保留旧名导入，维持既有导入路径（tests 与历史文档引用）。
 # @author aceFelix
@@ -793,7 +796,13 @@ class QueryLoop:
                         base_url=cfg.get("base_url", ""),
                         api_key=cfg.get("api_key", ""),
                     )
-                    self._provider = _build_provider(custom_settings, model_type=cfg.get("model_type", "multimodal"))
+                    self._provider = _build_provider(
+                        custom_settings,
+                        # 备选模型没写 model_type 时走 unknown（按无视觉处理），
+                        # 不能默认多模态：故障转移过去的那家常常正是纯文本模型。
+                        # @author aceFelix
+                        model_type=normalize_model_type(cfg.get("model_type")),
+                    )
                     self._model = name
                     # 故障转移后同步思考模式状态：语音模式下必须保持关闭
                     if self._thinking_override is not None:

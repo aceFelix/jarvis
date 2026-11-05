@@ -367,17 +367,19 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
         思考开关、切项目等改变提示词口径的场景共用；不重建 QueryLoop，只换 _system。
         @author aceFelix
         """
-        from agent.prompts.system import build_system_prompt
+        from agent.prompts.system import compose_system_prompt
 
         s = self._settings
         registry = getattr(self, "_active_registry", None)
         if registry is None:
             return
-        prompt = build_system_prompt(
-            s.workdir, registry, enable_thinking=s.enable_thinking, settings=s
+        # 传当前真正在跑的模型：``s.model`` 是启动快照，切过型之后它仍是旧名字，
+        # 不传就会给新模型拼上旧模型的视觉段（S5）。拼完补 append 两步收进
+        # compose_system_prompt，不在这里各写一遍。
+        # @author aceFelix
+        prompt = compose_system_prompt(
+            s, registry, model_name=str(getattr(self, "_model", "") or "")
         )
-        if s.system_prompt_append:
-            prompt = prompt + "\n\n" + s.system_prompt_append
         loop = getattr(self, "_query_loop", None)
         if loop is not None:
             loop.update_system_prompt(prompt)

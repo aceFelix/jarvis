@@ -18,7 +18,7 @@ from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
 from agent.permissions import parse_mode
 from agent.permissions.modes import PermissionMode
-from agent.prompts.system import build_system_prompt
+from agent.prompts.system import compose_system_prompt
 from agent.ui.cli import RichCLI
 from agent.ui.markdown_renderer import render_diff, render_table, render_tree, render_panel
 from agent.utils.mask import mask_key
@@ -56,7 +56,8 @@ def _print_help(ui: RichCLI) -> None:
         # 系统维护层（BLUEPRINT 6.1/6.2/6.4）@author aceFelix
         "  /disk        磁盘占用与可回收清单（只读）；--top 看空间被谁占了\n"
         "  /clean       清理：不带 --yes 只预览，执行后进隔离区（--restore 还原）\n"
-        "  /health      系统体检与安全诊断（--save 存报告；security/threats/scan）\n"
+        "  /health      系统体检与安全诊断（--save 存报告；security/threats/scan/caps）\n"
+        "  /repair      能力自我修复的闸门（off 急停；disable <动作> 只关一类）\n"
         "  /save [name] 保存当前会话\n"
         "  /load [前缀]  前缀匹配加载会话（支持模糊输入）\n"
         "  /loads       列出并选择已保存会话\n"
@@ -700,10 +701,9 @@ def _toggle_thinking(
     settings.enable_thinking = new_state
     settings.thinking_effort = effort
 
-    new_system = build_system_prompt(settings.workdir, registry, enable_thinking=new_state, settings=settings)
-    if settings.system_prompt_append:
-        new_system = new_system + "\n\n" + settings.system_prompt_append
-    loop._system = new_system
+    # 统一走 compose_system_prompt：上两行已把 enable_thinking 落到 settings，这里现读即可；
+    # 末尾的 system_prompt_append 段由它一并拼上，不再在此手抄。
+    loop._system = compose_system_prompt(settings, registry)
 
     ui.info(f"深度思考: {'✅ ' + effort if new_state else '❌ 关'}")
 

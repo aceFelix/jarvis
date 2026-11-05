@@ -482,7 +482,6 @@ async def handle_clean(ctx: "CommandContext", raw: str) -> bool:
 # /health
 # ---------------------------------------------------------------------------
 
-
 async def handle_health(ctx: "CommandContext", raw: str) -> bool:
     """``/health`` —— 体检与安全诊断。
 
@@ -495,6 +494,13 @@ async def handle_health(ctx: "CommandContext", raw: str) -> bool:
         /health threats          # 威胁检测记录
         /health scan [quick|full|custom <路径>]
         /health status [job_id]  # 扫描进度
+        /health caps             # 能力自查（静态档：包/二进制/内核/凭据）
+        /health caps --deep      # 加跑冒烟（真起一次浏览器、真截一帧屏）
+        /health caps <能力名>    # 看单项的每条前置条件实测证据
+        /health caps --json      # 机器可读（桌面端与审计脚本用）
+        /health caps --markdown  # Markdown 档（与 --json 同样供导出）
+        /health caps --repair <能力名>  # 按白名单动手修，修完必复测
+        /health caps --history   # 最近的修复记录（直读副作用账本，不另立台账）
     """
     tokens = raw.split()[1:]
     sub = tokens[0].lower() if tokens and not tokens[0].startswith("-") else ""
@@ -575,6 +581,73 @@ async def handle_health(ctx: "CommandContext", raw: str) -> bool:
                 f"{j.get('kind', '')} {j.get('path', '')}"
             )
         _say(ctx, "\n".join(lines))
+        return True
+
+    if sub == "caps":
+        # 能力自查：回答“我现在到底能做什么、缺什么、怎么补”。入口放在 `/health`
+        # 而不是新开一个 `/doctor`，沿用 `daemon/monitor.py` 顶部那句既有判断：
+        # 两套并存只会让人搞不清该信哪个。
+        # @author aceFelix
+        from agent.capabilities.report import (
+            collect_reports,
+            render_caps,
+            render_caps_markdown,
+            render_one,
+            to_dict,
+        )
+
+        rest = tokens[1:]
+        deep = "--deep" in rest
+        want_json = "--json" in rest
+        want_md = "--markdown" in rest
+
+        if "--history" in rest:
+            # 直接读 actions.jsonl 里那些 Repair: 开头的条目：不另建一份流水账，
+            # 同一件事在两个地方各自记一次迟早会对不上。
+            from agent.capabilities.repair import history
+
+            rows = history()
+            if not rows:
+                _say(ctx, "还没有任何修复记录（actions.jsonl 里没有 Repair: 条目）。")
+                return True
+            lines = ["最近修复记录"]
+            for r in rows:
+                lines.append(f"  [{r['when']}] {r['action']} → {r['state']}｜{r['preview']}")
+                if r.get("undo_hint"):
+                    lines.append(f"      怎么退：{r['undo_hint']}")
+            _say(ctx, "\n".join(lines))
+            return True
+
+        if "--repair" in rest:
+            # 执行体在 repair_commands 里（同一个门负责 /health caps --repair 与 /repair）：
+            # 拆它不是因为 /health 不该有子命令，而是两个职责同住一个文件已经超了行门。
+            from agent.commands.handlers.repair_commands import run_repair
+
+            _say(ctx, await run_repair(ctx, rest))
+            return True
+
+        # 只跟一个名字时看详情：`/health caps browser.selfcheck`
+        target = next((t for t in rest if not t.startswith("-")), "")
+
+        if deep:
+            # 必须预告：深档要真起浏览器、真截屏，不提醒的长静默会被当成卡死然后
+            # 被中断，最后什么结论都拿不到。
+            _say(ctx, "深档自检：会真起一次 headless 浏览器并截一帧屏，可能要十几秒到一两分钟…")
+        reports = await asyncio.to_thread(collect_reports, deep=deep)
+
+        if want_json:
+            import json as _json
+
+            _say(ctx, _json.dumps(to_dict(reports), ensure_ascii=False, indent=2))
+            return True
+        if target:
+            _say(ctx, await asyncio.to_thread(render_one, target, deep=deep))
+            return True
+        _say(
+            ctx,
+            render_caps_markdown(reports, deep=deep) if want_md
+            else render_caps(reports, deep=deep),
+        )
         return True
 
     # ---- report / save ----

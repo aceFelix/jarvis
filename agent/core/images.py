@@ -9,12 +9,65 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 from pathlib import Path
+from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.message import ImageContent
 from agent.ui.cli import RichCLI
+
+# 「附上」与「看见」是两件事：纯文本模型、以及没确认过视觉能力的模型，收到的
+# 是一句「图片已省略」的占位说明（provider 层转换时替换）。这句约束必须出现在
+# 每一次图片回执里——只在 system prompt 里说过一次，长会话里它会被忘掉，
+# 而工具回执是模型当下唯一在读的东西。
+_IMAGE_SEE_CLAUSE = "，附上不等于看见：无视觉能力的模型只收到省略说明，不得声称亲眼看过"
+
+
+def encode_pil_image(img: Any, fmt: str = "jpeg", max_size: int = 1280) -> ImageContent:
+    """把 PIL Image 缩放并编码为 base64 图片块（截图 / 拍照 / 网页截图共用）。
+
+    为什么住在 core 层：这段逻辑此前在 ``screen.py``、``camera.py``、``browser.py``
+    各抄了一份（函数体逐字相同），而本模块为了复用其中一份还反向 import 了
+    ``ScreenShotTool`` —— 下层依赖上层。收拢到此处后四处均改为引用，反向依赖一并消除；
+    顺带修掉一个误报：旧写法用 ``except ImportError`` 兜住对 ScreenShotTool 的导入，
+    pyautogui 缺失时会被报成「缺少 Pillow」。
+
+    实现要点：
+    - 缩放到最长边 max_size（保持比例）以省 token；长边 <= 1568px 较稳妥，1280 为默认。
+    - JPEG 体积远小于 PNG（屏幕内容偏照片式），默认 JPEG quality 85。
+    - JPEG 不支持透明通道，RGBA/LA/P 模式自动转 RGB。
+    - 不在此 import PIL：入参已是 PIL Image，各调用方自行延迟导入。
+
+    Args:
+        img: PIL.Image.Image（playwright 截图返回 bytes 时需先 ``Image.open``）。
+        fmt: ``"jpeg"`` 或 ``"png"``。
+        max_size: 最长边像素上限，``0`` 表示不缩放。
+
+    @author aceFelix
+    """
+    work = img.copy()
+    if max_size and max(work.size) > max_size:
+        work.thumbnail((max_size, max_size))
+
+    if fmt == "png":
+        media_type = "image/png"
+        pil_format = "PNG"
+    else:
+        media_type = "image/jpeg"
+        pil_format = "JPEG"
+        if work.mode in ("RGBA", "LA", "P"):
+            work = work.convert("RGB")
+
+    buf = io.BytesIO()
+    save_kwargs: dict[str, Any] = {}
+    if pil_format == "JPEG":
+        save_kwargs["quality"] = 85
+    work.save(buf, format=pil_format, **save_kwargs)
+    data = base64.b64encode(buf.getvalue()).decode("ascii")
+    return ImageContent(data=data, media_type=media_type)
 
 
 def _load_image_from_path(path: str) -> ImageContent | None:
@@ -24,7 +77,6 @@ def _load_image_from_path(path: str) -> ImageContent | None:
     """
     try:
         from PIL import Image
-        from agent.tools.system.screen import ScreenShotTool
     except ImportError:
         return None
 
@@ -34,7 +86,7 @@ def _load_image_from_path(path: str) -> ImageContent | None:
     try:
         img = Image.open(p)
         img.load()
-        return ScreenShotTool._encode_image(img, "jpeg", 1280)
+        return encode_pil_image(img, "jpeg", 1280)
     except Exception:
         return None
 
@@ -46,7 +98,6 @@ def _load_image_from_clipboard() -> ImageContent | None:
     """
     try:
         from PIL import Image, ImageGrab
-        from agent.tools.system.screen import ScreenShotTool
     except ImportError:
         return None
 
@@ -54,7 +105,7 @@ def _load_image_from_clipboard() -> ImageContent | None:
     if data is None:
         return None
     if isinstance(data, Image.Image):
-        return ScreenShotTool._encode_image(data, "jpeg", 1280)
+        return encode_pil_image(data, "jpeg", 1280)
     # Windows 剪贴板有时是文件路径列表
     if isinstance(data, list):
         for item in data:
@@ -81,6 +132,29 @@ def _hash_image(img: ImageContent) -> str:
     @author aceFelix
     """
     return hashlib.md5(f"{img.media_type}:{img.data}".encode()).hexdigest()
+
+
+def image_receipt(attached: bool, *, fmt: str = "", max_size: int | None = None) -> str:
+    """图片类工具（截图 / 拍照 / 网页截图）回执里「图片」那一行的统一措辞。
+
+    为什么三个工具要共用一个函数：这句是模型判断「我到底看不看得见」的唯一依据，
+    各写一份迟早会有一处写成「已回传: 是」——而工具其实只知道图片块挂上了结果，
+    能不能被看见由 provider 按 model_type 决定（``agent/llm/model_capability.py``）。
+    措辞越权一次，模型就有依据把「我没看到」汇报成「我验证过」。
+
+    Args:
+        attached: 本次结果是否真带上了图片块（编码失败降级为纯路径时为 False）。
+        fmt: 编码格式（如 ``jpeg``），空则不附体积说明。
+        max_size: 最长边像素上限，``0`` / ``None`` 表示原图。
+
+    @author aceFelix
+    """
+    line = "图片附上: 是" if attached else "图片附上: 否"
+    if fmt:
+        line += f"（{fmt}, 最长边<={max_size or '原图'}）"
+    if attached:
+        line += _IMAGE_SEE_CLAUSE
+    return line
 
 
 def paste_clipboard_image(ctx: ToolContext, ui: RichCLI) -> int:

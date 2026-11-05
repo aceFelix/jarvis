@@ -165,14 +165,51 @@ def _mail_section(registry: ToolRegistry) -> str:
     return _MAIL_SECTION
 
 
+def compose_system_prompt(
+    settings: object,
+    registry: ToolRegistry,
+    *,
+    model_name: str = "",
+    workdir: str | None = None,
+) -> str:
+    """按 settings 拼完整 system prompt（含末尾的 ``system_prompt_append``）。
+
+    存在的原因：``build_system_prompt(...)`` 再拼一段用户自定义内容这两步，在仓库里
+    被抄了六遍。漏拼第二处的调用点就会在切换模型/换项目后把用户自己加的段弄丢。
+    全部调用点均应走这里。
+
+    ``workdir`` 是给「切项目」的两阶段提交留的口子：那条路径要先用**新**目录拼提示词，
+    拼成功才把 ``settings.workdir`` 落成新值（失败则不提交切换，避免"提示词旧、目录新"
+    分裂）。此时若从 settings 读 workdir 拿到的是旧值，拼出来的提示词描述的还是上一个项目。
+    让调用点显式覆盖，比在调用方构造 settings 副本更直读，也不依赖 Settings 是 dataclass。
+
+    @author aceFelix
+    """
+    prompt = build_system_prompt(
+        workdir if workdir is not None else (getattr(settings, "workdir", "") or ""),
+        registry,
+        enable_thinking=bool(getattr(settings, "enable_thinking", True)),
+        settings=settings,
+        model_name=model_name,
+    )
+    append = getattr(settings, "system_prompt_append", "") or ""
+    return f"{prompt}\n\n{append}" if append else prompt
+
+
 def build_system_prompt(
     workdir: str,
     registry: ToolRegistry,
     *,
     enable_thinking: bool = True,
     settings: object | None = None,
+    model_name: str = "",
 ) -> str:
     """组装完整系统提示。
+
+    Args:
+        model_name: 当前**真正在跑**的模型名。省略时退回 ``settings.model``。
+            热切换模型时调用方必须传：引擎的 ``settings`` 快照里 `model` 仍是启动
+            时那一个，不传就会给新模型拼上旧模型的视觉段（S5）。
 
     顺序: 基础原则 -> 长期记忆 -> 画像记忆 -> 会话记忆 -> 技能包 -> 环境 -> 工具列表。
 
@@ -229,9 +266,120 @@ def build_system_prompt(
             _self_config_section(registry),
             _mail_section(registry),
             _cli_anything_section(registry),
+            # 能力段排在工具列表前：先让模型知道「哪些看着有、其实跑不通」，
+            # 再给它工具名单——顺序反过来它会先看见 BrowserNavigate 就动手。
+            # @author aceFelix
+            _capability_section(),
+            # 视觉输入段紧跟能力段：两者都在回答「你手上的证据能不能真被你看见」，
+            # 拆成两段隔开写容易被模型当成两件不相干的事。排在工具列表前同理。
+            # @author aceFelix
+            _vision_section(settings, model_name),
             _tools_section(registry),
         ]
     )
+
+
+# ── 能力自检段注入（S2）──
+
+# 与 _PROFILE_CACHE 同一套纪律：system prompt 在同一会话内必须逐字节稳定，否则
+# LLM 前缀缓存整段失效。探测结果因此按进程快照一次，运行中新装好的组件要到
+# 下次启动（或 /repair 复测后主动 reload）才反映进提示。
+# @author aceFelix
+_CAPABILITY_CACHE: str | None = None
+
+
+def _capability_section() -> str:
+    """「你今天的实际能力」段：把静态自检结论压给模型。
+
+    为什么必须有这一段：2026-11-03 那次「写个简易贪吃蛇」里，模型手上根本没有
+    可用的浏览器内核，却被 `text_blocks` 的交付自查纪律要求「BrowserNavigate +
+    BrowserScreenshot 亲眼看过」——工具坏着、又没有任何降级出口，于是它用
+    「假设我能看到」填空，最后向用户汇报「刚才我验证过」。把缺件事实摆进提示，
+    是在给它一个诚实说「我不能确认」的依据。
+
+    全部能力可用时返回空串：不给提示词增加一个字节，也不让一段「一切正常」的
+    废话挤占注意力。探测层自己坏掉同样返回空串——自检不得反过来弄坏主流程。
+
+    @author aceFelix
+    """
+    global _CAPABILITY_CACHE
+    if _CAPABILITY_CACHE is not None:
+        return _CAPABILITY_CACHE
+    _CAPABILITY_CACHE = ""
+    try:
+        from agent.capabilities import build_capability_prompt_block
+
+        _CAPABILITY_CACHE = build_capability_prompt_block()
+    except Exception:  # noqa: BLE001 - 自检缺失不能挡住对话启动
+        _CAPABILITY_CACHE = ""
+    return _CAPABILITY_CACHE
+
+
+def reload_capability_cache() -> None:
+    """重跑一次自检，并让下次组装 system prompt 时拿到新结论。
+
+    `/repair` 修完组件、`/health caps --deep` 强制重测之后调用：装完内核还让模型
+    照着旧结论说「浏览器不可用」，等于自检把自己变成了新的假消息源。
+
+    两层缓存都要清：光清提示段快照而留着探测层的 TTL 缓存，重拼时会直接拿到
+    修复前的旧结论（静态缓 300s），这个 reload 就只是看起来在做事。
+
+    @author aceFelix
+    """
+    global _CAPABILITY_CACHE
+    _CAPABILITY_CACHE = None
+    try:
+        from agent.capabilities import reset_cache as _reset_probe_cache
+
+        _reset_probe_cache()
+    except Exception:  # noqa: BLE001, S110 - 探测层不在时清提示快照仍有意义
+        pass
+
+
+# ── 模型视觉输入注入（S5）──
+
+# 这一段不能进进程缓存：它是 `settings` 的纯函数（当前模型是什么类型），
+# 而模型会在会话中被用户切掉。缓存住它 = 切到纯文本模型后提示词仍写着
+# 「你看不到」的反面。只依赖不频变的输入，本身就是稳的。
+_VISION_TEMPLATE = """\
+# 当前模型的视觉输入：{label}（图片不会进模型）
+
+本次会话里，截图 / 照片 / 网页截图到了 API 层会被换成一句「图片已省略」的
+文字说明。你看不到像素，只有文字。
+
+- 不要说你能看见屏幕 / 页面 / 照片，也不要据此判断布局、配色、对齐、字号、
+  图标位置。工具回执里的「图片附上: 是」只表示图片块挂上了，不表示你看到了。
+- 「交付自查纪律」里要求亲眼看过的那几条，本轮改用非视觉手段完成：
+  `BrowserGetText` 取正文、读 HTML/DOM、看 dev server 与终端日志、跑测试、
+  读文件 diff、按代码逻辑推断。
+- 上述手段都验证不到时，直接说「没有做视觉验证」；禁止写「已验证 / 我看过效果」。
+- 要真正看图：`/models` → 选中该模型 → 修改配置 → 把模型类型改成「多模态」。
+"""
+
+
+def _vision_section(settings: object | None, model_name: str = "") -> str:
+    """当前模型没确认具备视觉输入时的硬约束段；有视觉时返回空串。
+
+    与 `_capability_section` 的分工：那一段管「环境里缺什么组件」，这一段管
+    「组件齐了、图也到了 provider，模型自己看不看得见」。两者都能把「我假设」
+    写成「我验证过」，但成因与修法不同，所以判据分开。
+
+    拿不到 settings、或判断不了时一律返回空串：在情况不明时宣称模型看不见，
+    等于静默删掉一项真能力（功能损失比措辞不严谨更贵）。
+
+    @author aceFelix
+    """
+    if settings is None:
+        return ""
+    try:
+        from agent.llm.model_capability import model_has_vision, resolve_model_type, vision_tag
+
+        model_type = resolve_model_type(settings, model_name or None)
+        if model_has_vision(model_type):
+            return ""
+        return _VISION_TEMPLATE.format(label=vision_tag(model_type))
+    except Exception:  # noqa: BLE001 - 提示词组装不能因为一个段失败而中断对话
+        return ""
 
 
 # ── 画像记忆注入（Phase 1a M2）──

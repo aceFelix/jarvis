@@ -120,7 +120,9 @@ async def test_assembled_rebuilds_prompt_and_new_session(home, monkeypatch) -> N
     # build_system_prompt 打桩：断言收到新 workdir 且返回串被 loop 采纳
     captured: dict = {}
 
-    def fake_prompt(workdir, registry, *, enable_thinking=True, settings=None):
+    def fake_prompt(workdir, registry, *, enable_thinking=True, settings=None, **_kwargs):
+        """**_kwargs 不是装饰：调用方（compose_system_prompt）会透传 model_name 等新参数，
+        写死签名的假桩会让 TypeError 被生产代码的 except 吞掉，表现为“切换静默失败”。"""
         captured["workdir"] = workdir
         return f"SYS@{workdir}"
 

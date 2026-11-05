@@ -88,9 +88,13 @@ def _drain(event_queue: queue.Queue) -> list[dict]:
 
 
 def _patch_prompt(monkeypatch) -> None:
-    """build_system_prompt 打桩：返回带 workdir 的串，便于断言重建口径。"""
+    """build_system_prompt 打桩：返回带 workdir 的串，便于断言重建口径。
 
-    def fake_prompt(workdir, registry, *, enable_thinking=True, settings=None):
+    **_kwargs 用于吸收 compose_system_prompt 透传的新参数（如 model_name）；
+    写死签名的假桩会把 TypeError 变成“切换静默失败”这类难归因的现象。
+    """
+
+    def fake_prompt(workdir, registry, *, enable_thinking=True, settings=None, **_kwargs):
         return f"SYS@{workdir}"
 
     monkeypatch.setattr(sp_mod, "build_system_prompt", fake_prompt)

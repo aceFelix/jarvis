@@ -58,7 +58,7 @@ from agent.core.orchestrator import ToolOrchestrator
 from agent.core.query_loop import QueryLoop
 from agent.core.tool import ToolRegistry, build_default_registry
 from agent.permissions import parse_mode
-from agent.prompts.system import build_system_prompt
+from agent.prompts.system import compose_system_prompt
 from agent.session_manager import (
     _auto_save,
     _generate_session_title,
@@ -247,17 +247,20 @@ async def repl(settings: Settings) -> int:
             if settings.verbose:
                 ui.warn(f"LSP 初始化失败: {e}")
 
-    system_prompt = build_system_prompt(settings.workdir, registry, enable_thinking=settings.enable_thinking, settings=settings)
-    if settings.system_prompt_append:
-        system_prompt = system_prompt + "\n\n" + settings.system_prompt_append
-
     # ToolSearch 工具注册（延迟加载机制的核心）
     if settings.tools_deferred_loading:
         from agent.tools.tool_search import ToolSearchTool
         if "ToolSearch" not in registry:
             registry.register(ToolSearchTool(registry))
 
+    # 提示词必须在钥匙工具注册之后拼：deferred 模式下模型要先知道 ToolSearch 存
+    # 在，才能发现其余延迟工具。桌面端已踩过这个坑（engine_session.py 同段注释），
+    # REPL 侧此前是先拼后注册，模型收到"用 ToolSearch 加载工具"的指引却找不到该工具。
+    # @author aceFelix
     model = settings.model or provider.default_model
+    # 模型名一并传入：无视觉时提示词需要追加降级链；末尾 system_prompt_append 段
+    # 由统一入口拼上。
+    system_prompt = compose_system_prompt(settings, registry, model_name=model)
     loop = QueryLoop(
         provider=provider,
         registry=registry,

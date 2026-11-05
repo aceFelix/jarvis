@@ -185,9 +185,17 @@ class TestToolRegistrationFlows:
     """工具注册流程测试。"""
 
     def test_register_dynamic_tools_empty(self) -> None:
-        """register_dynamic_tools 无 mcp_client 时应返回 0 而不崩溃。"""
+        """register_dynamic_tools 无 mcp_client 时不应崩溃（返回值 ≥ 0）。
+
+        故意用一个全新的 ToolRegistry 而不是 build_default_registry()：后者是
+        lru_cache 的共享实例，往里注册 harness 工具会把同一进程里后续所有
+        `build_default_registry()` 都污染掉（曾导致 tests/capabilities 的工具归属
+        契约测只在整进程混跑时红）。
+        @author aceFelix
+        """
         from agent.core.tool import register_dynamic_tools
-        registry = build_default_registry()
+
+        registry = ToolRegistry()
         count = register_dynamic_tools(registry, mcp_client=None, workdir=None)
         assert count >= 0  # harness 可能注册也可能未注册
 

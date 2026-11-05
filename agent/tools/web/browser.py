@@ -25,18 +25,21 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import base64
 import io
 from typing import Any
 
 from agent.core.context import ToolContext
-from agent.core.message import ImageContent
+# 图片回执措辞的唯一出处（与截屏、拍照同源）：只说「附上」，不替模型说「看见」。
+# 图片编码也从这里同源：此前本文件内联了一份与 screen.py 逐字相同的编码实现，
+# 理由写的正是「独立内联避免跨模块耦合」——三份副本由此诞生，现已收拢。
+# @author aceFelix
+from agent.core.images import encode_pil_image, image_receipt
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
 
 
 # ---------------------------------------------------------------------------
-# 图片编码（与 screen.py 的 _encode_image 逻辑一致，独立内联避免跨模块耦合）
+# URL 规范化
 # ---------------------------------------------------------------------------
 
 
@@ -49,35 +52,6 @@ def _normalize_file_url(url: str) -> str:
     if url.startswith("file://"):
         return url.replace("\\", "/")
     return url
-
-
-def _encode_image(img: Any, fmt: str = "jpeg", max_size: int = 1280) -> ImageContent:
-    """把 PIL Image 缩放并编码为 base64 图片块。
-    Args:
-        img: PIL.Image.Image（playwright screenshot 返回 bytes，需先 PIL.open）。
-        fmt: "jpeg" 或 "png"。
-        max_size: 最长边像素上限，0 表示不缩放。
-    """
-    work = img.copy()
-    if max_size and max(work.size) > max_size:
-        work.thumbnail((max_size, max_size))
-
-    if fmt == "png":
-        media_type = "image/png"
-        pil_format = "PNG"
-    else:
-        media_type = "image/jpeg"
-        pil_format = "JPEG"
-        if work.mode in ("RGBA", "LA", "P"):
-            work = work.convert("RGB")
-
-    buf = io.BytesIO()
-    save_kwargs: dict[str, Any] = {}
-    if pil_format == "JPEG":
-        save_kwargs["quality"] = 85
-    work.save(buf, format=pil_format, **save_kwargs)
-    data = base64.b64encode(buf.getvalue()).decode("ascii")
-    return ImageContent(data=data, media_type=media_type)
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +296,7 @@ class BrowserScreenshotTool(Tool):
 
         try:
             img = Image.open(io.BytesIO(img_bytes))
-            image_block = _encode_image(img, fmt=fmt, max_size=max_size)
+            image_block = encode_pil_image(img, fmt=fmt, max_size=max_size)
         except Exception as e:
             return ToolResult.error(f"图片编码失败: {type(e).__name__}: {e}")
 
@@ -332,7 +306,8 @@ class BrowserScreenshotTool(Tool):
             f"已截取浏览器{scope}截图\n"
             f"原始尺寸: {w} x {h}\n"
             f"回传格式: {image_block.media_type}, 最长边<={max_size or '原图'}\n"
-            f"图片已回传: 是",
+            # 措辞走共用函数：工具只知道图片块挂上了，能不能被看见由 provider 定
+            + image_receipt(True),
             images=[image_block],
         )
 

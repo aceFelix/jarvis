@@ -98,14 +98,12 @@ async def handle_set_workdir(
     #     换 workdir → 更新 loop → 重挂 harness → 开新会话 → 落库。任一步失败
     #     都不提交切换（settings.workdir 保持旧值），避免"提示词旧、目录新"分裂。
     registry = getattr(loop, "_registry", None) or getattr(engine, "_registry", None)
-    from agent.prompts.system import build_system_prompt
+    from agent.prompts.system import compose_system_prompt
 
     try:
-        system_prompt = build_system_prompt(
-            path, registry, enable_thinking=s.enable_thinking, settings=s
-        )
-        if s.system_prompt_append:
-            system_prompt = system_prompt + "\n\n" + s.system_prompt_append
+        # workdir 显式覆盖为新路径：此刻 settings.workdir 仍是旧值，切换尚未提交；
+        # append 段由 compose_system_prompt 统一拼上。
+        system_prompt = compose_system_prompt(s, registry, workdir=path)
     except Exception as e:  # noqa: BLE001 - 提示词重建失败：不提交切换
         if announce:
             engine._emitter.emit(

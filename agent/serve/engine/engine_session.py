@@ -53,7 +53,7 @@ class EngineSessionMixin:
         from agent.core.orchestrator import ToolOrchestrator
         from agent.core.query_loop import QueryLoop
         from agent.core.tool import ToolRegistry, build_default_registry
-        from agent.prompts.system import build_system_prompt
+        from agent.prompts.system import compose_system_prompt
 
         s = self._settings
         self._emitter.emit("status", "正在初始化对话引擎...")
@@ -99,12 +99,10 @@ class EngineSessionMixin:
         orchestrator = ToolOrchestrator(
             registry=registry, permission_checker=checker, recovery_executor=recovery
         )
-        system_prompt = build_system_prompt(
-            s.workdir, registry, enable_thinking=s.enable_thinking, settings=s
-        )
-        if s.system_prompt_append:
-            system_prompt = system_prompt + "\n\n" + s.system_prompt_append
         model = s.model or provider.default_model
+        # 模型名一并传入：无视觉时提示词需要追加降级链，查能力表应以真正在用的模型名为准；
+        # 末尾的 system_prompt_append 段由统一入口拼上。
+        system_prompt = compose_system_prompt(s, registry, model_name=model)
         loop = QueryLoop(
             provider=provider,
             registry=registry,
