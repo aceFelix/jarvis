@@ -23,10 +23,27 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent.cli_anything.loader import _DEFAULT_USER_HARNESS_DIR, discover_harnesses
 from agent.cli_anything.registry import discover_and_register
+# 启用/禁用状态与 id 归一化已拆到独立模块（本文件当时 905 行，越过了仓库 900 行
+# 上限）。这里重导出是为了不动任何现有调用方：serve 侧按 market.enable_harness 延迟
+# 导入、用例也按这两个名字打桩。
+# @author aceFelix
+from agent.cli_anything.harness_state import (  # noqa: F401 - 保持原有对外名字
+    disable_harness,
+    enable_harness,
+    is_harness_disabled,
+    list_disabled_harnesses,
+)
+from agent.cli_anything.ids import normalize_harness_id as _normalize_id
+
+if TYPE_CHECKING:
+    # 只给 `registry: "ToolRegistry"` 这类字符串注解用：运行时无需依赖，
+    # 但少了这行 typing.get_type_hints() 与静态读者都会拿到一个不存在的名字。
+    # @author aceFelix
+    from agent.core.tool import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -253,14 +270,6 @@ def _load_registry(
     merged["_custom_market_url"] = custom_market_url
     merged["_custom_market_local"] = custom_market_local
     return merged
-
-
-def _normalize_id(value: str) -> str:
-    """把用户输入的 id 归一化（去除 cli-anything- 前缀，小写）。"""
-    v = value.strip().lower()
-    if v.startswith("cli-anything-"):
-        return v[len("cli-anything-"):]
-    return v
 
 
 def _id_from_skill_md(skill_md: str) -> str:
@@ -674,89 +683,10 @@ def uninstall_harness(
 
 
 # ---------------------------------------------------------------------------
-# harness 启用/禁用/创建/校验（与 Plugin 系统分离，各管各的）
+# harness 创建 / 校验（与 Plugin 系统分离，各管各的）
+# 启用 / 禁用状态不在这里：已拆到 agent/cli_anything/harness_state.py，本模块只在
+# 顶部重导出那四个入口，保持对外名字不变。
 # ---------------------------------------------------------------------------
-
-_HARNESS_STATE_FILE = Path.home() / ".jarvis" / "cli_anything" / "disabled.json"
-
-
-def _load_harness_disabled_state() -> dict[str, Any]:
-    """加载 harness 禁用状态。"""
-    try:
-        if _HARNESS_STATE_FILE.exists():
-            return json.loads(_HARNESS_STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {"disabled": []}
-
-
-def _save_harness_disabled_state(state: dict[str, Any]) -> None:
-    """持久化 harness 禁用状态。"""
-    try:
-        _HARNESS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _HARNESS_STATE_FILE.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logger.warning("保存 harness 禁用状态失败: %s", e)
-
-
-def enable_harness(harness_id: str) -> dict[str, Any]:
-    """启用被禁用的 harness。
-
-    Returns:
-        {"success": bool, "message": str}
-
-    @author aceFelix
-    """
-    cid = _normalize_id(harness_id)
-    if not cid:
-        return {"success": False, "message": "harness ID 为空"}
-
-    state = _load_harness_disabled_state()
-    if cid not in state.get("disabled", []):
-        return {"success": True, "message": f"harness '{cid}' 已是启用状态。"}
-
-    state["disabled"] = [x for x in state["disabled"] if x != cid]
-    _save_harness_disabled_state(state)
-    return {"success": True, "message": f"harness '{cid}' 已启用。重启或 /reset 后生效。"}
-
-
-def disable_harness(harness_id: str) -> dict[str, Any]:
-    """禁用 harness（不卸载，仅停止加载）。
-
-    Returns:
-        {"success": bool, "message": str}
-
-    @author aceFelix
-    """
-    cid = _normalize_id(harness_id)
-    if not cid:
-        return {"success": False, "message": "harness ID 为空"}
-
-    state = _load_harness_disabled_state()
-    if cid in state.get("disabled", []):
-        return {"success": True, "message": f"harness '{cid}' 已是禁用状态。"}
-
-    state.setdefault("disabled", []).append(cid)
-    _save_harness_disabled_state(state)
-    return {"success": True, "message": f"harness '{cid}' 已禁用。重启或 /reset 后生效。"}
-
-
-def is_harness_disabled(harness_id: str) -> bool:
-    """检查 harness 是否被禁用。"""
-    cid = _normalize_id(harness_id)
-    if not cid:
-        return False
-    state = _load_harness_disabled_state()
-    return cid in state.get("disabled", [])
-
-
-def list_disabled_harnesses() -> list[str]:
-    """返回被禁用的 harness ID 列表。"""
-    state = _load_harness_disabled_state()
-    return state.get("disabled", [])
 
 
 def create_harness(

@@ -43,6 +43,15 @@ jobs:
           # 编译检查 agent 包全部模块（含新增文件，无需维护硬编码列表）
           python -m compileall -q agent/
 
+      - name: Undefined-name check (F821)
+        # 2026-11-05 实修两起 NameError 后加的闸：compileall 只查语法，不查“用了
+        # 从来没导入的名字”。那两起（/doctor 里的 Path、LSP 里的 uri_to_path）都是
+        # 重构丢导入 / 只写函数内局部导入，且全仓没有用例执行过那些函数体，
+        # 于是一直潜伏到用户在 REPL 里敲 /doctor 才炸。
+        # 只选 F821 一条：仓库还有上百条既存 lint 噪音，全量 ruff 会立刻把 CI 变成
+        # 红海，反而没人管——门禁要能长期绿着才有人看。
+        run: ruff check --select F821 agent/
+
       - name: Run tests
         run: pytest tests/ -v --tb=short
 

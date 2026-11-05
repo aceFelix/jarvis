@@ -28,7 +28,8 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   不可逆动作到点执行与修复后复测走 `force=True` 当场重探。
 - **`/health caps`**：静态档 / `--deep` / `<能力名>` 详情 / `--json` / `--markdown` /
   `--repair` / `--history` 七个入口；入口放在 `/health` 下而不另开一个 `/doctor`，
-  沿用仓库已有判断：两套并存只会让人搞不清该信哪个（`jarvis --doctor` 也改成读同一份结论）。
+  沿用仓库已有判断：两套并存只会让人搞不清该信哪个。注意 `jarvis --doctor` **尚未**
+  改成读同一份结论（它自带 `_PKG_CHECKS` 表），两者现在是互补但不同源，已记为后续项。
 
 ### 新增（缺件在调用前拦住）
 
@@ -71,6 +72,10 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
 
 ### 变更（收敛与去重）
 
+- **`cli_anything/market.py` 拆分**：harness 启用/禁用状态（82 行）与 id 归一化纯函数
+  分别移到 `harness_state.py` / `ids.py`，market.py 905 → 828 行。起因是本轮给它补
+  `TYPE_CHECKING` 时越过了仓库 900 行上限，被 `test_engine_split_guards` 拦下——门禁
+  生效了。对外名字不变（market 顶部重导出那四个入口，调用方与现有打桩用例都不用改）。
 - **`compose_system_prompt()` 成为拼提示词的唯一入口**：此前“build 再拼一段用户自定义内容”
   这两步被抄了六遍，漏拼第二处的调用点在切模型/换项目后会把用户自己加的段弄丢；
   现全部调用点（REPL 启动、`/think`、`/memory`、桌面会话装配、切模型、切项目）已收敛。
@@ -103,6 +108,17 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   已有一条 `RealtimeTalk` 根本不在能力表中）。只改测不改表，反方向对账刻意不静态化
   的理由与实测数字见 [capability-tool-name-contract-fix.md](docs/fixlogs/capability-tool-name-contract-fix.md)。
 
+- **REPL 里打 `/doctor` 直接 NameError 把会话打崩**：`core_commands._doctor()` 用了
+  `Path`，而这个模块从来没导入过它——`git log -S` 追到是 `4b77351`（main 拆分那次）
+  留下的，潜伏了两个月。拿 `ruff check --select F821` 扫全仓又扫出 17 处未定义名字，
+  其中 `lsp_tool` 的 `uri_to_path` 是真崩的第二起：分发函数里写了函数内局部导入，
+  而真正用它的四个格式化函数在模块作用域里找不到，goToDefinition / findReferences /
+  goToImplementation / prepareCallHierarchy 四条操作 100% 报错（LSP 工具默认不注册，
+  所以从来没人撞到）。7 处真崩补模块级导入、10 处字符串注解补 `TYPE_CHECKING`；
+  `ci.yml` / `publish.yml` 各加一步 `ruff check --select F821 agent/`（只选这一条：
+  全量 lint 有上百条既存噪音，门禁要能长期绿着才有人看）。复盘见
+  [undefined-name-imports-fix.md](docs/fixlogs/undefined-name-imports-fix.md)。
+
 以下文档订正不改行为，只把**对外数字承诺**拉回与源码一致（真值由运行时实测得出）。
 
 ### 文档（事实性订正）
@@ -119,6 +135,12 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   并随 v2.3.2 发布），以及本文与 README 对「阶段 12」编号各指一件事（自阶段 13 起以
   README 为准，本轮记为**阶段 13**）。
 - **`/health` 命令用法注释补齐**：此前缺 `caps --markdown` / `--repair` / `--history` 三条。
+- **一句不实表述被自己跑出来的结果推翻**：上面三处文档（本文、`docs/guide/installation.md`、
+  `docs/architecture/20` §11）都写了「`jarvis --doctor` 也改成读同一份结论」，而实测
+  `agent/doctor.py` 根本没 import `agent/capabilities/`，它自己维护 29 行 `_PKG_CHECKS`。
+  已改为如实描述两套口径的覆盖差异（`--doctor` 多查 webview / WebView2 / pip / uv / Python
+  版本 / 配置文件；`/health caps` 多查 pylsp / keyring / OCR 权重 / 冒烟档 / 修复入口），
+  并把“彻底同源”记为后续项。
 
 ### 测试
 
@@ -127,6 +149,10 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   （2026-11-05 实测；例数会随平台相关的 skip 轻微波动，引用时以 `--collect-only` 实报为准）。
 - **变异矩阵（本轮交付纪律要求）**：注入“探测缓存永不过期 / 缺件被当可重试 / 修复跳过复测
   直接宣布成功 / 回执仍写已回传: 是 / 预算门读反”五个变异，**5/5 全部被现有用例抓到**。
+- 新增 `tests/commands/test_doctor_command.py` 7 例与 `tests/tools/test_lsp_format_paths.py`
+  14 例——这两个功能此前**没有任何用例执行过函数体**（只测了路由），才让两个 NameError
+  能潜伏。两次反向变异验闸门有牙：撤掉 `Path` 导入 7/7 全红，撤掉 `uri_to_path` 导入
+  8 红（并且抽到上一版 LSP 测里有 2 条因 payload 形状写错而空转，已修）。
 
 ## [2.3.5] — 2026-11-03
 

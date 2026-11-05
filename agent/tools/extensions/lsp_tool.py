@@ -21,6 +21,11 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
+# 把 LSP 返回的 file:// URI 换回本地路径。2026-11-05 实修：这个导入从来没写过，
+# 四个格式化函数（goToDefinition / findReferences / incomingCalls / outgoingCalls）
+# 一碰到带 uri 的结果就 NameError。client.py 只依赖标准库，这里顶层导入不会形成环。
+# @author aceFelix
+from agent.lsp.client import uri_to_path
 
 
 _LSP_OPERATIONS = [
@@ -212,9 +217,13 @@ def _get_method_and_params(operation: str, uri: str, line: int, character: int):
 
 
 def _format_result(operation: str, result: Any, cwd: str) -> str:
-    """格式化 LSP 结果为可读文本。"""
-    from agent.lsp.client import uri_to_path
+    """格式化 LSP 结果为可读文本。
 
+    2026-11-05 实修：这里原本写了一句函数内的 `from agent.lsp.client import uri_to_path`，
+    于是**只有本函数自己**能解析这个名字，而真正用它的 `_format_location` /
+    `_format_call_items` / `_format_incoming_calls` / `_format_outgoing_calls` 都在
+    自己的模块作用域里找，全部 NameError。现在改成模块顶部导入，局部那句删掉。
+    """
     if result is None:
         return "无结果"
 

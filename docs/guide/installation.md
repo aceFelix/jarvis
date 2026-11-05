@@ -171,9 +171,19 @@ jarvis --doctor
 
 > 包检查用 `importlib.util.find_spec` 探测，不实际 import，避免触发未安装包的副作用日志。
 >
-> `--doctor` 与 `/health caps` 读**同一份能力结论**（`agent/capabilities/`）：不另建一套
-> “能装 vs 能用”的判断，否则两套并存只会让人搞不清该信哪个。区别只在前者是启动期的
-> 包/系统依赖清单，后者多了逐能力的前置条件证据、冒烟档与修复入口。
+> `--doctor` 与会话内的 `/health caps` 是**两套互补但不同源**的判断（2026-11-05 实测：
+> `agent/doctor.py` 自带 `_PKG_CHECKS` 表，不读 `agent/capabilities/`）：
+>
+> - `--doctor` 回答「pip 该装哪些组」：逐包给 `pip install "jarvis-agent[<组>]"` 命令，
+>   额外查 Python 版本 / pip / uv / Playwright 内核目录 / WebView2 / 配置文件是否存在；
+>   退出码 0=全就绪、1=有缺失（`ℹ` 纯提示项不计失败）。
+> - `/health caps` 回答「这些能力现在真能用吗」：逐能力列前置条件的实测证据，还多查
+>   `lsp.python`（pylsp 可执行文件）、`secrets.keyring`（keyring 包）、OCR 权重目录这些
+>   `--doctor` 不查的东西，另有 `--deep` 冒烟档与 `--repair` 修复入口。
+>
+> 不确定缺什么时两个都跑：先看 `--doctor` 的缺失包，再看 `/health caps` 哪条能力被
+> 拖到「可用（有缺项）」。彻底同源（让 `--doctor` 改读能力表）已记为后续项，见
+> [能力自检与自我修复 §11](../architecture/20-能力自检与自我修复.md)。
 
 ## 版本更新
 

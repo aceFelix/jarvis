@@ -43,6 +43,12 @@ jobs:
       - name: Syntax check
         run: python -m compileall -q agent/
 
+      - name: Undefined-name check (F821)
+        # 与 ci.yml 同一道闸：compileall 测不出“用了没导入的名字”，而这类缺陷
+        # 会直接把 REPL 命令打崩（2026-11-05 实修两起）。发版前再拦一次，
+        # 避免把一个已知会炸的包推到 PyPI / npm。
+        run: ruff check --select F821 agent/
+
       - name: Run tests
         run: pytest tests/ -v --tb=short
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import platform
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent.core.message import Message, TextContent
@@ -537,6 +538,11 @@ def _doctor(ui: RichCLI, settings: Any, provider, model: str, messages: list[Mes
     ]
     render_table(prov_rows, headers=["项", "值"], title="Provider 状态")
 
+    # 配置文件是否存在。2026-11-05 实修：main 拆分那次重构把 `from pathlib import Path`
+    # 弄丢了，而此前没有任何用例真的执行过 `_doctor` 的函数体（只测了路由），于是
+    # `/doctor` 在 REPL 里直接 NameError 崩掉整个会话。改这个函数请先跑
+    # tests/commands/test_doctor_command.py。
+    # @author aceFelix
     user_cfg = Path.home() / ".jarvis" / "settings.toml"
     # 模型域配置（2026-09 拆分到 models.toml，密钥与模型定义同处）
     models_cfg = Path.home() / ".jarvis" / "models.toml"

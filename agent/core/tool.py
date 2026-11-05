@@ -21,6 +21,7 @@ import fnmatch
 import functools
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from agent.core.context import ToolContext

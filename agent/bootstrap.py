@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent.config.settings import Settings
 from agent.core.context import ToolContext
@@ -15,6 +15,12 @@ from agent.llm.model_capability import MODEL_TYPE_UNKNOWN
 from agent.permissions import PermissionChecker
 from agent.permissions.rules import RuleSet, load_rules
 from agent.ui.cli import RichCLI
+
+if TYPE_CHECKING:
+    # 只给 `_build_recovery_executor() -> "ToolRecoveryExecutor"` 这串注解用；
+    # 运行时仍在函数内延迟 import（error_recovery 反过来依赖本模块的产物）。
+    # @author aceFelix
+    from agent.core.error_recovery import ToolRecoveryExecutor
 
 
 def _model_type_for(settings: Settings, model_name: str | None = None) -> str:

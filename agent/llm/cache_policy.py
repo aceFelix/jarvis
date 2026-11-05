@@ -19,7 +19,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # 只给 `merge_tool_results(messages: list[Message])` 这类注解用（本模块头部开了
+    # from __future__ import annotations，运行时不求值，但名字总得能查到）。
+    # @author aceFelix
+    from agent.core.message import Message
 
 
 @dataclass
