@@ -95,6 +95,40 @@ def test_section_field_matches_the_real_toml_mapping():
     assert bad == [], f"段落/字段名与真实映射对不上（值会被写进没人读的地方）: {bad}"
 
 
+def test_repair_domain_is_fully_registered():
+    """`[repair]` 段的字段必须**全部**进真源表（反方向对账）。
+
+    上面的用例只查「spec 写的段/字段在真源里存在」，查不出**漏登记**。
+    收尾时实测就是漏在这一头：`[repair]` 五个字段只进了四个，`background_over_s`
+    没纳管。后果不是“改不了”那么轻：`describe_missing()` 只认目录，用户问
+    “修复为什么把我的对话卡住了”时，这项会被报成「没有这个配置项」，而它确实存在
+    ——本仓反复强调“存在但未纳管 ≠ 不存在”，这条测的就是不能反过来把它说成不存在。
+
+    为什么只对 `[repair]` 一个段做全量对账：207 项里只有 63 项纳管，其余本来就是
+    “只能用户自己改”（凭据、权限、未接线项），全表反向对账会误伤。
+    `[repair]` 五项都是行为参数（不涉及凭据与权限本身），本来就该全部纳管。
+    @author aceFelix
+    """
+    from agent.config.settings_domains import FLAT_DOMAINS, SUB_TABLES
+
+    real: set[str] = set()
+    for entry in list(FLAT_DOMAINS) + list(SUB_TABLES):
+        if len(entry) == 2:
+            section, fields = entry
+        else:
+            top, sub, fields = entry
+            section = f"{top}.{sub}"
+        if section == "repair":
+            real.update(field_name for field_name, _attr in fields)
+    registered = {s.field for s in CONFIG_SPECS if s.section == "repair"}
+
+    assert real, "settings_domains 里没有 [repair] 段了——本条测得换写法"
+    assert real == registered, (
+        f"[repair] 字段与真源表不齐：漏登记 {sorted(real - registered)}，"
+        f"凭空登记 {sorted(registered - real)}"
+    )
+
+
 def test_keys_are_unique():
     """协议键唯一：重名会让 ``SPEC_BY_KEY`` 悄悄丢掉前一条。"""
     keys = [s.key for s in CONFIG_SPECS]

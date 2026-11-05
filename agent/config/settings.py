@@ -461,6 +461,29 @@ class Settings:
     # 只有清出超过这个量才提示一句；低于它就完全静默（例行的无需消耗注意力）
     maintenance_auto_clean_notify_mb: float = 200.0
 
+    # 能力自我修复（docs/plans/capability-selfcheck.md 第 4 节）
+    # 这是维护层头一次会「改环境」的动作，所以它是一个自己的闸，不是复用
+    # maintenance_enabled：清理关掉不该连带把补依赖也关掉（两者风险完全不同）。
+    #
+    # 默认开（先生 2026-11-03 拍板），但权限是靠三道门而不是靠默认值守住的：
+    # 体积 ASK 线、动作白名单可单关、以及无人值守（/away）时一律升回待批。
+    # 设计纪律：超预算的只给命令不代执行，禁止清单内的一律不碰（详见计划 4.2）。
+    repair_enabled: bool = True
+    # 超过这个下载量先问再动。200MB 不是拍脑袋：playwright 无头壳实测 112.4MB
+    # 在线以里（平时自查够用，自动做），无头壳 + 完整内核合计约 296MB 在线外
+    # （要看真实窗口，先问）。数值走配置而不写进代码，就是为了让它能被改。
+    repair_ask_threshold_mb: float = 200.0
+    # 单个动作可关（如 ["pip-extras"]）：开关默认开之后，这是唯一能「只关风险大的
+    # 那一类」而保留其他修复能力的手段。值只认四个白名单 ID，写错不生效但会在
+    # /health caps --history 的回执里指出来。
+    repair_disabled_actions: list[str] = field(default_factory=list)
+    # 修完必须出声（文字回执 + 语音）。默认开：既然权限大是用户给的，
+    # 至少它动了什么、花了多少、怎么退要主动送到耳边，而不是等用户去查。
+    repair_announce_voice: bool = True
+    # 预计超过这个时长就转后台任务、完成后回报，而不是前台阻塞对话，也不弹询问
+    # （网慢就 ASK 只会让人多点一次回车，不解决任何问题）。沿用 /health scan 口径。
+    repair_background_over_s: float = 30.0
+
     # 工具延迟加载
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 + 不含文件名/路径形态 → 不发任何工具（0 token）。

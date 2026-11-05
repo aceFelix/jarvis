@@ -256,6 +256,16 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("deferred_loading", "tools_deferred_loading"),
         ("chat_detection", "tools_chat_detection"),
     )),
+    # [repair] 表：能力自我修复的闸门（docs/plans/capability-selfcheck.md 第 4 节）。
+    # 子键不带 repair_ 前缀，与 [tools]/[percept] 同口径；Settings 字段写全名。
+    # @author aceFelix
+    ("repair", (
+        ("enabled", "repair_enabled"),
+        ("ask_threshold_mb", "repair_ask_threshold_mb"),
+        ("disabled_actions", "repair_disabled_actions"),
+        ("announce_voice", "repair_announce_voice"),
+        ("background_over_s", "repair_background_over_s"),
+    )),
 )
 
 #: 嵌套子表映射：(父表, 子表键, ((子键, Settings 字段), ...))

@@ -339,6 +339,54 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "全盘扫描要跑几十分钟且严重占 CPU；默认只给快速扫描，开它等于允许一次长任务",
         tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=False,
     ),
+    # ---- 能力自我修复（[repair]）：维护层头一次会改环境 ----
+    #
+    # 为什么不归进 [maintenance]：那是两个不同的许可。用户关掉清理不等于同意
+    # 装东西，反之也一样；同一个 enabled 顶两件事迟早会有一件被误放行。
+    # 前三项标 confirm：总闸、体积线、动作白名单都在改「管家能不能自己动手」；
+    # 只有播报那一项是纯表达层（改的是它说什么，不是它能做什么）。
+    # @author aceFelix
+    ConfigSpec(
+        "repair_enabled", "repair", "enabled", "repair_enabled",
+        "bool", "允许自我修复（下内核 / 装 extras / 改配置）",
+        "开了它 jarvis 会自己补依赖；三道门仍在：超预算先问、超硬上限只给命令、"
+        "无人值守一律升回待批。想收权限先关这一项，而不是去关清理",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=True,
+    ),
+    ConfigSpec(
+        "repair_ask_threshold_mb", "repair", "ask_threshold_mb", "repair_ask_threshold_mb",
+        "float", "修复前必询问的体积线（MB）",
+        "200 的实据：playwright 无头壳 112.4MB 在线内（平时自查够用，自动做），"
+        "无头壳 + 完整内核约 296MB 在线外（先看后问）。调小它等于每次都要确认",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, lo=0.0, hi=2000.0, default=200.0,
+    ),
+    ConfigSpec(
+        "repair_disabled_actions", "repair", "disabled_actions", "repair_disabled_actions",
+        "list", "单独关掉哪几类修复动作",
+        "只认四个白名单 ID：fetch-browser / fetch-model / pip-extras / config-fix。"
+        "写错不报错也不生效，改完用 /repair status 确认它真的被关上了",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=[],
+    ),
+    ConfigSpec(
+        "repair_announce_voice", "repair", "announce_voice", "repair_announce_voice",
+        "bool", "修完是否出声播报",
+        "默认开：权限大是用户给的，动了什么、花了多少、怎么退得主动送到耳边。"
+        "关掉后仍会发文字回执，播报只是多加一道语音",
+        tier=TIER_AUTO, apply_mode=APPLY_LIVE, default=True,
+    ),
+    # 这一项是收尾时补登记的：[repair] 五个字段先前只进了四个，而本文件对「不收哪些项」
+    # 的习惯是写明理由（见下面 [monitor] 那段）——没写理由的就是漏了，不是故意。
+    # 漏掉的代价不是“改不了”那么轻：用户问「修复为什么把我的对话卡住了」时，
+    # 这项会被 `describe_missing()` 报成「没有这个配置项」，而它确实存在。
+    # tier 归 confirm：它管的是“长任务要不要堵着对话”，属于打断时机一类。
+    # @author aceFelix
+    ConfigSpec(
+        "repair_background_over_s", "repair", "background_over_s", "repair_background_over_s",
+        "float", "预计超此时长转后台任务（秒）",
+        "30 的实据：`playwright install chromium` 一分多钟，卡在前台会被当成死掉而被打断；"
+        "调大它等于让长任务堵着对话，调小它等于什么都进后台",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, lo=0.0, hi=600.0, default=30.0,
+    ),
     # ---- 系统资源监控（阶段 12 补齐）：阈值存于 [monitor]，但由感知源装配时读取 ----
     #
     # 为什么是 ``percept`` 而不是 ``live``：阈值由 ``percept/factory.py`` 在造

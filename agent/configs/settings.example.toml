@@ -370,3 +370,25 @@ auto_clean_enabled = true    # 自动清理子闸（总闸开启后才有意义�
 auto_clean_time = "04:30"    # 每日自动清理时间（HH:MM），错开画像维护的 03:30
 auto_clean_min_mb = 20     # 低于此可回收量就不建批次（零感知垃圾常只有几 MB）
 auto_clean_notify_mb = 200 # 清出超过这个量才提示一句；低于它全静默
+
+# ── 能力自我修复 ────────────────────────────────────────────────
+# 设计依据见 docs/plans/capability-selfcheck.md 第 4 节。
+#
+# 这一层是维护层头一次会「改环境」（下内核、装 extras、改配置），
+# 所以它是一个自己的闸，不复用 [maintenance].enabled：清理关掉不该连带
+# 把补依赖也关掉，两者风险完全不同。
+#
+# 权限是靠三道门而不是靠默认值守住的：
+#   1) 体积门：超 ask_threshold_mb 先问；超单个动作的硬上限只给命令不代执行；
+#   2) 时长门：预计超 background_over_s 转后台任务、完成后回报，不弹询问；
+#   3) 无人值守：/away 期间一律升回待批（沿用 W1 口径，不另造一套判断）。
+# 白名单只有四个动作：fetch-browser / fetch-model / pip-extras / config-fix；
+# 超出白名单（系统级依赖、自由包名、升级 jarvis 本体、任何删除）一律只给建议。
+# 命令：/repair on|off|status 进闸与审计，/health caps 看台账。
+# @author aceFelix
+[repair]
+enabled = true             # 自我修复总闸（默认开，靠三道门而不是靠关着它守规矩）
+ask_threshold_mb = 200     # 超过这个下载量先问再动（无头壳 112.4MB 自动做，全量 296MB 先问）
+disabled_actions = []      # 单个动作可关：["pip-extras"] 这种写法，其余修复能力不受影响
+announce_voice = true      # 修完出声播报（文字回执 + 语音）：动了什么、花了多少、怎么退
+background_over_s = 30     # 预计超此时长转后台任务，不阻塞对话（沿用 /health scan 口径）

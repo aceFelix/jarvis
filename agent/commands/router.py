@@ -63,6 +63,7 @@ from agent.commands.handlers.session_commands import (
     handle_save,
     handle_sessions,
 )
+from agent.commands.handlers.repair_commands import handle_repair  # 能力自我修复闸门 @author aceFelix
 from agent.commands.handlers.skill_commands import (
     handle_dispatch_skill,
     handle_skills,
@@ -204,6 +205,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/disk": handle_disk,
     "/health": handle_health,
     "/clean": handle_clean,   # 裸 /clean 不是“全清”，而是给用法提示
+    # 能力自我修复的急停开关（/repair 不带参给闸门状态与台账）@author aceFelix
+    "/repair": handle_repair,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -247,6 +250,7 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/disk ", handle_disk),
     ("/clean ", handle_clean),
     ("/health ", handle_health),
+    ("/repair ", handle_repair),
 ]
 
 
