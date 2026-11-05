@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-05T10:44:36Z",
+  "updated_at": "2026-11-05T10:50:04Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -1004,8 +1004,8 @@
     },
     "agent/core/tasks/approval_ops.py": {
       "role": "index",
-      "sha256": "3aa21b4ee92f16c3279e4aadf9f76b4eef5bcd20da300c0d2fc6910c0c55aa39",
-      "size": 12027,
+      "sha256": "712d5438c25fc788a982142a6b786bbc3d3fe72588027cb992e6cd2612bd7456",
+      "size": 11772,
       "normalized_sha256": "712d5438c25fc788a982142a6b786bbc3d3fe72588027cb992e6cd2612bd7456"
     },
     "agent/core/tasks/cli_host.py": {
@@ -1022,8 +1022,8 @@
     },
     "agent/core/tasks/spawn.py": {
       "role": "index",
-      "sha256": "5da2ba4d3bfa8c71388a1b086c16427cd2be3dd02d4272b618eef78b8da7c374",
-      "size": 9609,
+      "sha256": "8021921a329c73580968c97d2911929427578c6d8c65b4e6d02c8ddee2c66ec2",
+      "size": 9409,
       "normalized_sha256": "8021921a329c73580968c97d2911929427578c6d8c65b4e6d02c8ddee2c66ec2"
     },
     "agent/core/tasks/spine.py": {
@@ -2216,9 +2216,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ee88eb48d895e09dc6f96ab30030aae69267bbb2a09a70d09a8f8d7b1f0c6c5d",
+      "sha256": "c63cb7bc04cb380fb6d219bb9d746cef5e013fdd4657b546a63e5b3dd5e3c96c",
       "size": 241878,
-      "normalized_sha256": "ee88eb48d895e09dc6f96ab30030aae69267bbb2a09a70d09a8f8d7b1f0c6c5d"
+      "normalized_sha256": "c63cb7bc04cb380fb6d219bb9d746cef5e013fdd4657b546a63e5b3dd5e3c96c"
     },
     "aoci.meta.txt": {
       "role": "index",
