@@ -94,6 +94,14 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
 - **`[repair]` 漏登记一个字段**：五个设置字段只进了真源表四个（`background_over_s`），
   后果不是“改不了”而是会被 `describe_missing()` 报成「没有这个配置项」。已补登记，
   并新增 `[repair]` 段的反向对账测（旧测只查 spec → 真源方向，查不出漏登记）。
+- **能力契约测自己犯了自己要治的错**（Linux CI 独红、本地永绿）：
+  `test_declared_tool_names_actually_exist` 拿 `build_default_registry()` 的**运行时**
+  注册表当“工具是否存在”的唯一证据，而摄像头 / 浏览器那两组是“可选依赖没装就整组不
+  注册”——CI 上没装 opencv 就报「表里登记了不存在的工具：CameraShot」，而那个工具真的
+  存在。已改为 `ast` 静态扫源码取工具名全集（与装了什么包、开了哪些配置、什么平台无
+  关），加一条防自身失效断言，并删掉要逐台机器手改的 `CONDITIONAL_TOOLS` 豁免表（表里
+  已有一条 `RealtimeTalk` 根本不在能力表中）。只改测不改表，反方向对账刻意不静态化
+  的理由与实测数字见 [capability-tool-name-contract-fix.md](docs/fixlogs/capability-tool-name-contract-fix.md)。
 
 以下文档订正不改行为，只把**对外数字承诺**拉回与源码一致（真值由运行时实测得出）。
 

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -40,12 +41,6 @@ from agent.capabilities.registry import (
 # 修复动作白名单（计划 4.1）。加一项必须同时加实现与测试，写进表里不算数。
 ALLOWED_REPAIR_ACTIONS = {"fetch-browser", "fetch-model", "pip-extras", "config-fix"}
 
-# 按配置才注册的工具（默认 registry 里没有），在契约测里逐个豁免并写明原因。
-CONDITIONAL_TOOLS = {
-    "LSP",          # register_lsp_tool() 只在 [lsp] 启用时注册
-    "RealtimeTalk",  # 语音模式工具，按 [realtime_talk] 开关
-}
-
 # 运行时才发现的工具（CLI-Anything harness / MCP 服务器）：它们的依赖由
 # harness 自己的 plugin.json 或 MCP 服务器声明，不进本表（能力表只盖 jarvis
 # 自己能判定缺件的那部分，否则表会变成另一个包管理器）。
@@ -60,6 +55,50 @@ DYNAMIC_PREFIXES = ("cli_anything__", "mcp__")
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _static_tool_names() -> set[str]:
+    """从源码里收集 Tool 子类的 `name = "..."` 类属性，不 import 任何模块。
+
+    为什么存在性判据不能取 `build_default_registry()` 的运行时结果：注册是
+    **依赖条件**的——`_register_camera_tools()` 缺 cv2 直接 `return`，
+    `_register_browser_tools()` 缺 playwright 直接 `return`。Linux CI 上没装
+    opencv，`CameraShot` / `ListCameras` 就不在 registry 里，于是「表里登记了
+    不存在的工具」这条红其实说的是「这台机器装得不全」。拿运行时注册表当存在性
+    判据，恰好犯了本层要治的那个错——**`import 失败 ≠ 东西没有`**。
+    （2026-11-05 GitHub Actions 实红：`CameraShot`，本地 Windows 装了 opencv 永绿）
+
+    源码扫描同样保住了这条测原本的用处：名字写错、类被改名或删掉，字面量跟着
+    没，依旧红。至于「这台机器上现在能不能用」，那是探测层的职责。
+
+    @author aceFelix
+    """
+    names: set[str] = set()
+    for py in (_repo_root() / "agent").rglob("*.py"):
+        if "__pycache__" in py.parts:
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):  # 测不拦源码质问题，跳过即可
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            # 只认基类名以 Tool 结尾的类（Tool / XxxTool），避开 provider 等其
+            # 他带 name 类属性的普通类，防止把“别的名字”当成工具名存在证据。
+            bases = {ast.unparse(b).split("[")[0].split(".")[-1] for b in node.bases}
+            if not any(b.endswith("Tool") for b in bases):
+                continue
+            for stmt in node.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                value = stmt.value
+                if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id == "name":
+                        names.add(value.value)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -137,13 +176,20 @@ def test_every_deferred_tool_is_declared_or_exempted() -> None:
 
 
 def test_declared_tool_names_actually_exist() -> None:
-    """表里写的工具名必须真实存在（含按需注册的），不许凭空发明。"""
-    from agent.core.tool import build_default_registry
+    """表里写的工具名必须在源码里真有个 Tool 类，不许凭空发明。
 
-    registry = build_default_registry()
-    real = {t.name for t in registry.all()}
-    for tool in all_declared_tools():
-        assert tool in real or tool in CONDITIONAL_TOOLS, f"表里登记了不存在的工具：{tool}"
+    判据取自源码而不是运行时注册表（原因见 `_static_tool_names()`）：名字写错、
+    工具改名或被删除都要红；可选依赖没装不算「不存在」。
+    """
+    static = _static_tool_names()
+    # 防本测自身失效：这几个名字都是源码里核实过的，扫不到就是取路径或解析
+    # 写崩了，不能静默放行整表。CameraShot 特意在里面——它来自动态导入受限的
+    # vision 目录，扫不到说明扫描被依赖条件带偏了。
+    assert {"Bash", "ToolSearch", "ScreenShot", "CameraShot"} <= static, (
+        f"静态扫描异常，本测试自身失效：{sorted(static)[:5]}"
+    )
+    missing = [t for t in all_declared_tools() if t not in static]
+    assert not missing, f"表里登记了不存在的工具：{missing}"
 
 
 def test_mcp_dynamic_tools_map_to_mcp_capability() -> None:
