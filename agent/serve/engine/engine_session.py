@@ -90,6 +90,12 @@ class EngineSessionMixin:
 
             if "ToolSearch" not in registry:
                 registry.register(ToolSearchTool(registry))
+        # 多 Agent 协作装配（桌面「代理团队」，2026-11）：Agent / Team / Task 系列
+        # 工具此前只在终端 main.py 注册，桌面壳走 serve 完全拿不到。这里在 provider
+        # 建好后注册（SubagentTool 必须注入 provider），并把活动台账接到事件队列，
+        # 右栏才能实时看到每个子代理的状态。失败只提示、不阻断对话。
+        # @author aceFelix
+        self._register_collaboration(registry, provider)
         # harness 动态工具后台加载，避免阻塞首轮对话
         threading.Thread(
             target=lambda: self._register_harness(registry, s.workdir), daemon=True
@@ -168,6 +174,13 @@ class EngineSessionMixin:
     def _register_harness(self, registry: Any, workdir: str) -> None:
         """后台注册 CLI-Anything harness 工具（实现见 mcp_runtime）。"""
         mcp_runtime.register_harness(self, registry, workdir)
+
+    def _register_collaboration(self, registry: Any, provider: Any) -> None:
+        """注册多 Agent 协作工具并把活动台账接到事件队列（实现见 mcp_runtime）。
+
+        与 harness/MCP 同层：失败只发 info，不阻断对话装配。@author aceFelix
+        """
+        mcp_runtime.register_collaboration(self, registry, provider)
 
     async def _connect_mcp(self, registry: Any) -> None:
         """连接配置的 MCP server 并把工具注册进 registry（实现见 mcp_runtime）。

@@ -2,12 +2,7 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [Unreleased] — 目标版本 2.4.0
-
-> 尚未发布：`pyproject.toml` / `npm/package.json` / `agent/__init__.py` 三处版本号仍为
-> 2.3.5（`tests/test_release_contract.py::test_version_consistent_across_release_files`
-> 钉住三处一致）。发版时把本节标题改成 `## [2.4.0] — <日期>` 并同步三处版本号与
-> `uv.lock` 里那一条，不在这里预先谎报一个已存在的版本。
+## [2.4.0] — 2026-11-06
 
 这一版给系统装上了**自我认知**。起因是 2026-11-03 那次贪吃蛇：它汇报“我已经用浏览器打开
 验证过了”，而本机根本没装 playwright 浏览器内核——代码层把“工具有没有”等价于“包能不能
@@ -15,6 +10,21 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
 带实测证据的事实，并给它一个受约束的动手权限。事故复盘见
 [snake-visual-claim-fix.md](docs/fixlogs/snake-visual-claim-fix.md)，设计取舍见
 [20-能力自检与自我修复](docs/architecture/20-能力自检与自我修复.md)。
+
+### 新增（桌面多 Agent 协作，2026-11）
+
+- **serve 路径补齐协作工具**：`Agent` / `TeamCreate` / `TeamDelete` / `TeamStatus` /
+  `SendMessage` / `TaskCreate` / `TaskGet` / `TaskList` / `TaskUpdate` / `TaskStop` 在
+  `_ensure_session`（provider 建好后）注册，桌面壳不再只有终端能用多 Agent。
+- **活动台账** `agent/collaboration/activity.py`：进程内线程安全台账，记录每个子代理/
+  队友的 `status / task / current_tool / activity / output / iterations / tool_calls`；
+  变更节流 300ms、起止/失败立即通知。
+- **桌面协议**：新增 `agents.exec`（`status` / `stop` / `message`）与 `agents_state`
+  事件；同步子代理可在面板单独停止（取消自身 asyncio 任务），队友走 shutdown 协议。
+- **主聊天隔离**：`AgentActivityUI` 把子代理的流式文本/工具事件收进台账，只有
+  `ask_user` / `warn` / `error` 仍转发宿主。
+- **自动派发**：系统提示词新增「多代理协作」段（仅注册了 Agent 工具时注入），
+  说明何时拆分、四种角色、并行与后台队友的用法。
 
 ### 新增（能力自检层 `agent/capabilities/`）
 

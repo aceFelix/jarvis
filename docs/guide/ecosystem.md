@@ -38,6 +38,28 @@ Jarvis 支持派生子 Agent 并行处理复杂任务，以及团队协作模式
 
 管理命令：`/agents` `/tasks` `/plan`
 
+### 桌面代理团队面板（2026-11）
+
+jarvis-desktop 走 `python -m agent.serve`，此前只有终端入口注册了协作工具；升级后
+桌面同样具备完整工具面，并在右栏新增「代理团队」区块：
+
+- **自动派发**：系统提示词新增「多代理协作」段——任务可拆成多个独立子目标、且至少
+  一个需要跨文件取证时，模型自行用 `Agent` 派生；同一轮内互不依赖的子任务可一次
+  并行，长任务用 `run_in_background=true` 建持久队友。
+- **实时状态**：进程内活动台账（`agent/collaboration/activity.py`）记录每个子代理/
+  队友的 `status`（starting/running/thinking/idle/done/failed/stopped）、`task`、
+  `current_tool` 与一句 `activity`；后端以 `agents_state` 事件整份推送（节流 300ms，
+  起止/失败立即推），右栏 `AgentTeamPanel` 直接替换渲染。
+- **主聊天隔离**：子代理的流式文本与工具卡片只进活动台账，不再涌进主对话；需要用户
+  补充信息时仍会弹 `ask_user`。
+- **控制面**：`agents.exec` 三动词——`status` 读快照、`stop` 只停该代理（同步子代理
+  取消自己的 asyncio 任务，队友走 shutdown 协议）、`message` 给队友追加指令。
+- **重启语义**：团队文件持久在 `~/.jarvis/teams`，重启后成员会以 `offline` 显示
+  （本进程没在运行），不会凭空消失；子代理本身不落盘。
+
+详见 [架构说明 · 多 Agent 协作](../architecture/11-多Agent协作.md) 与
+[桌面三栏面板](desktop.md)。
+
 ### 典型用法
 
 ```text

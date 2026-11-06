@@ -197,6 +197,15 @@ class SubagentTool(Tool):
         except ValueError:
             permission_mode = self._permission_mode
 
+        # 活动台账：桌面右栏「代理团队」靠它显示子代理状态。终端同样生效，
+        # 只是终端没有消费者，写入成本可忽略。登记本身在 run_subagent 里做，
+        # 这里只生成 id 与展示名（id 末 4 位用于同名区分）。@author aceFelix
+        from agent.collaboration.activity import AgentActivityRegistry
+
+        activity_id = AgentActivityRegistry.new_agent_id(agent_type)
+        activity_name = f"{agent_type}-{activity_id.rsplit('-', 1)[-1]}"
+        team = self._team_mgr.active_team if self._team_mgr is not None else ""
+
         result = await run_subagent(
             agent_def,
             prompt,
@@ -204,6 +213,9 @@ class SubagentTool(Tool):
             workdir=ctx.workdir,
             permission_mode=permission_mode,
             parent_ui=ctx.ui,
+            activity_id=activity_id,
+            activity_name=activity_name,
+            activity_team=team or "",
         )
 
         if not result.success:
@@ -224,6 +236,8 @@ class SubagentTool(Tool):
         self, tasks: list[dict[str, Any]], ctx: ToolContext,
     ) -> ToolResult:
         """批量并行执行多个同步子代理任务。"""
+        from agent.collaboration.activity import AgentActivityRegistry
+
         mode_str = ctx.permission_mode or "yolo"
         try:
             permission_mode = PermissionMode(mode_str)
@@ -250,6 +264,11 @@ class SubagentTool(Tool):
             workdir=ctx.workdir,
             permission_mode=permission_mode,
             parent_ui=ctx.ui,
+            # 批量模式同样进活动台账：每个子任务一条记录，面板可分别看进度
+            activity_ids=[
+                AgentActivityRegistry.new_agent_id(agent_def.agent_type)
+                for agent_def, _prompt in job_list
+            ],
         )
 
         lines = [f"批量子代理结果（共 {len(results)} 个）:"]
@@ -328,6 +347,7 @@ class SubagentTool(Tool):
             agent_id=agent_id,
             agent_name=name,
             team_name=team_name,
+            role=agent_type,
         )
 
         sub_registry = _build_sub_registry(agent_def.allowed_tools)

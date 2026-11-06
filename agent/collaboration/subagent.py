@@ -37,6 +37,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import platform
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -330,6 +331,9 @@ async def run_subagent(
     extra: dict[str, Any] | None = None,
     permission_rules: Any = None,
     settings: Any = None,
+    activity_id: str | None = None,
+    activity_name: str | None = None,
+    activity_team: str = "",
 ) -> SubagentResult:
     """执行一个子 agent。
 
@@ -350,12 +354,39 @@ async def run_subagent(
             RuleSet）；None 用空集。不传就会“前台已放行、后台仍被拒”。
         settings: 宿主配置，原样递给子 ctx。编排器据此读 ``[actions]`` 的窗口长度
             与记账开关；不传就会退成默认值，让用户的配置对后台步骤无效。
+        activity_id: 非空时把本次执行登记进活动台账，并把子代理的流式文本/工具
+            事件收进台账（桌面右栏「代理团队」的数据源）。None = 沿用旧行为，
+            子代理事件直接走 parent_ui（终端路径零变化）。
+        activity_name: 台账里显示的代理名；缺省用 agent_type。
+        activity_team: 所属团队名（仅队友模式有）。
 
     Returns:
         SubagentResult: 子 agent 的执行结果。
     """
     if parent_ui is not None:
         parent_ui.info(f"  → 派生 {agent_def.agent_type} 子代理执行任务...")
+
+    # 活动台账：只在调用方给了 id 时启用（终端路径不传，行为零变化）。
+    # 台账名默认取 agent_type，同名时仍能靠 agent_id 区分。@author aceFelix
+    if activity_id:
+        from .activity import get_activity_registry
+
+        get_activity_registry().start_agent(
+            activity_id,
+            activity_name or agent_def.agent_type,
+            role=agent_def.agent_type,
+            mode="subagent",
+            team=activity_team,
+            task=prompt,
+        )
+        # 绑定到当前 asyncio.Task：agents.exec stop 靠它取消同步子代理。
+        # @author aceFelix
+        try:
+            import asyncio as _asyncio
+
+            get_activity_registry().bind_task(activity_id, _asyncio.current_task())
+        except Exception:
+            pass
 
     # 1. 构建子 agent 的工具集 + 权限校验器 + 编排器
     sub_registry = _build_sub_registry(agent_def.allowed_tools)
@@ -393,11 +424,25 @@ async def run_subagent(
 
     # 4. 独立的 messages 列表 + ToolContext
     sub_messages: list[Message] = []
+    # 有台账时用 UI 代理：子代理的流式文本与工具事件只更新台账，不再涌进主聊天；
+    # ask_user / warn / error 仍转发给宿主（子代理需要用户输入时不能静默）。
+    # @author aceFelix
+    if activity_id:
+        from .activity import AgentActivityUI, get_activity_registry
+
+        # 只有宿主在消费台账（桌面右栏）时才隔离子代理事件；终端没有监听器，
+        # 仍把进度打在终端上，保持原行为。@author aceFelix
+        if get_activity_registry().has_listener():
+            sub_ui: Any = AgentActivityUI(parent_ui, activity_id)
+        else:
+            sub_ui = parent_ui
+    else:
+        sub_ui = parent_ui
     sub_ctx = ToolContext(
         workdir=workdir,
         messages=sub_messages,
         permission_mode=permission_mode.value,
-        ui=parent_ui,  # 复用主 UI 打印子 agent 的工具调用提示
+        ui=sub_ui,  # 复用主 UI（或活动台账代理）打印子 agent 的工具调用提示
         # 只浅拷贝：effect_ids 必须是宿主传进来的同一个列表对象，子代理往里
         # 追加的 id 跑完才读得到（拷贝就会把回扣链断在这一行）
         extra=dict(extra or {}),
@@ -411,10 +456,28 @@ async def run_subagent(
     try:
         stats = await sub_loop.run(prompt, sub_ctx)
     except Exception as e:
+        if activity_id:
+            from .activity import get_activity_registry
+
+            get_activity_registry().finish_agent(
+                activity_id,
+                status="failed",
+                error=f"{type(e).__name__}: {e}",
+            )
+            get_activity_registry().forget_task(activity_id)
         return SubagentResult(
             success=False,
             error=f"{type(e).__name__}: {e}",
         )
+    except asyncio.CancelledError:
+        # 控制面停止（agents.exec stop）走这里收尾：CancelledError 不是 Exception
+        # 子类，前面的 except Exception 接不到。@author aceFelix
+        if activity_id:
+            from .activity import get_activity_registry
+
+            get_activity_registry().finish_agent(activity_id, status="stopped", output="已停止")
+            get_activity_registry().forget_task(activity_id)
+        raise
 
     # 6. 提取子 agent 的最终文本回复（最后一条 assistant 消息）
     report = ""
@@ -429,6 +492,21 @@ async def run_subagent(
             f"  ← {agent_def.agent_type} 子代理完成"
             f"（{stats.iterations} 轮，{stats.tool_calls} 次工具调用）"
         )
+
+    if activity_id:
+        from .activity import get_activity_registry
+
+        get_activity_registry().update_agent(
+            activity_id,
+            iterations=stats.iterations,
+            tool_calls=stats.tool_calls,
+        )
+        get_activity_registry().finish_agent(
+            activity_id,
+            status="done",
+            output=(report.strip() or "")[:600],
+        )
+        get_activity_registry().forget_task(activity_id)
 
     return SubagentResult(
         success=True,
@@ -445,6 +523,7 @@ async def run_subagents_parallel(
     workdir: str,
     permission_mode: PermissionMode = PermissionMode.YOLO,
     parent_ui: Any = None,
+    activity_ids: list[str] | None = None,
 ) -> list[SubagentResult]:
     """并行执行多个子 agent。
 
@@ -454,18 +533,21 @@ async def run_subagents_parallel(
     Args:
         tasks: [(agent_def, prompt), ...] 列表。
         其余参数同 run_subagent。
+        activity_ids: 与 tasks 等长的台账 id 列表；None = 全部走旧行为。
 
     Returns:
         与 tasks 等长的结果列表，顺序对应。
     """
     import asyncio
 
+    ids = activity_ids or []
     coros = [
         run_subagent(
             agent_def, prompt,
             provider=provider, workdir=workdir,
             permission_mode=permission_mode, parent_ui=parent_ui,
+            activity_id=ids[idx] if idx < len(ids) else None,
         )
-        for agent_def, prompt in tasks
+        for idx, (agent_def, prompt) in enumerate(tasks)
     ]
     return await asyncio.gather(*coros)

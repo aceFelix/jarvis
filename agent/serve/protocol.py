@@ -173,6 +173,9 @@ actions.exec        action: str（status/list/     {ok, action, message?, counts
 - 运行健康：``mcp_ready``（MCP 后台连接落定时推一次，payload 即 state.get 的
   mcp 快照 ``{connected, failed, tools}``；桌面 init 时快照常为 None——MCP 约 9s
   后台预热才连上，故需本事件驱动右栏补刷）
+- 代理团队：``agents_state``（payload 与 ``agents.exec status`` 同形：团队、
+  每个子代理/队友的状态与当前动作、共享任务台账摘要。台账侧节流 300ms，
+  起止/失败状态立即推送；桌面右栏「代理团队」整份替换渲染）
 
 @author aceFelix
 """
@@ -309,6 +312,13 @@ CMD_PERCEPT_CONFIG_SET = "percept.config.set"
 CMD_TASKS_EXEC = "tasks.exec"
 CMD_ACTIONS_EXEC = "actions.exec"
 
+# agents.exec（多 Agent 协作，2026-11）：桌面右栏「代理团队」。一条指令承载
+# status / stop / message 三个动词；status 与 agents_state 事件同形（团队、
+# 每个子代理/队友的状态与当前动作、共享任务台账摘要）。stop/message 只操作
+# 代理自身，不触碰主会话的回复任务。实现在 agent/serve/rpc_agents.py。
+# @author aceFelix
+CMD_AGENTS_EXEC = "agents.exec"
+
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MESSAGE,
@@ -366,6 +376,7 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_PERCEPT_CONFIG_SET,
     CMD_TASKS_EXEC,
     CMD_ACTIONS_EXEC,
+    CMD_AGENTS_EXEC,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

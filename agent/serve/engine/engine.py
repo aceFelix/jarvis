@@ -145,6 +145,13 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
         # verify_callback 阻塞在此 get()，桌面 wechat.pairing 指令 put() 解锁。
         # @author aceFelix
         self._wechat_pairing_q: queue.Queue[str] | None = None
+        # 多 Agent 协作宿主对象（_ensure_session 装配后填充；None = 尚未装配）。
+        # 右栏「代理团队」的 team 信息与 stop/message 控制面都读这三项。
+        # @author aceFelix
+        self._team_mgr: Any = None
+        self._task_list: Any = None
+        self._team_name: str = ""
+        self._activity_bound = False
 
 
 

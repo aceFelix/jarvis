@@ -317,25 +317,49 @@ def _probe_playwright_browsers(req: AssetReq) -> RequirementStatus:
             evidence=f"内核根目录的上级不存在：{root}（路径判定可能有误，不据此判缺失）",
             optional=req.optional,
         )
-    # 无头自查只需要 headless shell；完整 chromium 只在 headless=false 时用到，
-    # 所以这里"有任一 chromium 形态即算可用"，但把两者状态都写进证据，便于定位。
-    have: list[str] = []
-    want: list[str] = []
-    for key, rev in sorted(revisions.items()):
-        folder = root / f"{key}-{rev}"
-        want.append(f"{key}-{rev}")
-        if folder.exists():
-            have.append(f"{key}-{rev}")
-    if have:
+    # 两种内核形态各管一摊，**不能互相顶替**：
+    #   headless=True （我们 browser.py 的默认路径，交付自查也走这里）
+    #       → 只认 chromium_headless_shell
+    #   headless=False
+    #       → 才用完整 chromium
+    # 旧版 playwright 的 browsers.json 里没有 headless-shell 这一项，那时无头也是拿
+    # 完整 chromium 顶，所以"无头该找谁"要按 revisions 里有没有这个 key 分开判。
+    #
+    # 2026-11-05 修正：此前这里写成"有任一 chromium 形态即算可用"，于是只有完整版
+    # 时静态档照样打勾，真启动却抛 Executable doesn't exist —— 故障被自己的探针藏了。
+    shell_rev = revisions.get("chromium_headless_shell", "")
+    full_rev = revisions.get("chromium", "")
+    if shell_rev:
+        headless_want = f"chromium_headless_shell-{shell_rev}"
+        fix_hint = f'"{sys.executable}" -m playwright install chromium --only-shell'
+    elif full_rev:
+        headless_want = f"chromium-{full_rev}"  # 旧版布局：无头复用完整 chromium
+        fix_hint = f'"{sys.executable}" -m playwright install chromium'
+    else:
+        return RequirementStatus(
+            kind="asset", label=req.label, state=ReqState.PROBE_FAILED,
+            evidence=f"browsers.json 里既无 chromium 也无 headless-shell：{revisions}",
+            optional=req.optional,
+        )
+
+    candidates = [n for n in (f"chromium_headless_shell-{shell_rev}" if shell_rev else "",
+                              f"chromium-{full_rev}" if full_rev else "") if n]
+    have = [n for n in candidates if (root / n).exists()]
+    have_note = "、".join(have) if have else "一个都没有"
+
+    if (root / headless_want).exists():
         return RequirementStatus(
             kind="asset", label=req.label, state=ReqState.OK,
-            evidence=f"已装 {'、'.join(have)}（需要 {'、'.join(want)}）@ {root}",
+            evidence=f"无头内核就绪：{headless_want}（已装 {have_note}）@ {root}",
             optional=req.optional,
         )
     return RequirementStatus(
         kind="asset", label=req.label, state=ReqState.MISSING,
-        evidence=f"需要 {' 或 '.join(want)}，{root} 下一个都没有",
-        fix_hint=f'"{sys.executable}" -m playwright install chromium --only-shell',
+        evidence=(
+            f"缺 {headless_want}（已装 {have_note}）；完整版顶替不了无头壳，"
+            f"headless=True 会抛 Executable doesn't exist @ {root}"
+        ),
+        fix_hint=fix_hint,
         optional=req.optional,
     )
 

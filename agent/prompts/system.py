@@ -23,6 +23,7 @@ from agent.core.tool import ToolRegistry
 from agent.prompts.text_blocks import (
     _BASE_PROMPT,
     _GOAL_SPINE_SECTION,
+    _COLLAB_SECTION,
     _MAIL_SECTION,
     _NO_THINKING_SECTION,
     _PLATFORM_LINUX,
@@ -137,6 +138,19 @@ def _goal_spine_section(registry: ToolRegistry) -> str:
     if "TrackGoal" not in registry:
         return ""
     return _GOAL_SPINE_SECTION
+
+
+def _collab_section(registry: ToolRegistry) -> str:
+    """多代理协作段（按需注入）：只有注册了 Agent 工具才拼进提示。
+
+    子代理的受限工具集里没有 Agent（防递归），不判断就会让它去找一个手上
+    没有的入口；终端与桌面 serve 都在注册后才会命中。
+
+    @author aceFelix
+    """
+    if "Agent" not in registry:
+        return ""
+    return _COLLAB_SECTION
 
 
 def _self_config_section(registry: ToolRegistry) -> str:
@@ -268,6 +282,7 @@ def build_system_prompt(
             _platform_section(),
             _schedule_section(registry),
             _goal_spine_section(registry),
+            _collab_section(registry),
             _self_config_section(registry),
             _mail_section(registry),
             _cli_anything_section(registry),

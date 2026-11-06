@@ -12,6 +12,32 @@ J.A.R.V.I.S 支持派生子 Agent 并行处理复杂任务，以及团队协作�
 | [collaboration/teammate_registry.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/collaboration/teammate_registry.py) | 进程内 teammate 注册表 |
 | [collaboration/mailbox.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/collaboration/mailbox.py) | Agent 间消息邮箱 |
 | [collaboration/task_list.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/collaboration/task_list.py) | 共享任务列表 |
+| [collaboration/activity.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/collaboration/activity.py) | 活动台账（进程内实时状态，桌面右栏数据源） |
+
+## 一·五、桌面接入（2026-11）
+
+**装配点**：`agent/serve/engine/mcp_runtime.py::register_collaboration` 在
+`_ensure_session`（provider 建好之后）调用 `register_subagent_tool` +
+`register_team_tools`，并 `bind_activity_emitter`。团队名取工作目录名（清洗后），
+跨次启动复用同一团队文件；启动时先把上一进程残留的「活跃」标记清成空闲。
+
+**活动台账**：`AgentActivityRegistry` 全局单例，线程安全；字段 `agent_id / name /
+role / mode / team / status / task / current_tool / activity / output / started_at /
+updated_at / iterations / tool_calls / error`。变更最多每 300ms 通知一次，起止/失败
+状态立即通知。`AgentActivityUI` 代替宿主 UI 接收子代理事件：`tool_use` /
+`tool_result` / `assistant_text` / `assistant_thinking` 只写台账，`ask_user` / `warn` /
+`error` 仍转发——子代理的流式文本与工具卡片不会污染主聊天。
+
+**协议**：
+- 指令 `agents.exec`（`agent/serve/rpc_agents.py`）：`status` / `stop` / `message`；
+- 事件 `agents_state`：与 `status` 同形（`enabled / team / agents / counts /
+  task_list`），由台账监听器整份推送；
+- `stop` 的取消通道：同步子代理在 `run_subagent` 里 `bind_task(asyncio.current_task())`，
+  RPC 通过 `loop.call_soon_threadsafe(task.cancel)` 取消；队友走
+  `asyncio.run_coroutine_threadsafe(runner.shutdown(), engine_loop)`。
+
+**重启语义**：团队文件与共享任务台账持久在 `~/.jarvis`；活动台账不落盘。重启后
+团队里仍存在的成员以 `status=offline` 出现在面板（本进程未运行），不是失败。
 
 ## 二、子代理 Subagent
 

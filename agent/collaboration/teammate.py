@@ -56,12 +56,14 @@ class TeammateIdentity:
         team_name: 所属团队。
         color: UI 颜色。
         plan_mode_required: 是否需要 leader 审批计划。
+        role: 角色类型（explorer/researcher/coder/general），供活动台账展示。
     """
     agent_id: str
     agent_name: str
     team_name: str
     color: Optional[str] = None
     plan_mode_required: bool = False
+    role: Optional[str] = None
 
 
 @dataclass
@@ -206,6 +208,22 @@ class TeammateRunner:
         self._state.status = "running"
         self._state.started_at = time.time()
 
+        # 活动台账：桌面右栏「代理团队」按 agent_id 显示队友状态。
+        # 登记失败不能阻断队友启动（观测层不反噬执行链）。@author aceFelix
+        try:
+            from .activity import get_activity_registry
+
+            get_activity_registry().start_agent(
+                self._identity.agent_id,
+                self._identity.agent_name,
+                role=self._identity.role or "general",
+                mode="teammate",
+                team=self._identity.team_name,
+                task=prompt,
+            )
+        except Exception:
+            pass
+
         # 清空邮箱（上一个会话的残留）
         clear_mailbox(self._identity.agent_name, self._identity.team_name)
 
@@ -253,11 +271,28 @@ class TeammateRunner:
             )
 
             # 3. 构建 ToolContext
+            # UI 用活动台账代理：队友的流式文本/工具事件进右栏「代理团队」，
+            # 不再淹没主聊天；ask_user / warn / error 仍转发给宿主。
+            # @author aceFelix
+            from .activity import AgentActivityUI, get_activity_registry
+
+            activity = get_activity_registry()
             ctx = ToolContext(
                 workdir=self._workdir,
                 messages=self._state.messages,
                 permission_mode=self._permission_mode,
-                ui=parent_ui,
+                # 桌面有台账消费者时才隔离事件；终端仍走原始 UI（保持进度可见）。
+                # @author aceFelix
+                ui=(
+                    AgentActivityUI(parent_ui, self._identity.agent_id)
+                    if activity.has_listener()
+                    else parent_ui
+                ),
+            )
+            activity.update_agent(
+                self._identity.agent_id,
+                status="running",
+                activity="开始执行任务",
             )
 
             # 4. 邮件轮询 + 任务执行循环
@@ -305,6 +340,15 @@ class TeammateRunner:
                 if waiting_for_more_work:
                     self._state.status = "idle"
                     self._update_team_member_active(False)
+                    try:
+                        activity.update_agent(
+                            self._identity.agent_id,
+                            status="idle",
+                            activity="空闲，等待新任务",
+                            current_tool="",
+                        )
+                    except Exception:
+                        pass
 
                     # 发送 idle 通知
                     try:
@@ -354,6 +398,25 @@ class TeammateRunner:
             self._state.status = "terminated"
             self._update_team_member_active(False)
 
+            # 活动台账收尾：面板据此把该行标成「已停止」，不再画控制按钮。
+            # 已在 _execute_turn 里标过 failed 的不覆盖（失败原因比"已退出"有用）。
+            # @author aceFelix
+            try:
+                from .activity import get_activity_registry
+
+                reg = get_activity_registry()
+                current = {
+                    a.get("agent_id"): a.get("status") for a in reg.snapshot()
+                }.get(self._identity.agent_id, "")
+                if current not in ("failed", "stopped"):
+                    reg.finish_agent(
+                        self._identity.agent_id,
+                        status="stopped",
+                        output="已退出",
+                    )
+            except Exception:
+                pass
+
             # 从进程内注册表注销
             try:
                 from .teammate_registry import get_teammate_registry
@@ -391,9 +454,31 @@ class TeammateRunner:
         try:
             stats = await loop.run(user_text, ctx)
             self._state.last_report_tool_count = stats.tool_calls
+            self._state.last_report_token_count = getattr(stats, "total_tokens", 0) or 0
+            from .activity import get_activity_registry
+
+            get_activity_registry().update_agent(
+                self._identity.agent_id,
+                status="idle",
+                activity="本轮完成，等待新任务",
+                iterations=stats.iterations,
+                tool_calls=stats.tool_calls,
+                current_tool="",
+            )
         except Exception as e:
             if parent_ui:
                 parent_ui.error(f"  [{self._identity.agent_name}] 执行异常: {e}")
+            try:
+                from .activity import get_activity_registry
+
+                get_activity_registry().update_agent(
+                    self._identity.agent_id,
+                    status="failed",
+                    error=f"{type(e).__name__}: {e}",
+                    current_tool="",
+                )
+            except Exception:
+                pass
 
     async def _handle_message(
         self,
@@ -485,6 +570,17 @@ class TeammateRunner:
                 )
                 if updated:
                     self._state.current_task_id = task.id
+                    try:
+                        from .activity import get_activity_registry
+
+                        get_activity_registry().update_agent(
+                            self._identity.agent_id,
+                            task=f"#{task.id} {task.subject}",
+                            activity=f"领取任务 #{task.id}",
+                            status="running",
+                        )
+                    except Exception:
+                        pass
                     self._state.pending_user_messages.append(
                         f"你领取了任务 #{task.id}: {task.subject}\n\n"
                         f"{task.description or '请按任务描述自主完成，完成后汇报结果。'}"

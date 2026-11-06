@@ -120,3 +120,109 @@ async def connect_mcp(engine: ChatEngine, registry: Any) -> None:
         pass  # MCP SDK 未安装，跳过接入
     except Exception as e:
         engine._emitter.emit("info", f"⚠ MCP 接入异常: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 多 Agent 协作装配（桌面「代理团队」，2026-11）
+# ---------------------------------------------------------------------------
+
+
+def build_desktop_team(engine: ChatEngine) -> tuple[Any, Any, str]:
+    """为当前工作区装配团队与共享任务台账。
+
+    团队名取工作目录名（清洗后），同一项目跨次启动复用同一团队文件；
+    上一进程残留的「活跃」标记先清成空闲，否则 TeamDelete 永远删不掉。
+    进程内 runner 注册表重启即空，真实运行状态以本次台账为准。
+
+    @author aceFelix
+    """
+    from pathlib import Path
+
+    from agent.collaboration.task_list import TaskList
+    from agent.collaboration.team import get_team_manager, sanitize_name
+
+    settings = engine._settings
+    raw = Path(str(getattr(settings, "workdir", "") or ".")).name
+    name = sanitize_name(raw or "jarvis-desktop")
+    mgr = get_team_manager()
+    team = mgr.load(name)
+    if team is None:
+        try:
+            mgr.create(
+                name,
+                cwd=str(getattr(settings, "workdir", "") or ""),
+                description="桌面工作区协作团队",
+                model=getattr(settings, "model", None),
+            )
+        except RuntimeError:
+            # 另一个入口已建同名团队：以磁盘上的为准
+            team = mgr.load(name)
+    else:
+        for member in team.non_lead_members:
+            if member.is_active is not False:
+                try:
+                    mgr.mark_member_active(name, member.name, False)
+                except Exception:
+                    pass
+    mgr.set_active_team(name)
+    tasks = TaskList(name)
+    tasks.ensure_dir()
+    return mgr, tasks, name
+
+
+def register_collaboration(engine: ChatEngine, registry: Any, provider: Any) -> None:
+    """把 Agent / Team / Task 系列工具挂进引擎注册表，并接上活动事件。
+
+    与终端 main.py 的注册口径一致（provider 必须注入，否则 Agent 工具拒绝派生）；
+    任何失败只发 info 提示，不阻断对话装配。
+
+    @author aceFelix
+    """
+    try:
+        from agent.core.tool import register_subagent_tool, register_team_tools
+        from agent.permissions.modes import PermissionMode
+
+        mgr, tasks, team_name = build_desktop_team(engine)
+        engine._team_mgr = mgr
+        engine._task_list = tasks
+        engine._team_name = team_name
+        try:
+            mode = PermissionMode(str(getattr(engine._settings, "permission_mode", "default")))
+        except (ValueError, TypeError):
+            mode = PermissionMode.YOLO
+        count = 0
+        if register_subagent_tool(
+            registry,
+            provider=provider,
+            permission_mode=mode,
+            team_mgr=mgr,
+            task_list=tasks,
+        ):
+            count += 1
+        count += register_team_tools(registry, task_list=tasks, team_mgr=mgr)
+        bind_activity_emitter(engine)
+        if count:
+            engine._emitter.emit(
+                "info",
+                f"✓ 多 Agent 协作已就绪（团队 {team_name}，注册 {count} 个协作工具）",
+            )
+    except Exception as e:
+        engine._emitter.emit("info", f"⚠ 多 Agent 协作装配失败: {type(e).__name__}: {e}")
+
+
+def bind_activity_emitter(engine: ChatEngine) -> None:
+    """把活动台账的变更接到 ``agents_state`` 事件（幂等，只接一次）。"""
+    if getattr(engine, "_activity_bound", False):
+        return
+    from agent.collaboration.activity import get_activity_registry
+
+    def _push(agents: list[dict[str, Any]]) -> None:
+        try:
+            from agent.serve.rpc_agents import build_agents_payload
+
+            engine._emitter.emit("agents_state", build_agents_payload(engine, agents))
+        except Exception:
+            pass
+
+    get_activity_registry().set_listener(_push)
+    engine._activity_bound = True

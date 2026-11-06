@@ -133,9 +133,11 @@ def test_desktop_commands_count():
     2026-10-21 W3 阶段 10 收尾切片：+tasks.exec / actions.exec（53→55，桌面
     「任务中心」与「可撤销行动」面板；两条通用指令各承载多个动词，理由同
     extensions.exec，业务实现见 agent/serve/rpc_tasks.py）。
+    2026-11 多 Agent 协作：+agents.exec（55→56，桌面右栏「代理团队」的
+    status/stop/message，快照与 agents_state 事件同形，见 agent/serve/rpc_agents.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 55
+    assert len(protocol.DESKTOP_COMMANDS) == 56
 
 
 def test_all_registered_rpcs_declared():

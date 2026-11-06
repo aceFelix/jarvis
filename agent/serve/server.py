@@ -45,6 +45,7 @@ from agent.serve.rpc_email import EmailRpcMixin
 from agent.serve.rpc_extensions import ExtensionsRpcMixin
 from agent.serve.rpc_percept import PerceptRpcMixin
 from agent.serve.rpc_tasks import TasksRpcMixin
+from agent.serve.rpc_agents import AgentsRpcMixin
 from agent.serve.engine.api import WorkbenchAPI
 from agent.serve.engine.metrics import collect_metrics
 from agent.serve.engine.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
@@ -58,7 +59,7 @@ _MAX_FILE_CHARS = 200_000
 
 
 class DesktopBridgeServer(
-    PerceptRpcMixin, TasksRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
+    PerceptRpcMixin, TasksRpcMixin, AgentsRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
 ):
     """桌面壳 API 服务器：BridgeServer 传输层 + ChatEngine 指令路由。
 
@@ -220,6 +221,11 @@ class DesktopBridgeServer(
         # @author aceFelix
         self._register_rpc(protocol.CMD_TASKS_EXEC, self._rpc_tasks_exec)
         self._register_rpc(protocol.CMD_ACTIONS_EXEC, self._rpc_actions_exec)
+        # agents.exec（多 Agent 协作，2026-11）：桌面右栏「代理团队」。status 是
+        # 内存/小文件快照读取，stop/message 只是把控制动作投到引擎 loop，本身
+        # 不阻塞，故走同步 _register_rpc；handler 在 rpc_agents.AgentsRpcMixin。
+        # @author aceFelix
+        self._register_rpc(protocol.CMD_AGENTS_EXEC, self._rpc_agents_exec)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。
