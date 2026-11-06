@@ -421,7 +421,10 @@ def test_asset_missing_names_revision_and_hint(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "empty"))
     st = probe_mod.probe_asset(_ASSET)
     assert st.state == ReqState.MISSING
-    assert "chromium-1223" in st.evidence
+    assert "chromium_headless_shell-1223" in st.evidence
+    # 2026-11-05 修正后的口径：完整 chromium 顶替不了无头壳，证据里必须写明，
+    # 否则面板会让人以为“装了完整版就够了”。@author aceFelix
+    assert "完整版顶替不了无头壳" in st.evidence
     assert "playwright install chromium --only-shell" in st.fix_hint
     assert probe_mod.sys.executable in st.fix_hint
 
