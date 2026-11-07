@@ -239,6 +239,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.track_goal import TrackGoalTool
     from agent.tools.config_tool import ConfigExplainTool, ConfigListTool, ConfigSetTool
     from agent.tools.pref_tool import PreferenceTool
+    from agent.tools.memory.memory_update import MemoryUpdateTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_box import EmailBoxTool
@@ -262,6 +263,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(ConfigSetTool())
     # 阶段 12 P3 偏好账本：带条件的"以后…"（只能落 auto 域）@author aceFelix
     registry.register(PreferenceTool())
+    # 长期记忆（桌面设置面板可编辑，模型经此追加；2026-11）@author aceFelix
+    registry.register(MemoryUpdateTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())

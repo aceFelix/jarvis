@@ -94,6 +94,18 @@ class WorkbenchUI:
     def error(self, text: str) -> None:
         self._emit("error", text)
 
+    def plan_submitted(self, content: str, summary: str, path: str) -> None:
+        """计划提交（ExitPlanMode，2026-11）：把预览、摘要与文件路径推给桌面。
+
+        终端 RichCLI 没有本方法，工具侧用 getattr 探测，取不到即跳过；计划全文
+        以 ``.jarvis/PLAN.md`` 为准，本事件只带预览（工具已截到 2000 字）。
+        @author aceFelix
+        """
+        self._emit(
+            "plan_submitted",
+            {"content": content, "summary": summary, "path": path},
+        )
+
     def remote_user_message(self, channel: str, text: str) -> None:
         """远端通道（手机 / 微信）用户消息：前端按普通用户气泡渲染并标注来源。
 

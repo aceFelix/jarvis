@@ -150,8 +150,29 @@ class ToolOrchestrator:
 
             # 权限校验：五层管线结论后再过 W1 运行时层闸门
             # （授权租约→away 分流；DENY 不可放宽，fail-closed）
+            # 模式以 ctx 为准：EnterPlanMode / ExitPlanMode 在运行时改
+            # ctx.permission_mode，不把该值传进 checker 就只是“记了个状态”，
+            # 写操作仍按旧模式放行（2026-11 修复）。ctx 为空/非法时回退
+            # checker 构造模式，保持原有行为。@author aceFelix
+            mode_override = None
+            raw_mode = str(getattr(ctx, "permission_mode", "") or "")
+            if raw_mode:
+                try:
+                    from agent.permissions.modes import PermissionMode as _PlanMode
+
+                    mode_override = _PlanMode(raw_mode)
+                except ValueError:
+                    mode_override = None
+            # 只在「工具运行期真的切进了规划模式」时才覆盖 checker 的模式：
+            # 其它入口（下拉切模式）会重建 checker 并同步 ctx，无需在这里改；
+            # 同值/非规划状态保持原三参数调用（测试替身与旧调用形状兼容）。
             # @author aceFelix
-            perm = self._checker.check(tool, tu.input, ctx)
+            checker_mode = getattr(self._checker, "mode", None)
+            plan_active = bool(ctx.extra.get("_plan_mode_entered")) and mode_override == _PlanMode.PLAN
+            if plan_active and checker_mode is not None and mode_override != checker_mode:
+                perm = self._checker.check(tool, tu.input, ctx, mode=mode_override)
+            else:
+                perm = self._checker.check(tool, tu.input, ctx)
             perm = policy_gate(tool, tu.input, ctx, perm)
             # 空转循环检测：每次调用都记录签名（ASK/DENY 也记，保持窗口连续），
             # 但只把 ALLOW 强制升级 ASK 拦刹车（ASK 自有人工环节，DENY 不动）。

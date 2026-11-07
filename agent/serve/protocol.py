@@ -176,6 +176,11 @@ actions.exec        action: str（status/list/     {ok, action, message?, counts
 - 代理团队：``agents_state``（payload 与 ``agents.exec status`` 同形：团队、
   每个子代理/队友的状态与当前动作、共享任务台账摘要。台账侧节流 300ms，
   起止/失败状态立即推送；桌面右栏「代理团队」整份替换渲染）
+- 计划提交：``plan_submitted``（payload ``{content, summary, path}``；
+  ``ExitPlanMode`` 落盘 ``.jarvis/PLAN.md`` 后推一次，content 只带 2000 字预览；
+  桌面渲染为系统消息，计划全文以文件为准）
+- 长期记忆：``memory_changed``（payload ``{scope}``；桌面工作台改完 MEMORY.md 后
+  推一次，面板重拉 memory.get。模型经 MemoryUpdate 写入时不推，下次 memory.get 自见）
 
 @author aceFelix
 """
@@ -319,6 +324,15 @@ CMD_ACTIONS_EXEC = "actions.exec"
 # @author aceFelix
 CMD_AGENTS_EXEC = "agents.exec"
 
+# memory.get / memory.save（长期记忆，2026-11）：桌面「设置 → 长期记忆」面板。
+# 读取返回 user/project 两个范围的路径、正文、字数与更新时间；保存为整体覆盖
+# （原子写 + 单份 .bak）。项目级路径取自当前 settings.workdir，未选项目时
+# 保存会明确报错。保存成功后引擎重建本会话提示词，并推 memory_changed。
+# 模型侧写入走 MemoryUpdate 工具（只追加、自动去重）。实现在 rpc_memory.py。
+# @author aceFelix
+CMD_MEMORY_GET = "memory.get"
+CMD_MEMORY_SAVE = "memory.save"
+
 # 全部桌面指令集合（测试与文档一致性校验用）
 DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_MESSAGE,
@@ -377,6 +391,8 @@ DESKTOP_COMMANDS: frozenset[str] = frozenset({
     CMD_TASKS_EXEC,
     CMD_ACTIONS_EXEC,
     CMD_AGENTS_EXEC,
+    CMD_MEMORY_GET,
+    CMD_MEMORY_SAVE,
 })
 
 # ---- 事件名常量（服务端 → 客户端） ----

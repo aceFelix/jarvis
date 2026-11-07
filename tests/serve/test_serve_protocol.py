@@ -135,9 +135,12 @@ def test_desktop_commands_count():
     extensions.exec，业务实现见 agent/serve/rpc_tasks.py）。
     2026-11 多 Agent 协作：+agents.exec（55→56，桌面右栏「代理团队」的
     status/stop/message，快照与 agents_state 事件同形，见 agent/serve/rpc_agents.py）。
+    2026-11 桌面「设置 → 长期记忆」：+memory.get / memory.save（56→58，读两个范围
+    的 MEMORY.md 快照与整体覆盖保存，保存后由 api.reload_memory 触发引擎重建
+    系统提示词并推 memory_changed，见 agent/serve/rpc_memory.py）。
     增减须同步双仓文档（jarvis-desktop 的 contracts.ts 与本文件口径）。
     """
-    assert len(protocol.DESKTOP_COMMANDS) == 56
+    assert len(protocol.DESKTOP_COMMANDS) == 58
 
 
 def test_all_registered_rpcs_declared():

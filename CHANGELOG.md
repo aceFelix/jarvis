@@ -2,6 +2,46 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [2.5.0] — 2026-11-07
+
+### 新增（桌面打包全能力，2026-11-07）
+
+- **冻结后端按 `[all]` 全 extras 构建**：`jarvis-serve.exe` 现在包含
+  gui / browser / camera / vision / voice / mcp / daemon / wechat 八组依赖，
+  桌面安装包不再出现“开发态能截图/语音、打包态没有”的落差。
+- **随包 playwright 双内核**：`build_serve.ps1` 把无头壳与完整 chromium 下载到
+  `dist/jarvis-serve/ms-playwright`，`serve_entry` 冻结态自动指向该目录，离线可用。
+- **`jarvis-serve.exe --caps` 能力门禁**：新增 `agent/capabilities/gate.py`，
+  检查八组模块、双内核与关键能力；构建脚本与发布流水线缺一即红。
+- **vision extras 补 `paddlepaddle`**：paddleocr 只给算法与模型，OCR 真跑起来
+  需要推理后端；此前只装 paddleocr 会“包装了却跑不动”。
+
+### 新增（长期记忆可视化编辑，2026-11）
+
+- **`MemoryUpdate` 工具**：模型在用户明确要求「记住…」时，把一条事实追加到
+  `MEMORY.md`（`scope=user` 用户级 / `scope=project` 项目级）。只追加不覆盖：
+  整条去重、单条 ≤ 2000 字符、行尾带日期；整体改写/清空只给用户。
+- **`memory.get` / `memory.save` 指令**：桌面「设置 → 长期记忆」读取两个范围的
+  完整快照（路径/全文/字数/修改时间）并整体保存；保存走临时文件 + `os.replace`
+  原子写，覆盖前保留一份 `MEMORY.md.bak`，单文件上限 100 000 字符。
+- **`reload_memory` → `memory_changed`**：保存后由引擎线程重拼本会话 system prompt，
+  下一轮对话立即带上新记忆；同时推 `memory_changed` 让桌面面板刷新。
+- 系统提示词新增条件段（仅注册了 `MemoryUpdate` 时注入）：何时该记、scope 分工、
+  不记临时状态/密钥、重复内容不追加。
+
+### 新增（桌面规划模式，2026-11）
+
+- **serve 注册 `EnterPlanMode` / `ExitPlanMode`**：桌面模型可自主进入只读规划、
+  提交方案到 `.jarvis/PLAN.md` 并恢复原权限模式。
+- **`plan_submitted` 事件**：方案摘要 + 2000 字预览 + 文件路径推给桌面，以系统消息呈现。
+
+### 修复（规划模式权限未生效）
+
+- `PermissionChecker.check()` 支持调用时 `mode` 覆盖；`ToolOrchestrator` 在
+  `ctx.extra["_plan_mode_entered"]` 为真时把 ctx 的 plan 模式传给 checker。
+  此前 `EnterPlanMode` 只改 ctx、不改判定，写操作照样放行。
+- `mode.set` 同步 `ctx.permission_mode`，避免下拉切模式后 ctx 与 checker 分叉。
+
 ## [2.4.0] — 2026-11-06
 
 这一版给系统装上了**自我认知**。起因是 2026-11-03 那次贪吃蛇：它汇报“我已经用浏览器打开

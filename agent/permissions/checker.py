@@ -147,8 +147,24 @@ class PermissionChecker:
         """返回一个换了模式的 checker（用于子代理等场景）。"""
         return PermissionChecker(rules=self._rules, mode=mode)
 
-    def check(self, tool: Tool, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
-        """主校验入口。返回 ALLOW / DENY / ASK 之一。"""
+    def check(
+        self,
+        tool: Tool,
+        args: dict[str, Any],
+        ctx: ToolContext,
+        mode: PermissionMode | None = None,
+    ) -> PermissionResult:
+        """主校验入口。返回 ALLOW / DENY / ASK 之一。
+
+        Args:
+            mode: 可选的模式覆盖。工具在运行时改 ``ctx.permission_mode``
+                （EnterPlanMode / ExitPlanMode）后，调用方须把该值传进来，
+                否则计划模式只改了上下文、拦不住写操作（2026-11 修复）。
+                为 None 时用构造时设定的模式。
+
+        @author aceFelix
+        """
+        effective = mode or self._mode
         # 0. 先校验输入（不通过直接 DENY）
         v = tool.validate_input(args, ctx)
         if not v.ok:
@@ -166,7 +182,7 @@ class PermissionChecker:
             result = _stricter(result, path_result)
 
         # 3. 模式覆写（用 _relax_by_mode：yolo 可放宽 ASK，不可放宽 DENY）
-        mode_result = self._apply_mode(tool, args, ctx)
+        mode_result = self._apply_mode(tool, args, ctx, effective)
         if mode_result is not None:
             result = _relax_by_mode(result, mode_result)
 
@@ -196,7 +212,7 @@ class PermissionChecker:
         # 5. 默认 ASK（fail-closed）
         if result.behavior == PermissionBehavior.ASK and result.reason == _DEFAULT_ASK_REASON:
             result = PermissionResult.ask(
-                f"无 allow 规则命中: 工具 {tool.name}（模式={self._mode.value}）"
+                f"无 allow 规则命中: 工具 {tool.name}（模式={effective.value}）"
             )
 
         return result
@@ -240,23 +256,32 @@ class PermissionChecker:
         return None, raw_path
 
     def _apply_mode(
-        self, tool: Tool, args: dict[str, Any], ctx: ToolContext
+        self,
+        tool: Tool,
+        args: dict[str, Any],
+        ctx: ToolContext,
+        mode: PermissionMode | None = None,
     ) -> PermissionResult | None:
-        """模式策略覆写。返回 None 表示模式对此无意见。"""
+        """模式策略覆写。返回 None 表示模式对此无意见。
+
+        ``mode`` 为调用时覆盖（见 :meth:`check`），用于工具运行期切换
+        （EnterPlanMode / ExitPlanMode）；None 时用构造模式。
+        """
+        effective = mode or self._mode
         # plan 模式: 只放行只读白名单
-        if self._mode == PermissionMode.PLAN:
+        if effective == PermissionMode.PLAN:
             if tool.name in PLAN_ALLOWED_TOOLS or tool.is_read_only(args):
                 return PermissionResult.allow("plan 模式放行只读工具")
             return PermissionResult.deny(f"plan 模式禁止写操作: {tool.name}")
 
         # accept_edits: 文件编辑工具自动放行
-        if self._mode == PermissionMode.ACCEPT_EDITS:
+        if effective == PermissionMode.ACCEPT_EDITS:
             if tool.name in AUTO_ALLOW_EDIT_TOOLS:
                 return PermissionResult.allow("accept_edits 模式放行文件编辑")
             return None  # 其他工具交给后续判定
 
         # yolo: 非 deny 的全部放行（deny 由规则/守护处理）
-        if self._mode == PermissionMode.YOLO:
+        if effective == PermissionMode.YOLO:
             return PermissionResult.allow("yolo 模式自动放行")
 
         return None

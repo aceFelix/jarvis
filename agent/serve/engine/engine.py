@@ -276,6 +276,11 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
             # 思考强度切换（think.set / 终端 /think）：写 settings 后同步到 loop/provider，
             # 开关变化时重建系统提示词。未装配时只写 settings。@author aceFelix
             await self._handle_set_thinking(cmd.get("effort", ""))
+        elif action == "reload_memory":
+            # 桌面「设置 → 长期记忆」保存后：MEMORY.md 已由 server 侧落盘，
+            # 这里只重建本会话提示词并通知面板刷新，不重开会话（避免清屏）。
+            # @author aceFelix
+            await self._reload_memory(str(cmd.get("scope", "")))
         elif action == "slash_exec":
             # 桌面 slash.exec 透传：复用终端命令路由（白名单/交互禁令/输出捕获
             # 全在 slash_bridge，engine 已超大体量只挂路由），结果走 slash_result
@@ -348,6 +353,12 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
             recovery_executor=recovery,
         )
         self._query_loop.set_orchestrator(orchestrator)
+        # ctx 的模式是权限判定的运行时真源（见 orchestrator.check 调用）：
+        # 只重建 checker 而不改 ctx，会让 EnterPlanMode 设的 plan 立刻被旧值覆盖。
+        # @author aceFelix
+        ctx = getattr(self, "_ctx", None)
+        if ctx is not None:
+            ctx.permission_mode = getattr(new_mode, "value", str(new_mode))
         self._emitter.emit("status", f"工作模式：{getattr(new_mode, 'value', new_mode)}")
 
     async def _handle_set_thinking(self, effort: str) -> None:
@@ -390,6 +401,30 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
         loop = getattr(self, "_query_loop", None)
         if loop is not None:
             loop.update_system_prompt(prompt)
+
+    async def _reload_memory(self, scope: str) -> None:
+        """长期记忆（MEMORY.md）被桌面设置面板改写后重建本会话提示词。
+
+        两件事分开做：
+        1. 文件落盘由 server 侧 RPC（``memory.save``）完成，这里不碰磁盘；
+        2. 提示词重拼复用 ``_rebuild_system_prompt``（含 workdir / 思考开关 /
+           当前模型，与切项目同一口径），不重开会话、不清屏。
+
+        最后推 ``memory_changed`` 事件：桌面右栏记忆面板据此刷新字数与预览，
+        也让同一台设备上的其他入口（多窗口）同步看到新内容。
+
+        Args:
+            scope: ``user`` / ``project``，只用于回传事件，不影响重拼逻辑。
+        @author aceFelix
+        """
+        if not getattr(self, "_session_ready", False):
+            # 会话尚未装配：下次 _ensure_session 时会重新读 MEMORY.md，
+            # 这里无需预热，只回一个事件让面板知道已落盘。
+            self._emitter.emit("memory_changed", {"scope": scope})
+            return
+        self._rebuild_system_prompt()
+        self._emitter.emit("memory_changed", {"scope": scope})
+
 
 
 

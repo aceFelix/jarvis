@@ -384,3 +384,110 @@ def get_memory_files(workdir: str) -> dict[str, Path | None]:
         "user": user_memory_path(),
         "project": project_memory_path(workdir),
     }
+
+
+# ---- 长期记忆读写（桌面设置面板 / MemoryUpdate 工具，2026-11）----
+
+#: 单文件上限（字符）。MEMORY.md 是注入 system prompt 的，过大既挤占上下文
+#: 又会让每轮提示词膨胀，所以在写入边界直接拒绝而不是悄悄截断。
+MEMORY_MAX_CHARS = 100_000
+
+MEMORY_SCOPES = ("user", "project")
+
+
+def _resolve_scope_path(workdir: str, scope: str) -> Path:
+    """把 scope 解析成文件路径；非法 scope 或项目级缺 workdir 直接报错。
+
+    @author aceFelix
+    """
+    if scope not in MEMORY_SCOPES:
+        raise ValueError(f"未知记忆范围: {scope}（可选 user / project）")
+    if scope == "project":
+        if not workdir:
+            raise ValueError("项目级记忆需要先选择项目（workdir 为空）")
+        return project_memory_path(workdir)
+    return user_memory_path()
+
+
+def read_memory_scope(workdir: str, scope: str) -> dict[str, Any]:
+    """读取一个范围的长期记忆，供桌面面板展示。
+
+    Returns:
+        ``{scope, path, content, exists, chars, updated_at}``；文件不存在时
+        content 为空、exists=false，不抛异常（面板首次打开是正常状态）。
+
+    @author aceFelix
+    """
+    path = _resolve_scope_path(workdir, scope)
+    exists = path.is_file()
+    content = ""
+    updated_at = 0
+    if exists:
+        try:
+            content = path.read_text(encoding="utf-8")
+            updated_at = int(path.stat().st_mtime)
+        except OSError:
+            # 读失败按“空文件”呈现，但 exists 仍为真，避免误报成“从未创建”
+            content = ""
+    return {
+        "scope": scope,
+        "path": str(path),
+        "content": content,
+        "exists": exists,
+        "chars": len(content),
+        "updated_at": updated_at,
+    }
+
+
+def save_memory_scope(workdir: str, scope: str, content: str) -> dict[str, Any]:
+    """整体覆盖写一个范围的长期记忆。
+
+    安全约定：先写临时文件再 ``os.replace``，避免半截文件被下一轮注入；
+    覆盖前留一份 ``MEMORY.md.bak``（单份），用户手滑清空还能捞回来。
+
+    @author aceFelix
+    """
+    path = _resolve_scope_path(workdir, scope)
+    if len(content) > MEMORY_MAX_CHARS:
+        raise ValueError(f"长期记忆过长（{len(content)} > {MEMORY_MAX_CHARS} 字符）")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        try:
+            import shutil
+
+            shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+        except OSError:
+            pass  # 备份失败不阻断保存
+    text = content.rstrip() + "\n" if content.strip() else ""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+    return read_memory_scope(workdir, scope)
+
+
+def append_memory_entry(workdir: str, scope: str, text: str, today: str | None = None) -> dict[str, Any]:
+    """追加一条长期记忆（模型工具走的路径）。
+
+    去重口径：整条文本已是文件子串就跳过，避免模型反复“记住”同一句话把
+    文件撑成复读机；追加行带日期，便于人工回溯。
+
+    Returns:
+        ``{entry, added, ...read_memory_scope 字段}``；added=false 表示已存在。
+
+    @author aceFelix
+    """
+    entry = " ".join(str(text or "").split())
+    if not entry:
+        raise ValueError("记忆内容不能为空")
+    if len(entry) > 2_000:
+        raise ValueError("单条记忆不能超过 2000 字符；长内容请拆成多条")
+    current = read_memory_scope(workdir, scope)
+    if entry in current["content"]:
+        return {**current, "entry": entry, "added": False}
+    stamp = today or time.strftime("%Y-%m-%d")
+    line = f"- {entry}（{stamp}）"
+    base = current["content"].rstrip()
+    merged = f"{base}\n{line}" if base else f"# 长期记忆\n\n{line}"
+    saved = save_memory_scope(workdir, scope, merged)
+    return {**saved, "entry": entry, "added": True}
+

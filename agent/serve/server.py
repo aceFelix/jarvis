@@ -46,6 +46,7 @@ from agent.serve.rpc_extensions import ExtensionsRpcMixin
 from agent.serve.rpc_percept import PerceptRpcMixin
 from agent.serve.rpc_tasks import TasksRpcMixin
 from agent.serve.rpc_agents import AgentsRpcMixin
+from agent.serve.rpc_memory import MemoryRpcMixin
 from agent.serve.engine.api import WorkbenchAPI
 from agent.serve.engine.metrics import collect_metrics
 from agent.serve.engine.model_admin import VALID_API_FORMATS, VALID_MODEL_TYPES
@@ -59,7 +60,8 @@ _MAX_FILE_CHARS = 200_000
 
 
 class DesktopBridgeServer(
-    PerceptRpcMixin, TasksRpcMixin, AgentsRpcMixin, EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
+    PerceptRpcMixin, TasksRpcMixin, AgentsRpcMixin, MemoryRpcMixin,
+    EmailRpcMixin, ExtensionsRpcMixin, BridgeServer
 ):
     """桌面壳 API 服务器：BridgeServer 传输层 + ChatEngine 指令路由。
 
@@ -226,6 +228,11 @@ class DesktopBridgeServer(
         # 不阻塞，故走同步 _register_rpc；handler 在 rpc_agents.AgentsRpcMixin。
         # @author aceFelix
         self._register_rpc(protocol.CMD_AGENTS_EXEC, self._rpc_agents_exec)
+        # memory.get / memory.save（长期记忆，2026-11）：桌面「设置 → 长期记忆」。
+        # 都是快速本地文件 IO，走同步 _register_rpc；写后由 api.reload_memory
+        # 投引擎队列重建提示词，handler 在 rpc_memory.MemoryRpcMixin。@author aceFelix
+        self._register_rpc(protocol.CMD_MEMORY_GET, self._rpc_memory_get)
+        self._register_rpc(protocol.CMD_MEMORY_SAVE, self._rpc_memory_save)
 
     def _register_rpc(self, cmd_type: str, fn: Callable[[dict], Any]) -> None:
         """注册一个同步取值型指令：执行 fn(data) → 结果封 reply 回执发回。

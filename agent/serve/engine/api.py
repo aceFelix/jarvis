@@ -102,6 +102,14 @@ class WorkbenchAPI:
         """删除会话（成功推 session_deleted；删当前会话另推 session_new）。@author aceFelix"""
         self._post({"cmd": "delete_session", "name": name})
 
+    def reload_memory(self, scope: str) -> None:
+        """长期记忆被设置面板改写后通知引擎重建提示词（2026-11）。
+
+        入队即返回；引擎线程内重建本会话 system prompt 并推 ``memory_changed``，
+        保证用户保存后下一轮对话就带上新记忆。@author aceFelix
+        """
+        self._post({"cmd": "reload_memory", "scope": scope})
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """历史会话列表（左栏面板数据源，按更新时间倒序）。
 

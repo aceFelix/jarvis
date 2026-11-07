@@ -33,6 +33,12 @@
 > 独立 `jarvis-serve.exe` 的入口（`serve_entry.py`）、打包规格（`jarvis-serve.spec`）与构建
 > 脚本（`build_serve.ps1`）；产物 `dist/jarvis-serve/` 由 jarvis-desktop 的 `npm run dist` 经
 > `extraResources` 拷入 NSIS 安装包，使终端用户无需安装 Python。
+>
+> 自 2026-11-07 起按**全能力**构建：构建机 `pip install -e ".[all]"`（八组 extras），
+> `build_serve.ps1` 再把 playwright 无头壳 + 完整 chromium 下载到
+> `dist/jarvis-serve/ms-playwright`，冻结态由 `serve_entry.py` 指向该目录。
+> `jarvis-serve.exe --caps` 是发布门禁：八组模块、双内核与关键能力缺一即失败，
+> 构建脚本与 `release.yml` 都会执行。
 
 ## 开机自启（已退役）
 
@@ -327,6 +333,24 @@ token = ""                     # 认证 token，留空自动生成
 > **桌面端**：jarvis-desktop 输入栏的「跨设备协同」下拉按钮可直接发起微信连接，二维码内联聊天区（重连
 > 时总在底部刷新），**扫上即连**（微信配对码为服务端偶发兜底，桌面不再内联输入）；微信发来的消息以带「微信」标记的
 > 用户气泡上屏、每条回复各自成独立气泡、每轮对话即时存到电脑会话历史；与手机、桌面文本共享同一会话并串行发送。
+
+## 规划模式（桌面，2026-11）
+
+桌面的「规划」有两层，别混：
+
+- **权限模式**：输入区下拉选「规划」，整个会话按 plan 判定，写操作被拒，直到你切回；
+- **模型自主规划**：模型可调 `EnterPlanMode` 进入只读调研，完成后调 `ExitPlanMode`
+  把方案写入 `<当前项目>/.jarvis/PLAN.md` 并恢复原权限模式。
+
+`ExitPlanMode` 提交后桌面会收到 `plan_submitted` 事件，以**系统消息**显示
+「计划已提交 + 摘要 + 文件路径 + 2000 字预览」，不会把它当成用户发言。计划全文以
+`.jarvis/PLAN.md` 为准（同一工作区一份，每次覆盖）。
+
+限制与边界：
+
+- plan 只放行只读工具白名单，**不放宽 DENY**（路径守护、危险命令规则照旧）；
+- 计划注入是普通 user 消息，不写 system prompt；
+- 终端没有 `plan_submitted` 钩子，行为不变。
 
 ## 外部前端接入（serve 模式）
 

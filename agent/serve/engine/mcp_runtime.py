@@ -179,7 +179,11 @@ def register_collaboration(engine: ChatEngine, registry: Any, provider: Any) -> 
     @author aceFelix
     """
     try:
-        from agent.core.tool import register_subagent_tool, register_team_tools
+        from agent.core.tool import (
+            register_plan_tools,
+            register_subagent_tool,
+            register_team_tools,
+        )
         from agent.permissions.modes import PermissionMode
 
         mgr, tasks, team_name = build_desktop_team(engine)
@@ -200,6 +204,10 @@ def register_collaboration(engine: ChatEngine, registry: Any, provider: Any) -> 
         ):
             count += 1
         count += register_team_tools(registry, task_list=tasks, team_mgr=mgr)
+        # 规划模式工具（2026-11）：EnterPlanMode / ExitPlanMode 在终端由 main.py
+        # 注册；桌面 serve 此前缺失，模型无法自己“先规划后执行”。
+        # @author aceFelix
+        count += register_plan_tools(registry)
         bind_activity_emitter(engine)
         if count:
             engine._emitter.emit(

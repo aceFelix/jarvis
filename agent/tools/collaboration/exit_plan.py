@@ -111,4 +111,14 @@ class ExitPlanModeTool(Tool):
         ]
         if summary:
             result_lines.insert(1, f"   摘要: {summary}")
+
+        # 桌面事件钩子：终端 RichCLI 没有 plan_submitted，getattr 取不到即跳过；
+        # serve 的 WorkbenchUI 实现它，把计划以 plan_submitted 事件推给右栏/聊天。
+        # 计划全文仍以 .jarvis/PLAN.md 为准，事件只带 2000 字预览。@author aceFelix
+        emitter = getattr(ctx.ui, "plan_submitted", None)
+        if callable(emitter):
+            try:
+                emitter(plan_content[:2000], summary, str(plan_path))
+            except Exception:
+                pass
         return ToolResult(data="\n".join(result_lines))

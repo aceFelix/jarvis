@@ -24,6 +24,8 @@ from agent.prompts.text_blocks import (
     _BASE_PROMPT,
     _GOAL_SPINE_SECTION,
     _COLLAB_SECTION,
+    _PLAN_MODE_SECTION,
+    _MEMORY_SECTION,
     _MAIL_SECTION,
     _NO_THINKING_SECTION,
     _PLATFORM_LINUX,
@@ -151,6 +153,26 @@ def _collab_section(registry: ToolRegistry) -> str:
     if "Agent" not in registry:
         return ""
     return _COLLAB_SECTION
+
+
+def _plan_mode_section(registry: ToolRegistry) -> str:
+    """规划模式段（按需注入）：只有注册了 EnterPlanMode 才拼进提示。
+
+    @author aceFelix
+    """
+    if "EnterPlanMode" not in registry:
+        return ""
+    return _PLAN_MODE_SECTION
+
+
+def _memory_tool_section(registry: ToolRegistry) -> str:
+    """长期记忆写入段（按需注入）：只有注册了 MemoryUpdate 才拼进提示。
+
+    @author aceFelix
+    """
+    if "MemoryUpdate" not in registry:
+        return ""
+    return _MEMORY_SECTION
 
 
 def _self_config_section(registry: ToolRegistry) -> str:
@@ -283,6 +305,8 @@ def build_system_prompt(
             _schedule_section(registry),
             _goal_spine_section(registry),
             _collab_section(registry),
+            _plan_mode_section(registry),
+            _memory_tool_section(registry),
             _self_config_section(registry),
             _mail_section(registry),
             _cli_anything_section(registry),
