@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 
 from agent.core.window_observer import WindowObserver
@@ -134,6 +133,7 @@ def test_subagent_is_not_followed_by_default() -> None:
 
 
 def test_retry_probe_catches_late_window() -> None:
+    """首次探测未命中、重试命中，用同步调用避免 CI 上的定时器抖动。"""
     before = {1: _win(1, "终端")}
     after = {1: _win(1, "终端"), 9: _win(9, "记事本")}
     observer, director, actions = _observer(
@@ -141,7 +141,8 @@ def test_retry_probe_catches_late_window() -> None:
     )
 
     observer.before("Bash", {}, "t7")
-    observer.after("t7")
-    time.sleep(0.06)
+    state = observer._pending.pop("t7")
+    observer._probe(state, retry=False)   # 第一次：只有旧窗口
+    observer._probe(state, retry=True)    # 第二次：新窗口已成为前台
 
     assert director.hwnd_calls == [9]
