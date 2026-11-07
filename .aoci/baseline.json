@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-07T17:45:36Z",
+  "updated_at": "2026-11-07T17:49:36Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -4153,9 +4153,9 @@
     },
     "tests/core/test_window_observer.py": {
       "role": "observe",
-      "sha256": "6a31ed8f5c953541a690b58487573a9294f927ff14669789fae4f10f3d443db1",
-      "size": 4342,
-      "normalized_sha256": "6a31ed8f5c953541a690b58487573a9294f927ff14669789fae4f10f3d443db1"
+      "sha256": "baa2bc424532227c937fcd179de65b4f58bb2e29807759979ebd3ffdb1109f0d",
+      "size": 4576,
+      "normalized_sha256": "baa2bc424532227c937fcd179de65b4f58bb2e29807759979ebd3ffdb1109f0d"
     },
     "tests/daemon/__init__.py": {
       "role": "observe",
