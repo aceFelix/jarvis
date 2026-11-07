@@ -95,7 +95,7 @@ J.A.R.V.I.S 已经能操作电脑（窗口、鼠标、键盘、文件、浏览�
 
 ### 4.1 挂载点：复用现有 Hooks（零侵入）
 
-项目已有 [`agent/core/hooks.py`](../agent/core/hooks.py)，且 [`orchestrator.py`](../agent/core/orchestrator.py) 已在工具执行前后触发：
+项目已有 [`agent/core/hooks.py`](../../agent/core/hooks.py)，且 [`orchestrator.py`](../../agent/core/orchestrator.py) 已在工具执行前后触发：
 
 | 事件 | 触发位置 | 现有 payload |
 |---|---|---|
