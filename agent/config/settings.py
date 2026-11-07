@@ -173,6 +173,23 @@ class Settings:
     # 终端太窄/太矮/非 TTY 时自动跳过，回退到简单横幅。--no-boot 也可关闭。
     boot_animation: bool = True
 
+    # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随。
+    # trace 只记路径/窗口标题/计数，不记文件内容；window_follow 默认 show
+    # （置顶可见但不激活），不会抢用户键鼠。详见 docs/plans/operation-visibility.md。
+    trace_enabled: bool = True
+    trace_keep_runs: int = 20
+    window_follow: str = "show"           # off / show / focus
+    window_follow_hold_ms: int = 1200     # 置顶保持时长
+    window_follow_dir_throttle_s: int = 60  # 同目录弹资源管理器的节流
+    window_follow_move: str = "minimal"   # minimal（仅屏外/最小化时挪）/ side（总是挪到右侧）
+    # 通用窗口观察器（2026-11）：工具执行后延迟探测"新出现且变前台"的窗口
+    window_probe_delay_ms: int = 450
+    window_probe_retry_ms: int = 1200
+    window_follow_subagents: bool = False
+    # 任务收尾清理：transient 只关本轮新开、被操作过、且非最终结果的窗口；
+    # off 一律不关。只发 WM_CLOSE，未保存窗口跳过，用户原有窗口绝不碰。
+    window_cleanup: str = "transient"
+
     # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超窗口比例才自动摘要，
     # 防止 token 爆炸 + 撞模型上下文窗口。未超比例绝不压缩，用满窗口前半程。
     context_compaction: bool = True

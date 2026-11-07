@@ -69,6 +69,17 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     )),
     ("ui", (
         ("boot_animation", "boot_animation"),
+        # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随 @author aceFelix
+        ("trace_enabled", "trace_enabled"),
+        ("trace_keep_runs", "trace_keep_runs"),
+        ("window_follow", "window_follow"),
+        ("window_follow_hold_ms", "window_follow_hold_ms"),
+        ("window_follow_dir_throttle_s", "window_follow_dir_throttle_s"),
+        ("window_follow_move", "window_follow_move"),
+        ("window_probe_delay_ms", "window_probe_delay_ms"),
+        ("window_probe_retry_ms", "window_probe_retry_ms"),
+        ("window_follow_subagents", "window_follow_subagents"),
+        ("window_cleanup", "window_cleanup"),
     )),
     ("context", (
         ("compaction", "context_compaction"),

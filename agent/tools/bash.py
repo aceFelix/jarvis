@@ -58,40 +58,71 @@ _TIMEOUT_HINT = (
 # 「以 & 结尾」的后台命令（排除 && 连接符）
 _BACKGROUND_TAIL = re.compile(r"(?<!&)&\s*$")
 
+# 拉起 GUI 后立刻返回的命令：沙箱会等 GUI 退出，必须按后台处理（2026-11-08）
+_GUI_LAUNCH = re.compile(
+    r"(?:cmd\s+//c\s+start|(?:^|[;&|]\s*)start\s+[\"']?|Start-Process\b)",
+    re.IGNORECASE,
+)
+
+# 复合命令：`A && B &` 的 `&` 作用于整个列表，重定向必须包在整组外面，
+# 否则后台子 shell 仍继承管道，父进程等 EOF 会一直挂到 GUI 退出（2026-11 实测）。
+_COMPOUND_BODY = re.compile(r"&&|\|\||;")
+
 
 def _detach_background(command: str) -> tuple[str, bool]:
-    """把「以 & 结尾」的后台命令改写成真正能立刻返回的形式。
+    """把后台命令改写成真正能立刻返回的形式（支持多行脚本）。
 
     为什么必须有这一步：MSYS2/Git Bash 的 ``bash -c 'cmd &'`` **并不会**立刻返回，
     它会等这个后台 job（实机实测：``sleep 3 &`` = 3.18s，
     ``sleep 3 >/dev/null &`` = 0.21s，``sleep 3 2>/dev/null &`` = 3.13s）。
     只要后台进程还接着 bash 的 stdout，bash 就不肯走。
 
-    于是模型写 ``firefox.exe URL &`` 时，「打开一个网页」照样要卡满 timeout——
-    这正是用户反馈「网页都加载出来了，jarvis 还在等」的根因（不是等页面稳定）。
+    2026-11 补充（操作可见性实测）：``cd /path && notepad.exe > /dev/null 2>&1 &``
+    仍然卡满 120 秒。原因是 shell 把整个 ``cd && notepad`` 列表当成一个后台 job，
+    重定向只落在 notepad 上，**后台子 shell 自己仍握着管道**，父进程等 EOF 到超时。
+    因此复合命令必须整组加括号再统一重定向。
 
-    这里给后台命令补上 ``> /dev/null 2>&1`` 让它真正脱离。代价是拿不到后台进程
-    的输出，但后台命令本来就不该指望工具返回它的运行日志。
+    2026-11-08 补充（多行脚本实测）：模型常把 ``notepad.exe ... &`` 写在一行、
+    后面再跟 ``sleep 2; echo started``。原来的实现只看**整个命令末尾**有没有 ``&``，
+    于是判定为前台命令并送进沙箱——沙箱等 GUI 子进程结束，直接吃满 120 秒，
+    且沙箱退出时会连带杀掉刚拉起的记事本。现在逐行识别，任意一行是后台命令
+    就按后台处理（跳过沙箱），后续行照常执行。
 
     Returns:
-        ``(实际执行的命令, 是否后台命令)``。第二项只看「是否以 & 结尾」，
-        **与有没有被改写过无关**——调用方据此决定是否跳过沙箱，
-        否则模型自己写全了 ``> /dev/null 2>&1 &`` 时会被误判成前景命令。
+        ``(实际执行的命令, 是否后台命令)``。第二项为真时调用方跳过沙箱；
+        另外 ``start`` / ``Start-Process`` 这类“拉起 GUI 后立刻返回”的命令
+        也按后台处理，避免沙箱等待 GUI 退出。
 
     @author aceFelix
     """
-    stripped = command.rstrip()
-    if not _BACKGROUND_TAIL.search(stripped):
-        return command, False
-    # 模型自己已经丢过输出的：保持原样，但它仍然是后台命令
-    if re.search(r">\s*/dev/null", stripped) and (
-        "2>&1" in stripped or "2>/dev/null" in stripped or "2> /dev/null" in stripped
-    ):
-        return command, True
-    body = stripped[:-1].rstrip()
-    if not body:
-        return command, False
-    return f"{body} > /dev/null 2>&1 &", True
+    lines = command.splitlines() or [command]
+    rewritten: list[str] = []
+    has_background = False
+    for line in lines:
+        stripped = line.rstrip()
+        if not stripped or not _BACKGROUND_TAIL.search(stripped) or stripped == "&":
+            rewritten.append(line)
+            continue
+        body = stripped[:-1].rstrip()
+        if not body:
+            rewritten.append(line)
+            continue
+        has_background = True
+        already_redirected = bool(re.search(r">\s*/dev/null", stripped)) and (
+            "2>&1" in stripped or "2>/dev/null" in stripped or "2> /dev/null" in stripped
+        )
+        if already_redirected and not _COMPOUND_BODY.search(body):
+            rewritten.append(stripped)  # 用户已写全，保留原样
+        elif _COMPOUND_BODY.search(body):
+            rewritten.append(f"( {body} ) > /dev/null 2>&1 &")
+        else:
+            rewritten.append(f"{body} > /dev/null 2>&1 &")
+
+    result = "\n".join(rewritten).rstrip()
+    if not has_background and _GUI_LAUNCH.search(command):
+        # GUI 启动命令本身没有 &：整段后台化，否则普通执行路径仍会等 cmd 退出
+        return f"( {command.strip()} ) > /dev/null 2>&1 &", True
+    return result, has_background
 
 
 class _StreamCollector:
@@ -306,10 +337,10 @@ class BashTool(Tool):
         _run_cmd, is_background = _detach_background(command)
 
         if sandbox_enabled and risk.needs_sandbox and not is_background:
-            return await self._call_sandboxed(command, work_dir, timeout, risk, ctx)
+            return await self._call_sandboxed(_run_cmd, work_dir, timeout, risk, ctx)
 
-        # 普通执行路径
-        return await self._call_normal(command, work_dir, timeout, ctx)
+        # 普通执行路径（必须用改写后的命令：多行 & / GUI 启动要靠它立刻返回）
+        return await self._call_normal(_run_cmd, work_dir, timeout, ctx)
 
     async def _call_sandboxed(
         self, command: str, work_dir: str, timeout: int, risk: RiskLevel, ctx: ToolContext

@@ -326,6 +326,19 @@ async def repl(settings: Settings) -> int:
 
     ui.banner(provider.name, model, settings.workdir)
 
+    # ---- 操作可见性（2026-11）：trace + 窗口跟随 ----
+    # 通过既有 tool_before/tool_after/file_changed 钩子旁路采集，不改任何工具。
+    # 初始化失败只记诊断、不拦启动（窗口后端在无桌面环境可能拿不到句柄）。
+    # @author aceFelix
+    try:
+        from agent.core.trace import install_observability
+
+        install_observability(settings, ui)
+    except Exception as _obs_exc:  # noqa: BLE001 - 观测层故障不能拦住对话
+        from agent.core.diag import diag_warn as _diag_warn
+
+        _diag_warn("observability", f"操作可见性初始化失败: {_obs_exc}")
+
     # 阶段 12 P4：用几天后主动提一次「你好像反复在同一个场合改同一项」。
     # 门槛（启动次数 + 天数）与"只提一次"都由 onboarding 掌控；候选来自 P3 的
     # 证据式提炼，**不生效**，要用户自己 /prefs accept。@author aceFelix

@@ -80,6 +80,7 @@ from agent.commands.handlers.tool_commands import (
     handle_tools,
 )
 from agent.commands.handlers.undo_commands import handle_undo  # W3.2 副作用账本 @author aceFelix
+from agent.commands.handlers.trace_commands import handle_trace  # 操作可见性（2026-11）
 from agent.commands.handlers.update_commands import handle_update
 from agent.commands.handlers.voice_commands import (
     handle_listen,
@@ -207,6 +208,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/clean": handle_clean,   # 裸 /clean 不是“全清”，而是给用法提示
     # 能力自我修复的急停开关（/repair 不带参给闸门状态与台账）@author aceFelix
     "/repair": handle_repair,
+    # 操作可见性（2026-11）：回看最近一轮操作轨迹 @author aceFelix
+    "/trace": handle_trace,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）
@@ -251,6 +254,7 @@ PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
     ("/clean ", handle_clean),
     ("/health ", handle_health),
     ("/repair ", handle_repair),
+    ("/trace ", handle_trace),
 ]
 
 

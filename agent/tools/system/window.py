@@ -31,16 +31,22 @@ def _import_pygetwindow():
 
 
 def _find_windows(gw, title: str, exact: bool) -> list:
-    """按标题查找窗口。返回匹配的窗口对象列表。
+    """按标题查找窗口；模糊匹配时**优先短标题**（更具体的那个）。
 
-    exact=True: 精确匹配；False: 包含匹配（大小写不敏感）。
-    只返回有标题的窗口。
+    2026-11-08 实测：``helloJarvis.txt`` 同时命中
+    ``helloJarvis.txt - 记事本`` 与 ``E:\\...\\helloJarvis.txt - Notepad++``，
+    旧实现取第一条，结果把点击/输入发到了 Notepad++。短标题通常才是用户指的那个窗口，
+    长标题往往只是碰巧包含同样的路径片段。
+
+    @author aceFelix
     """
     all_wins = gw.getAllWindows()
     if exact:
         return [w for w in all_wins if w.title == title]
     title_lower = title.lower()
-    return [w for w in all_wins if w.title and title_lower in w.title.lower()]
+    matches = [w for w in all_wins if w.title and title_lower in w.title.lower()]
+    matches.sort(key=lambda w: (0 if w.title == title else 1, len(w.title)))
+    return matches
 
 
 def _fmt_window(w) -> str:

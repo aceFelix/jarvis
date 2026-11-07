@@ -2,6 +2,51 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [Unreleased]
+
+### 新增（操作可见性，2026-11）
+
+- **终端操作轨迹**：旁路复用 `tool_before` / `tool_after` / `file_changed` 钩子，
+  每轮写成 `~/.jarvis/traces/<run>.jsonl`，终端逐条显示工具、目标、耗时、失败原因
+  与文件增删行数；`/trace` 回看最近一轮，`/trace list|path|export|on|off` 管理。
+  只记路径与窗口标题，不记文件内容；命中密码管理器/银行等关键词的标题会脱敏。
+- **窗口跟随**：`[ui] window_follow = "show"`（默认）把被操作的窗口置顶到前台，
+  但**不调用 SetForegroundWindow**，不抢用户键鼠；写/改文件时用
+  `explorer /select` 定位并选中文件（同目录 60 秒节流，读文件不弹）。
+  `focus` 档才真正激活，并在终端明示接管输入。仅 Windows 完整支持，
+  其他平台自动降级为 `off`。
+- **零新增依赖**：窗口控制只用 ctypes 调 Win32 API，安装包体积不变；
+  新增 `[ui]` 配置 10 项（见 `settings.example.toml`）。
+- **任务收尾关窗**：一轮结束后自动关闭中间产物窗口（只关本轮新开且被操作过的），
+  最终结果、当前前台与未保存窗口（标题带 `*`）保留；关闭用 `WM_CLOSE`，
+  可用 `[ui] window_cleanup = "off"` 整体关闭。
+- **通用窗口观察器**：窗口跟随不再按工具名登记，改为执行前后快照差分——
+  任何工具（Bash/MCP/插件/harness/未来工具）开新窗且成为前台都会自动跟随；
+  用户自己切已有窗口不触发，子代理默认不跟随。
+
+### 修复（实机走查发现，2026-11-08）
+
+- **Bash 多行后台命令误入沙箱**：`notepad ... &` 写在中途行、后面还跟 `sleep` 时，
+  旧逻辑只看整段末尾的 `&`，误判为前台命令并送进沙箱，等 GUI 到 120 秒超时；
+  现在逐行识别，任意一行是后台命令就跳沙箱。
+- **GUI 启动被沙箱等待**：`cmd //c start` / `start ""` / `Start-Process` 按后台路由，
+  不再等 GUI 退出。
+- **窗口标题误配**：同一条文件名同时出现在记事本与 Notepad++ 标题里时，
+  模糊匹配改为「精确优先、标题更短优先」，避免点击/输入发错窗口。
+- 复盘见
+  [docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md](docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md)。
+
+### 修复（实机走查发现，2026-11-07）
+
+- **Bash 复合后台命令卡满 timeout**：`cd <dir> && notepad.exe ... &` 的 `&` 作用于
+  整个列表，`> /dev/null 2>&1` 只落在后半段，后台子 shell 仍握着管道，工具等 EOF
+  到 120 秒超时。现对复合体整组加括号重定向，详见
+  [docs/fixlogs/bash-compound-background-fix.md](docs/fixlogs/bash-compound-background-fix.md)。
+- **摘要口径**：`文件工具 N 次` 只统计文件工具；GUI「另存为」产生的文件不计入，
+  不再用「N 个文件」造成「没改文件」的误读。
+- **按键跟随**：`KeyTap` 执行后也跟随当前前台窗口，Ctrl+S 弹出的「另存为」对话框
+  能立即看到。
+
 ## [2.5.0] — 2026-11-07
 
 ### 新增（桌面打包全能力，2026-11-07）

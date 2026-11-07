@@ -114,6 +114,24 @@ tools_mode = "builtin"
 # 终端太窄/太矮/非 TTY 时自动跳过。也可用 --no-boot 或 JARVIS_BOOT_ANIMATION=0 关闭。
 boot_animation = true
 
+# 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随。
+# trace 每轮把工具、目标、耗时、失败原因记到 ~/.jarvis/traces；只记路径与窗口标题，
+# 不记文件内容。window_follow 控制被操作的窗口是否显示到前台：
+#   show（默认）= 置顶可见但不抢键鼠；focus = 真激活（会接管输入）；off = 关闭。
+trace_enabled = true
+trace_keep_runs = 20
+window_follow = "show"
+window_follow_hold_ms = 1200
+window_follow_dir_throttle_s = 60
+window_follow_move = "minimal"
+# 通用窗口观察器：工具执行后延迟探测"新出现且变前台"的窗口，不依赖工具名。
+window_probe_delay_ms = 450
+window_probe_retry_ms = 1200
+window_follow_subagents = false
+# 任务收尾清理：transient（默认）关掉本轮中间产物窗口，最终结果与当前前台窗口保留；
+# 只碰本轮新开的窗口、未保存窗口跳过，用户原有窗口绝不关闭。off 一律不关。
+window_cleanup = "transient"
+
 [context]
 # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超过窗口比例时，
 # 自动将旧消息摘要为一段结构化摘要（冻结前缀），保留最近几条原消息。

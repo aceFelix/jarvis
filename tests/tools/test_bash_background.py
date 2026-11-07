@@ -65,6 +65,72 @@ class TestDetachBackground:
         assert is_background is True
         assert out == "make build | tee log.txt > /dev/null 2>&1 &"
 
+    def test_compound_background_is_wrapped(self) -> None:
+        """`A && B &` 必须整组加括号重定向。
+
+        2026-11 实测 ``cd /path && notepad.exe > /dev/null 2>&1 &`` 卡满 120 秒：
+        `&` 作用于整个列表，重定向只落在 notepad 上，后台子 shell 仍握着管道。
+        """
+        cmd = "cd /path && notepad.exe > /dev/null 2>&1 &"
+        out, is_background = _detach_background(cmd)
+        assert is_background is True
+        assert out == "( cd /path && notepad.exe > /dev/null 2>&1 ) > /dev/null 2>&1 &"
+
+    def test_compound_background_without_redirect_is_wrapped(self) -> None:
+        out, is_background = _detach_background("cd /path; sleep 3 &")
+        assert is_background is True
+        assert out == "( cd /path; sleep 3 ) > /dev/null 2>&1 &"
+
+    def test_multiline_background_line_is_detected(self) -> None:
+        """2026-11-08 实测：后台行后面还有别的命令，旧实现只看整段末尾，误判成前台。
+
+        结果是整段进沙箱、等 GUI 到 120 秒超时，沙箱退出时还杀掉了刚开的记事本。
+        """
+        cmd = (
+            'cd /e/work && notepad.exe "a.txt" > /dev/null 2>&1 &\n'
+            "sleep 2; echo started"
+        )
+        out, is_background = _detach_background(cmd)
+
+        assert is_background is True
+        lines = out.splitlines()
+        assert lines[0] == (
+            '( cd /e/work && notepad.exe "a.txt" > /dev/null 2>&1 ) > /dev/null 2>&1 &'
+        )
+        assert lines[1] == "sleep 2; echo started"
+
+    def test_gui_launch_counts_as_background_without_ampersand(self) -> None:
+        """`start` / `Start-Process` 会立刻返回，但沙箱会等 GUI 退出，必须跳过沙箱。"""
+        for cmd in (
+            'cmd //c start "" notepad.exe "a.txt"',
+            "powershell -Command \"Start-Process notepad.exe\"",
+        ):
+            out, is_background = _detach_background(cmd)
+            assert is_background is True
+            assert out.endswith("> /dev/null 2>&1 &")
+
+
+@pytest.mark.asyncio
+async def test_call_uses_rewritten_command(monkeypatch) -> None:
+    """2026-11-08 实测：改写结果曾被丢弃，仍用原命令执行，于是 GUI 启动等满 120 秒。"""
+    tool = BashTool()
+    seen: dict[str, str] = {}
+
+    async def fake_normal(command, work_dir, timeout, ctx):
+        seen["cmd"] = command
+        return ToolResult.ok("ok")
+
+    monkeypatch.setattr(tool, "_call_normal", fake_normal)
+    ctx = SimpleNamespace(
+        settings=SimpleNamespace(sandbox_enabled=False),
+        workdir=".",
+        abort_event=asyncio.Event(),
+    )
+
+    await tool.call({"command": 'cmd //c start "" notepad.exe "a.txt"'}, ctx)
+
+    assert seen["cmd"].endswith("> /dev/null 2>&1 &")
+
 
 # ---- 真实子进程行为 ----
 
@@ -94,6 +160,20 @@ async def test_background_command_returns_promptly() -> None:
 
     assert not result.is_error, result.data
     assert elapsed < 3.0, f"后台命令等了 {elapsed:.2f}s，应当立刻返回"
+    assert "已在后台启动" in str(result.data)
+
+
+@pytest.mark.asyncio
+@requires_shell
+async def test_compound_background_command_returns_promptly() -> None:
+    """`cd . && sleep 3 &` 也必须立刻返回（复合列表不能被当成前台命令）。"""
+    ctx = ToolContext(workdir=".", messages=[])
+    t0 = time.monotonic()
+    result = await BashTool()._call_normal("cd . && sleep 3 &", ".", 30, ctx)
+    elapsed = time.monotonic() - t0
+
+    assert not result.is_error, result.data
+    assert elapsed < 3.0, f"复合后台命令等了 {elapsed:.2f}s，应当立刻返回"
     assert "已在后台启动" in str(result.data)
 
 
