@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-07T16:55:27Z",
+  "updated_at": "2026-11-07T17:38:35Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -47,9 +47,9 @@
     },
     "CHANGELOG.md": {
       "role": "index",
-      "sha256": "f5661e7592207c66fb042e2fb79d346c029521aabecfee56cafcb71d732b1d35",
-      "size": 69449,
-      "normalized_sha256": "f5661e7592207c66fb042e2fb79d346c029521aabecfee56cafcb71d732b1d35"
+      "sha256": "c597170e163d87bd3183505675535bfdb1ab549b6ff04a432d163a073472ed83",
+      "size": 69490,
+      "normalized_sha256": "c597170e163d87bd3183505675535bfdb1ab549b6ff04a432d163a073472ed83"
     },
     "LICENSE": {
       "role": "index",
@@ -83,9 +83,9 @@
     },
     "agent/__init__.py": {
       "role": "index",
-      "sha256": "890ce1943c65176e87b267e86e081489c5cddda0d440d18127c8aeaac51c7af5",
+      "sha256": "c4f6f87fd2fc78b08b3462275bc39d856dc36e76c6614c699dcd84342bb48e0c",
       "size": 493,
-      "normalized_sha256": "890ce1943c65176e87b267e86e081489c5cddda0d440d18127c8aeaac51c7af5"
+      "normalized_sha256": "c4f6f87fd2fc78b08b3462275bc39d856dc36e76c6614c699dcd84342bb48e0c"
     },
     "agent/bootstrap.py": {
       "role": "index",
@@ -2294,9 +2294,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ab17d9e354ded9bc5c3669551d9ccb6fb0e6646615ac01473ca92b51c3f22da5",
-      "size": 252805,
-      "normalized_sha256": "ab17d9e354ded9bc5c3669551d9ccb6fb0e6646615ac01473ca92b51c3f22da5"
+      "sha256": "1ef525b9987697f4c6f8835f326e677b0bacb87840ca8d4ec3a1a6c20f6e66d4",
+      "size": 252811,
+      "normalized_sha256": "1ef525b9987697f4c6f8835f326e677b0bacb87840ca8d4ec3a1a6c20f6e66d4"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -3518,9 +3518,9 @@
     },
     "npm/package.json": {
       "role": "index",
-      "sha256": "0f8888cf07876bff26a9da2bfddd4eab985be7bedcbc008449f25ed1c731c8cd",
+      "sha256": "7bcecbd722bdcc6ced5cc1bd27a6c2cfad6c1475e168249f082d1b0674f9d8e8",
       "size": 914,
-      "normalized_sha256": "0f8888cf07876bff26a9da2bfddd4eab985be7bedcbc008449f25ed1c731c8cd"
+      "normalized_sha256": "7bcecbd722bdcc6ced5cc1bd27a6c2cfad6c1475e168249f082d1b0674f9d8e8"
     },
     "npm/run.js": {
       "role": "index",
@@ -3548,9 +3548,9 @@
     },
     "pyproject.toml": {
       "role": "index",
-      "sha256": "82376e88cafa960f5d9e71acc8e62916926dc1d1041daa882556eaa37e54f582",
+      "sha256": "072a52aee646bc153502d2203c82935da023fa159a9d6a57ae297cdbca0778f5",
       "size": 4676,
-      "normalized_sha256": "82376e88cafa960f5d9e71acc8e62916926dc1d1041daa882556eaa37e54f582"
+      "normalized_sha256": "072a52aee646bc153502d2203c82935da023fa159a9d6a57ae297cdbca0778f5"
     },
     "scripts/check_md_links.py": {
       "role": "index",
@@ -5003,9 +5003,9 @@
     },
     "uv.lock": {
       "role": "index",
-      "sha256": "59ea1bfaaa9ad560b312623e232cafb5a9a95ed866e9be0a329fe83e63f719b2",
+      "sha256": "c91a73fd05f61974f13c56deac586384bf11e2e54a6cc7cad156c97a66f8269f",
       "size": 864407,
-      "normalized_sha256": "59ea1bfaaa9ad560b312623e232cafb5a9a95ed866e9be0a329fe83e63f719b2"
+      "normalized_sha256": "c91a73fd05f61974f13c56deac586384bf11e2e54a6cc7cad156c97a66f8269f"
     },
     "zai-docs/GLM-4.6v-Flash多模态免费模型.md": {
       "role": "index",
