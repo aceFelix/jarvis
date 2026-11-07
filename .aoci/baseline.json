@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-07T17:38:35Z",
+  "updated_at": "2026-11-07T17:45:36Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -3302,9 +3302,9 @@
     },
     "docs/plans/operation-visibility.md": {
       "role": "index",
-      "sha256": "4ac5542a390a2646ef423fce334482370ed040de8f25d33d8b578708281e8b37",
-      "size": 20799,
-      "normalized_sha256": "4ac5542a390a2646ef423fce334482370ed040de8f25d33d8b578708281e8b37"
+      "sha256": "5988918ae3bdd0a0fe6c77d8ac888837cc674d0bd76565731c4d44883249701b",
+      "size": 20805,
+      "normalized_sha256": "5988918ae3bdd0a0fe6c77d8ac888837cc674d0bd76565731c4d44883249701b"
     },
     "docs/plans/proactive-desktop.md": {
       "role": "index",
