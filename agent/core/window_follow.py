@@ -133,7 +133,11 @@ class WindowDirector:
         hwnd = win.hwnd
         now = time.monotonic()
         key = str(hwnd)
-        if now - self._last_show.get(key, 0.0) < _SHOW_THROTTLE_S:
+        # 首次动作永不节流：不能用 0.0 当"从未执行"的哨兵值——Linux 上
+        # time.monotonic() 是开机以来的秒数，刚启动的 CI 机器可能只有几十秒，
+        # 直接比较会把第一次显示误判成"5 秒内重复"（2026-11-08 CI 回归）。
+        last = self._last_show.get(key)
+        if last is not None and now - last < _SHOW_THROTTLE_S:
             return None
         self._last_show[key] = now
 
@@ -171,7 +175,10 @@ class WindowDirector:
         target = os.path.abspath(path)
         folder = target if os.path.isdir(target) else os.path.dirname(target)
         now = time.monotonic()
-        if now - self._last_dir.get(folder, 0.0) < self.dir_throttle_s:
+        # 同上：只用"确实弹过这个目录"才参与节流；0.0 哨兵值在系统 uptime
+        # 小于 dir_throttle_s（默认 60 秒）时会把首次定位目录吞掉。
+        last = self._last_dir.get(folder)
+        if last is not None and now - last < self.dir_throttle_s:
             return None
         self._last_dir[folder] = now
         ok = self._backend.open_folder(target)

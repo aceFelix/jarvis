@@ -114,6 +114,21 @@ def test_show_is_throttled_per_window() -> None:
     assert len([c for c in backend.calls if c[0] == "show"]) == 1
 
 
+def test_first_show_is_not_throttled_on_small_clock(monkeypatch) -> None:
+    """系统 uptime 很小时，第一次显示窗口也不能被节流。
+
+    回归 2026-11-08 CI：Linux 的 ``time.monotonic()`` 是开机秒数，GitHub runner
+    刚开机时只有几十秒；旧实现拿 0.0 当“从未执行”的哨兵值，把首次动作误判成
+    “5 秒内重复”（见 docs/fixlogs/window-follow-throttle-uptime-fix.md）。
+    """
+    backend = FakeBackend()
+    director = WindowDirector(_settings(), backend=backend)
+    monkeypatch.setattr("agent.core.window_follow.time.monotonic", lambda: 1.0)
+
+    assert director.show_by_title("记事本") is not None
+    assert ("show", 101, "minimal") in backend.calls
+
+
 def test_missing_window_reports_instead_of_raising() -> None:
     backend = FakeBackend()
     director = WindowDirector(_settings(), backend=backend)
@@ -152,6 +167,23 @@ def test_relative_file_path_uses_workdir() -> None:
     director.on_file_changed("a.txt", "write", workdir="C:/proj")
 
     assert ("open", os.path.abspath("C:/proj/a.txt")) in backend.calls
+
+
+def test_first_folder_open_is_not_throttled_on_small_clock(monkeypatch) -> None:
+    """系统 uptime 很小时，第一次定位目录也不能被节流，但后续仍要节流。
+
+    回归 2026-11-08 CI（Linux/Python 3.14）：``time.monotonic()`` 只有几十秒时，
+    旧实现用 0.0 当“从未执行”的哨兵值，把首次 ``show_dir`` 误判成
+    “60 秒内重复”，三条窗口跟随测试随机失败。
+    """
+    backend = FakeBackend()
+    director = WindowDirector(_settings(), backend=backend)
+    monkeypatch.setattr("agent.core.window_follow.time.monotonic", lambda: 1.0)
+
+    assert director.on_file_changed("C:/proj/a.txt", "edit")["action"] == "show_dir"
+    assert ("open", os.path.abspath("C:/proj/a.txt")) in backend.calls
+    # 首次放行不等于取消节流：同一目录紧接着再改一次文件应被吞掉
+    assert director.on_file_changed("C:/proj/b.txt", "write") is None
 
 
 def test_cleanup_closes_only_new_windows() -> None:

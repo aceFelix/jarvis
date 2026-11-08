@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
-（暂无）
+### 修复（CI 回归，2026-11-08）
+
+- **窗口跟随首次动作被节流吞掉**：节流判断原来用 `0.0` 表示“从未执行”，
+  Linux 上 `time.monotonic()` 是开机秒数，CI 新虚拟机的 uptime 低于阈值时
+  首次“定位目录 / 显示窗口”会被误判为重复而直接跳过；改为 `None` 哨兵，
+  首次一定放行、后续仍节流。复盘见
+  [window-follow-throttle-uptime-fix.md](docs/fixlogs/window-follow-throttle-uptime-fix.md)。
 
 ## [2.5.1] — 2026-11-08
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-07T17:49:36Z",
+  "updated_at": "2026-11-08T03:32:32Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -47,9 +47,9 @@
     },
     "CHANGELOG.md": {
       "role": "index",
-      "sha256": "c597170e163d87bd3183505675535bfdb1ab549b6ff04a432d163a073472ed83",
-      "size": 69490,
-      "normalized_sha256": "c597170e163d87bd3183505675535bfdb1ab549b6ff04a432d163a073472ed83"
+      "sha256": "02f8ab871f6076ac35547993347c4849066636fc2587747d6fb0dd5e4571347e",
+      "size": 69962,
+      "normalized_sha256": "02f8ab871f6076ac35547993347c4849066636fc2587747d6fb0dd5e4571347e"
     },
     "LICENSE": {
       "role": "index",
@@ -1100,9 +1100,9 @@
     },
     "agent/core/window_follow.py": {
       "role": "index",
-      "sha256": "4d86756a03541747573696b05ede3e1e50bfe842493e69a5576fb43fa852e350",
-      "size": 9842,
-      "normalized_sha256": "4d86756a03541747573696b05ede3e1e50bfe842493e69a5576fb43fa852e350"
+      "sha256": "163a041434bec4739173aa00b415eab092da1d97bed398c8656715367e73f8c8",
+      "size": 10395,
+      "normalized_sha256": "163a041434bec4739173aa00b415eab092da1d97bed398c8656715367e73f8c8"
     },
     "agent/core/window_observer.py": {
       "role": "index",
@@ -2294,9 +2294,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "1ef525b9987697f4c6f8835f326e677b0bacb87840ca8d4ec3a1a6c20f6e66d4",
-      "size": 252811,
-      "normalized_sha256": "1ef525b9987697f4c6f8835f326e677b0bacb87840ca8d4ec3a1a6c20f6e66d4"
+      "sha256": "b32c8e4c2627de430cf6fb6aa92affc4247ce561127bae2650e379b659138bff",
+      "size": 253289,
+      "normalized_sha256": "b32c8e4c2627de430cf6fb6aa92affc4247ce561127bae2650e379b659138bff"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -3203,6 +3203,12 @@
       "sha256": "d87a745783056c81e3c773c512d6aa6af67ae03b0239e03cc5784f752ebc0672",
       "size": 4126,
       "normalized_sha256": "7e4bc7180919caf074325a42f94095a2117fa2a0a56e14c3d9dd7f1c993c3098"
+    },
+    "docs/fixlogs/window-follow-throttle-uptime-fix.md": {
+      "role": "index",
+      "sha256": "41a6b54a6d7c849523d35d2ca702f0ade2d3e53966f9c0acd59583a4bde5f48a",
+      "size": 6540,
+      "normalized_sha256": "41a6b54a6d7c849523d35d2ca702f0ade2d3e53966f9c0acd59583a4bde5f48a"
     },
     "docs/fixlogs/workbench-gui-retired.md": {
       "role": "index",
@@ -4147,9 +4153,9 @@
     },
     "tests/core/test_window_follow.py": {
       "role": "observe",
-      "sha256": "18ff7a62956b4a66f0bc87650ff87b3641604b14d59484f3a4ef00947a5d0ee5",
-      "size": 6793,
-      "normalized_sha256": "18ff7a62956b4a66f0bc87650ff87b3641604b14d59484f3a4ef00947a5d0ee5"
+      "sha256": "7e04f83dad623830ae756b58983f1d4bd587797c89b8389e65de9d1e5743d362",
+      "size": 8456,
+      "normalized_sha256": "7e04f83dad623830ae756b58983f1d4bd587797c89b8389e65de9d1e5743d362"
     },
     "tests/core/test_window_observer.py": {
       "role": "observe",
