@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 from agent.core.context import ToolContext
+from agent.core.gui_launch import GUI_LAUNCH_PATTERN, is_gui_launch
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.sandbox.audit import SandboxAuditor
 from agent.core.sandbox.executor import SandboxConfig, SandboxExecutor
@@ -58,11 +59,9 @@ _TIMEOUT_HINT = (
 # 「以 & 结尾」的后台命令（排除 && 连接符）
 _BACKGROUND_TAIL = re.compile(r"(?<!&)&\s*$")
 
-# 拉起 GUI 后立刻返回的命令：沙箱会等 GUI 退出，必须按后台处理（2026-11-08）
-_GUI_LAUNCH = re.compile(
-    r"(?:cmd\s+//c\s+start|(?:^|[;&|]\s*)start\s+[\"']?|Start-Process\b)",
-    re.IGNORECASE,
-)
+# 拉起 GUI 后立刻返回的命令：沙箱会等 GUI 退出，必须按后台处理（2026-11-08）。
+# 口径与 agent/core/gui_launch.py 共用，收尾清理靠它识别"用户要看的结果窗口"。
+_GUI_LAUNCH = GUI_LAUNCH_PATTERN
 
 # 复合命令：`A && B &` 的 `&` 作用于整个列表，重定向必须包在整组外面，
 # 否则后台子 shell 仍继承管道，父进程等 EOF 会一直挂到 GUI 退出（2026-11 实测）。
@@ -262,6 +261,15 @@ class BashTool(Tool):
         # 用分类器判断（readonly 才算只读）
         from agent.permissions.shell_classifier import classify
         return classify(args.get("command", "")) == "readonly"
+
+    def window_policy(self, args: dict[str, Any]) -> str | None:
+        """GUI 启动命令拉起的窗口是用户要看的结果，收尾必须保留。
+
+        普通命令（编译、脚本、测试）不声明，交给运行时默认策略。
+        @author aceFelix
+        """
+        command = str((args or {}).get("command") or "")
+        return "keep" if is_gui_launch(command) else None
 
     def is_concurrency_safe(self, args: dict[str, Any]) -> bool:
         # 只读命令可并行；写类命令保守起见不可并行

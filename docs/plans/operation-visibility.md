@@ -287,12 +287,15 @@ SetForegroundWindow(hwnd)
 | 规则 | 说明 |
 |---|---|
 | 只关本轮新开的窗口 | 以回合开始时的窗口快照为基线，`before` 里已有的一律不碰 |
+| 按工具声明优先 | `Tool.window_policy` 返回 `keep` 保留、`transient` 关闭；未声明走默认策略 |
 | 只关被操作过的窗口 | 必须出现在窗口跟随/操作记录里（`hwnd` 进 involved 集合） |
 | 保留最终结果 | 最后一步打开的窗口不关（通常就是结果） |
-| 保留当前前台 | 回合结束时用户正在看的窗口不关 |
+| 保留用户要求打开的窗口 | Bash 的 `start` / `cmd //c start` / `Start-Process` 之后出现的窗口不关（浏览器/编辑器等） |
+| 保留当前前台 | 回合结束时用户正在看、且**本轮没操作过**的窗口不关；被工具自己激活的不算 |
+| 关闭动作后收尾 | 显式关闭（`*Close` / `action=close`）晚于窗口置前 → 该窗口按中间产物关闭 |
 | 未保存不关 | 标题含 `*` 的跳过并上报，绝不强杀丢数据 |
 | 关闭方式 | `WM_CLOSE`（应用可弹保存确认），不是 `TerminateProcess` |
-| 开关 | `[ui] window_cleanup = "transient"`（默认）/ `"off"` |
+| 开关 | `[ui] window_cleanup = "transient"`（默认）/ `"off"`；未知意图默认 `keep`，可配 `window_cleanup_unknown = "transient"` 恢复激进 |
 
 终端会多一行：`🪟 已关闭 N 个临时窗口；保留 M 个未保存窗口`。
 
@@ -468,7 +471,7 @@ window_follow_hold_ms = 1200
 | `window_follow` 默认档 | `show`（可见不抢焦点） |
 | 自动弹资源管理器 | 是（同目录 60s 节流，读文件不弹） |
 | `focus` 档 | 保留，默认不用 |
-| 任务收尾清理 | `transient`（关中间产物，保留最终结果/前台/未保存） |
+| 任务收尾清理 | `transient`（关中间产物，保留最终结果 / 用户要求打开的 GUI 窗口 / 未保存） |
 | trace 保留轮数 | 20 轮 |
 | 失败时截图 | 暂未实现（P1 只记错误摘要；截图需要额外依赖与隐私处理，留待后续） |
 

@@ -192,3 +192,37 @@ class TestThinkingPanelWindow:
         assert "思考片段0" in output
         assert "思考片段49" in output
         assert "（前略）" not in output
+
+
+class TestLiveLeakRecovery:
+    """Live 残留收口（2026-11-08 输出错乱修复）。
+
+    窗口观察器在后台线程打印窗口动作时，可能恰好撞上模型线程启动思考 Live：
+    旧实现先清 ``_thinking_started`` 再 stop，一旦 stop 抛异常，就会留下
+    “标志已清、Live 仍在跑”的残留；之后所有收口都在开头早退，泄漏的 Live
+    以 12fps 持续重绘，把正文/工具输出撕成一字一行。
+    """
+
+    def test_end_thinking_stops_live_even_when_flag_cleared(self) -> None:
+        """标志已被清掉也不影响强制收口。"""
+        ui, _buf = _make_cli(terminal=True)
+        ui.assistant_thinking("想一下")
+        assert ui._thinking_live is not None
+
+        ui._thinking_started = False  # 模拟异常收尾后的不一致状态
+        ui._end_thinking()
+
+        assert ui._thinking_live is None
+        assert ui._live_handles == []
+
+    def test_info_stops_leaked_live_before_printing(self) -> None:
+        """任何打印路径（info/warn）都必须先把残留 Live 收掉。"""
+        ui, buf = _make_cli(terminal=True)
+        ui.assistant_thinking("想一下")
+        ui._thinking_started = False
+
+        ui.info("窗口动作")
+
+        assert ui._thinking_live is None
+        assert "窗口动作" in buf.getvalue()
+

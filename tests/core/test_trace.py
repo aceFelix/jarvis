@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from agent.core.trace import (
     MASKED_WINDOW,
@@ -231,18 +232,201 @@ def test_cleanup_closes_intermediate_keeps_final_and_foreground(tmp_path) -> Non
     )
     rec.director = director
     rec._before_windows = {1: "终端"}
-    rec._involved = {2, 3, 4}
+    # 4 号窗口本轮没动过 → 才算“用户正在看”，必须保留
+    rec._involved = {2, 3}
     rec._step_new = [{2}, {3}]
+    # 2 是中间产物：由工具显式声明 transient（契约式收尾）
+    rec._step_policy = ["transient", None]
 
     rec._cleanup_transient_windows()
 
-    assert director.closed == [2]          # 中间产物关掉
+    assert director.closed == [2]          # 声明 transient 的关掉
     assert 3 in director.kept              # 最后一步的结果保留
-    assert 4 in director.kept              # 当前前台保留
+    assert 4 in director.kept              # 用户自己的前台窗口保留
     assert any(
         e["type"] == "window_action" and e["action"] == "close"
         for e in rec.current_events
     )
+
+
+def test_cleanup_closes_foreground_window_touched_by_run(tmp_path) -> None:
+    """显式关闭动作晚于窗口置前时，被操作过的前台窗口按中间产物关闭。
+
+    2026-11-08 实机（WPS）：``edit_text`` 由 COM 激活了「WPS Office」窗口，
+    随后 ``writer close`` 关掉文档。收尾据此判定应用壳是做完的中间产物。
+    """
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "WPS Office"}, fg=2)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = []
+    rec._show_at = {2: 1.0}
+    rec._last_close_intent_at = 2.0   # 关闭动作晚于置前
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == [2]
+    assert 2 not in director.kept
+
+
+def test_gui_launch_window_is_kept_at_cleanup(tmp_path) -> None:
+    """``start firefox`` 打开、后续被置前的窗口属于最终结果，收尾不得关闭。
+
+    2026-11-08 实机：用户要求“用火狐打开贪吃蛇”，火狐在 Bash 后台启动、
+    随后被观察器置前（involved），旧规则只保留“最后一步窗口 / 未被操作窗口”，
+    任务结束时把火狐关掉了，与用户意图相反。
+    """
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "Mozilla Firefox"}, fg=2)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = []
+    rec._gui_launch_at = time.monotonic()
+    rec.note_action({"action": "show", "ok": True, "hwnd": 2, "message": "已置前"})
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == []
+    assert 2 in director.kept
+
+
+def test_gui_launch_command_marks_launch_time(tmp_path) -> None:
+    """Bash 的 GUI 启动命令要记下时间点，供后续窗口出现时登记保留。"""
+    rec = _recorder(tmp_path)
+    rec.on_tool_before(
+        {
+            "tool_name": "Bash",
+            "tool_use_id": "g1",
+            "tool_input": {"command": 'cmd //c start "" "E:/snake/index.html"'},
+        }
+    )
+    rec.on_tool_after(
+        {"tool_name": "Bash", "tool_use_id": "g1", "is_error": False, "result": ""}
+    )
+
+    assert rec._gui_launch_at > 0.0
+
+
+def test_cleanup_keeps_undeclared_windows_by_default(tmp_path) -> None:
+    """未声明意图的窗口默认保留：宁可多留一个，也不误关用户要看的东西。"""
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "某个新窗口"}, fg=1)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = []
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == []
+    assert 2 in director.kept
+
+
+def test_cleanup_closes_declared_transient_window(tmp_path) -> None:
+    """工具声明 transient 的窗口，即使没被操作过也要关。"""
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "中间窗口"}, fg=1)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._step_new = [{2}]
+    rec._step_policy = ["transient"]
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == [2]
+
+
+def test_cleanup_declared_keep_beats_later_close_intent(tmp_path) -> None:
+    """工具显式声明 keep 时，优先于关闭动作的启发式判定。"""
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "结果窗口"}, fg=1)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = [{2}]
+    rec._step_policy = ["keep"]
+    rec._show_at = {2: 1.0}
+    rec._last_close_intent_at = 2.0
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == []
+    assert 2 in director.kept
+
+
+def test_cleanup_close_intent_before_show_keeps_window(tmp_path) -> None:
+    """关闭动作早于窗口置前时，不能把后来出现的窗口当中间产物。"""
+    rec = _recorder(tmp_path)
+    director = StubCleanupDirector({1: "终端", 2: "后开的窗口"}, fg=1)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = []
+    rec._show_at = {2: 2.0}
+    rec._last_close_intent_at = 1.0
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == []
+    assert 2 in director.kept
+
+
+def test_cleanup_unknown_transient_mode_is_aggressive(tmp_path) -> None:
+    """配置为 transient 时恢复旧行为：关掉本轮被操作过的新窗口。"""
+    rec = _recorder(tmp_path)
+    rec.cleanup_unknown = "transient"
+    director = StubCleanupDirector({1: "终端", 2: "被操作的窗口"}, fg=1)
+    rec.director = director
+    rec._before_windows = {1: "终端"}
+    rec._involved = {2}
+    rec._step_new = []
+
+    rec._cleanup_transient_windows()
+
+    assert director.closed == [2]
+
+
+def test_close_intent_detected_from_action_close(tmp_path) -> None:
+    """harness（WPS）的 action=close 要记成关闭意图。"""
+    rec = _recorder(tmp_path)
+    rec.on_tool_before(
+        {
+            "tool_name": "cli_anything__wps",
+            "tool_use_id": "c1",
+            "tool_input": {"subcommand": "writer", "action": "close"},
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "cli_anything__wps",
+            "tool_use_id": "c1",
+            "is_error": False,
+            "result": "",
+        }
+    )
+
+    assert rec._last_close_intent_at > 0.0
+
+
+def test_window_policy_from_hook_recorded(tmp_path) -> None:
+    """orchestrator 透传的 window_policy 要按步骤落到 _step_policy。"""
+    rec = _recorder(tmp_path)
+    rec.on_tool_before(
+        {"tool_name": "Demo", "tool_use_id": "p1", "tool_input": {}}
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "Demo",
+            "tool_use_id": "p1",
+            "is_error": False,
+            "result": "",
+            "window_policy": "transient",
+        }
+    )
+
+    assert rec._step_policy == ["transient"]
 
 
 def test_chinese_path_survives_json_roundtrip(tmp_path) -> None:

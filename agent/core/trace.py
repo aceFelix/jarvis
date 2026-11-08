@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agent.core.gui_launch import is_gui_launch
 from agent.ui.trace_view import render_event, safe_info
 
 TRACE_ROOT = Path.home() / ".jarvis" / "traces"
@@ -53,6 +54,8 @@ MASKED_WINDOW = "‹已脱敏窗口›"
 _MAX_ERROR_CHARS = 120
 _MAX_BUFFER = 400
 _END_DEBOUNCE_S = 0.8
+# GUI 窗口从命令启动到真正出现/被置前的宽限；收尾时这类窗口属于"用户要看的结果"。
+_GUI_KEEP_WINDOW_S = 10.0
 
 _recorder: "TraceRecorder | None" = None
 
@@ -136,7 +139,19 @@ class TraceRecorder:
     _before_windows: dict[int, str] = field(default_factory=dict)
     _step_start: dict[int, str] = field(default_factory=dict)
     _step_new: list[set[int]] = field(default_factory=list)
+    # 每一步工具声明的窗口意图（与 _step_new 对齐）：keep / transient / None
+    _step_policy: list[str | None] = field(default_factory=list)
     _involved: set[int] = field(default_factory=set)
+    # 用户要求打开的 GUI 窗口（如 Bash `start firefox`）：收尾时必须保留，
+    # 即使它后来被观察器置前、也不算"最后一步"。@author aceFelix
+    _keep_hwnds: set[int] = field(default_factory=set)
+    _gui_launch_at: float = 0.0
+    # 窗口被置前的时刻 + 最近一次"显式关闭"动作的时刻：
+    # 关闭动作晚于置前 → 该窗口是做完的中间产物（如 WPS 关文档后的应用壳）。
+    _show_at: dict[int, float] = field(default_factory=dict)
+    _last_close_intent_at: float = 0.0
+    # 未声明意图的窗口默认保留（宁多留、不误关）；可配置为 transient 恢复激进清理
+    cleanup_unknown: str = "keep"
     _end_timer: threading.Timer | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -160,7 +175,12 @@ class TraceRecorder:
         self._before_windows = self._snapshot_windows()
         self._step_start = {}
         self._step_new = []
+        self._step_policy = []
         self._involved = set()
+        self._keep_hwnds = set()
+        self._gui_launch_at = 0.0
+        self._show_at = {}
+        self._last_close_intent_at = 0.0
         self._started = time.monotonic()
         self._rotate()
         self._emit({"type": "run_start", "input_chars": int(input_chars)})
@@ -253,6 +273,16 @@ class TraceRecorder:
         hwnd = action.get("hwnd")
         if isinstance(hwnd, int):
             self._involved.add(hwnd)
+            if action.get("action") in ("show", "focus"):
+                now = time.monotonic()
+                self._show_at[hwnd] = now
+                # 刚跑过 GUI 启动命令、随后出现的窗口 = 用户要看的结果
+                # （2026-11-08 实机：firefox 被收尾清理误关）。@author aceFelix
+                if (
+                    hwnd not in self._before_windows
+                    and now - self._gui_launch_at <= _GUI_KEEP_WINDOW_S
+                ):
+                    self._keep_hwnds.add(hwnd)
         self._emit({"type": "window_action", **action})
 
     def on_tool_after(self, payload: dict[str, Any]) -> None:
@@ -285,6 +315,24 @@ class TraceRecorder:
         current = self._snapshot_windows()
         self._step_new.append(set(current) - set(self._step_start))
         self._step_start = {}
+        # 工具声明的窗口意图（None=不声明），与 _step_new 对齐
+        policy = payload.get("window_policy")
+        self._step_policy.append(
+            str(policy) if policy in ("keep", "transient") else None
+        )
+        # 显式关闭动作（WindowClose / BrowserClose / wps action=close）：
+        # 之后收尾可把"关闭动作之前被置前的窗口"判为做完的中间产物。
+        if pending and _is_close_intent(
+            str(pending.get("tool") or ""), dict(pending.get("input") or {})
+        ):
+            self._last_close_intent_at = time.monotonic()
+        # GUI 启动步（start firefox / Start-Process …）：窗口可能晚 1~2 秒才出现，
+        # 这里只记时间点，窗口真正被观察器置前时再登记进保留集合。
+        # @author aceFelix
+        if pending and pending.get("tool") == "Bash":
+            command = str((pending.get("input") or {}).get("command") or "")
+            if is_gui_launch(command):
+                self._gui_launch_at = time.monotonic()
         # 启动观察器探测（延迟后判断是否出现"新窗口且变前台"）
         if self.observer is not None:
             try:
@@ -366,12 +414,36 @@ class TraceRecorder:
         except Exception:
             return {}
 
-    def _cleanup_transient_windows(self) -> None:
-        """关闭本轮新开、被实际操作过、且不属于最终结果的窗口。
+    def _policy_for(self, hwnd: int) -> str | None:
+        """查这个窗口所在步骤的工具意图声明（后出现的声明覆盖先前的）。
 
-        保留三类：未被操作过的新窗口（可能是用户自己开的）、最后一步打开的窗口
-        （通常就是最终结果）、当前前台窗口（用户正在看）。未保存窗口由
-        ``WindowDirector`` 跳过并上报。
+        Args:
+            hwnd: 窗口句柄。
+
+        Returns:
+            ``"keep"`` / ``"transient"`` / None（该窗口没有对应声明）。
+        """
+        policy = None
+        for index, windows in enumerate(self._step_new):
+            if hwnd in windows and index < len(self._step_policy):
+                declared = self._step_policy[index]
+                if declared:
+                    policy = declared
+        return policy
+
+    def _cleanup_transient_windows(self) -> None:
+        """关闭本轮新开、但被判定为中间产物的窗口。
+
+        判定优先级（从高到低）：
+
+        1. 工具显式声明 ``transient`` → 关闭；显式 ``keep`` → 保留；
+        2. 显式关闭动作（WindowClose / BrowserClose / `action=close`）
+           晚于该窗口被置前 → 视为做完的中间产物（WPS 关文档后的应用壳）；
+        3. 未声明时**默认保留**（宁多留、不误关）；只有配置
+           ``[ui] window_cleanup_unknown = "transient"`` 才恢复"关被操作窗口"的激进策略；
+        4. 未保存窗口由 ``WindowDirector`` 跳过并上报，绝不强杀。
+
+        最后一步打开的窗口与 GUI 启动命令拉起的窗口始终保留。
         """
         if self.director is None:
             return
@@ -380,17 +452,41 @@ class TraceRecorder:
         except Exception:
             return
         new_windows = set(current) - set(self._before_windows)
-        involved = new_windows & self._involved
-        keep: set[int] = set(new_windows - involved)
+        aggressive = self.cleanup_unknown == "transient"
+        keep: set[int] = set()
+        transient: set[int] = set()
+        for hwnd in new_windows:
+            policy = self._policy_for(hwnd)
+            if policy == "transient":
+                transient.add(hwnd)
+                continue
+            if policy == "keep":
+                keep.add(hwnd)
+                continue
+            # 未声明：保守保留；只有强信号才当中间产物
+            shown = self._show_at.get(hwnd)
+            if shown is not None and self._last_close_intent_at > shown:
+                transient.add(hwnd)
+                continue
+            if aggressive and hwnd in self._involved:
+                transient.add(hwnd)
+                continue
+            keep.add(hwnd)
+        # 最后一步打开的窗口通常就是最终结果；但显式 transient / 关闭动作
+        # 已判定为中间产物的不再拉回。
         if self._step_new:
-            keep |= self._step_new[-1] & self._involved
+            keep |= (self._step_new[-1] & new_windows) - transient
         fg = None
         try:
             fg = self.director.foreground_hwnd()
         except Exception:
             fg = None
-        if isinstance(fg, int):
+        # 只有"本轮没操作过"的前台窗口才算用户正在看
+        if isinstance(fg, int) and fg not in self._involved:
             keep.add(fg)
+        # 用户要求打开的 GUI 窗口（如 `start firefox`）属于最终结果：
+        # 后续验证步骤（sleep/截图）不会把它从保留集合里挤掉。
+        keep |= self._keep_hwnds & set(current)
         try:
             result = self.director.close_transients(self._before_windows, keep)
         except Exception:
@@ -465,6 +561,21 @@ class TraceRecorder:
             self._end_timer = None
 
 
+def _is_close_intent(tool_name: str, tool_input: dict[str, Any]) -> bool:
+    """本次工具调用是否表达"把它关掉"的意图。
+
+    覆盖两类：窗口/浏览器关闭工具（名字以 ``Close`` 结尾），以及
+    WPS/office 这类 harness 的 ``action=close`` 参数。用于把"关闭动作
+    之前被置前的窗口"判为做完的中间产物。
+
+    @author aceFelix
+    """
+    name = str(tool_name or "").lower()
+    if name.endswith("close"):
+        return True
+    return str(tool_input.get("action") or "").strip().lower() == "close"
+
+
 def _slim_input(tool_input: dict[str, Any]) -> dict[str, Any]:
     """入参只保留前 3 个短字段，避免 trace 文件被大段内容撑爆。"""
     slim: dict[str, Any] = {}
@@ -523,6 +634,9 @@ def install_observability(settings: Any, ui: Any) -> TraceRecorder:
         keep_runs=max(1, int(getattr(settings, "trace_keep_runs", 20) or 20)),
         ui=ui,
         director=director,
+        cleanup_unknown=str(
+            getattr(settings, "window_cleanup_unknown", "keep") or "keep"
+        ),
     )
 
     # 通用窗口观察器：快照差分决定跟随，不依赖工具名（见 docs/plans/window-observer.md）

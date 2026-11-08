@@ -114,6 +114,25 @@ class Tool(abc.ABC):
         """进行时活动描述（spinner 展示用）。返回 None 则回退到工具名。"""
         return None
 
+    def window_policy(self, args: dict[str, Any]) -> str | None:
+        """声明本次调用涉及的窗口在任务收尾时怎么处理。
+
+        收尾清理只看得到窗口和步骤，看不到工具语义；只有工具自己知道
+        "这个窗口是给用户看的结果"还是"内部副产物"。默认不声明（None），
+        由运行时按保守规则处理（未知窗口一律保留，宁多留不误关）。
+
+        Args:
+            args: 本次工具调用的完整入参。
+
+        Returns:
+            ``"keep"``：本次调用打开的窗口属于最终结果，收尾保留；
+            ``"transient"``：属于中间副产物，收尾可关；
+            ``None``：不声明，交给运行时默认策略。
+
+        @author aceFelix
+        """
+        return None
+
     # ---- 权限规则匹配辅助（供 BashTool 等）----
     def prepare_permission_matcher(
         self, args: dict[str, Any]

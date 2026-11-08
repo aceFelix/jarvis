@@ -128,9 +128,13 @@ window_follow_move = "minimal"
 window_probe_delay_ms = 450
 window_probe_retry_ms = 1200
 window_follow_subagents = false
-# 任务收尾清理：transient（默认）关掉本轮中间产物窗口，最终结果与当前前台窗口保留；
-# 只碰本轮新开的窗口、未保存窗口跳过，用户原有窗口绝不关闭。off 一律不关。
+# 任务收尾清理：transient（默认）关掉本轮中间产物窗口；最终结果、用户要求打开的
+# GUI 窗口（Bash start / Start-Process 拉起的浏览器等）与未保存窗口保留；
+# 只碰本轮新开的窗口，用户原有窗口绝不关闭。off 一律不关。
 window_cleanup = "transient"
+# 工具未声明窗口意图时的默认策略：keep（默认，保守——宁多留一个窗口也不误关）
+# / transient（激进——关掉本轮被操作过的新窗口，旧行为）。
+window_cleanup_unknown = "keep"
 
 [context]
 # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超过窗口比例时，

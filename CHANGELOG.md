@@ -4,13 +4,27 @@
 
 ## [Unreleased]
 
-### 修复（CI 回归，2026-11-08）
+### 修复（2026-11-08）
 
 - **窗口跟随首次动作被节流吞掉**：节流判断原来用 `0.0` 表示“从未执行”，
   Linux 上 `time.monotonic()` 是开机秒数，CI 新虚拟机的 uptime 低于阈值时
   首次“定位目录 / 显示窗口”会被误判为重复而直接跳过；改为 `None` 哨兵，
   首次一定放行、后续仍节流。复盘见
   [window-follow-throttle-uptime-fix.md](docs/fixlogs/window-follow-throttle-uptime-fix.md)。
+- **任务收尾关不掉被操作窗口**：收尾清理把“当前前台窗口”一律当用户正在看而保留，
+  但 WPS 等 COM 自动化会自己激活窗口，导致本轮新开的 WPS 壳窗口留在桌面上；
+  现在只有“本轮没操作过”的前台窗口才保留。复盘见
+  [wps-window-cleanup-foreground-fix.md](docs/fixlogs/wps-window-cleanup-foreground-fix.md)。
+- **思考面板 Live 残留导致输出错乱**：窗口观察器（后台线程）与模型线程撞在
+  同一份面板状态上，`_end_thinking` 又按“是否启动过”早退，一旦 stop 失败就留下
+  泄漏的 Live，以 12fps 持续重绘把正文撕成一字一行；改为状态锁 + 句柄清单强制收口。
+- **用户要求打开的 GUI 窗口被收尾误关**：`start firefox` 之后出现的窗口属于最终结果，
+  旧规则只认“最后一步 / 前台 / 未被操作”，把火狐关掉了。现在由共享的 GUI 启动
+  口径识别并保留；同时新增 `Tool.window_policy` 契约（`keep` / `transient` / 未声明），
+  未声明时默认保留（`[ui] window_cleanup_unknown = "keep"`），只有显式关闭动作
+  或声明 `transient` 才收尾关闭。两处复盘见
+  [thinking-live-leak-and-gui-window-close-fix.md](docs/fixlogs/thinking-live-leak-and-gui-window-close-fix.md)。
+
 
 ## [2.5.1] — 2026-11-08
 

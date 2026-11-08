@@ -260,3 +260,21 @@ async def test_background_command_skips_sandbox(monkeypatch) -> None:
     calls.clear()
     await tool.call({"command": "ls -la"}, ctx)
     assert calls == ["normal"]
+
+
+class TestWindowPolicy:
+    """窗口意图声明：GUI 启动命令 = keep，普通命令不声明。"""
+
+    def test_gui_launch_declares_keep(self) -> None:
+        """GUI 启动拉起的窗口是用户要看的结果。"""
+        tool = BashTool()
+        assert tool.window_policy(
+            {"command": 'cmd //c start "" "E:/work/snake/index.html"'}
+        ) == "keep"
+
+    def test_plain_command_declares_nothing(self) -> None:
+        """编译/脚本/测试类命令不改变窗口策略。"""
+        assert BashTool().window_policy({"command": "python app.py"}) is None
+
+    def test_empty_command_declares_nothing(self) -> None:
+        assert BashTool().window_policy({}) is None

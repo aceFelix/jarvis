@@ -189,6 +189,9 @@ class Settings:
     # 任务收尾清理：transient 只关本轮新开、被操作过、且非最终结果的窗口；
     # off 一律不关。只发 WM_CLOSE，未保存窗口跳过，用户原有窗口绝不碰。
     window_cleanup: str = "transient"
+    # 未声明窗口意图时的默认策略：keep=保留（保守，宁多留不误关）；
+    # transient=关掉本轮被操作过的新窗口（激进，旧行为）。
+    window_cleanup_unknown: str = "keep"
 
     # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超窗口比例才自动摘要，
     # 防止 token 爆炸 + 撞模型上下文窗口。未超比例绝不压缩，用满窗口前半程。

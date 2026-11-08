@@ -2,6 +2,7 @@
 
 > 来源：用户提出的产品构想——参考《钢铁侠》中 JARVIS 操作电脑／检索信息时的多弹窗与数据可视化。
 > 状态：构想记录，后续分阶段实现；当前不阻塞窗口跟随（见 [window-observer.md](window-observer.md)）。
+> C1（终端任务驾驶舱）工程方案已单独成文：[terminal-cockpit.md](terminal-cockpit.md)（待评审）。
 > 作者：aceFelix
 
 ---

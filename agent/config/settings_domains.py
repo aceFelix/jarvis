@@ -80,6 +80,7 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("window_probe_retry_ms", "window_probe_retry_ms"),
         ("window_follow_subagents", "window_follow_subagents"),
         ("window_cleanup", "window_cleanup"),
+        ("window_cleanup_unknown", "window_cleanup_unknown"),
     )),
     ("context", (
         ("compaction", "context_compaction"),

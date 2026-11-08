@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Any
 
 from agent.core.context import UIProtocol
@@ -163,6 +164,12 @@ class RichCLI(UIProtocol):
         self._thinking_buf = ""
         self._thinking_started = False
         self._thinking_live: Any = None  # Rich Live 实例（流式思考面板）
+        # Live 句柄清单 + 状态锁：窗口观察器在后台线程里调 info()/end_thinking，
+        # 与模型线程的 thinking 增量并发；锁住"状态 + start"这一小段，
+        # 避免出现"started=False 但 Live 还在跑"的残留（2026-11-08 实机错乱）。
+        # @author aceFelix
+        self._live_handles: list[Any] = []
+        self._live_lock = threading.RLock()
         # prompt_toolkit 会话（懒初始化，复用历史记录）
         self._pt_session: PromptSession | None = None
         # 语音模式：隐藏思维链文本，通过 TTS 播报进度（voice_loop 设置）
@@ -226,29 +233,41 @@ class RichCLI(UIProtocol):
         根治在 _thinking_panel：去前导空白 + 无界缓冲改显式尾部窗口（永远
         显示最新一段思考），面板高度有界，Live 原地擦回不再产生空帧。
         """
-        self._thinking_buf += text
+        live: Any = None
+        with self._live_lock:
+            self._thinking_buf += text
 
-        if not self._thinking_started:
-            # 纯空白增量不启动：继续静默累积，等第一段可见文本到达再开面板
-            if not self._thinking_buf.strip():
-                return
-            self._thinking_started = True
-            if self._console and _HAS_RICH and self._console.is_terminal:
-                self._thinking_live = Live(
-                    self._thinking_panel(),
-                    console=self._console,
-                    refresh_per_second=12,
-                    transient=False,
-                    # 面板超过终端可视高度时截断为省略号，而不是 "visible"
-                    # （visible 会让超高内容滚出屏幕后无法原地擦除，同样导致刷屏）
-                    vertical_overflow="ellipsis",
-                )
-                self._thinking_live.start()
-            # else: 静态模式——不建 Live，只在 _end_thinking 时打印一次
-        else:
-            # 流式更新：新文本到了，刷新 Live 面板（静态模式下无 Live，仅累积）
-            if self._thinking_live is not None:
-                self._thinking_live.update(self._thinking_panel(windowed=True))
+            if not self._thinking_started:
+                # 纯空白增量不启动：继续静默累积，等第一段可见文本到达再开面板
+                if not self._thinking_buf.strip():
+                    return
+                # 先清掉任何异常残留的 Live，保证同一时刻只有一个面板在渲染
+                self._stop_live_handles_locked()
+                self._thinking_started = True
+                if self._console and _HAS_RICH and self._console.is_terminal:
+                    live = Live(
+                        self._thinking_panel(),
+                        console=self._console,
+                        refresh_per_second=12,
+                        transient=False,
+                        # 面板超过终端可视高度时截断为省略号，而不是 "visible"
+                        # （visible 会让超高内容滚出屏幕后无法原地擦除，同样导致刷屏）
+                        vertical_overflow="ellipsis",
+                    )
+                    self._thinking_live = live
+                    self._live_handles.append(live)
+                    live.start()
+                # else: 静态模式——不建 Live，只在 _end_thinking 时打印一次
+            else:
+                # 流式更新：新文本到了，刷新 Live 面板（静态模式下无 Live，仅累积）
+                live = self._thinking_live
+
+        if live is not None:
+            # 刷新放到锁外：渲染可能较慢，不能挡住后台线程的 info()/收尾
+            try:
+                live.update(self._thinking_panel(windowed=True))
+            except Exception:
+                pass
 
     # Live 帧面板的最大可视行数：思考流是无限长的，必须做尾部滚动窗口，
     # 否则面板随缓冲增长超出终端高度，ellipsis 截断后终端永远显示开头段
@@ -284,28 +303,76 @@ class RichCLI(UIProtocol):
             padding=(0, 1),
         )
 
+    def _stop_live_handles_locked(self) -> None:
+        """停掉所有记录的思考面板 Live（调用方必须已持有 ``_live_lock``）。
+
+        只清状态、逐个 stop；任何异常都吞掉——收口失败不能让对话中断。
+        失败的句柄留在列表里，下一次收口或读输入前会再试一次。
+        """
+        handles, self._live_handles = self._live_handles, []
+        self._thinking_live = None
+        for old in handles:
+            try:
+                old.stop()
+            except Exception:
+                self._live_handles.append(old)
+
     def _end_thinking(self) -> None:
         """结束思考阶段。
 
         Live 模式：最终刷新 + 停止，面板自然保留。
         静态模式（非交互终端）：此刻才一次性打印面板，避免流式刷屏。
+
+        2026-11-08 修复：以前这里先判 ``_thinking_started``，为 False 就整段
+        跳过——一旦上一次 stop 抛异常留下"标志已清、Live 仍在跑"的残留，
+        后续每次收口都会跳过它，泄漏的 Live 用 12fps 一直重绘，把正文/工具
+        输出撕成一字一行。现在无论标志如何，都按句柄清单强制收口。
         """
-        if not self._thinking_started:
-            # 未启动（整段都是空白增量）：兜底清空缓冲，不输出任何面板
-            self._thinking_buf = ""
-            return
-        self._thinking_started = False
-
-        if self._thinking_live is not None:
-            # 最终刷新 + 停止 Live
-            self._thinking_live.update(self._thinking_panel())
-            self._thinking_live.stop()
+        with self._live_lock:
+            handles = self._live_handles
+            self._live_handles = []
             self._thinking_live = None
-        elif self._thinking_buf and self._console:
-            # 静态模式：思考完整了才输出一个面板（全程只打印一次）
-            self._console.print(self._thinking_panel())
+            started = self._thinking_started
+            self._thinking_started = False
 
-        self._thinking_buf = ""
+        if not started and not handles:
+            # 未启动（整段都是空白增量）：兜底清空缓冲，不输出任何面板
+            with self._live_lock:
+                self._thinking_buf = ""
+            return
+
+        if handles and not started:
+            # 状态不一致说明前面的 stop 失败过；记一条诊断，便于下次定位
+            try:
+                from agent.core.diag import diag_warn
+
+                diag_warn("ui", f"思考面板 Live 残留 {len(handles)} 个，已强制收口")
+            except Exception:
+                pass
+
+        try:
+            final_panel = self._thinking_panel()
+        except Exception:
+            final_panel = None
+
+        for live in handles:
+            try:
+                if final_panel is not None:
+                    live.update(final_panel)
+            except Exception:
+                pass
+            try:
+                live.stop()
+            except Exception:
+                with self._live_lock:
+                    self._live_handles.append(live)
+
+        if not handles and final_panel is not None and self._thinking_buf and self._console:
+            # 静态模式：思考完整了才输出一个面板（全程只打印一次）
+            self._console.print(final_panel)
+
+        with self._live_lock:
+            self._thinking_buf = ""
 
     def end_thinking(self) -> None:
         """公开收尾入口：把当前思考阶段收口（幂等，未启动时为空操作）。

@@ -500,6 +500,16 @@ class ToolOrchestrator:
             ctx.ui.tool_result(tool.name, tu.id, content_str, is_error=result.is_error)
 
         # ---- Hook: tool_after ----
+        # 窗口意图声明：只有工具自己知道它打开的是"用户要看的结果"还是内部副产物；
+        # 收尾清理按声明优先，未声明走保守规则（2026-11-08 契约式收尾）。
+        # @author aceFelix
+        window_policy = None
+        try:
+            policy_fn = getattr(tool, "window_policy", None)
+            if callable(policy_fn):
+                window_policy = policy_fn(dict(tu.input))
+        except Exception:
+            window_policy = None
         try:
             from agent.core.hooks import get_hooks, HookEvent
             await get_hooks().trigger(HookEvent.TOOL_AFTER, {
@@ -508,6 +518,7 @@ class ToolOrchestrator:
                 "tool_use_id": tu.id,
                 "result": content_str,
                 "is_error": result.is_error,
+                "window_policy": window_policy,
             })
         except Exception:
             pass

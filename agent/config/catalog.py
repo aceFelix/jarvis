@@ -213,6 +213,7 @@ FIELD_DOCS: dict[str, str] = {
     "window_probe_retry_ms": "首次未发现新窗口时的二次探测延迟；0 表示不重试",
     "window_follow_subagents": "子代理执行时是否也跟随窗口；默认关，避免多个代理抢屏",
     "window_cleanup": "任务收尾清理：transient 关掉本轮中间产物的窗口（只碰自己开的、跳过未保存）；off 一律不关",
+    "window_cleanup_unknown": "工具未声明窗口意图时的默认策略：keep 保留（保守，宁多留不误关）、transient 关掉本轮被操作过的新窗口",
     "voice_barge_in": "语音打断：播报中开口说话就停——Windows 上两个 PyAudio 并发会崩，默认关",
     "voice_barge_in_key": "键盘打断：播报中按 ESC 停止；不占 PyAudio，无崩溃风险",
     "voice_wake_words": "唤醒词清单；留空则用内置默认",
