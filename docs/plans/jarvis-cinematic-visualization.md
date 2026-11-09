@@ -2,7 +2,10 @@
 
 > 来源：用户提出的产品构想——参考《钢铁侠》中 JARVIS 操作电脑／检索信息时的多弹窗与数据可视化。
 > 状态：构想记录，后续分阶段实现；当前不阻塞窗口跟随（见 [window-observer.md](window-observer.md)）。
-> C1（终端任务驾驶舱）工程方案已单独成文：[terminal-cockpit.md](terminal-cockpit.md)（待评审）。
+> C1（终端任务驾驶舱）工程方案已单独成文：[terminal-cockpit.md](terminal-cockpit.md)。
+> 2026-11-08 用户实机否决终端内嵌方案，改为 **C1b 独立 tkinter HUD 窗口**（任务结束不关闭），
+> 实施细节见该文档 §13。
+> 下一步 **C3-lite 多任务浮窗** 方案与配置管理：[cockpit-multicards.md](cockpit-multicards.md)（待评审）。
 > 作者：aceFelix
 
 ---
@@ -121,15 +124,31 @@ Electron 壳新增 **PanelManager**：
 
 ## 5. 分阶段
 
+### 5.1 统一配置管理（所有可视化功能必须满足）
+
+- 每个可视化能力都必须有配置键，可单独开启/关闭；
+- 一个总开关 `[visualization] enabled` 关闭全部窗口；
+- 未实现的功能不预埋配置键，落地时同步 catalog / 示例 TOML / README；
+- 非法值降级到默认并记一条诊断；配置变更重启生效；
+- 现有 `[ui] visual_cockpit` 作为历史别名继续有效，`[visualization]` 优先。
+
+配置细节见 [cockpit-multicards.md](cockpit-multicards.md) §5。
+
+### 5.2 阶段表
+
 | 阶段 | 内容 | 载体 | 验收 |
 |---|---|---|---|
-| **C1** | 终端任务驾驶舱：任务面板 + 数据流 + 抽取表 | Rich Live | 一轮抓取任务能实时看到三块内容，不干扰输入 |
-| **C2** | 终端 ASCII 拓扑 | Rich / 字符画 | 节点随抓取增长，状态色可辨 |
+| **C1b** | 独立任务驾驶舱 HUD（已完成） | tkinter 独立窗口 | 首次任务弹出、结束不关闭、关闭只隐藏 |
+| **C2-lite** | 左侧“爬虫驾驶舱”独立窗口（**已完成 2026-11-09**，原名“抓取网络”）：URL 去重清单 + 汇总 + 抽取表，拓扑区占位 | tkinter `Toplevel`（屏幕最左侧） | 有抓取才弹、结束保留、关闭只隐藏；`[visualization] crawl_window` 可关 |
+| **C2 → C4-lite** | Canvas 抓取拓扑（暂缓） | tkinter Canvas | 先补 `parent_url` / `depth` 数据源，否则只画散点 |
+| **C3-lite** | 多任务浮窗：每个运行中工具一张卡，错位堆叠、完成自动收起 | tkinter `Toplevel` | 长工具出现、短工具不闪、上限 4、可总关 |
+| **C3-lite.2** | 子代理任务卡：每个代理一张，保留终端原始输出，左侧第二列 | tkinter `Toplevel` + 活动台账 | 方案见 [agent-cards.md](agent-cards.md)（待评审） |
 | **C3** | 桌面多浮窗 + 错位堆叠 | Electron PanelManager | 任务卡实时出现/收起，不抢焦点 |
 | **C4** | 桌面 Canvas 拓扑 + 抽取联动 | Electron | 点击节点联动右侧结果 |
 | **C5** | 电影感打磨 | 动画/音效 | 可关闭，默认克制 |
 
-> 先 C1/C2：不改抓取逻辑，只做展示层；确认"感觉对了"再进桌面。
+> C2 的“终端 ASCII 拓扑”在独立窗口方案落地后已失去意义，改为 HUD/桌面 Canvas 拓扑；
+> 先 C3-lite 把“多弹窗”的感觉做出来，再回头补拓扑与抽取表。
 
 ---
 
@@ -158,8 +177,10 @@ Electron 壳新增 **PanelManager**：
 
 | 项 | 默认建议 |
 |---|---|
-| 先做终端还是直接桌面 | 终端 C1/C2 先验证信息结构 |
-| 浮窗上限 | 6 |
-| 拓扑节点上限 | 200 |
+| 先做终端还是直接桌面 | C1b 独立 HUD 已完成；下一步 C3-lite 多任务浮窗 |
+| 浮窗默认 | `tool_cards = "auto"`（≥300ms 才显示） |
+| 浮窗上限 | 4 |
+| 拓扑节点上限 | 200（C4） |
 | 是否录屏 | 否，只做事件与截图引用 |
 | 是否需要音效 | 默认关 |
+| 配置落点 | 新增 `[visualization]` 段，`[ui] visual_cockpit` 兼容 |

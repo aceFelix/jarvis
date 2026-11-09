@@ -40,6 +40,9 @@ def _make_cli(terminal: bool) -> tuple[RichCLI, io.StringIO]:
         width=100,
         color_system=None,  # 关颜色，方便断言纯文本
     )
+    # 本机是 Windows，Console 即使输出到 StringIO 也会把 legacy_windows 判 True；
+    # 这里模拟"现代终端"，显式关掉 legacy（cmd 的 legacy 降级另有用例覆盖）。
+    ui._console.legacy_windows = False
     return ui, buf
 
 
@@ -91,6 +94,43 @@ class TestLiveMode:
         ui.assistant_text("答案")
         assert ui._thinking_live is None
         assert ui._thinking_started is False
+
+
+class TestLegacyWindowsConsole:
+    """cmd 这类 legacy Windows 控制台：Live 不可靠，必须降级静态模式。
+
+    2026-11-08 实机：cmd 下 `legacy_windows=True`，思考面板走 Live 时整块
+    画不出来；Git Bash（mintty，非 TTY）反而正常。修复为 legacy 一律静态。
+    """
+
+    class _LegacyConsole:
+        is_terminal = True
+        legacy_windows = True
+
+        def __init__(self) -> None:
+            self.prints: list = []
+
+        def print(self, *args, **kwargs) -> None:
+            self.prints.append(args[0] if args else None)
+
+    def test_legacy_windows_uses_static_mode(self) -> None:
+        """legacy 控制台不创建 Live，思考结束一次性打印面板。"""
+        ui = RichCLI(boot_animation=False)
+        console = self._LegacyConsole()
+        ui._console = console
+
+        ui.assistant_thinking("想一下")
+        assert ui._thinking_live is None
+        assert ui._thinking_started is True
+
+        ui._end_thinking()
+        assert len(console.prints) == 1
+        # legacy 控制台不能用 Rich Panel（实机会竖排乱码），必须是纯文本块
+        printed = console.prints[0]
+        assert isinstance(printed, str)
+        assert "思考过程" in printed
+        assert "想一下" in printed
+        assert ui._thinking_buf == ""
 
 
 class TestThinkingEndOnToolCall:
