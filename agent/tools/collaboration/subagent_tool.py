@@ -258,17 +258,24 @@ class SubagentTool(Tool):
                 )
             job_list.append((agent_def, prompt))
 
+        batch_ids = [
+            AgentActivityRegistry.new_agent_id(agent_def.agent_type)
+            for agent_def, _prompt in job_list
+        ]
+        batch_names = [
+            f"{agent_def.agent_type}-{agent_id.rsplit('-', 1)[-1]}"
+            for (agent_def, _prompt), agent_id in zip(job_list, batch_ids)
+        ]
         results = await run_subagents_parallel(
             job_list,
             provider=self._provider,
             workdir=ctx.workdir,
             permission_mode=permission_mode,
             parent_ui=ctx.ui,
-            # 批量模式同样进活动台账：每个子任务一条记录，面板可分别看进度
-            activity_ids=[
-                AgentActivityRegistry.new_agent_id(agent_def.agent_type)
-                for agent_def, _prompt in job_list
-            ],
+            # 批量模式同样进活动台账：每个子任务一条记录，面板可分别看进度；
+            # 名字带 id 后缀，代理卡上才能区分同名子代理。@author aceFelix
+            activity_ids=batch_ids,
+            activity_names=batch_names,
         )
 
         lines = [f"批量子代理结果（共 {len(results)} 个）:"]

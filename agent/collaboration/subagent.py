@@ -428,16 +428,30 @@ async def run_subagent(
     # ask_user / warn / error 仍转发给宿主（子代理需要用户输入时不能静默）。
     # @author aceFelix
     if activity_id:
-        from .activity import AgentActivityUI, get_activity_registry
+        from .activity import AgentActivityUI, TeeActivityUI, get_activity_registry
 
-        # 只有宿主在消费台账（桌面右栏）时才隔离子代理事件；终端没有监听器，
-        # 仍把进度打在终端上，保持原行为。@author aceFelix
-        if get_activity_registry().has_listener():
+        registry = get_activity_registry()
+        # 桌面右栏：收进台账，避免子代理输出污染主聊天（原行为）。
+        # 终端子代理卡：转发 + 记账，保留终端原始输出（用户 2026-11-08 选择）。
+        # 两者都没有：直接复用主 UI，零变化。@author aceFelix
+        if registry.has_listener():
             sub_ui: Any = AgentActivityUI(parent_ui, activity_id)
+        elif registry.has_card_observer():
+            sub_ui = TeeActivityUI(
+                parent_ui, activity_id, activity_name or agent_def.agent_type
+            )
         else:
             sub_ui = parent_ui
     else:
         sub_ui = parent_ui
+    # 子代理身份写进 ctx.extra：trace 钩子据此给事件打 agent_id，
+    # 主任务工具卡与主 HUD 步数才能过滤掉子代理的工具调用。
+    # 只浅拷贝，保留 effect_ids 的同一列表对象（回扣链不能断）。@author aceFelix
+    sub_extra = dict(extra or {})
+    if activity_id:
+        sub_extra.setdefault("agent_id", activity_id)
+        sub_extra.setdefault("agent_name", activity_name or agent_def.agent_type)
+        sub_extra.setdefault("agent_mode", "subagent")
     sub_ctx = ToolContext(
         workdir=workdir,
         messages=sub_messages,
@@ -445,7 +459,7 @@ async def run_subagent(
         ui=sub_ui,  # 复用主 UI（或活动台账代理）打印子 agent 的工具调用提示
         # 只浅拷贝：effect_ids 必须是宿主传进来的同一个列表对象，子代理往里
         # 追加的 id 跑完才读得到（拷贝就会把回扣链断在这一行）
-        extra=dict(extra or {}),
+        extra=sub_extra,
         # settings 不传的话，编排器读 ``[actions]`` 全部退成默认值：用户把延时窗口
         # 改成 90 秒、或把记账关掉，后台步骤照旧按 30 秒记账。同一个工具两个
         # 入口口径不一致，与 permission_rules 是同一类错。
@@ -456,6 +470,9 @@ async def run_subagent(
     try:
         stats = await sub_loop.run(prompt, sub_ctx)
     except Exception as e:
+        from .activity import flush_ui
+
+        flush_ui(sub_ui)
         if activity_id:
             from .activity import get_activity_registry
 
@@ -472,6 +489,9 @@ async def run_subagent(
     except asyncio.CancelledError:
         # 控制面停止（agents.exec stop）走这里收尾：CancelledError 不是 Exception
         # 子类，前面的 except Exception 接不到。@author aceFelix
+        from .activity import flush_ui
+
+        flush_ui(sub_ui)
         if activity_id:
             from .activity import get_activity_registry
 
@@ -486,6 +506,12 @@ async def run_subagent(
             report = msg.get_text()
             if report.strip():
                 break
+
+    # 先把 Tee UI 缓冲的最终正文/思考冲刷出去，再打印“完成”提示，
+    # 避免最后一整段回答压在小结行后面（2026-11-08 实机修复）。
+    from .activity import flush_ui
+
+    flush_ui(sub_ui)
 
     if parent_ui is not None:
         parent_ui.info(
@@ -524,6 +550,7 @@ async def run_subagents_parallel(
     permission_mode: PermissionMode = PermissionMode.YOLO,
     parent_ui: Any = None,
     activity_ids: list[str] | None = None,
+    activity_names: list[str] | None = None,
 ) -> list[SubagentResult]:
     """并行执行多个子 agent。
 
@@ -534,6 +561,8 @@ async def run_subagents_parallel(
         tasks: [(agent_def, prompt), ...] 列表。
         其余参数同 run_subagent。
         activity_ids: 与 tasks 等长的台账 id 列表；None = 全部走旧行为。
+        activity_names: 与 tasks 等长的展示名；None = 用 agent_type。
+            批量派生同名代理时靠它区分卡片（如 ``explorer-3f2a``）。
 
     Returns:
         与 tasks 等长的结果列表，顺序对应。
@@ -541,12 +570,14 @@ async def run_subagents_parallel(
     import asyncio
 
     ids = activity_ids or []
+    names = activity_names or []
     coros = [
         run_subagent(
             agent_def, prompt,
             provider=provider, workdir=workdir,
             permission_mode=permission_mode, parent_ui=parent_ui,
             activity_id=ids[idx] if idx < len(ids) else None,
+            activity_name=names[idx] if idx < len(names) else None,
         )
         for idx, (agent_def, prompt) in enumerate(tasks)
     ]

@@ -271,23 +271,29 @@ class TeammateRunner:
             )
 
             # 3. 构建 ToolContext
-            # UI 用活动台账代理：队友的流式文本/工具事件进右栏「代理团队」，
-            # 不再淹没主聊天；ask_user / warn / error 仍转发给宿主。
-            # @author aceFelix
-            from .activity import AgentActivityUI, get_activity_registry
+            # UI 用活动台账代理：桌面有监听器时收进右栏「代理团队」；
+            # 终端有代理卡 observer 时用 TeeActivityUI（转发 + 记账，正文整段
+            # 缓冲后再打印，避免多个队友的表格逐列交错）。@author aceFelix
+            from .activity import AgentActivityUI, TeeActivityUI, get_activity_registry
 
             activity = get_activity_registry()
+            if activity.has_listener():
+                teammate_ui: Any = AgentActivityUI(parent_ui, self._identity.agent_id)
+            elif activity.has_card_observer():
+                teammate_ui = TeeActivityUI(
+                    parent_ui,
+                    self._identity.agent_id,
+                    self._identity.agent_name,
+                )
+            else:
+                teammate_ui = parent_ui
             ctx = ToolContext(
                 workdir=self._workdir,
                 messages=self._state.messages,
                 permission_mode=self._permission_mode,
                 # 桌面有台账消费者时才隔离事件；终端仍走原始 UI（保持进度可见）。
                 # @author aceFelix
-                ui=(
-                    AgentActivityUI(parent_ui, self._identity.agent_id)
-                    if activity.has_listener()
-                    else parent_ui
-                ),
+                ui=teammate_ui,
             )
             activity.update_agent(
                 self._identity.agent_id,
@@ -453,6 +459,11 @@ class TeammateRunner:
 
         try:
             stats = await loop.run(user_text, ctx)
+            # 本轮回答整段缓冲在 TeeActivityUI 中：先冲刷再更新“空闲”，
+            # 否则用户会先看到“本轮完成”，正文才姗姗来迟。
+            from .activity import flush_ui
+
+            flush_ui(ctx.ui)
             self._state.last_report_tool_count = stats.tool_calls
             self._state.last_report_token_count = getattr(stats, "total_tokens", 0) or 0
             from .activity import get_activity_registry
@@ -466,6 +477,9 @@ class TeammateRunner:
                 current_tool="",
             )
         except Exception as e:
+            from .activity import flush_ui
+
+            flush_ui(ctx.ui)
             if parent_ui:
                 parent_ui.error(f"  [{self._identity.agent_name}] 执行异常: {e}")
             try:

@@ -112,6 +112,8 @@ class AgentActivityRegistry:
         #: agent_id → 运行它的 asyncio.Task（同步子代理可被 agents.exec stop 取消）
         self._tasks: dict[str, Any] = {}
         self._listener: Optional[Callable[[list[dict[str, Any]]], None]] = None
+        #: 终端驾驶舱等只读观察者；与桌面 listener 并存，不改变 has_listener 语义
+        self._observers: list[Callable[[list[dict[str, Any]]], None]] = []
         self._last_notify = 0.0
         self._timer: Optional[threading.Timer] = None
 
@@ -223,6 +225,28 @@ class AgentActivityRegistry:
         with self._lock:
             return self._listener is not None
 
+    def add_observer(self, observer: Callable[[list[dict[str, Any]]], None]) -> None:
+        """注册只读观察者（终端子代理卡用）。
+
+        与 ``set_listener`` 不同：observer 不改变 ``has_listener``，因此不会
+        把子代理的原始输出从终端收走；observer 异常一律吞掉。
+        @author aceFelix
+        """
+        with self._lock:
+            if observer not in self._observers:
+                self._observers.append(observer)
+
+    def remove_observer(self, observer: Callable[[list[dict[str, Any]]], None]) -> None:
+        """注销观察者（窗口关闭 / 进程退出时调用）。"""
+        with self._lock:
+            if observer in self._observers:
+                self._observers.remove(observer)
+
+    def has_card_observer(self) -> bool:
+        """是否有终端卡片在观察台账（决定是否启用 TeeActivityUI）。"""
+        with self._lock:
+            return bool(self._observers)
+
     def clear(self, *, keep_listener: bool = True) -> None:
         """清空台账（会话重置 / 引擎停机时用）。"""
         with self._lock:
@@ -238,14 +262,17 @@ class AgentActivityRegistry:
     def _notify(self, *, force: bool = False) -> None:
         """节流通知：立即路径直发，否则最多每 300ms 一次。
 
-        注意：监听器在锁外调用，避免宿主回调里再读台账造成重入死锁。
+        监听器与 observer 都在锁外调用，避免宿主回调里再读台账造成重入死锁；
+        任一回调异常只吞掉，不影响其它消费者与执行链。
         @author aceFelix
         """
         listener: Optional[Callable[[list[dict[str, Any]]], None]]
+        observers: list[Callable[[list[dict[str, Any]]], None]]
         snapshot: list[dict[str, Any]]
         with self._lock:
             listener = self._listener
-            if listener is None:
+            observers = list(self._observers)
+            if listener is None and not observers:
                 return
             now = time.time()
             if not force and (now - self._last_notify) < _NOTIFY_INTERVAL_S:
@@ -261,11 +288,14 @@ class AgentActivityRegistry:
                 self._timer.cancel()
                 self._timer = None
             snapshot = [rec.to_dict() for rec in self._agents.values()]
-        try:
-            listener(sorted(snapshot, key=lambda x: x.get("started_at") or 0))
-        except Exception:
-            # 观测层故障绝不能反噬执行链
-            pass
+        ordered = sorted(snapshot, key=lambda x: x.get("started_at") or 0)
+        callbacks = ([listener] if listener is not None else []) + observers
+        for callback in callbacks:
+            try:
+                callback(ordered)
+            except Exception:
+                # 观测层故障绝不能反噬执行链
+                pass
 
     # ---- 展示辅助 ----
 
@@ -353,6 +383,133 @@ class AgentActivityUI:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base, name)
+
+
+class TeeActivityUI:
+    """转发 + 记账的 UI 代理（终端子代理卡专用）。
+
+    与 ``AgentActivityUI`` 的区别：它**不吞掉**子代理的流式文本与工具卡，
+    先原样转发给宿主 UI（终端照常打印），再把同一事件写进活动台账，供
+    终端浮窗卡渲染。这样“保留终端原始输出”与“每个代理一张卡”可以共存。
+
+    **整段缓冲（2026-11-08 实机修复）**：多个子代理/队友并行时，逐片段
+    转发会让 A 的 Markdown 表格与 B 的表格逐列交错，终端看起来完全错位。
+    因此正文按一条 assistant 消息整段缓冲，在工具调用/本轮结束时一次性
+    交给宿主；思考也按块缓冲，避免多个代理共用同一个思考面板。
+
+    只在没有桌面 listener、但存在终端卡片 observer 时使用；
+    两者都没有时仍走旧行为（直接用 parent_ui）。
+
+    @author aceFelix
+    """
+
+    def __init__(self, base_ui: Any, agent_id: str, agent_name: str = "") -> None:
+        self._base = base_ui
+        self._agent_id = agent_id
+        self._agent_name = agent_name or agent_id
+        self._text_buf = ""
+        self._think_buf = ""
+
+    def assistant_text(self, text: str) -> None:
+        """累积整段正文并实时更新台账；不在片段级别写终端。"""
+        chunk = text or ""
+        if not self._text_buf:
+            # 新一段正文开始：先把前面积累的思考整块输出，保证「思考→正文」顺序
+            self._flush_thinking()
+        self._text_buf += chunk
+        from .activity import get_activity_registry
+
+        get_activity_registry().update_agent(
+            self._agent_id,
+            status="running",
+            activity="整理结论",
+            output=_clip(self._text_buf, _OUTPUT_LIMIT),
+        )
+
+    def assistant_thinking(self, text: str) -> None:
+        """累积思考块并标记 thinking；不喂共享思考面板（防多代理混流）。"""
+        self._think_buf += text or ""
+        from .activity import get_activity_registry
+
+        get_activity_registry().update_agent(self._agent_id, status="thinking", activity="思考中")
+
+    def flush(self) -> None:
+        """把尚未输出的思考与正文一次性交给宿主 UI（轮次结束/工具边界调用）。"""
+        self._flush_thinking()
+        self._flush_text()
+
+    def _flush_text(self) -> None:
+        """一次性输出整段正文；空缓冲直接跳过。"""
+        text = self._text_buf
+        self._text_buf = ""
+        if not text:
+            return
+        try:
+            # 整段末尾补换行：两个代理先后 flush 时不会把第二段直接粘在第一段句尾
+            self._base.assistant_text(text.rstrip("\n") + "\n")
+        except Exception:
+            pass
+
+    def _flush_thinking(self) -> None:
+        """一次性输出整块思考（带代理名前缀），避免多个面板互相覆盖。"""
+        body = self._think_buf.strip()
+        self._think_buf = ""
+        if not body:
+            return
+        if len(body) > 3000:
+            body = body[:1500] + "\n… [思考截断] …\n" + body[-1000:]
+        try:
+            from agent.ui.trace_view import safe_info
+
+            safe_info(self._base, f"💭 {self._agent_name} 思考：\n{body}")
+        except Exception:
+            pass
+
+    def tool_use(self, tool_name: str, tool_input: dict[str, Any], tool_use_id: str) -> None:
+        """先冲刷待输出文本，再转发工具卡片，最后记录“当前在调什么”。"""
+        self.flush()
+        self._base.tool_use(tool_name, tool_input, tool_use_id)
+        from .activity import get_activity_registry
+
+        hint = _tool_hint(tool_name, tool_input)
+        get_activity_registry().update_agent(
+            self._agent_id,
+            status="running",
+            current_tool=hint,
+            activity=f"调用 {tool_name}：{hint}" if hint else f"调用 {tool_name}",
+        )
+
+    def tool_result(
+        self,
+        tool_name: str,
+        result: str,
+        is_error: bool = False,
+        tool_use_id: str = "",
+    ) -> None:
+        """先冲刷待输出文本，再转发结果卡片，最后记录返回摘要。"""
+        self.flush()
+        self._base.tool_result(tool_name, result, is_error, tool_use_id)
+        from .activity import get_activity_registry
+
+        get_activity_registry().update_agent(
+            self._agent_id,
+            current_tool="",
+            activity=f"{tool_name} 返回{'错误' if is_error else '结果'}",
+            output=_clip(result or "", _OUTPUT_LIMIT),
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+
+def flush_ui(ui: Any) -> None:
+    """收尾时把 UI 代理的缓冲冲刷出去（普通 UI 没有 flush 时静默跳过）。"""
+    flush = getattr(ui, "flush", None)
+    if callable(flush):
+        try:
+            flush()
+        except Exception:
+            pass
 
 
 def _tool_hint(tool_name: str, args: dict[str, Any] | None) -> str:
