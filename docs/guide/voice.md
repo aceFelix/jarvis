@@ -29,11 +29,24 @@ Jarvis 提供两套独立的语音系统：
   - **CosyVoiceTTS**：整段合成播放（`cosyvoice-v3-flash` / `v3-plus` / `v3.5-plus`）
   - **StreamTTSPlayer**：WebSocket 流式合成，LLM 逐句输出 → 即时合成播放，首句延迟 ~500ms
   - 默认音色 `longanlang_v3`；内置 7 个音色，`/tts-voice` 可切换或添加自定义音色（音色带「适配模型」字段：系统音色按模型系列隔离、声音复刻绑定 target_model，切换时不兼容自动联动切 `tts_model`）
-- **打断机制**：ESC 键打断当前 AI 播报，或说"退下"退出语音模式
+- **打断机制**：**空格键**打断当前 AI 播报（2026-11-09 由 ESC 改为 Space），或说"退下"进入待机
+- **静默待机**：聆听阶段连续 `[voice] idle_standby_seconds`（默认 **10 秒**）没有任何识别文本，
+  自动进入待机并等唤醒词；`0` 表示关闭该行为（一直停留在聆听）。
+  **计时从 JARVIS 说完话、重新开始聆听时算起**，思考/工具/TTS 播报时间不计入用户沉默。
+- **键盘配置**：`[voice] barge_in_key = true` 启用空格打断；`idle_standby_seconds` 可调静默阈值
+- **待机唤醒门禁（2026-11-09）**：对话与待机录音**都不带唤醒热词**（防 ASR 在静音/噪音时凭空输出「贾维斯」）；
+  待机只接受**短句（≤12 字）且唤醒词在前 8 字内**；服务端没有检测到任何 VAD 语音事件的结果直接丢弃
+  （对话阶段同样丢弃，避免“没出声却出现「你说: 贾维斯」”）。
+  复盘见 [voice-false-wake-fix.md](../fixlogs/voice-false-wake-fix.md)。
 - **轮次收尾**：每轮（回复完成 / 被打断 / 待机退下 / 中途出错）voice_loop 都补发一次
   `on_turn_done()`，serve 适配器映射为文本轮同一 `assistant_done`，桌面壳据此定稿气泡并
   清忙碌态（修复「语音已回复却仍在思考、停不下来」）；终端适配器未覆盖该方法，行为不变
   （2026-10-12，见 [06-语音系统](../architecture/06-语音系统.md) 与 `../fixlogs/voice-turn-done-fix.md`）
+- **会话保存与标题（2026-11-09）**：每轮语音对话结束都会**即时落盘**，并与文本对话
+  共用同一套收尾逻辑（`advance_session`）：第 1 轮取用户首句前 **15 字**做标题，
+  第 2 轮由 LLM 根据前两轮生成 ≤15 字标题。此前语音会话一直沿用启动时的时间戳名字
+  （`session-YYYYMMDD-HHMMSS`），从不生成标题。会话元信息保留 `created_at` /
+  `updated_at`，`/sessions` 与 `/load` 选择器都会显示**创建/更新时间**。
 - **思考隔离**：思考过程只显示在终端面板，不进入 TTS
 - **内容清洗**：自动过滤代码块、表格、链接等不适合朗读的内容
 - **依赖兜底**：`/voice` 依赖 `dashscope` + `pyaudio`（`[voice]` 可选组）。二者未安装时
@@ -65,6 +78,11 @@ Jarvis 提供两套独立的语音系统：
   若确要在实时语音里用工具，精选 10~20 个常用工具子集（勿一次性注册全量）并实机验证。
   高风险操作先语音确认再执行
 - **纯终端 UI**：转录文字流实时显示（2026-09 起不再弹出 pywebview 独立窗口）
+- **会话落库与标题（2026-11-09）**：终端 `/talk` 的 user/ai 转写按轮配对后写入会话
+  历史，并与文本、`/voice` 共用 `advance_session`（每轮保存 + 15 字标题）。
+  配对规则与桌面 `WorkbenchRealtimeUI` 同口径：正常顺序、转写滞后（回答先到先暂存）、
+  开场白单独落库、回声轮丢弃、打断轮先落旧问句、退出时 flush 残轮。
+  实现见 `agent/voice/talk_history.py`（`TalkHistoryRecorder`）。
 - **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
   工作台 `--gui` 已于 2026-10 退役，见
   [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）

@@ -93,6 +93,9 @@ class _QwenASRCallback:
         # 已收到的服务端事件总数。调用方用它区分「链路上根本没在识别」
         # （计数不动）与「在识别但没听到人说话」（计数会涨）。
         self._event_count = 0
+        # 是否收到过服务端 VAD 的 speech_started/stopped：待机唤醒用它过滤
+        # 「零 VAD 事件却返回文本」的 ASR 幻觉（2026-11-09）。@author aceFelix
+        self._speech_seen = False
 
     # ---- OmniRealtimeCallback 实现（鸭子类型）----
 
@@ -128,6 +131,12 @@ class _QwenASRCallback:
         elif evt_type == "conversation.item.input_audio_transcription.text":
             # 中间结果（stash）
             self._last_partial = message.get("stash", "")
+        elif evt_type in (
+            "input_audio_buffer.speech_started",
+            "input_audio_buffer.speech_stopped",
+        ):
+            # 服务端 VAD 明确检测到语音：待机唤醒只认这类结果
+            self._speech_seen = True
         elif evt_type == "session.finished":
             # 会话结束（end_session 后服务端完成）
             self._finished.set()
@@ -176,6 +185,11 @@ class _QwenASRCallback:
         """最近一次中间结果。"""
         return self._last_partial
 
+    @property
+    def speech_seen(self) -> bool:
+        """服务端 VAD 是否检测到过语音（待机唤醒的幻觉门禁）。"""
+        return self._speech_seen
+
 
 class QwenASR:
     """Qwen3-ASR 语音识别器。基于 OmniRealtimeConversation，服务端 VAD。
@@ -217,6 +231,7 @@ class QwenASR:
         silence_seconds: float = _SILENCE_SECONDS,  # QwenASR 用服务端 VAD，此参数仅用于 end_session 时机参考
         on_partial: Any = None,
         on_open: Any = None,
+        hotwords: str | None = None,
     ) -> dict[str, Any]:
         """录一段话并识别成文字。阻塞直到识别完成。
 
@@ -230,6 +245,11 @@ class QwenASR:
         6. close()
 
         服务端 VAD 自动断句，silence_seconds 映射为 turn_detection_silence_duration_ms。
+
+        Args:
+            hotwords: 覆盖本次的 ASR 上下文热词。None=用实例默认（对话阶段靠它
+                偏向唤醒词）；传 "" 表示本次不带热词——待机唤醒必须关掉偏置，
+                否则静音/噪音时 ASR 容易凭空输出“贾维斯”造成误唤醒（2026-11-09）。
         """
         import base64
 
@@ -263,9 +283,10 @@ class QwenASR:
             )
             # 热词走 corpus_text：SDK 会把它包成 input_audio_transcription.corpus
             # 的 {"text": ...} 再随 session.update 下发（见 omni_realtime.py）。
-            # 留空则不设该字段，行为与改造前完全一致。@author aceFelix
-            if self._hotwords:
-                params.corpus_text = self._hotwords
+            # 留空则不设该字段；待机用 hotwords="" 关掉偏置防幻觉。
+            hotword_text = self._hotwords if hotwords is None else hotwords
+            if hotword_text:
+                params.corpus_text = hotword_text
             conv.update_session(
                 output_modalities=[MultiModality.TEXT],
                 enable_turn_detection=True,
@@ -393,7 +414,12 @@ class QwenASR:
         except Exception:
             pass
 
-        result: dict[str, Any] = {"text": callback.final_text, "duration": duration}
+        result: dict[str, Any] = {
+            "text": callback.final_text,
+            "duration": duration,
+            # 零 VAD 事件却返回文本时，调用方（待机唤醒）应视为幻觉丢弃
+            "speech_detected": callback.speech_seen,
+        }
         if callback.error:
             result["error"] = callback.error
         elif server_silent and not callback.final_text:

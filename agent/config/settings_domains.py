@@ -42,6 +42,8 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("voice", (
         ("barge_in", "voice_barge_in"),
         ("barge_in_key", "voice_barge_in_key"),
+        # 静默待机秒数（2026-11-09）@author aceFelix
+        ("idle_standby_seconds", "voice_idle_standby_seconds"),
         # 三张词表：留空则回退 voice_config.py 的内置默认（见 voice/wake_words.py）
         ("wake_words", "voice_wake_words"),
         ("exit_words", "voice_exit_words"),
@@ -69,6 +71,8 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     )),
     ("ui", (
         ("boot_animation", "boot_animation"),
+        # 终端任务驾驶舱（C1，2026-11-08）@author aceFelix
+        ("visual_cockpit", "visual_cockpit"),
         # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随 @author aceFelix
         ("trace_enabled", "trace_enabled"),
         ("trace_keep_runs", "trace_keep_runs"),
@@ -81,6 +85,41 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("window_follow_subagents", "window_follow_subagents"),
         ("window_cleanup", "window_cleanup"),
         ("window_cleanup_unknown", "window_cleanup_unknown"),
+    )),
+    # [visualization] 可视化总开关与多任务浮窗（C3-lite）
+    # 放在 ui 之后：task_cockpit 与 [ui] visual_cockpit 同字段，后应用者优先。
+    ("visualization", (
+        ("enabled", "visual_enabled"),
+        ("task_cockpit", "visual_cockpit"),
+        ("tool_cards", "visual_tool_cards"),
+        ("tool_card_min_ms", "visual_tool_card_min_ms"),
+        ("tool_card_max", "visual_tool_card_max"),
+        ("tool_card_hold_ms", "visual_tool_card_hold_ms"),
+        ("effects", "visual_effects"),
+        ("position_memory", "visual_position_memory"),
+        # 子代理/队友任务卡（C3-lite.2）@author aceFelix
+        ("agent_cards", "visual_agent_cards"),
+        ("agent_card_max", "visual_agent_card_max"),
+        ("agent_card_hold_ms", "visual_agent_card_hold_ms"),
+        ("agent_card_keep_idle", "visual_agent_card_keep_idle"),
+        ("agent_card_min_ms", "visual_agent_card_min_ms"),
+        # 左侧抓取网络窗口（C2-lite）@author aceFelix
+        ("crawl_window", "visual_crawl_window"),
+        # 左侧窗口分层拓扑（P3）@author aceFelix
+        ("crawl_topology", "visual_crawl_topology"),
+        ("crawl_max_nodes", "visual_crawl_max_nodes"),
+    )),
+    # [crawl] 真爬虫（P2）：Crawl / WebExtract 默认值与总开关 @author aceFelix
+    ("crawl", (
+        ("enabled", "crawl_enabled"),
+        ("max_pages", "crawl_max_pages"),
+        ("max_depth", "crawl_max_depth"),
+        ("same_domain", "crawl_same_domain"),
+        ("delay_ms", "crawl_delay_ms"),
+        ("respect_robots", "crawl_respect_robots"),
+        ("timeout_s", "crawl_timeout_s"),
+        ("use_browser", "crawl_use_browser"),
+        ("max_bytes_per_page", "crawl_max_bytes_per_page"),
     )),
     ("context", (
         ("compaction", "context_compaction"),

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import threading
@@ -99,13 +100,17 @@ def _listen(ui, settings, loop, ctx) -> None:
         ui.warn("未识别到内容（可能环境噪音或未说话）")
 
 
-async def _voice_mode(ui, settings, loop, ctx) -> None:
+async def _voice_mode(ui, settings, loop, ctx, cmd_ctx=None) -> None:
     """进入语音对话模式。/voice 命令的执行体。
 
     二期解耦：voice_loop 不再直接依赖 RichCLI，这里构造 REPL 适配器
-    （RichCLIVoiceAdapter）把事件映射回终端输出，并挂接键盘 ESC 打断
+    （RichCLIVoiceAdapter）把事件映射回终端输出，并挂接键盘空格打断
     （置位 interrupt_event 由 voice_loop 轮询响应）；voice_loop 退出后
     回收键盘 watcher。serve / 桌面壳路径用 ServeVoiceAdapter，不走本函数。
+
+    ``cmd_ctx``（CommandContext）用于把每轮语音对话接回**与文本对话同一套**
+    会话收尾：轮数 +1、增量保存、按需生成 ≤15 字标题（2026-11-09 用户要求：
+    语音会话此前一直沿用启动时间戳名字，从不生成标题）。
 
     @author aceFelix
     """
@@ -117,22 +122,67 @@ async def _voice_mode(ui, settings, loop, ctx) -> None:
         return
     adapter = RichCLIVoiceAdapter(ui)
     interrupt_event = threading.Event()
-    if not adapter.start_key_watcher(interrupt_event):
-        ui.info("   ⚠ keyboard 库未安装，ESC 打断不可用（pip install keyboard）")
+
+    async def _on_turn_end() -> None:
+        """一轮语音结束后走统一会话收尾（保存 + 标题生成）。"""
+        if cmd_ctx is None:
+            return
+        from agent.session_manager import advance_session
+
+        try:
+            name, count, titled = await advance_session(
+                ui,
+                cmd_ctx.messages,
+                session_name=cmd_ctx.session_name,
+                dialog_count=cmd_ctx.dialog_count,
+                title_generated=cmd_ctx.title_generated,
+                provider=cmd_ctx.provider,
+                model=cmd_ctx.model,
+                workdir=getattr(cmd_ctx.settings, "workdir", "") or "",
+                settings=cmd_ctx.settings,
+            )
+        except Exception:
+            return
+        cmd_ctx.session_name = name
+        cmd_ctx.dialog_count = count
+        cmd_ctx.title_generated = titled
+        # 会话名可能已按标题改名：同步给后续工具/检查点使用的运行时上下文
+        try:
+            cmd_ctx.ctx.extra["session_name"] = name
+        except Exception:
+            pass
+
+    # barge_in_key 是键盘打断总开关；关掉后仍可用语音关键词/退下退出
+    if getattr(settings, "voice_barge_in_key", True):
+        if not adapter.start_key_watcher(interrupt_event):
+            ui.info("   ⚠ keyboard 库未安装，空格打断不可用（pip install keyboard）")
+    else:
+        ui.info("   键盘打断已关闭（[voice] barge_in_key = false）")
     try:
-        await voice_loop(adapter, settings, loop, ctx, interrupt_event=interrupt_event)
+        await voice_loop(
+            adapter,
+            settings,
+            loop,
+            ctx,
+            interrupt_event=interrupt_event,
+            on_turn_end=_on_turn_end,
+        )
     finally:
         adapter.stop_key_watcher()
 
 
-async def _realtime_talk(ui, settings) -> None:
+async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
     """/talk 命令 —— 实时双工语音对话（纯终端）。
 
     2026-09 调整（aceFelix）：下线 pywebview 独立窗口路径，/talk 一律
     直接在终端内运行全双工对话（引擎不变，UI 为 RichCLI 转录文字流）；
     图形化实时聊天由 jarvis-desktop 桌面应用承担（曾由三栏工作台窗口
-    的中栏实时模式承担，该窗口壳已于 2026-10 退役删除），
-    realtime_window 独立窗口包已作为孤儿代码删除。
+    的中栏实时模式承担，该窗口壳已于 2026-10 退役删除）。
+
+    2026-11-09（用户要求「/talk 也要存会话」）：实时语音同样不经 QueryLoop，
+    因此用 ``TalkHistoryRecorder`` 包一层 UI，把 user/ai 转写按轮配对后写入
+    ``cmd_ctx.messages``，并复用一个串行落库任务调用 ``advance_session``
+    —— 与文本、``/voice`` 共用「每轮保存 + 15 字标题」口径。
 
     实时语音/多模态服务由 DashScope 提供，必须使用 DashScope API Key。
     如果当前 LLM 是 deepseek/openai 等其它厂商，settings.api_key 会是另一家 key，
@@ -187,9 +237,72 @@ async def _realtime_talk(ui, settings) -> None:
         "tools_mode": getattr(settings, "realtime_tools_mode", "builtin"),
     }
 
+    # ---- 转写落库（2026-11-09）----
+    # 串行队列 + 单个 worker：保证多轮语音的保存/标题按到达顺序应用，
+    # 避免两轮同时进入 LLM 标题生成时 dialog_count / session_name 互相覆盖。
+    recorder = ui
+    persist_queue: asyncio.Queue[object] | None = None
+    persist_task: asyncio.Task | None = None
+    if cmd_ctx is not None:
+        from agent.core.message import Message
+        from agent.session_manager import advance_session
+        from agent.voice.talk_history import TalkHistoryRecorder
+
+        persist_queue = asyncio.Queue()
+
+        async def _persist_loop() -> None:
+            """串行消费落库信号：每轮保存 + 按需生成标题。"""
+            while True:
+                item = await persist_queue.get()  # type: ignore[union-attr]
+                if item is None:
+                    return
+                try:
+                    name, count, titled = await advance_session(
+                        ui,
+                        cmd_ctx.messages,
+                        session_name=cmd_ctx.session_name,
+                        dialog_count=cmd_ctx.dialog_count,
+                        title_generated=cmd_ctx.title_generated,
+                        provider=cmd_ctx.provider,
+                        model=cmd_ctx.model,
+                        workdir=getattr(cmd_ctx.settings, "workdir", "") or "",
+                        settings=cmd_ctx.settings,
+                    )
+                except Exception:
+                    continue
+                cmd_ctx.session_name = name
+                cmd_ctx.dialog_count = count
+                cmd_ctx.title_generated = titled
+                try:
+                    cmd_ctx.ctx.extra["session_name"] = name
+                except Exception:
+                    pass
+
+        def _commit(user_text, ai_text) -> None:
+            """一对（或单项）转写：先写消息，再通知 worker 保存。"""
+            if user_text:
+                cmd_ctx.messages.append(Message.user_text(user_text))
+            if ai_text:
+                cmd_ctx.messages.append(Message.assistant_text(ai_text))
+            persist_queue.put_nowait(True)  # type: ignore[union-attr]
+
+        recorder = TalkHistoryRecorder(ui, _commit)
+        persist_task = asyncio.create_task(_persist_loop())
+
     # 纯终端全双工对话（原「优先拉起 pywebview 独立窗口」路径已于 2026-09 下线）
     rt = RealtimeTalk(**config)
-    await rt.run(ui)
+    try:
+        await rt.run(recorder)
+    finally:
+        # 收尾：先把配对缓冲里的残轮写进历史，再等 worker 落盘完（不丢最后一轮）
+        if cmd_ctx is not None and persist_queue is not None:
+            recorder.flush_pending_transcripts()
+            persist_queue.put_nowait(None)
+            if persist_task is not None:
+                try:
+                    await persist_task
+                except Exception:
+                    pass
 
 
 async def handle_listen(ctx: "CommandContext", stripped: str) -> bool:
@@ -200,13 +313,13 @@ async def handle_listen(ctx: "CommandContext", stripped: str) -> bool:
 
 async def handle_voice(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /voice。"""
-    await _voice_mode(ctx.ui, ctx.settings, ctx.loop, ctx.ctx)
+    await _voice_mode(ctx.ui, ctx.settings, ctx.loop, ctx.ctx, cmd_ctx=ctx)
     return True
 
 
 async def handle_talk(ctx: "CommandContext", stripped: str) -> bool:
     """处理 /talk。"""
-    await _realtime_talk(ctx.ui, ctx.settings)
+    await _realtime_talk(ctx.ui, ctx.settings, cmd_ctx=ctx)
     return True
 
 

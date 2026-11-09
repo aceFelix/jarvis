@@ -126,6 +126,7 @@ def _show_voice(ui: RichCLI, settings: Any) -> None:
         # 语音打断
         ["voice_barge_in", _bool_icon(settings.voice_barge_in)],
         ["voice_barge_in_key", _bool_icon(settings.voice_barge_in_key)],
+        ["voice_idle_standby_seconds", f"{settings.voice_idle_standby_seconds}s（0=关闭）"],
     ]
     render_table(rows, headers=["配置项", "值"], title="语音 (TTS / STT / Realtime)")
 

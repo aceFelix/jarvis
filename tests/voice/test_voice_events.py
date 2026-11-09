@@ -201,7 +201,7 @@ class TestRichCLIVoiceAdapter:
         class _FakeWatcher:
             available = False
 
-            def __init__(self, cb) -> None:
+            def __init__(self, cb, *, key="space") -> None:
                 self.cb = cb
 
             def start(self) -> None:
@@ -212,11 +212,11 @@ class TestRichCLIVoiceAdapter:
 
         monkeypatch.setattr(ra, "_KeyBargeInWatcher", _FakeWatcher)
         ad, _ = self._adapter()
-        assert ad.start_key_watcher(threading.Event()) is False
+        assert ad.start_key_watcher(threading.Event(), key="space") is False
         ad.stop_key_watcher()  # 未启动时 stop 也应安全
 
     def test_key_watcher_callback_sets_interrupt(self, monkeypatch) -> None:
-        """ESC 回调应置位 interrupt_event 并中断阻塞的 stt.listen。"""
+        """空格回调应置位 interrupt_event 并中断阻塞的 stt.listen。"""
         import agent.voice.repl_adapter as ra
         from agent.voice import stt as stt_mod
 
@@ -225,8 +225,9 @@ class TestRichCLIVoiceAdapter:
         class _FakeWatcher:
             available = True
 
-            def __init__(self, cb) -> None:
+            def __init__(self, cb, *, key="space") -> None:
                 captured["cb"] = cb
+                captured["key"] = key
                 self.started = False
 
             def start(self) -> None:
@@ -239,9 +240,10 @@ class TestRichCLIVoiceAdapter:
         ad, _ = self._adapter()
         ev = threading.Event()
         try:
-            assert ad.start_key_watcher(ev) is True
+            assert ad.start_key_watcher(ev, key="space") is True
+            assert captured["key"] == "space"
             assert not ev.is_set()
-            captured["cb"]()  # 模拟按下 ESC
+            captured["cb"]()  # 模拟按下空格
             assert ev.is_set()
             assert stt_mod._is_stopped()  # 回调应中断 stt
         finally:

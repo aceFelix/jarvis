@@ -53,15 +53,18 @@ pitch_rate = 1.0     # 0.5-2.0，1.0 正常音调
 # model 原样透传给 DashScope，需填 qwen 实时识别模型名；填 paraformer / fun-asr 之类会在建连阶段报错。
 model = "qwen3-asr-flash-realtime"
 max_seconds = 15         # 单次录音最长秒数（防卡死，客户端兜底超时）
-silence_seconds = 1.5    # 服务端 VAD 连续静音多少秒视为说完
+silence_seconds = 2    # 服务端 VAD 连续静音多少秒视为说完
 
 [voice]
 # barge_in: 语音打断——播报中开口说话自动打断。
 # 默认关闭——watcher 开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows 上会 segfault。
 barge_in = false
-# barge_in_key: 键盘打断——播报中按 ESC 立即停止播报，切回聆听。
-# 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。想换键改 voice_loop.py _KeyBargeInWatcher 默认 key。
+# barge_in_key: 键盘打断——播报中按 Space 空格立即停止播报，切回聆听。
+# 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。
 barge_in_key = true
+# idle_standby_seconds: 对话阶段连续多少秒没开口（没有任何识别文本）就自动待机，
+# 等唤醒词再继续。默认 10 秒；0 = 关闭（一直停在聆听）。
+idle_standby_seconds = 10
 
 [realtime_talk]
 # /talk 实时双工语音（DashScope qwen-audio-3.0-realtime-flash）。
@@ -114,6 +117,12 @@ tools_mode = "builtin"
 # 终端太窄/太矮/非 TTY 时自动跳过。也可用 --no-boot 或 JARVIS_BOOT_ANIMATION=0 关闭。
 boot_animation = true
 
+# 任务驾驶舱（C1b）：独立置顶 HUD 窗口，首次任务开始时弹出。
+# 任务结束窗口保留最终汇总、不自动关闭；点 ✕ 只隐藏，不退出 jarvis。
+# window（默认）/ off（完全禁用）。语音会话不弹窗。
+# 历史别名：新配置建议写到 [visualization] task_cockpit，同名时后者优先。
+visual_cockpit = "window"
+
 # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随。
 # trace 每轮把工具、目标、耗时、失败原因记到 ~/.jarvis/traces；只记路径与窗口标题，
 # 不记文件内容。window_follow 控制被操作的窗口是否显示到前台：
@@ -135,6 +144,63 @@ window_cleanup = "transient"
 # 工具未声明窗口意图时的默认策略：keep（默认，保守——宁多留一个窗口也不误关）
 # / transient（激进——关掉本轮被操作过的新窗口，旧行为）。
 window_cleanup_unknown = "keep"
+
+[visualization]
+# 可视化总开关：false 时关闭主 HUD 与所有多任务浮窗卡。
+enabled = true
+
+# 主任务驾驶舱：window（默认）/ off（[ui] visual_cockpit 为历史别名）
+task_cockpit = "window"
+
+# 多任务浮窗（C3-lite）：每个运行中工具一张独立小卡。
+#   auto（默认）= 工具持续 ≥ tool_card_min_ms 才弹，避免快工具闪屏
+#   always      = 工具一开始就弹（调试/演示用）
+#   off         = 关闭浮窗，只保留主 HUD
+tool_cards = "auto"
+tool_card_min_ms = 300      # ms；auto 模式的弹卡阈值
+tool_card_max = 4           # 同时最多几张（1–6）
+tool_card_hold_ms = 600     # 完成后保留多久再收起
+
+# 子代理/队友任务卡（C3-lite.2）：每个子代理/队友一张琥珀色独立卡，
+# 排在主 HUD 左侧第二列（工具卡占第一列）。
+#   auto（默认）= 启用；终端仍照常打印子代理的原始工具卡与文本
+#   off         = 关闭代理卡，完全回到旧的终端行为
+agent_cards = "auto"
+agent_card_max = 3          # 同时最多几张（1–6），超出的只在主 HUD 显示 +N
+agent_card_hold_ms = 800    # 完成/失败后保留多久再收起
+agent_card_keep_idle = true # 队友空闲时保留暗色卡（显示“空闲 · 等待任务”）
+agent_card_min_ms = 0       # 出现阈值；0 = 子代理一开始就显示
+
+# 左侧“抓取网络”窗口（C2-lite）：屏幕最左侧独立窗口，显示 URL 清单（带 L 层）、
+# 成功/失败/去重/字节汇总、抽取表与 Crawl 统计；分层拓扑见下方 crawl_topology。
+#   auto（默认）= 本轮出现第一条网页抓取才弹出，任务结束保留汇总，点 ✕ 只隐藏
+#   off         = 完全不创建该窗口
+crawl_window = "auto"
+
+# 左侧窗口的分层拓扑（P3）：节点 = 页面、边 = 父→子，点击节点/抽取行互相高亮。
+#   auto（默认）= 画拓扑
+#   off         = 只保留清单/抽取/统计，不画节点
+crawl_topology = "auto"
+crawl_max_nodes = 60    # 可见节点上限（20–200），超出折叠为 +N
+
+# 动效：off 静态；subtle（默认）扫描线 + 状态点脉冲；full 预留
+effects = "subtle"
+
+# 记忆主 HUD 位置（~/.jarvis/ui_state.json）
+position_memory = true
+
+[crawl]
+# 真爬虫（P2）：Crawl / WebExtract 的默认值与总开关。
+# 单次工具调用可以覆盖这些默认值；enabled=false 时两个工具直接拒绝执行。
+enabled = true
+max_pages = 10          # 1–100
+max_depth = 2           # 0–5；起点为 L0
+same_domain = true      # 只跟同域链接（子域算同域）
+delay_ms = 300          # 每次请求间隔（毫秒），礼貌爬取
+respect_robots = true   # 读取 /robots.txt，禁止路径不入队
+timeout_s = 20          # 单页抓取超时（秒）
+use_browser = "auto"           # 抓取后端：auto（HTTP 失败/空壳页降级浏览器）/always/never
+max_bytes_per_page = 2000000  # 单页正文上限（字节），超出截断
 
 [context]
 # 上下文压缩：总 token（冻结摘要+活跃窗口+system prompt）超过窗口比例时，

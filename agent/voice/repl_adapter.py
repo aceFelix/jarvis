@@ -4,9 +4,11 @@
 转录 / 提示事件还原为终端输出与 RichCLI 内部渲染状态（``_voice_mode`` /
 ``_thinking_*``），保持解耦前 ``/voice`` 的原有体验（测试保底）。
 
-键盘 ESC 打断也由本适配器挂接：创建 ``_KeyBargeInWatcher``，回调中中断
+键盘空格打断也由本适配器挂接：创建 ``_KeyBargeInWatcher``，回调中中断
 阻塞的 STT 录音（``stt._request_stop``）并置位外部 ``interrupt_event``，
 由 voice_loop 轮询该 event 触发即时打断（停 TTS / 中止 LLM）。
+键名默认 ``space``（2026-11-09 用户要求由 ESC 改为空格；``key`` 参数保留
+给测试/特殊宿主，普通 /voice 不需要改配置）。
 
 serve / 桌面壳路径不使用本模块（用 engine.ServeVoiceAdapter）。
 
@@ -48,6 +50,8 @@ class RichCLIVoiceAdapter(VoiceEventsBase):
         if state == STATE_THINKING:
             ui._voice_mode = True
             ui._voice_tts_feed = None
+            # 语音模式只收口终端思考面板；独立驾驶舱窗口继续接收 trace 事件，
+            # 让 /voice 也有操作可视化（2026-11-09 用户要求）。
             ui._thinking_started = False
             if getattr(ui, "_thinking_live", None) is not None:
                 try:
@@ -85,22 +89,28 @@ class RichCLIVoiceAdapter(VoiceEventsBase):
         """错误 → RichCLI error。"""
         self._ui.error(msg)
 
-    # ---- 键盘 ESC 打断挂接 ----
+    # ---- 键盘空格打断挂接 ----
 
-    def start_key_watcher(self, interrupt_event: threading.Event) -> bool:
-        """创建并启动键盘 ESC 监听，回调置位 interrupt_event。
+    def start_key_watcher(
+        self, interrupt_event: threading.Event, key: str = "space"
+    ) -> bool:
+        """创建并启动键盘监听，回调置位 interrupt_event。
 
         回调同时中断阻塞中的 ``stt.listen()``（pyaudio C 阻塞无法被
-        asyncio 信号打断），使聆听阶段也能响应 ESC。
+        asyncio 信号打断），使聆听阶段也能响应空格。
+
+        Args:
+            interrupt_event: voice_loop 轮询的打断事件。
+            key: keyboard 库键名；默认 ``space``（/voice 固定空格，参数留给测试）。
 
         Returns:
             keyboard 库可用且监听已启动返回 True，否则 False。
         """
-        def _on_esc() -> None:
+        def _on_key() -> None:
             stt_module._request_stop()  # 中断阻塞中的 stt.listen()
             interrupt_event.set()      # 通知 voice_loop 即时打断 TTS/LLM
 
-        watcher = _KeyBargeInWatcher(_on_esc)
+        watcher = _KeyBargeInWatcher(_on_key, key=key)
         if not watcher.available:
             return False
         watcher.start()
@@ -108,7 +118,7 @@ class RichCLIVoiceAdapter(VoiceEventsBase):
         return True
 
     def stop_key_watcher(self) -> None:
-        """停止键盘 ESC 监听（voice_loop 退出后调用）。"""
+        """停止键盘监听（voice_loop 退出后调用）。"""
         if self._key_watcher is not None:
             try:
                 self._key_watcher.stop()

@@ -202,6 +202,36 @@ FIELD_DOCS: dict[str, str] = {
     "tts_voice": "播报音色",
     "stt_model": "语音识别模型；填错会在建连阶段直接报错",
     "boot_animation": "启动时的方舟反应炉动画；终端太窄或非 TTY 时自动跳过",
+    "visual_cockpit": "任务驾驶舱：独立 HUD 窗口在首次任务时弹出，任务结束保留结果不关闭；window 打开、off 关闭（[ui] 为历史别名，[visualization] task_cockpit 优先）",
+    # 多任务浮窗（C3-lite，2026-11-08）@author aceFelix
+    "visual_enabled": "可视化总开关：false 时关闭主 HUD 与所有浮窗卡",
+    "visual_tool_cards": "多任务浮窗：每个运行中工具一张卡；auto 只对 ≥min_ms 弹、always 全弹、off 关闭",
+    "visual_tool_card_min_ms": "浮窗卡出现阈值（毫秒）：auto 模式下工具持续这么久才弹卡",
+    "visual_tool_card_max": "浮窗卡同时显示上限（1–6）",
+    "visual_tool_card_hold_ms": "浮窗卡完成后保留时长（毫秒），到点自动收起",
+    "visual_effects": "HUD 动效：off 静态、subtle 扫描线与脉冲（full 预留）",
+    "visual_position_memory": "记住主 HUD 窗口位置（~/.jarvis/ui_state.json）",
+    # 子代理/队友任务卡（C3-lite.2，2026-11-08）@author aceFelix
+    "visual_agent_cards": "子代理/队友任务卡：每个代理一张琥珀色卡，放在主 HUD 左侧第二列；auto 启用、off 关闭（关闭后终端行为完全回到旧样）",
+    "visual_agent_card_max": "代理卡同时显示上限（1–6），超出的只在主 HUD 显示 +N",
+    "visual_agent_card_hold_ms": "代理完成后卡片保留时长（毫秒），到点自动收起",
+    "visual_agent_card_keep_idle": "队友空闲时保留暗色卡（true 保留、false 收起）",
+    "visual_agent_card_min_ms": "代理卡出现阈值（毫秒）；0 = 子代理一开始就显示",
+    # 左侧抓取网络窗口（C2-lite，2026-11-09）@author aceFelix
+    "visual_crawl_window": "左侧抓取网络窗口：本轮出现网页抓取时弹出，显示 URL 清单（带 L 层）、成功/失败/去重/字节汇总、抽取表与爬虫统计；auto 启用、off 关闭",
+    # 左侧窗口分层拓扑（P3，2026-11-09）@author aceFelix
+    "visual_crawl_topology": "左侧窗口分层拓扑：auto 画节点与父→子连线（节点与抽取行点击联动）；off 只保留清单/抽取/统计",
+    "visual_crawl_max_nodes": "拓扑可见节点上限（20–200，默认 60），超出的节点折叠为 +N",
+    # 真爬虫（P2，2026-11-09）@author aceFelix
+    "crawl_enabled": "真爬虫总开关：关闭后 Crawl / WebExtract 直接拒绝执行",
+    "crawl_max_pages": "Crawl 单次最多抓取页数（1–100，默认 10）",
+    "crawl_max_depth": "Crawl 最大深度（0–5，起点为 L0，默认 2）",
+    "crawl_same_domain": "Crawl 是否只跟同域链接（子域算同域，默认 true）",
+    "crawl_delay_ms": "Crawl 每次请求间隔毫秒（礼貌爬取，默认 300）",
+    "crawl_respect_robots": "Crawl 是否读取 robots.txt 并跳过禁止路径（默认 true）",
+    "crawl_timeout_s": "Crawl 单页抓取超时秒数（默认 20）",
+    "crawl_use_browser": "抓取后端策略（P4）：auto 默认（HTTP 失败/JS 空壳页自动降级浏览器渲染）、always 全程浏览器、never 只用 HTTP；遇到 Cloudflare 挑战如实标记失败，不做绕过",
+    "crawl_max_bytes_per_page": "Crawl 单页正文上限（字节，超出截断，默认 2000000）",
     # 操作可见性（2026-11）：终端轨迹 + 窗口跟随 @author aceFelix
     "trace_enabled": "操作轨迹：每轮把工具、目标、耗时、失败原因记到 ~/.jarvis/traces；只记路径不记内容",
     "trace_keep_runs": "轨迹保留轮数；超出后自动删最旧的文件",
@@ -215,7 +245,9 @@ FIELD_DOCS: dict[str, str] = {
     "window_cleanup": "任务收尾清理：transient 关掉本轮中间产物的窗口（只碰自己开的、跳过未保存）；off 一律不关",
     "window_cleanup_unknown": "工具未声明窗口意图时的默认策略：keep 保留（保守，宁多留不误关）、transient 关掉本轮被操作过的新窗口",
     "voice_barge_in": "语音打断：播报中开口说话就停——Windows 上两个 PyAudio 并发会崩，默认关",
-    "voice_barge_in_key": "键盘打断：播报中按 ESC 停止；不占 PyAudio，无崩溃风险",
+    "voice_barge_in_key": "键盘打断：播报中按空格停止；不占 PyAudio，无崩溃风险",
+    # 2026-11-09 语音交互补强（aceFelix）
+    "voice_idle_standby_seconds": "对话阶段静默待机秒数：连续多少秒没说话自动进入待机等唤醒；0=关闭",
     "voice_wake_words": "唤醒词清单；留空则用内置默认",
 }
 

@@ -2,7 +2,7 @@
 
 从 voice_loop 拆出。含三类监听器:
 - _BargeInWatcher: 麦克风能量（RMS）监听，超阈值持续一段时间视为开口
-- _KeyBargeInWatcher: 键盘 ESC 轮询（当前主循环实际使用的）
+- _KeyBargeInWatcher: 键盘空格轮询（当前主循环实际使用的）
 - _VoiceBargeInDetector: 短 STT 录音 + 打断词检测
 """
 
@@ -102,16 +102,18 @@ class _BargeInWatcher:
 
 
 class _KeyBargeInWatcher:
-    """键盘 ESC 监听器：全阶段通用退出/打断信号。
+    """键盘空格监听器：全阶段通用退出/打断信号。
 
     - 对话阶段（聆听/思考/说话）：停止当前播报 → 返回聆听
     - 待机阶段（等唤醒词）：退出语音模式 → 回到文本 REPL
 
     用 keyboard.is_pressed() 轮询，不依赖全局钩子（Windows 上全局钩子需管理员权限）。
     后台线程每 100ms 检查一次，响应延迟 < 200ms。
+    键名可通过 ``[voice] barge_in_hotkey`` 配置（默认 space，2026-11-09 用户要求
+    由 ESC 改为空格）。
     """
 
-    def __init__(self, on_barge_in, *, key: str = "esc") -> None:
+    def __init__(self, on_barge_in, *, key: str = "space") -> None:
         self._on_barge = on_barge_in
         self._key = key
         self._stop = threading.Event()

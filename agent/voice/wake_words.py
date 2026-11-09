@@ -47,6 +47,18 @@ _HAN_RE = re.compile(r"[\u4e00-\u9fff]")
 #: 短词并没有被禁掉——它仍走字面匹配那条路，用户真说了「贾维」照样唤醒。
 _MIN_HAN_FOR_PINYIN = 3
 
+#: 待机唤醒专用：整句最多允许多长（含标点）。
+#:
+#: 2026-11-09 实机反馈：没叫它却自动唤醒。原因是待机 STT 把环境噪音/ASR
+#: 幻觉识别成一句话，里面只要**任意位置**含「贾维斯」就会唤醒。待机场景用户
+#: 通常只喊一个词或一句很短的话，因此把「唤醒词必须在前 8 字内 + 整句≤12 字」
+#: 作为额外门禁，避免普通长句碰巧包含唤醒词。
+_MAX_WAKE_CHARS = 12
+_WAKE_PREFIX_CHARS = 8
+
+#: 前后要剥掉的标点/空白。
+_WAKE_STRIP = " \t\r\n，,。.!！?？、;；:：-—\"'“”‘’"
+
 #: 词表之间允许的分隔符（用户可能写成一个字符串而不是 TOML 数组）。
 _SPLIT_RE = re.compile(r"[,，、;；\s]+")
 
@@ -99,6 +111,9 @@ def _pinyin_hit(text: str, words: tuple[str, ...] | list[str]) -> bool:
 def matches(text: str, words: Any) -> bool:
     """``text`` 是否「在叫」词表里的某个词：先字面命中，再拼音同音命中。
 
+    注意：这是**通用包含匹配**，用于对话中的退出词/打断词；待机唤醒请用
+    ``matches_wake``（额外限制位置与句长，防环境噪音/ASR 幻觉误唤醒）。
+
     Args:
         text: ASR 识别出的文本（可能含标点、英汉混合）。
         words: 词表（任何可迭代的字符串集合）。
@@ -114,6 +129,42 @@ def matches(text: str, words: Any) -> bool:
     if _contains_any(text, words):
         return True
     return _pinyin_hit(text, words)
+
+
+def matches_wake(text: str, words: Any) -> bool:
+    """待机唤醒专用更严格的匹配：短句 + 唤醒词必须出现在前 8 字内。
+
+    为什么不能直接用 ``matches``：待机时麦克风会收到环境噪音，ASR 在热词
+    偏置下可能凭空输出一句话；只要句子里任意位置含「贾维斯」，包含匹配就会
+    误唤醒。待机场景用户通常只喊一个词/一句很短的话，因此增加：
+
+    - 整句（去首尾标点后）不超过 ``_MAX_WAKE_CHARS``；
+    - 唤醒词必须在前 ``_WAKE_PREFIX_CHARS`` 个字符内（字面或拼音）。
+
+    拼音层仍只对 ≥3 字的词开放，避免「甲维集团」这类短词同音误报。
+
+    @author aceFelix
+    """
+    if not text or not words:
+        return False
+    cleaned = str(text).strip().strip(_WAKE_STRIP)
+    if not cleaned or len(cleaned) > _MAX_WAKE_CHARS:
+        return False
+    head = cleaned[:_WAKE_PREFIX_CHARS].lower()
+    for word in tuple(words):
+        literal = str(word or "").strip().lower()
+        if literal and literal in head:
+            return True
+    p_head = _pinyin(cleaned[:_WAKE_PREFIX_CHARS])
+    if not p_head:
+        return False
+    for word in tuple(words):
+        if _han_count(str(word or "")) < _MIN_HAN_FOR_PINYIN:
+            continue
+        needle = _pinyin(str(word))
+        if needle and needle in p_head:
+            return True
+    return False
 
 
 def _configured(settings: Any, attr: str) -> tuple[str, ...]:

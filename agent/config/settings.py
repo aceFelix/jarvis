@@ -111,9 +111,12 @@ class Settings:
     # 默认关闭：watcher 会开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows
     # 上可能 segfault（见 configs/settings.example.toml 同名说明），环境稳定后再开。
     voice_barge_in: bool = False
-    # barge_in_key（键盘打断）默认启用：TTS 播报期间用 keyboard 库全局钩子监听 ESC，
+    # barge_in_key（键盘打断）默认启用：TTS 播报期间用 keyboard 库全局钩子监听空格，
     # 按下立即停止播报并切回聆听。不占 PyAudio，无 segfault 风险，daemon 无窗口也能捕获。
     voice_barge_in_key: bool = True
+    # 对话阶段静默待机：用户连续多少秒没开口（无任何 STT 文本）就自动进入待机，
+    # 等待唤醒词。默认 10 秒；0 = 关闭该行为（一直停留在聆听）。
+    voice_idle_standby_seconds: float = 10.0
     # 唤醒 / 退下 / 打断三张词表（[voice] wake_words / exit_words / interrupt_words）。
     # 留空 = 用 voice_config.py 里的内置词表，所以老配置不受影响。
     # 唤醒词除字面匹配外还参与**拼音同音**匹配：配「贾维斯」即可命中「加维思」
@@ -172,6 +175,59 @@ class Settings:
     # 启动时播放 JARVIS 蓝色方舟反应炉粒子动画。
     # 终端太窄/太矮/非 TTY 时自动跳过，回退到简单横幅。--no-boot 也可关闭。
     boot_animation: bool = True
+
+    # 任务驾驶舱（C1b，2026-11-08）：独立的 tkinter HUD 窗口，不是终端内嵌。
+    # window（默认）= 首次任务开始时弹出，任务结束保留最终汇总、不自动关闭；
+    # 手动关闭只隐藏，下一轮任务首个工具自动重现。off=完全禁用。
+    visual_cockpit: str = "window"
+
+    # 可视化总开关与多任务浮窗（C3-lite，2026-11-08）。
+    # 总开关 false 时关闭主 HUD 与所有浮窗；浮窗 auto 只对 ≥min_ms 的工具弹，
+    # always 全部弹，off 关闭。effects=off 时关闭扫描线/闪烁动画。
+    visual_enabled: bool = True
+    visual_tool_cards: str = "auto"
+    visual_tool_card_min_ms: int = 300
+    visual_tool_card_max: int = 4
+    visual_tool_card_hold_ms: int = 600
+    visual_effects: str = "subtle"
+    visual_position_memory: bool = True
+
+    # 子代理/队友任务卡（C3-lite.2，2026-11-08）：每个子代理/队友一张琥珀色卡，
+    # 放在主 HUD 左侧第二列；终端原始输出仍照常打印（TeeActivityUI）。
+    # auto = 启用；off = 完全回到旧行为（无 observer、无代理卡）。
+    # max 同时最多几张（1–6）；hold 为 done/failed 保留毫秒；
+    # keep_idle 保留队友空闲暗色卡；min_ms 为出现阈值（0=立即）。
+    # @author aceFelix
+    visual_agent_cards: str = "auto"
+    visual_agent_card_max: int = 3
+    visual_agent_card_hold_ms: int = 800
+    visual_agent_card_keep_idle: bool = True
+    visual_agent_card_min_ms: int = 0
+
+    # 左侧“抓取网络”窗口（C2-lite，2026-11-09）：auto = 本轮出现抓取才弹、
+    # 结束保留、点 ✕ 只隐藏；off = 完全不创建。数据来自 trace 的 web_fetch。
+    # @author aceFelix
+    visual_crawl_window: str = "auto"
+    # 左侧窗口的分层拓扑（P3，2026-11-09）：auto = 画节点与父→子连线；
+    # off = 只保留清单/抽取/统计。max_nodes 为可见节点总上限，超出折叠为 +N。
+    # @author aceFelix
+    visual_crawl_topology: str = "auto"
+    visual_crawl_max_nodes: int = 60
+
+    # 真爬虫（P2，2026-11-09）：Crawl / WebExtract 的默认值与总开关。
+    # 单次工具调用可覆盖这些默认值；enabled=false 时两个工具直接拒绝执行。
+    # 默认礼貌爬取：同域、深度 2、10 页、300ms 间隔、遵守 robots。
+    # @author aceFelix
+    crawl_enabled: bool = True
+    crawl_max_pages: int = 10
+    crawl_max_depth: int = 2
+    crawl_same_domain: bool = True
+    crawl_delay_ms: int = 300
+    crawl_respect_robots: bool = True
+    crawl_timeout_s: int = 20
+    # 抓取后端策略（P4，2026-11-09）：auto 时 HTTP 失败/JS 空壳页自动降级浏览器渲染
+    crawl_use_browser: str = "auto"
+    crawl_max_bytes_per_page: int = 2_000_000
 
     # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随。
     # trace 只记路径/窗口标题/计数，不记文件内容；window_follow 默认 show

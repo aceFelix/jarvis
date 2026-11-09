@@ -128,6 +128,41 @@ class TestNoFalseWake:
         assert ww.matches("贾维斯", None) is False
 
 
+@requires_pinyin
+class TestStrictWakeGate:
+    """待机唤醒专用门禁：短句 + 唤醒词在前 8 字内。
+
+    2026-11-09 用户反馈「没叫它却自动唤醒」：待机时环境噪音被 ASR 幻听成
+    一句话，只要任意位置含「贾维斯」就会唤醒。严格门禁把长句/句中词挡掉。
+    """
+
+    @pytest.mark.parametrize("text", HOMOPHONES)
+    def test_homophone_still_wakes(self, text: str) -> None:
+        assert ww.matches_wake(text, ("贾维斯",)) is True
+
+    @pytest.mark.parametrize("text", IN_SENTENCE)
+    def test_short_sentence_with_wake_wakes(self, text: str) -> None:
+        assert ww.matches_wake(text, ("贾维斯",)) is True
+
+    @pytest.mark.parametrize("text", DAILY_TALK)
+    def test_daily_talk_still_does_not_wake(self, text: str) -> None:
+        assert ww.matches_wake(text, ("贾维斯",)) is False
+
+    def test_long_sentence_is_rejected_even_with_wake_word(self) -> None:
+        """长句里碰巧含唤醒词不唤醒（环境噪音/正常聊天常见）。"""
+        assert ww.matches_wake(
+            "先别叫贾维斯了我现在正在忙别的事情", ("贾维斯",)
+        ) is False
+
+    def test_wake_word_too_far_from_start_is_rejected(self) -> None:
+        """前 8 字门禁：唤醒词出现在句子后段不算叫它。"""
+        assert ww.matches_wake("我今天想问一下贾维斯", ("贾维斯",)) is False
+
+    def test_empty_inputs_are_safe(self) -> None:
+        assert ww.matches_wake("", ("贾维斯",)) is False
+        assert ww.matches_wake("贾维斯", ()) is False
+
+
 class TestPinyinUnavailable:
     """没装 pypinyin 时优雅降级：不报错，只退化为字面匹配。"""
 

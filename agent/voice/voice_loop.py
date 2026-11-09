@@ -11,7 +11,7 @@ RichCLI 的直接依赖，一切对外输出经 ``voice_events.VoiceSessionEvent
 
 第四刀新增:
 - **打断（barge-in）**: TTS 播报期间检测到打断信号（interrupt_event 置位，
-  来源可为键盘 ESC / 麦克风能量 / 桌面壳按钮）立即 tts.stop() + abort_event，
+  来源可为键盘空格 / 麦克风能量 / 桌面壳按钮）立即 tts.stop() + abort_event，
   切回聆听。无需等它说完才能纠正/追问。
 - **TTS 文本清洗**: LLM 回复常带 markdown，直接喂 TTS 会读出符号噪声。
   清洗逻辑见 tts_text 模块。
@@ -26,7 +26,7 @@ RichCLI 的直接依赖，一切对外输出经 ``voice_events.VoiceSessionEvent
   音频在本地（serve 子进程 / REPL 同机）pyaudio 播放，不向 GUI 传音频流。
 - **打断线程模型**: 每轮起一个 daemon 轮询线程监听 interrupt_event（50ms
   粒度），置位即触发 _on_barge（abort + 停 TTS）。打断来源由宿主适配器挂接
-  （REPL=键盘 ESC，serve=麦克风 _BargeInWatcher + 桌面壳 voice.interrupt）。
+  （REPL=键盘空格，serve=麦克风 _BargeInWatcher + 桌面壳 voice.interrupt）。
 - **音频 I/O 离事件循环**: stt.listen / StreamTTSPlayer.start / finish 均为
   阻塞 pyaudio / 网络调用，统一经 asyncio.to_thread 放工作线程跑，保证宿主
   事件循环（serve 指令循环 / REPL 主循环）不被录音播放饿死，voice.stop /
@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import inspect
 import threading
 import time
 from typing import Any, Callable
@@ -61,8 +62,8 @@ from agent.voice.voice_config import (
 # 词表不再写死：从 [voice] 表解析（留空回退内置默认），并用拼音同音匹配把
 # 「加维思」/「贾伟斯」这类 ASR 近音字也算作叫到了（见 wake_words 模块）。
 from agent.voice.wake_words import (
-    build_asr_hotwords,
     matches,
+    matches_wake,
     resolve_exit_words,
     resolve_wake_words,
 )
@@ -79,6 +80,66 @@ from agent.voice.voice_events import (
 
 # 打断轮询粒度（秒）：interrupt_event 置位后最多 50ms 内响应
 _INTERRUPT_POLL_SEC = 0.05
+
+#: 对话阶段默认静默待机秒数（用户 2026-11-09 要求 10 秒；[voice] 可改）
+_DEFAULT_IDLE_STANDBY_SEC = 10.0
+#: 上限保护：配置成几天几夜没意义，也避免 threading.Timer 被传超大值
+_IDLE_STANDBY_MAX_SEC = 120.0
+
+
+def _idle_standby_seconds(settings: Settings) -> float:
+    """读取并钳制 ``[voice] idle_standby_seconds``；0 表示关闭静默待机。"""
+    try:
+        seconds = float(getattr(settings, "voice_idle_standby_seconds", _DEFAULT_IDLE_STANDBY_SEC))
+    except (TypeError, ValueError):
+        seconds = _DEFAULT_IDLE_STANDBY_SEC
+    if seconds <= 0:
+        return 0.0
+    return min(seconds, _IDLE_STANDBY_MAX_SEC)
+
+
+def _silence_expired(state: dict[str, float] | None, seconds: float) -> bool:
+    """累计静默是否已到待机阈值（跨多轮「没听清」也算）。"""
+    if not state or seconds <= 0:
+        return False
+    last = float(state.get("last_speech", 0.0))
+    return last > 0 and (time.time() - last) >= seconds
+
+
+class _IdleStandbyTimer:
+    """聆听阶段的静默看门狗：到点中断 ``stt.listen()``，让循环进待机。
+
+    为什么需要它：``stt.listen(max_seconds=voice_max_seconds)`` 在用户完全
+    不开口时会一直阻塞到最长录音时间（默认 5 分钟），无法做到「10 秒没人
+    说话就待机」。看门狗到点调用 ``stt._request_stop()`` 提前结束录音；
+    用户一开始说话（STT partial）就取消计时，不会误杀正常长句。
+    """
+
+    def __init__(self, seconds: float, on_fire: Callable[[], None]) -> None:
+        self._seconds = max(0.1, seconds)
+        self._on_fire = on_fire
+        self._timer: threading.Timer | None = None
+        self.fired = threading.Event()
+
+    def start(self) -> None:
+        """启动计时（重复调用会先取消旧计时）。"""
+        self.cancel()
+        self._timer = threading.Timer(self._seconds, self._fire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _fire(self) -> None:
+        self.fired.set()
+        try:
+            self._on_fire()
+        except Exception:
+            pass
+
+    def cancel(self) -> None:
+        """取消计时；已触发过则 ``fired`` 保持置位供调用方判断。"""
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
 
 
 class _VoiceDependencyError(RuntimeError):
@@ -170,17 +231,50 @@ async def _voice_loop_round(
     stt: Any,
     interrupt_event: threading.Event,
     stop_event: threading.Event,
+    silence_state: dict[str, float] | None = None,
 ) -> bool:
     """跑一轮语音对话（听→想→说）。返回是否继续下一轮。
 
     False 表示用户要退出语音模式（退下 / 待机）。
-    stop_event: 外部停止信号；与 stt 停止标志组合区分「退出意图」
-    （Ctrl+C / voice.stop，抛 KeyboardInterrupt 退出）与「打断意图」
-    （voice.interrupt 仅中断录音，返回 True 继续聆听）。
+
+    Args:
+        stop_event: 外部停止信号；与 stt 停止标志组合区分「退出意图」
+            （Ctrl+C / voice.stop，抛 KeyboardInterrupt 退出）与「打断意图」
+            （voice.interrupt 仅中断录音，返回 True 继续聆听）。
+        silence_state: 跨轮静默累积（``{"last_speech": 墙钟秒}``）。用户连续
+            ``[voice] idle_standby_seconds`` 秒没有任何识别文本时返回 False
+            进入待机；None 时本轮独立计时（兼容旧调用/单测）。
+
+    @author aceFelix
     """
+    # ---- 0. 静默待机：先判断是不是已经该退下了 ----
+    idle_seconds = _idle_standby_seconds(settings)
+    state = silence_state if silence_state is not None else {"last_speech": time.time()}
+    remaining = idle_seconds - (time.time() - float(state.get("last_speech", time.time())))
+    if idle_seconds > 0 and remaining <= 0:
+        events.on_info(f"🛌 {idle_seconds:g} 秒没有听到你说话，进入待机（说唤醒词继续）")
+        return False
+
     # ---- 1. 听：STT 录音识别 ----
     events.on_state(STATE_LISTENING)
     events.on_info("🎤 聆听中...（说话即可，停顿后自动结束）")
+
+    # 静默看门狗：到点中断阻塞录音；用户一开口（任何 partial）就取消，
+    # 避免正常长句被 10 秒阈值误杀。@author aceFelix
+    idle_timer: _IdleStandbyTimer | None = None
+    if idle_seconds > 0:
+        def _stop_listening() -> None:
+            from agent.voice import stt as stt_module
+
+            stt_module._request_stop()
+
+        idle_timer = _IdleStandbyTimer(max(0.1, remaining), _stop_listening)
+        idle_timer.start()
+
+    def _on_partial(text: str) -> None:
+        if idle_timer is not None:
+            idle_timer.cancel()
+        events.on_user_partial(text)
 
     t_listen = time.time()
     try:
@@ -191,25 +285,51 @@ async def _voice_loop_round(
             stt.listen,
             max_seconds=settings.voice_max_seconds,
             silence_seconds=settings.stt_silence_seconds,
-            on_partial=events.on_user_partial,
+            on_partial=_on_partial,
             on_open=lambda: None,
+            # 对话阶段也不再下发唤醒热词：热词偏置会让 ASR 在用户沉默/噪音/
+            # TTS 尾音时幻听出「贾维斯」，而对话阶段用户本来就已经醒着，
+            # 不需要这个偏置。@author aceFelix
+            hotwords="",
         )
-        # 停止标志被触发（Ctrl+C 信号 / voice.stop / voice.interrupt 均经此标志中断录音）
-        from agent.voice.stt import _is_stopped
-        if _is_stopped():
-            if stop_event.is_set():
-                # 退出意图（Ctrl+C / voice.stop）：抛出让 voice_loop 干净退出
-                raise KeyboardInterrupt
-            # 打断意图（voice.interrupt 仅中断录音）：清进度行后返回，
-            # 由 voice_loop 清标志并继续聆听，不退出语音模式
-            events.on_user_partial("")
-            return True
     except KeyboardInterrupt:
         # Ctrl+C 在聆听阶段（REPL 主线程信号在 await 点抛出）: 清进度行并重新
         # 抛出，让 voice_loop 的 except 捕获并退出语音模式（不能 return False，
         # 否则误判"退下"进待机）
         events.on_user_partial("")
         raise
+    finally:
+        if idle_timer is not None:
+            idle_timer.cancel()
+
+    from agent.voice import stt as stt_module
+    user_text = (result.get("text") or "").strip()
+    # 服务端没检测到任何 VAD 语音事件却返回文本 = ASR 幻觉（静音/噪音/
+    # TTS 尾音常见），一律当成“没听清”处理，绝不上交给 LLM。
+    # 2026-11-09 用户实机：没出声却连续识别出“贾维斯”。@author aceFelix
+    if not result.get("speech_detected", True):
+        user_text = ""
+
+    # 看门狗到点：真的没有任何识别文本才待机；如果用户恰好在边界开口，
+    # 有文本就按正常轮次继续。@author aceFelix
+    if idle_timer is not None and idle_timer.fired.is_set():
+        stt_module._reset_stop()
+        if not user_text:
+            events.on_user_partial("")
+            events.on_info(f"🛌 {idle_seconds:g} 秒没有听到你说话，进入待机（说唤醒词继续）")
+            return False
+
+    # 停止标志被触发（Ctrl+C 信号 / voice.stop / voice.interrupt 均经此标志中断录音）
+    if stt_module._is_stopped():
+        if stop_event.is_set():
+            # 退出意图（Ctrl+C / voice.stop）：抛出让 voice_loop 干净退出
+            raise KeyboardInterrupt
+        # 打断意图（voice.interrupt 仅中断录音）：清进度行后返回，
+        # 由 voice_loop 清标志并继续聆听，不退出语音模式；这次主动按键
+        # 视为一次“交互”，重新给用户 10 秒窗口。@author aceFelix
+        state["last_speech"] = time.time()
+        events.on_user_partial("")
+        return True
 
     # 清识别进度行（适配器收到空 partial 即清行）
     events.on_user_partial("")
@@ -221,13 +341,23 @@ async def _voice_loop_round(
         # 继续 return True 只会无限刷屏。上抛致命错误让 voice_loop 干净退出。
         if "未安装" in err or "No module named" in err:
             raise _VoiceDependencyError(err)
+        # 连续失败也算“没人说话”：10 秒内一直报错时直接待机，避免无限刷屏
+        if _silence_expired(state, idle_seconds):
+            events.on_info(f"🛌 {idle_seconds:g} 秒没有听到你说话，进入待机（说唤醒词继续）")
+            return False
         events.on_error(f"识别失败: {err}，再说一次")
         return True
 
-    user_text = result.get("text", "").strip()
     if not user_text:
+        # 快速返回的“没听清”也要累计到 10 秒，不能每轮重置
+        if _silence_expired(state, idle_seconds):
+            events.on_info(f"🛌 {idle_seconds:g} 秒没有听到你说话，进入待机（说唤醒词继续）")
+            return False
         events.on_info("没听清，再说一次", LEVEL_WARN)
         return True
+
+    # 成功听到用户说话：重置静默计时
+    state["last_speech"] = time.time()
 
     exit_words = resolve_exit_words(settings)
     _exit_detected = matches(user_text, exit_words)
@@ -314,12 +444,14 @@ async def _voice_loop_round(
         ctx.abort_event = asyncio.Event()
         ctx.on_assistant_text = None
         stream_player.stop()
+        state["last_speech"] = time.time()
         return True
     except Exception as e:
         round_done.set()
         events.on_error(f"回复出错: {type(e).__name__}: {e}")
         ctx.on_assistant_text = None
         stream_player.stop()
+        state["last_speech"] = time.time()
         return True
     finally:
         ctx.on_assistant_text = None
@@ -330,6 +462,7 @@ async def _voice_loop_round(
         events.on_info("🔇 检测到打断，已停止回复（继续聆听）", LEVEL_WARN)
         ctx.abort_event = asyncio.Event()
         stream_player.stop()
+        state["last_speech"] = time.time()
         return True
 
     # ---- 3. 说：StreamTTSPlayer 已通过 feeder 流式接收文本 ----
@@ -377,6 +510,7 @@ async def _voice_loop_round(
         # 播报阶段被打断：音频已被 _on_barge 停止，finish() 提前返回
         events.on_info("🔇 检测到打断，已停止播报（继续聆听）", LEVEL_WARN)
         ctx.abort_event = asyncio.Event()
+        state["last_speech"] = time.time()
         return True
 
     if settings.verbose:
@@ -397,6 +531,10 @@ async def _voice_loop_round(
         events.on_info("🛌 贾维斯已退下（说「贾维斯」唤醒）")
         return False
 
+    # 关键：静默计时从「贾维斯说完」才开始，不能把 LLM 思考 + TTS 播报时间
+    # 算进用户沉默（否则长回答一说完就立刻待机——2026-11-09 实机反馈）。
+    # @author aceFelix
+    state["last_speech"] = time.time()
     return True
 
 
@@ -406,13 +544,17 @@ async def _standby_round(settings: Settings, stt: Any) -> str:
     返回识别到的文本（可能为空）。Ctrl+C 由调用方处理。
     """
     try:
-        # 与对话阶段同理：阻塞短录放工作线程，待机期间宿主指令循环保持空闲
+        # 与对话阶段同理：阻塞短录放工作线程，待机期间宿主指令循环保持空闲。
+        # 待机不携带唤醒热词：热词偏置会让 ASR 在环境噪音/静音时凭空输出
+        # “贾维斯”，正是 2026-11-09 用户反馈“没叫它却自动唤醒”的主因。
+        # @author aceFelix
         result = await asyncio.to_thread(
             stt.listen,
             max_seconds=_STANDBY_MAX_SECONDS,
             silence_seconds=_STANDBY_SILENCE_SECONDS,
             on_partial=lambda t: None,
             on_open=lambda: None,
+            hotwords="",
         )
     except KeyboardInterrupt:
         # Ctrl+C（REPL 主线程信号在 await 点抛出）：交调用方退出语音模式
@@ -420,6 +562,10 @@ async def _standby_round(settings: Settings, stt: Any) -> str:
     # 停止标志不在这里抛：调用方按 stop_event 区分「退出」与「打断继续待机」
     if result.get("error"):
         # 待机时偶发错误不刷屏，静默继续
+        return ""
+    # 服务端没有给出任何 VAD 事件却返回了文本 = 极可能是 ASR 幻觉/环境噪音，
+    # 直接丢弃，不进入唤醒判定（2026-11-09 误唤醒修复）。@author aceFelix
+    if not result.get("speech_detected", True):
         return ""
     return result.get("text", "").strip()
 
@@ -458,7 +604,7 @@ async def voice_loop(
     *,
     stop_event: threading.Event | None = None,
     interrupt_event: threading.Event | None = None,
-    on_turn_end: Callable[[], None] | None = None,
+    on_turn_end: Callable[[], Any] | None = None,
 ) -> None:
     """进入语音模式。对话 ⇄ 待机 循环，直到外部停止 / Ctrl+C 彻底退出。
 
@@ -477,9 +623,9 @@ async def voice_loop(
 
     解耦说明（二期）:
         - 不再接收 RichCLI；一切输出经 ``events`` 回调外抛（宿主适配器渲染）。
-        - 打断来源经 ``interrupt_event`` 注入（REPL=键盘 ESC，serve=麦克风
+        - 打断来源经 ``interrupt_event`` 注入（REPL=键盘空格，serve=麦克风
           barge-in + 桌面壳 voice.interrupt 按钮）；本函数轮询该 event。
-        - 键盘 ESC / 麦克风 watcher 的创建与生命周期由宿主适配器负责。
+        - 键盘空格 / 麦克风 watcher 的创建与生命周期由宿主适配器负责。
 
     pause_event: 已废弃，保留参数仅为向后兼容，内部不再使用。
     stop_event: 外部停止信号。宿主停止语音会话时设置，循环关键点检查并干净退出；
@@ -491,7 +637,8 @@ async def voice_loop(
         有增长（产生了新的用户/助手消息，含被打断的半轮）时调用——宿主据此
         触发会话持久化（工作台引擎传 ``_after_turn``，与文本对话同一套自动
         存盘；此前语音轮只进内存不落盘，重启即丢）。回调异常静默，不影响
-        语音循环；未传时行为零变化（REPL 宿主）。
+        语音循环；未传时行为零变化。**允许返回 awaitable**（终端 /voice 传
+        async 回调，走共享的 advance_session 生成 15 字标题，2026-11-09）。
 
     @author aceFelix
     """
@@ -529,18 +676,15 @@ async def voice_loop(
 
     # 词表解析一次，整会话复用（待机轮询每几秒跑一轮，不重复读配置）
     wake_words = resolve_wake_words(settings)
-    # 热词只送「主词」（用户写的第一条）：把多个谐音变体全塞给模型会让它以为
-    # 这些写法都对，反而削弱治本效果；谐音鲁棒性交给拼音匹配那一层。
-    asr_hotwords = build_asr_hotwords(wake_words[:1])
+    # 不再把唤醒词当 ASR 热词下发（2026-11-09）：热词偏置在静音/噪音/TTS
+    # 尾音上会制造“贾维斯”幻觉，实测比它带来的唤醒准确率更烦人。
+    # 近音字鲁棒性交给 matches_wake 的拼音层。@author aceFelix
     # 待机提示里展示的样例词（给人看，不参与判定）
     wake_hint = wake_words[0] if wake_words else "贾维斯"
 
     stt = create_stt(
         api_key=_voice_api_key(settings),
         model=settings.stt_model,
-        # 唤醒词作为 ASR 上下文增强下发：治本的一层——让模型一开始就倾向于
-        # 输出「贾维斯」，而不是先听成近音字。空词表则不启用。@author aceFelix
-        hotwords=asr_hotwords,
     )
     tts = CosyVoiceTTS(
         api_key=_voice_api_key(settings),
@@ -605,6 +749,8 @@ async def voice_loop(
 
     try:
         in_dialog = True  # True=对话阶段, False=待机阶段
+        # 跨轮静默计时：用户连续 N 秒没开口就转待机（2026-11-09 用户要求）
+        silence_state: dict[str, float] = {"last_speech": time.time()}
         while True:
             if stop_event and stop_event.is_set():
                 _voice_log("[voice_loop] 收到外部停止信号，退出语音循环")
@@ -622,7 +768,7 @@ async def voice_loop(
                     try:
                         cont = await _voice_loop_round(
                             events, settings, loop, ctx, tts, stt, interrupt_event,
-                            stop_event
+                            stop_event, silence_state,
                         )
                     finally:
                         # 一轮语音（听→想→说）结束：无论成功回复 / 被打断 /
@@ -633,15 +779,19 @@ async def voice_loop(
                         # 疯狂输出思考、停不下来”。@author aceFelix
                         events.on_turn_done()
                     # 每轮落库钩子：本轮消息有增长（正常回复或被打断的半轮）
-                    # 即通知宿主持久化（工作台 _after_turn；异常静默不影响语音）
+                    # 即通知宿主持久化（工作台 _after_turn；异常静默不影响语音）。
+                    # 回调可能是 async（终端 /voice 传 advance_session 包装，
+                    # 生成标题要 await LLM）。@author aceFelix
                     if on_turn_end is not None and len(ctx.messages) > msg_count_before_round:
                         try:
-                            on_turn_end()
+                            pending = on_turn_end()
+                            if inspect.isawaitable(pending):
+                                await pending
                         except Exception:
                             pass
                     if stop_event and stop_event.is_set():
                         break
-                    # ESC / 停止标志打断了 stt.listen() → 清标志回到聆听
+                    # 空格 / 停止标志打断了 stt.listen() → 清标志回到聆听
                     if cont and stt_module._is_stopped():
                         stt_module._reset_stop()
                         events.on_info("   ⏎ 已打断（继续聆听）")
@@ -672,11 +822,12 @@ async def voice_loop(
                 if stt_module._is_stopped():
                     stt_module._reset_stop()
                     continue
-                if text and matches(text, wake_words):
+                if text and matches_wake(text, wake_words):
                     if stop_event and stop_event.is_set():
                         break
                     events.on_state(STATE_DIALOG)
                     events.on_info("🔊 唤醒，回到对话模式")
+                    silence_state["last_speech"] = time.time()
                     in_dialog = True
                 # 不含唤醒词则静默继续待机（不打印识别内容，避免刷屏）
     except _VoiceDependencyError as e:

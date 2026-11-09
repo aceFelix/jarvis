@@ -106,7 +106,7 @@ def test_on_turn_end_fires_when_round_grows_messages(monkeypatch) -> None:
     """本轮消息有增长：回调触发一次（宿主据此落库）。"""
     calls: list = []
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         # 模拟 QueryLoop 写入本轮用户/助手消息
         ctx.messages.append(SimpleNamespace(role="user", get_text=lambda: "问"))
         ctx.messages.append(SimpleNamespace(role="assistant", get_text=lambda: "答"))
@@ -124,7 +124,7 @@ def test_on_turn_end_skipped_when_no_message_growth(monkeypatch) -> None:
     """本轮无消息增长（纯打断/空轮）：不触发回调，不产生空存盘。"""
     calls: list = []
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         stop.set()
         return False
 
@@ -137,7 +137,7 @@ def test_on_turn_end_skipped_when_no_message_growth(monkeypatch) -> None:
 def test_on_turn_end_exception_swallowed(monkeypatch) -> None:
     """回调抛异常：静默吞掉，不中断语音循环（会话仍干净退出）。"""
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         ctx.messages.append(SimpleNamespace(role="user", get_text=lambda: "问"))
         stop.set()
         return False
@@ -146,6 +146,29 @@ def test_on_turn_end_exception_swallowed(monkeypatch) -> None:
         raise RuntimeError("存盘失败")
 
     _calls, events = _run_voice_loop(monkeypatch, fake_round, _boom)
+    assert events.states()[-1] == STATE_EXITED
+
+
+def test_on_turn_end_awaits_async_callback(monkeypatch) -> None:
+    """回调返回 awaitable 时必须被 await（终端 /voice 传 async 收尾）。
+
+    2026-11-09：终端 /voice 与文本 REPL 共用 advance_session 生成 15 字标题，
+    收尾回调是 async 的；voice_loop 只调用不 await 会丢保存/标题。
+    """
+    done: list = []
+
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
+        ctx.messages.append(SimpleNamespace(role="user", get_text=lambda: "问"))
+        ctx.messages.append(SimpleNamespace(role="assistant", get_text=lambda: "答"))
+        stop.set()
+        return False
+
+    async def _async_turn_end() -> None:
+        await asyncio.sleep(0)
+        done.append(1)
+
+    _calls, events = _run_voice_loop(monkeypatch, fake_round, _async_turn_end)
+    assert done == [1]
     assert events.states()[-1] == STATE_EXITED
 
 
@@ -161,7 +184,7 @@ def test_turn_done_fires_once_per_growing_round(monkeypatch) -> None:
     """每轮正常回复（消息有增长）都应补发一次 turn_done 收尾信号。"""
     state = {"n": 0}
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         state["n"] += 1
         ctx.messages.append(SimpleNamespace(role="user", get_text=lambda: "问"))
         ctx.messages.append(SimpleNamespace(role="assistant", get_text=lambda: "答"))
@@ -177,7 +200,7 @@ def test_turn_done_fires_once_per_growing_round(monkeypatch) -> None:
 def test_turn_done_fires_even_on_empty_round(monkeypatch) -> None:
     """空轮（无消息增长，如没听清）也发 turn_done：无条件收尾，杜绝残留忙碌态。"""
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         stop.set()
         return False
 
@@ -188,7 +211,7 @@ def test_turn_done_fires_even_on_empty_round(monkeypatch) -> None:
 def test_turn_done_fires_on_round_exception(monkeypatch) -> None:
     """轮次抛异常（Ctrl+C）也经 finally 补发 turn_done，气泡不残留。"""
 
-    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop):
+    async def fake_round(events, settings, loop, ctx, tts, stt, intr, stop, silence_state=None):
         raise KeyboardInterrupt
 
     _calls, events = _run_voice_loop(monkeypatch, fake_round, None)
