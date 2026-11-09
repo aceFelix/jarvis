@@ -4,8 +4,229 @@
 
 ## [Unreleased]
 
+### 新增（爬虫 P4：浏览器降级，2026-11-09）
+
+- **`Crawl` 新增 `use_browser` 抓取后端**：`auto`（默认）/`always`/`never`。
+  `auto` 先走 HTTP，遇到 403/503、Cloudflare 等挑战页、正文过短（< 500 字符，
+  疑似 JS 空壳）或请求异常时自动降级到无头浏览器渲染；`always` 全程浏览器，
+  `never` 只用 HTTP（正文短本身不算失败）。
+- **反爬只识别不绕过**：命中 `Just a moment...`、`cf-challenge` 等特征即把该页
+  标为失败并写明原因（浏览器仍未通过也会标红），不做任何挑战绕过。
+- **浏览器后端复用共享实例**：新增 `fetch_via_browser()`（临时 page、渲染完即关，
+  不改变用户/模型正在操作的页面）；一次爬取结束若浏览器是本次拉起的就释放。
+  页面 `kind` 记为 `browser`，工具回执里该页后缀 ` ·browser` 便于区分。
+- **新增配置**：`[crawl] use_browser = "auto"`，`settings.py`、`settings_domains.py`、
+  `catalog.py`、`settings.example.toml` 四处同步；非法值回退 `auto`。
+- 新增 `tests/tools/test_crawl.py::TestBrowserFallback`（策略归一、挑战页识别、
+  空壳页降级、挑战页标红、always 不走 HTTP）。
+
+### 新增（爬虫 P3：分层拓扑与窗口放大，2026-11-09）
+
+- **爬虫驾驶舱放大到 560×640**：URL 清单 7 行、抽取表 4 行，新增约 160px 高的分层拓扑区。
+- **分层拓扑**：节点 = 去重 URL、边 = `parent_url → url`、层号 = depth（根页居中）；
+  成功绿 / 失败红 / 未知灰；单层超过 8 个或总数超过 `crawl_max_nodes` 时折叠为
+  `+N`；按已确认方案不做缩放、平移与节点拖拽。
+- **节点↔抽取行联动**：点击拓扑节点高亮对应抽取行，点击抽取行高亮节点，
+  再次点击取消；单页抓取或拓扑关闭时显示对应空态。
+- **新增配置**：`[visualization] crawl_topology = "auto"|"off"`、
+  `crawl_max_nodes = 60`（20–200），`settings.py`、`settings_domains.py`、
+  `catalog.py`、`settings.example.toml` 四处同步。
+- 新增 `agent/ui/cockpit_crawl_topo.py`（纯函数布局）与
+  `tests/ui/test_cockpit_crawl_topo.py`。
+
+### 新增（爬虫 P2：Crawl 多页抓取，2026-11-09）
+
+- **新增 `Crawl` 工具**：广度优先抓取站点，支持 `max_pages`（1–100）、
+  `max_depth`（0–5）、`same_domain`（子域算同域）、`delay_ms`（默认 300）、
+  `respect_robots`、`timeout_s`、`max_bytes_per_page`，并可按 CSS 选择器
+  `extract` 逐页抽取（复用 WebExtract 的 `extract_fields`）。单页 4xx/5xx/
+  超时不终止整次爬取；不绕过 Cloudflare 等反爬挑战。
+- **驾驶舱数据源接通**：Crawl 结束时经 `ToolResult.trace_meta` 批量上报，
+  `TraceRecorder` 逐条派生 `web_fetch`（带 `parent_url`/`depth`/`kind`）、
+  `web_extract` 与 `crawl_stats`。URL 清单显示 `L0/L1…` 层级（单页抓取显示
+  `L-`），拓扑区统计行显示队列/完成/失败/去重/深度/字节/耗时；抓取缓冲从
+  20 条扩到 200 条。
+- **新增 `[crawl]` 配置段**（`enabled`/`max_pages`/`max_depth`/`same_domain`/
+  `delay_ms`/`respect_robots`/`timeout_s`/`max_bytes_per_page`），
+  `settings.py`、`settings_domains.py`、`catalog.py`、`settings.example.toml`
+  四处同步；`enabled=false` 时 Crawl 与 WebExtract 均拒绝执行。
+- **阶段边界**：浏览器降级（`use_browser` / CF 识别）按计划留到 P4；
+  Crawl 目前结束一次性上报，不做逐页实时刷新；拓扑连线仍待 P3。
+- **验收打磨（2026-11-09 实测）**：跳过 Cloudflare 邮箱混淆链接
+  （`/cdn-cgi/l/email-protection…`），不再白抓一条 404；驾驶舱“去重”格优先取
+  `crawl_stats.dedup_hits`——Crawl 在入队阶段就去重，单看 fetch 会显示 0。
+- 新增测试 `tests/tools/test_crawl.py`（URL 规范化、同域、链接、robots、
+  BFS 层级/去重/失败继续/逐页抽取）。
+
+### 新增（爬虫 P1：WebExtract 结构化抽取，2026-11-09）
+
+- **新增 `WebExtract` 工具**：抓取单个网页后按 CSS 选择器把字段抽成表
+  （`fields: [{name, selector, attr}]`，attr 常用 text/html/href/src）。
+  选择器用 `beautifulsoup4` + 内置 `html.parser`（核心依赖新增
+  `beautifulsoup4>=4.12`，不引入 lxml）。抽不到的字段记入 `missing`、不返回
+  空字符串；作用范围 `selector` 未命中时全部记缺失，不退回整页抽取。
+- **爬虫驾驶舱“抽取 // EXTRACT”区点亮**：`ToolResult` 新增 `trace_meta`
+  旁路字段（不进入 tool_result 文本、不参与截断），orchestrator 原样传给
+  tool_after 钩子，`TraceRecorder` 据此派生 `web_extract` 事件；窗口显示
+  域名 + 前 3 个字段，缺失时标“缺 N”。
+- 文档：`docs/architecture/05-工具系统.md` 工具表、`docs/plans/crawler-cockpit.md`
+  数据契约同步；新增测试 `tests/tools/test_web_extract.py`。
+
+### 优化（语音交互，2026-11-09）
+
+- **`/voice` 空格打断**：键盘打断键由 ESC 改为 **Space**（`keyboard.is_pressed("space")`），
+  播报/推理中按空格立即停止并回到聆听；`barge_in_key = true` 仍可总开关控制。
+- **10 秒静默自动待机**：聆听阶段连续 `[voice] idle_standby_seconds`（默认 10 秒）
+  没有任何识别文本（含连续“没听清”/识别失败）时，自动进入待机等唤醒词；
+  `0` 可关闭。新增 `_IdleStandbyTimer` 看门狗，到点中断阻塞的 `stt.listen`，
+  用户一开口（任何 partial）立即取消，避免误杀正常长句。
+- **修复：长回答结束后误待机**：静默计时原先从“用户上次说话”开始算，LLM 思考 +
+  工具 + TTS 播报超过 10 秒时，话一说完就立刻进待机。现在每轮回到聆听前重置
+  `last_speech`，给用户完整的 10 秒窗口；连续“没听清”的空轮次仍会累计。
+  复盘见 [voice-idle-standby-after-reply-fix.md](docs/fixlogs/voice-idle-standby-after-reply-fix.md)。
+- **修复：无声音自动唤醒 / 对话幻听**：对话与待机录音都不再下发唤醒热词（避免 ASR
+  在静音/噪音/TTS 尾音时幻听「贾维斯」）；待机唤醒改用 `matches_wake`（整句≤12 字 +
+  唤醒词在前 8 字）；对话/待机都加 VAD 门禁——没有服务端语音事件的结果直接丢弃，
+  对话阶段也不会再出现“没出声却识别出「贾维斯」”。复盘见
+  [voice-false-wake-fix.md](docs/fixlogs/voice-false-wake-fix.md)。
+- **配置**：`[voice]` 新增 `idle_standby_seconds`；`/config` 语音面板同步展示。
+- 文档同步：`docs/guide/voice.md`、`docs/architecture/06-语音系统.md`、
+  `docs/test/TEST_CHECKLIST.md`（T-129 空格打断、T-133 静默待机）。
+
+### 优化 / 修复（代理卡交互与并行输出，2026-11-09）
+
+- **终端优先：用 Git Bash / cmd 时驾驶舱与抓取舱自动让出置顶**：此前两窗常驻
+  `-topmost`，会挡住终端内容。新增 `agent/ui/cockpit_zorder.py`，Tk 线程每 0.4s
+  查一次前台窗口进程名（mintty / cmd / conhost / Windows Terminal / PowerShell 等），
+  命中就取消两窗置顶（不 lower，避免闪烁），切到其它程序再自动恢复；非 Windows
+  平台行为不变。`CrawlManager` 新增 `set_topmost()`，新弹出的抓取窗沿用当前策略。
+- **修复：一次网页抓取暴露的三处体验问题**（用户实机走查）：
+  1. `ToolSearch` 搜「浏览器 打开网页」时把 CLI-Anything 插件排到前面、内置
+     `BrowserNavigate/BrowserGetText` 被挤出前 6，返回体 **56,423 字符**被宿主截断，
+     模型白跑一步还看不清 schema。现在中文长词拆二元组 + 中英别名映射，搜索池
+     加入已常驻的内置工具（标注“已可用，直接调用”），单条 schema 限 1200 字符、
+     整次返回限 6000 字符。
+  2. 会话标题直接截首句前 15 字，切在链接上得到 `jarvsi帮我抓取一下htt`。现在先
+     剥掉代码块/行内代码/URL/绝对路径再截；只有链接时回退原文。
+  3. 驾驶舱执行序列只显示最近 4 步，8 步任务里唯一的失败被挤出，出现“失败 1”
+     但列表全 ✓ 的矛盾。现在失败步固定置顶（总行数仍为 4）。
+  复盘见 [toolsearch-title-failed-step-fix.md](docs/fixlogs/toolsearch-title-failed-step-fix.md)。
+- **新增左侧“爬虫驾驶舱”窗口（C2-lite，原名“抓取网络”）**：网页抓取可视化不再挤在右侧 430px 的
+  驾驶舱里，改为**屏幕最左侧独立窗口**（520×520，与 HUD 同一视觉语言、整面可拖）。
+  本轮出现第一条 `web_fetch` 才弹出，显示 URL 去重清单（状态/耗时/字节/×命中）、
+  汇总（抓取/成功/失败/去重/累计字节/域名分布）、抽取表；任务结束保留，点 ✕ 只隐藏，
+  下一轮有新抓取再出现。拓扑区先占位——没有 `parent_url` / `depth` 不画假边。
+  配置：`[visualization] crawl_window = "auto" | "off"`；实现见
+  `agent/ui/cockpit_crawl.py`。
+- **`/talk` 也写入会话历史**：实时双工对话同样不经 `QueryLoop`，此前退出即丢。
+  终端新增 `TalkHistoryRecorder`（`agent/voice/talk_history.py`）把 user/ai 转写按轮
+  配对写入 `messages`，再用串行落库任务调用 `advance_session`——与文本、`/voice`
+  共用「每轮保存 + 15 字标题」口径。配对规则与桌面 `WorkbenchRealtimeUI` 同口径：
+  正常顺序 / 转写滞后 / 开场白 / 回声轮丢弃 / 打断轮 / 退出 flush。复盘见
+  [talk-session-persist-fix.md](docs/fixlogs/talk-session-persist-fix.md)。
+- **修复：`/voice` 会话只有时间戳、从不生成标题**：语音每轮走 `voice_loop` 直连
+  `query_loop`，绕过了 REPL 的轮数统计与标题生成，退出时仍叫
+  `session-YYYYMMDD-HHMMSS`。现在收尾逻辑收敛为 `advance_session`，**文本与语音
+  共用同一套规则**：第 1 轮取用户首句前 15 字、第 2 轮 LLM 归纳 ≤15 字，且**每轮
+  语音都即时落盘**（此前只在退出时保存）。`voice_loop.on_turn_end` 支持 async 回调。
+  会话元信息保留 `created_at`/`updated_at`，`/sessions` 与 `/load` 选择器新增
+  **创建时间**，`sessions.list` 返回 `created_at`。复盘见
+  [voice-session-title-fix.md](docs/fixlogs/voice-session-title-fix.md)。
+- **修复：纯闲聊也会弹出任务驾驶舱**：旧逻辑在 `run_start` 就懒创建窗口，所以每轮
+  不调用任何工具的闲聊都会弹出一张“共 0 步 · 0 工具 · 任务完成”的 HUD。
+  现在 `run_start` 只缓存，等本轮首个工具/抓取事件才建窗并补投 `run_start`（耗时仍从
+  任务开始算）；没有工具调用的 `run_end` 直接丢弃，已显示的窗口在闲聊期间保持上一轮
+  真实汇总，不再被刷成“0 步”。复盘见
+  [cockpit-chat-pops-fix.md](docs/fixlogs/cockpit-chat-pops-fix.md)。
+- **任务驾驶舱执行序列可展开**：主 HUD 的“执行序列 // EXEC”行支持点击展开/收起，
+  显示该步工具名、目标、调用入参（最多 3 个短字段）、耗时与失败错误；详情面板覆盖
+  数据流/抓取区，再次点击同一步收起；拖动窗口不会误触展开。
+- **代理卡纵向散开 + 可拖动**：主 HUD 左侧第二列不再 `slot*18` 斜向重叠，
+  改为 `slot*(140+10)` 纵向完全分开；按住卡面即可拖动，状态刷新不会重置位置。
+- **工具卡点击展开**：单击青色工具卡在 `300×112` / `440×300` 之间切换，
+  展开态显示目标、完整 slim 入参 JSON 与失败错误摘要；工具结果正文不落 trace，
+  因此不进卡片。
+- **并行代理输出不再错位**：多个子代理/队友同时输出 Markdown 表格时，逐片段
+  转发会列列交错。`TeeActivityUI` 改为正文整段缓冲、工具边界/轮次结束一次性
+  输出；思考按块缓冲并带 `💭 代理名` 前缀，不再共用同一个思考面板。
+- **队友接入 Tee**：`TeammateRunner` 在终端存在卡片 observer 时也改用
+  `TeeActivityUI`，此前队友绕过 Tee、直接写主 UI，是表格错位的主要来源。
+- **`/voice` 语音模式保留操作可视化**：语音只影响 TTS 与终端思考面板，不再
+  抑制主 HUD、工具卡与代理卡；语音任务执行期间同样实时更新，语音结束后窗口常驻。
+
+### 新增（子代理任务卡 C3-lite.2，2026-11-08）
+
+- **每个子代理/队友一张琥珀色卡**：数据源是已有的代理活动台账
+  （`AgentActivityRegistry`），不再按工具弹卡。卡内五行：代理名 + `AGENT`
+  标签/耗时、角色与模式（子代理 / 队友 · 团队）、任务摘要、当前工具或动作、
+  轮次/工具数/状态。放在主 HUD **左侧第二列**（工具卡占第一列），与青色工具卡
+  明确区分；完成/失败保留 800ms 后收起，`stopped` 立即收起，队友空闲保留
+  暗色卡。默认最多 3 张，超出的只在主 HUD 页脚显示 `AGENTS n · +N`。
+- **终端原始输出保留**：新增 `TeeActivityUI`（先转发宿主 UI、再写台账），
+  子代理的工具卡/流式文本照常打印；只有桌面已有 `set_listener` 时仍走
+  `AgentActivityUI`（桌面右栏行为不变）。
+- **主任务统计隔离**：子代理的 `ctx.extra` 写入 `agent_id/agent_name/agent_mode`，
+  trace 事件带上这三个字段；主 HUD 状态与工具卡对带 `agent_id` 的工具事件直接
+  忽略（不计步数/失败、不再重复弹工具卡），`/trace` 回看行尾标注 `· @名字`。
+- **配置**：`[visualization]` 新增 `agent_cards`（auto/off）、`agent_card_max`
+  （1–6）、`agent_card_hold_ms`、`agent_card_keep_idle`、`agent_card_min_ms`；
+  `agent_cards = "off"` 时完全回到旧终端行为（不注册 observer、终端零提示）。
+- **批量派生区分**：`Subagent(tasks=[...])` 的并行代理名带 id 后缀
+  （如 `explorer-3f2a`），代理卡不再出现多张同名卡。
+- **实现说明**：纯逻辑与 Tk 分离在 `agent/ui/cockpit_agents.py`
+  （`AgentCardPlanner` / `AgentCardManager`），共享造型常量在
+  `agent/ui/hud_theme.py`；方案见
+  [agent-cards.md](docs/plans/agent-cards.md)。
+
+### 新增（多任务浮窗 C3-lite，2026-11-08）
+
+- **多任务浮窗卡**：每个运行中的工具一张独立 tkinter `Toplevel` 小卡，
+  主 HUD 左侧斜向堆叠；`auto` 模式下工具持续 ≥300ms 才弹，完成显示 ✓/✗ 后
+  保留 600ms 自动收起；同时最多 4 张（可配 1–6），并行超出时主 HUD 显示 `+N`。
+  卡内容：工具名、耗时、目标/入参、状态与扫描线；不抢键盘焦点。
+- **统一可视化配置 `[visualization]`**：`enabled` 总开关 + `task_cockpit` /
+  `tool_cards` / `tool_card_min_ms` / `tool_card_max` / `tool_card_hold_ms` /
+  `effects` / `position_memory`；旧 `[ui] visual_cockpit` 保留为历史别名，
+  同名时 `[visualization]` 优先。主 HUD 位置可记忆到 `~/.jarvis/ui_state.json`。
+- **并行工具状态**：`CockpitState` 从单个 `current` 扩展为
+  `active[tool_use_id]`，并行工具不再互相覆盖；主 HUD 显示“N 个工具并行”。
+- **实现说明**：卡片逻辑拆为 `agent/ui/cockpit_cards.py`（`CardPlanner` 纯逻辑 +
+  `CardManager` Tk 线程），共享配色/截断工具抽到 `agent/ui/hud_theme.py`；
+  退出时显式断开卡片对 Tk 根的引用，避免 `Tcl_AsyncDelete` 崩进程。
+  方案见 [cockpit-multicards.md](docs/plans/cockpit-multicards.md)。
+
+### 新增（独立任务驾驶舱 C1b，2026-11-08）
+
+- **独立 HUD 驾驶舱窗口**：tkinter 无边框深色窗口，右上角置顶、整面可拖动、
+  自绘关闭按钮。首次任务开始时弹出，实时显示当前工具、三格指标（步骤 /
+  失败 / 耗时）、执行序列、数据流与抓取列表。**任务结束窗口不关闭**，保留
+  最终汇总；手动关闭后本会话不再弹出。`[ui] visual_cockpit = "window"`
+  （默认）/ `"off"`；语音会话不弹窗。
+  - 线程模型：Tk 独占后台守护线程，模型线程只投递事件队列；窗口创建失败的
+    环境自动禁用并记诊断，不影响对话；退出时在 Tk 线程内释放对象，避免
+    `Tcl_AsyncDelete` 崩溃。
+  - 原「终端底部内嵌 Rich Live」方案（C1）按 2026-11-08 用户决策移除，
+    显示阈值、高度降级与 Live 互斥一并删除；`CockpitState` 保留为窗口数据源。
+  - `web_fetch` 仍由 trace 在 `on_tool_after` 派生（`WebFetch` /
+    `BrowserNavigate`），工具实现零改动；缺失字段省略，不写假值。
+    `/trace` 回看保留三类事件渲染。
+  - 顺带保留：思考面板抽到 `agent/ui/thinking_panel.py`；修复 `tool_end`
+    失败且错误摘要为空时 `render_event` 抛 `IndexError`。
+
 ### 修复（2026-11-08）
 
+- **驾驶舱点 ✕ 导致 jarvis 退出**：关闭时 `destroy()` 销毁 Tk 后，`finally` 又调用
+  `winfo_exists()`，命中已释放的 Tcl 解释器，实机报 `alloc: invalid block` 并退出
+  整个进程；同时旧语义是“本会话永久关闭”，关闭后无法再显示。改为：点 ✕ 只
+  `withdraw` 隐藏、不退出；下一轮任务首个工具自动 `deiconify` 重现；进程退出时
+  单次销毁（不再调用任何已销毁 Tk 的方法）。复盘见
+  [cockpit-window-close-exit-fix.md](docs/fixlogs/cockpit-window-close-exit-fix.md)。
+- **cmd 下思考面板不显示**：cmd 是 legacy Windows 控制台（`legacy_windows=True`），
+  Rich Live 的原地刷新/擦除不可靠，思考面板帧画不出来；Git Bash 因非 TTY 走静态
+  打印反而正常。改为 legacy 控制台与“输出被重定向”同口径降级为静态模式，
+  并用纯文本分隔块替代 Rich Panel（Panel 在 legacy 渲染器下会竖排乱码），
+  思考结束一次性打印完整内容。复盘见
+  [cmd-thinking-panel-legacy-console-fix.md](docs/fixlogs/cmd-thinking-panel-legacy-console-fix.md)。
 - **窗口跟随首次动作被节流吞掉**：节流判断原来用 `0.0` 表示“从未执行”，
   Linux 上 `time.monotonic()` 是开机秒数，CI 新虚拟机的 uptime 低于阈值时
   首次“定位目录 / 显示窗口”会被误判为重复而直接跳过；改为 `None` 哨兵，

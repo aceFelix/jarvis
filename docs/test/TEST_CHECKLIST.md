@@ -304,7 +304,7 @@
 | T-381 | 日常对话不误唤醒 | 待机状态下说「甲维集团」「加个微信」「价格维持不变」 | **不**被唤醒（单测 `TestNoFalseWake`，11 条日常语句零误报） |
 | T-382 | 唤醒词可换 | `[voice] wake_words = ["星期五"]` 后重启，进待机 | 横幅显示「说「星期五」唤醒我」（不再是「贾维斯」）；喊「星期五」或其近音「星其舞」都能唤醒（单测 `test_wake_hint_uses_configured_word` / `test_configured_wake_word_is_detected`） |
 | T-383 | 唤醒词作为 ASR 热词下发 | 进 /voice 后看服务端会话配置（或抓 WebSocket 帧） | `session.update` 的 `input_audio_transcription.corpus.text` = 配置的第一个唤醒词；未配则无该项（单测 `test_stt_qwen_session.py::TestHotwordsReachServer`） |
-| T-384 | 打断后不留悬空输出流 | /voice 下让 jarvis 长回答，中途说「停」/按 ESC 打断，再让它回答一轮 | 新一**不会**夹着上一轮被断的语音；单测 `test_tts_stream_lifecycle.py::TestBargeInReleasesStream`（stop 后流必须已关、两轮输出流不并存） |
+| T-384 | 打断后不留悬空输出流 | /voice 下让 jarvis 长回答，中途按空格打断，再让它回答一轮 | 新一**不会**夹着上一轮被断的语音；单测 `test_tts_stream_lifecycle.py::TestBargeInReleasesStream`（stop 后流必须已关、两轮输出流不并存） |
 | T-385 | 长回答末尾不被掐断 | 让 jarvis 调一个慢工具（如联网搜索）再说长段结论，听完整个回复 | 最后一句完整说完，不会“说一半就断”；单测 `test_tts_playback_drain.py::test_long_gap_does_not_underestimate`（停 6 秒后 remaining 仍 > 0.9s） |
 | T-386 | 语音不可用时不让用户瞎猜 | 把 `DASHSCOPE_API_KEY` 改成无效值后进 /voice 说一句话 | 文字照常上屏，同时明确提示「⚠ TTS 连接建立失败，本轮只显示文字…」；不再静默无声（单测 `TestSilentDropDegrades`） |
 
@@ -321,7 +321,10 @@
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
 | T-128 | 完整闭环 | `/voice` 后说"现在几点" | 听→想→说全链路正常 |
-| T-129 | ESC 打断 | Agent 朗读时按 ESC | 立即停止朗读 |
+| T-129 | 空格打断 | Agent 朗读时按空格 | 立即停止朗读 |
+| T-133 | 静默待机 | /voice 聆听时 10 秒不说话 | 自动进入待机；说「贾维斯」可唤醒 |
+| T-134 | 无声音不误唤醒 | 待机 1–2 分钟不说话，环境有普通说话/噪音 | 不自动唤醒；喊「贾维斯」仍能唤醒 |
+| T-135 | 对话沉默不幻听 | 回复结束后不说话，等 10 秒进待机 | 不出现“🧑 你说: 贾维斯”，只提示没听清/进待机 |
 | T-130 | 退出词 | 说"退下" | 退出语音模式 |
 | T-131 | 多轮连续对话 | 连续问 3 个问题 | 每轮正确闭环 |
 | T-132 | 思考隔离 | 开启 /think 后语音对话 | 思考内容只显示不朗读 |
