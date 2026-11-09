@@ -61,10 +61,10 @@ from agent.permissions import parse_mode
 from agent.prompts.system import compose_system_prompt
 from agent.session_manager import (
     _auto_save,
-    _generate_session_title,
-    _generate_title_from_first_user,
+    advance_session,
 )
 from agent.ui.cli import RichCLI
+from agent.ui.cockpit import VisualOptions
 
 
 def _install_quiet_loop_exception_handler() -> None:
@@ -103,7 +103,11 @@ async def repl(settings: Settings) -> int:
     @author aceFelix
     """
     _install_quiet_loop_exception_handler()
-    ui = RichCLI(verbose=settings.verbose, boot_animation=settings.boot_animation)
+    ui = RichCLI(
+        verbose=settings.verbose,
+        boot_animation=settings.boot_animation,
+        visual_options=VisualOptions.from_settings(settings),
+    )
 
     # 版本自检（Phase 1）：后台线程查 PyPI 最新版，非阻塞、24h 节流。
     # 检出更新时仅打印一行提示（/update 一键升级），不影响启动速度。
@@ -442,6 +446,11 @@ async def repl(settings: Settings) -> int:
                 recovery = cmd_ctx.recovery
                 orchestrator = cmd_ctx.orchestrator
                 _dialog_count = cmd_ctx.dialog_count
+                # /voice 等命令内部可能推进轮数并生成标题（与文本共用
+                # advance_session），把名字与标题状态一起收回本地变量。
+                # @author aceFelix
+                _session_name = cmd_ctx.session_name or _session_name
+                _title_generated = bool(cmd_ctx.title_generated)
 
                 # /load 加载会话后恢复轮数/标题状态：
                 # 继续加载前的轮数计数（如加载 3 轮 → 下一轮是第 4 轮），
@@ -529,13 +538,25 @@ async def repl(settings: Settings) -> int:
                     f"reason={stats.stopped_reason} "
                     f"tokens={stats.usage.input_tokens}+{stats.usage.output_tokens}{_cache_hint}]"
                 )
-            # 每轮对话后增量保存（防窗口被强杀丢失记忆）
-            _dialog_count += 1
+            # 每轮对话后：轮数 +1、增量保存、按需生成标题。
+            # 统一走 advance_session，与终端 /voice 共用同一套 15 字标题逻辑
+            # （2026-11-09：语音会话此前只有时间戳名字，从不生成标题）。
+            # @author aceFelix
+            _session_name, _dialog_count, _title_generated = await advance_session(
+                ui,
+                messages,
+                session_name=_session_name,
+                dialog_count=_dialog_count,
+                title_generated=_title_generated,
+                provider=provider,
+                model=model,
+                workdir=settings.workdir,
+                settings=settings,
+            )
+            cmd_ctx.session_name = _session_name
             cmd_ctx.dialog_count = _dialog_count
-            _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
-                       session_name=_session_name, verbose=False,
-                       dialog_count=_dialog_count, title_generated=_title_generated,
-                       settings=settings)
+            cmd_ctx.title_generated = _title_generated
+            cmd_ctx.ctx.extra["session_name"] = _session_name
             # 写恢复点（崩溃恢复用）
             try:
                 from agent.core.memory.recovery import save_recovery_point
@@ -548,21 +569,6 @@ async def repl(settings: Settings) -> int:
                 )
             except Exception:
                 pass
-
-            # 1轮对话后用用户首句生成标题；2轮对话后用 LLM 根据前两轮生成标题
-            # 注意：加载的会话已带标题（_title_generated=True），任何分支都不再生成
-            if _dialog_count == 1 and not _title_generated:
-                _session_name = await _generate_title_from_first_user(
-                    ui, messages, _session_name
-                )
-                cmd_ctx.session_name = _session_name
-            elif _dialog_count == 2 and len(messages) >= 4 and not _title_generated:
-                _title_generated = True
-                cmd_ctx.title_generated = True
-                _session_name = await _generate_session_title(
-                    ui, provider, model, messages, _session_name
-                )
-                cmd_ctx.session_name = _session_name
         except (KeyboardInterrupt, asyncio.CancelledError):
             ctx.abort_event.set()
             ui.warn("已中断（按回车继续）")

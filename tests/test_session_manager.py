@@ -35,6 +35,7 @@ from agent.session_manager import (
     _render_session,
     _sanitize_title,
     _save_session,
+    advance_session,
 )
 
 
@@ -262,6 +263,25 @@ class TestGenerateTitleFromFirstUser:
         result = await _generate_title_from_first_user(ui, messages, "old")
         assert result == "第二条才是正文"
 
+    async def test_url_stripped_before_truncation(self, jarvis_home) -> None:
+        """先剥 URL 再截 15 字：实机标题曾被切成「jarvsi帮我抓取一下htt」。"""
+        ui = StubUI()
+        messages = [
+            Message.user_text("jarvsi帮我抓取一下https://ailhz.top/这个网页内容"),
+        ]
+        result = await _generate_title_from_first_user(ui, messages, "session-old")
+        assert "http" not in result
+        assert result.startswith("jarvsi")
+
+    async def test_url_only_falls_back_to_raw_text(self, jarvis_home) -> None:
+        """用户只发了一个链接：清洗后为空 → 回退原文，不能生成空标题。"""
+        ui = StubUI()
+        result = await _generate_title_from_first_user(
+            ui, [Message.user_text("https://example.com/abc")], "session-old"
+        )
+        assert result
+        assert result != "session-old"
+
     async def test_exception_returns_old_name(self, jarvis_home, monkeypatch) -> None:
         """内部异常时回退旧名。"""
         ui = StubUI()
@@ -392,6 +412,122 @@ class TestAutoSave:
         ui = StubUI()
         _auto_save(ui, [Message.user_text("x")], session_name="s1")  # 不抛异常
         assert ui.calls == []
+
+
+class TestAdvanceSession:
+    """统一会话收尾 advance_session（文本 REPL 与 /voice 共用）。
+
+    2026-11-09 用户反馈：语音会话只留时间戳名字、从不生成标题。
+    收尾逻辑收敛到 advance_session 后，两条路径生成 15 字以内标题的规则一致。
+    """
+
+    async def test_first_turn_generates_title_without_llm(self, jarvis_home) -> None:
+        """第 1 轮：取用户首句前 15 字做标题，不调用 LLM。"""
+        ui = StubUI()
+        messages = [
+            Message.user_text("帮我看看电脑为什么这么卡，风扇一直响"),
+            Message.assistant_text("好的，我先看一下进程。"),
+        ]
+        name, count, titled = await advance_session(
+            ui,
+            messages,
+            session_name="session-20261109-164502",
+            dialog_count=0,
+            title_generated=False,
+            settings=None,
+        )
+        assert count == 1
+        assert titled is False
+        # 先截前 15 字再清标点（逗号被去掉，标题共 15 字）
+        assert name == "帮我看看电脑为什么这么卡风扇"
+        assert len(name) <= 15
+        assert (jarvis_home / "sessions" / f"{name}.json").exists()
+
+    async def test_second_turn_uses_llm_title(self, jarvis_home) -> None:
+        """第 2 轮：用前两轮对话让 LLM 生成标题。"""
+        from agent.llm.base import Stop, TextDelta
+
+        ui = StubUI()
+        provider = FakeTitleProvider([TextDelta(text="网络排障"), Stop()])
+        messages = [
+            Message.user_text("帮我看看为什么连不上网"),
+            Message.assistant_text("先检查网卡状态"),
+            Message.user_text("网卡显示已连接"),
+            Message.assistant_text("那可能是 DNS"),
+        ]
+        name, count, titled = await advance_session(
+            ui,
+            messages,
+            session_name="session-old",
+            dialog_count=1,
+            title_generated=False,
+            provider=provider,
+            model="qwen",
+            settings=None,
+        )
+        assert count == 2
+        assert titled is True
+        assert name == "网络排障"
+
+    async def test_existing_title_is_kept(self, jarvis_home) -> None:
+        """已有标题（/load 恢复或用户改名）不再生成。"""
+        ui = StubUI()
+        messages = [Message.user_text("随便聊聊"), Message.assistant_text("好的")]
+        name, count, titled = await advance_session(
+            ui,
+            messages,
+            session_name="已有标题",
+            dialog_count=0,
+            title_generated=True,
+            settings=None,
+        )
+        assert name == "已有标题"
+        assert count == 1
+        assert titled is True
+
+    async def test_empty_messages_noop(self, jarvis_home, monkeypatch) -> None:
+        """没有消息时不动轮数、不落盘。"""
+        save_mock = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+        monkeypatch.setattr(store_mod, "save_session", save_mock)
+        ui = StubUI()
+        name, count, titled = await advance_session(
+            ui,
+            [],
+            session_name="s1",
+            dialog_count=3,
+            title_generated=False,
+        )
+        assert (name, count, titled) == ("s1", 3, False)
+        save_mock.assert_not_called()
+
+    async def test_created_at_survives_rename(self, jarvis_home) -> None:
+        """标题改名后创建时间不变（时间属性不能因改名丢失）。"""
+        ui = StubUI()
+        messages = [Message.user_text("第一次提问"), Message.assistant_text("回答")]
+        name, _count, _titled = await advance_session(
+            ui,
+            messages,
+            session_name="session-20260101-000000",
+            dialog_count=0,
+            title_generated=False,
+            settings=None,
+        )
+        first = json.loads((jarvis_home / "sessions" / f"{name}.json").read_text(encoding="utf-8"))
+        created = first["meta"]["created_at"]
+        assert created > 0
+
+        # 第二轮再次保存（同名文件），created_at 必须保留
+        messages.append(Message.user_text("第二次提问"))
+        await advance_session(
+            ui,
+            messages,
+            session_name=name,
+            dialog_count=1,
+            title_generated=False,
+            settings=None,
+        )
+        second = json.loads((jarvis_home / "sessions" / f"{name}.json").read_text(encoding="utf-8"))
+        assert second["meta"]["created_at"] == created
 
 
 class TestSaveSession:

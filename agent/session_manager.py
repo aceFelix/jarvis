@@ -22,6 +22,7 @@ __all__ = [
     "_rename_session_file",
     "_generate_title_from_first_user",
     "_generate_session_title",
+    "advance_session",
     "_auto_save",
     "_save_session",
     "_load_session",
@@ -102,6 +103,28 @@ def _rename_session_file(old_name: str, title: str) -> str:
     return old_name
 
 
+def _clean_title_source(text: str) -> str:
+    """标题取材清洗：去掉代码块、行内代码、URL 与绝对路径。
+
+    2026-11-09 实机：用户输入「jarvsi帮我抓取一下https://ailhz.top/...」，
+    直接取前 15 字得到 ``jarvsi帮我抓取一下htt``——标题被 URL 残片污染。
+    先剥掉这些“不适合进标题”的片段，再截 15 字。
+
+    Args:
+        text: 用户原始输入。
+
+    Returns:
+        清洗后的文本；若清洗后为空（例如用户只发了一个链接），返回原文，
+        避免生成空标题。
+    """
+    cleaned = re.sub(r"```.*?```", " ", text, flags=re.S)
+    cleaned = re.sub(r"`[^`]*`", " ", cleaned)
+    cleaned = re.sub(r"(?:https?|ftp)://\S+", " ", cleaned)
+    cleaned = re.sub(r"\b[A-Za-z]:\\[^\s]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or text.strip()
+
+
 async def _generate_title_from_first_user(
     ui: RichCLI, messages: list[Message], old_name: str
 ) -> str:
@@ -119,8 +142,9 @@ async def _generate_title_from_first_user(
         if not first_user_text:
             return old_name
 
-        # 取前 15 个字符（中英文混排按字符计）
-        title = first_user_text[:15]
+        # 先剥 URL/代码/路径再截，避免标题切在链接上（2026-11-09 实机）@author aceFelix
+        source = _clean_title_source(first_user_text)
+        title = source[:15]
         title = _rename_session_file(old_name, title)
         if title != old_name:
             ui.info(f"📝 会话标题已生成: {title}")
@@ -200,6 +224,76 @@ async def _generate_session_title(
         return title
     except Exception:
         return old_name
+
+
+async def advance_session(
+    ui: RichCLI,
+    messages: list[Message],
+    *,
+    session_name: str,
+    dialog_count: int,
+    title_generated: bool,
+    provider: Any = None,
+    model: str = "",
+    workdir: str = "",
+    settings: Any = None,
+) -> tuple[str, int, bool]:
+    """一轮对话结束后的统一收尾：轮数 +1、增量保存、按需生成标题。
+
+    **文本 REPL 与终端 ``/voice`` 共用这一套口径**（2026-11-09 用户要求：
+    语音会话此前直接沿用启动时的时间戳名字，从不生成标题）。规则：
+
+    - 第 1 轮：取用户首句的前 15 字做标题（不调 LLM，零延迟）；
+    - 第 2 轮：用前两轮对话让 LLM 生成 ≤15 字标题（需 provider）；
+    - 已有标题（``/load`` 恢复、用户改名）则不再生成；
+    - 每轮都增量落盘，语音轮也会即时保存（此前只在退出时保存）。
+
+    Args:
+        ui: 终端 UI（标题生成成功时打印一行提示）。
+        messages: 本会话完整消息列表（保存与标题生成的来源）。
+        session_name: 当前会话名（通常是时间戳）。
+        dialog_count: 本轮之前的已完成轮数。
+        title_generated: 是否已有标题（True 时跳过生成）。
+        provider: LLM provider；第 2 轮 LLM 标题需要，缺省时跳过第 2 轮标题。
+        model: 模型名。
+        workdir: 工作目录（写入会话元信息）。
+        settings: 设置对象；传入时顺带触发画像记忆提炼。
+
+    Returns:
+        ``(session_name, dialog_count, title_generated)`` 更新后的三元组。
+
+    @author aceFelix
+    """
+    if not messages:
+        return session_name, dialog_count, title_generated
+
+    dialog_count += 1
+    _auto_save(
+        ui,
+        messages,
+        workdir=workdir,
+        model=model,
+        provider=getattr(settings, "provider", "") or "",
+        session_name=session_name,
+        verbose=False,
+        dialog_count=dialog_count,
+        title_generated=title_generated,
+        settings=settings,
+    )
+
+    if dialog_count == 1 and not title_generated:
+        session_name = await _generate_title_from_first_user(ui, messages, session_name)
+    elif (
+        dialog_count == 2
+        and len(messages) >= 4
+        and not title_generated
+        and provider is not None
+    ):
+        title_generated = True
+        session_name = await _generate_session_title(
+            ui, provider, model, messages, session_name
+        )
+    return session_name, dialog_count, title_generated
 
 
 def _auto_save(
@@ -332,7 +426,12 @@ def _load_by_picker(ui: RichCLI, messages: list[Message]) -> dict | None:
     # 转 pick_from_list 格式 [(value, label, description), ...]
     items = []
     for s in sessions:
+        created = ""
         ts = ""
+        try:
+            created = datetime.fromtimestamp(s.created_at).strftime("%m-%d %H:%M")
+        except Exception:
+            pass
         try:
             ts = datetime.fromtimestamp(s.updated_at).strftime("%m-%d %H:%M")
         except Exception:
@@ -340,7 +439,7 @@ def _load_by_picker(ui: RichCLI, messages: list[Message]) -> dict | None:
         items.append((
             s.name,
             s.name,
-            f"{s.message_count}条消息  {ts}",
+            f"{s.message_count}条消息  创建 {created} · 更新 {ts}",
         ))
 
     from agent.ui.terminal_picker import pick_from_list
@@ -415,13 +514,17 @@ def _list_sessions(ui: RichCLI) -> None:
         table = Table(title="已保存会话", show_lines=False)
         table.add_column("名称", style="cyan", no_wrap=True)
         table.add_column("消息数", justify="right", style="green")
+        # 标题命名不含时间戳，靠这两列回答“哪个会话是什么时候的”
+        table.add_column("创建时间", style="dim")
         table.add_column("更新时间", style="dim")
         table.add_column("工作目录", style="dim")
         for s in sessions:
+            created = datetime.fromtimestamp(s.created_at).strftime("%Y-%m-%d %H:%M")
             ts = datetime.fromtimestamp(s.updated_at).strftime("%Y-%m-%d %H:%M")
-            table.add_row(s.name, str(s.message_count), ts, s.workdir)
+            table.add_row(s.name, str(s.message_count), created, ts, s.workdir)
         ui._console.print(table)
     else:
         for s in sessions:
+            created = datetime.fromtimestamp(s.created_at).strftime("%Y-%m-%d %H:%M")
             ts = datetime.fromtimestamp(s.updated_at).strftime("%Y-%m-%d %H:%M")
-            print(f"  {s.name}  ({s.message_count} 条, {ts})  {s.workdir}")
+            print(f"  {s.name}  ({s.message_count} 条, 创建 {created}, 更新 {ts})  {s.workdir}")

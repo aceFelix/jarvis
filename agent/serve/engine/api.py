@@ -123,6 +123,9 @@ class WorkbenchAPI:
             return [
                 {
                     "name": s.name,
+                    # created_at：会话创建时间（标题命名不再带时间戳后，
+                    # 前端据此回答“这个会话是什么时候的”）。@author aceFelix
+                    "created_at": s.created_at,
                     "updated_at": s.updated_at,
                     "message_count": s.message_count,
                     "model": s.model,
