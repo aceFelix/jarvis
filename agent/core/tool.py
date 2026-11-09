@@ -263,6 +263,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_box import EmailBoxTool
     from agent.tools.extensions.email_tool import SendEmailTool
+    from agent.tools.web.crawl import CrawlTool
+    from agent.tools.web.extract import WebExtractTool
     from agent.tools.web.web import WebFetchTool, WebSearchTool
 
     registry = ToolRegistry()
@@ -287,6 +289,10 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
+    # 爬虫能力 P1：按 CSS 选择器把单页抽成字段表（爬虫驾驶舱抽取区数据源）
+    registry.register(WebExtractTool())
+    # 爬虫能力 P2：BFS 多页抓取（web_fetch.parent_url/depth + crawl_stats 数据源）
+    registry.register(CrawlTool())
     registry.register(SendEmailTool())
     # 收件箱查看/搜索/回复（全程只读，不改邮箱状态）@author aceFelix
     registry.register(EmailBoxTool())

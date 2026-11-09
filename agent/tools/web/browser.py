@@ -667,3 +667,63 @@ async def search_via_browser(
                 await manager.close()
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Crawl 浏览器降级（P4）—— 临时页面渲染单页
+# ---------------------------------------------------------------------------
+
+
+async def fetch_via_browser(url: str, *, timeout_s: float = 20.0) -> tuple[str, int]:
+    """用无头浏览器渲染单页，返回 ``(html, http_status)``（Crawl 降级后端）。
+
+    @author aceFelix
+
+    与 Browser* 工具的区别：开**临时 page**、渲染完即关，不导航也不改变用户/
+    模型正在操作的共享页面；浏览器实例与 Browser* 共用（懒启动）。本函数不
+    负责关闭浏览器——一次爬取可能连续渲染多页，统一由调用方在结束时
+    :func:`close_browser`，避免每页都重启浏览器。
+
+    Args:
+        url: 目标 URL（http/https）。
+        timeout_s: 导航超时秒数。
+
+    Returns:
+        ``(页面 HTML, HTTP 状态码)``；浏览器没拿到响应时状态码为 0。
+
+    Raises:
+        Exception: playwright 未安装或导航失败，由调用方兜获并把该页标记失败。
+    """
+    timeout_ms = int(max(1.0, float(timeout_s)) * 1000)
+    shared = await _manager.get_page(headless=True)
+    tmp = None
+    try:
+        tmp = await shared.context.new_page()
+        response = await tmp.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        # 等 JS 渲染完成（networkidle 超时不致命，用当前 DOM 继续）
+        try:
+            await tmp.wait_for_load_state("networkidle", timeout=min(5000, timeout_ms))
+        except Exception:  # noqa: BLE001, S110 - networkidle 超时不致命，用当前 DOM 继续
+            pass
+        html = await tmp.content()
+        status = int(getattr(response, "status", 0) or 0) if response is not None else 0
+        return html, status
+    finally:
+        if tmp is not None:
+            try:
+                await tmp.close()
+            except Exception:  # noqa: BLE001, S110 - 关闭临时页失败不影响结果
+                pass
+
+
+def browser_active() -> bool:
+    """共享浏览器是否已启动（爬取前记录，用于决定结束时是否要关）。"""
+    return _manager.is_active
+
+
+async def close_browser() -> None:
+    """关闭共享浏览器（幂等）；由爬取在“本次自己启动浏览器”时收尾调用。"""
+    try:
+        await _manager.close()
+    except Exception:  # noqa: BLE001, S110 - 关闭失败无需上抛
+        pass

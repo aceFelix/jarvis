@@ -87,6 +87,25 @@ def _line_diff(old: str, new: str) -> dict[str, int]:
     return {"added": added, "removed": removed}
 
 
+def _agent_meta(ctx: Any) -> dict[str, str]:
+    """从 ``ToolContext.extra`` 取子代理身份，供事件标注与主任务过滤。
+
+    字段缺失时返回空字典（不写假值）。@author aceFelix
+    """
+    extra = getattr(ctx, "extra", None)
+    if not isinstance(extra, dict):
+        return {}
+    agent_id = extra.get("agent_id")
+    if not agent_id:
+        return {}
+    meta = {"agent_id": str(agent_id)}
+    for key in ("agent_name", "agent_mode"):
+        value = extra.get(key)
+        if value:
+            meta[key] = str(value)
+    return meta
+
+
 def _target_of(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
     """从工具入参提取"操作目标"，供终端展示与窗口跟随。"""
     for key in ("file_path", "filePath", "path"):
@@ -119,6 +138,10 @@ class TraceRecorder:
     ui: Any = None
     director: Any = None
     observer: Any = None
+    # 事件旁路出口（C1 终端驾驶舱）：每条记录在落盘与滚动行之外再交给它一份。
+    # 必须与主流程隔离——sink 抛异常不能影响工具执行或 JSONL 落盘。
+    # @author aceFelix
+    on_event: Any = None
     base_dir: Path = TRACE_ROOT
     current_events: list[dict[str, Any]] = field(default_factory=list)
     last_run_events: list[dict[str, Any]] = field(default_factory=list)
@@ -250,8 +273,11 @@ class TraceRecorder:
             "started": time.monotonic(),
             "tool": tool,
             "input": tool_input,
+            "agent": _agent_meta(ctx),
         }
-        self._steps += 1
+        # 子代理的工具调用不计入主任务步数；事件照常落盘并带 agent_id。
+        if not _agent_meta(ctx):
+            self._steps += 1
         self._emit(
             {
                 "type": "tool_start",
@@ -259,6 +285,7 @@ class TraceRecorder:
                 "tool_use_id": tool_use_id,
                 "target": _target_of(tool, tool_input),
                 "input": _slim_input(tool_input),
+                **_agent_meta(ctx),
             }
         )
         # 窗口跟随：交由通用观察器判定（快照差分 + 入参线索），不再按工具名分支
@@ -291,10 +318,12 @@ class TraceRecorder:
             return
         tool_use_id = str(payload.get("tool_use_id") or "")
         pending = self._pending.pop(tool_use_id, None)
+        agent_meta = pending.get("agent") if pending else _agent_meta(payload.get("ctx"))
         started = pending["started"] if pending else time.monotonic()
         duration = int((time.monotonic() - started) * 1000)
         is_error = bool(payload.get("is_error"))
-        if is_error:
+        if is_error and not (agent_meta or {}):
+            # 子代理失败不计入主任务失败数；它由代理卡自己汇总
             self._failed += 1
         error = ""
         if is_error:
@@ -309,8 +338,54 @@ class TraceRecorder:
                 "duration_ms": duration,
                 "error": error,
                 "result_chars": len(str(payload.get("result") or "")),
+                **(agent_meta or {}),
             }
         )
+        # 抓取类工具派生 web_fetch（工具实现零改动，见 docs/plans/terminal-cockpit.md）。
+        # 字段缺失即省略：http_status / parent_url / depth 本轮无数据源，不写假值。
+        # @author aceFelix
+        if pending is not None:
+            fetch_tool = str(pending.get("tool") or "")
+            fetch_url = str((pending.get("input") or {}).get("url") or "")
+            if fetch_url and fetch_tool in ("WebFetch", "BrowserNavigate"):
+                derived: dict[str, Any] = {
+                    "type": "web_fetch",
+                    "url": fetch_url,
+                    "status": "error" if is_error else "ok",
+                    "duration_ms": duration,
+                }
+                if fetch_tool == "WebFetch":
+                    # BrowserNavigate 不返回页面正文，字节数不适用，省略
+                    derived["bytes"] = len(str(payload.get("result") or ""))
+                derived.update(agent_meta or {})
+                self._emit(derived)
+            # 结构化旁路：工具把要上驾驶舱的数据放在 ToolResult.trace_meta。
+            # WebExtract 上报单条 web_extract；Crawl 批量上报 web_fetch /
+            # web_extract / crawl_stats，这里统一按“dict 或 list”展开。@author aceFelix
+            trace_meta = payload.get("trace_meta")
+            if isinstance(trace_meta, dict):
+                for fetch in _as_event_list(trace_meta.get("web_fetch")):
+                    if not fetch.get("url"):
+                        continue
+                    self._emit({"type": "web_fetch", **fetch, **(agent_meta or {})})
+                for extracted in _as_event_list(trace_meta.get("web_extract")):
+                    if not extracted.get("url"):
+                        continue
+                    extract_event: dict[str, Any] = {
+                        "type": "web_extract",
+                        "url": extracted.get("url"),
+                        "fields": extracted.get("fields") or {},
+                    }
+                    missing = extracted.get("missing") or []
+                    if missing:
+                        extract_event["missing"] = list(missing)
+                    if extracted.get("selector"):
+                        extract_event["selector"] = extracted["selector"]
+                    extract_event.update(agent_meta or {})
+                    self._emit(extract_event)
+                stats = trace_meta.get("crawl_stats")
+                if isinstance(stats, dict):
+                    self._emit({"type": "crawl_stats", **stats, **(agent_meta or {})})
         # 记录这一步新出现的窗口，供收尾判定"哪些是中间产物、哪些是最终结果"
         current = self._snapshot_windows()
         self._step_new.append(set(current) - set(self._step_start))
@@ -553,12 +628,33 @@ class TraceRecorder:
         line = render_event(record)
         if line:
             safe_info(self.ui, line)
+        # 驾驶舱等旁路消费者：异常完全隔离，观测失败不能中断任务
+        sink = self.on_event
+        if sink is not None:
+            try:
+                sink(record)
+            except Exception:
+                pass
 
     def _cancel_end_timer(self) -> None:
         timer = self._end_timer
         if timer is not None:
             timer.cancel()
             self._end_timer = None
+
+
+def _as_event_list(value: Any) -> list[dict[str, Any]]:
+    """把 ``trace_meta`` 的单条 dict 或批量 list 统一成事件列表。
+
+    过滤非 dict 项，避免工具意外塞入字符串/None 把派生事件弄脏。
+
+    @author aceFelix
+    """
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
 
 
 def _is_close_intent(tool_name: str, tool_input: dict[str, Any]) -> bool:
@@ -637,6 +733,8 @@ def install_observability(settings: Any, ui: Any) -> TraceRecorder:
         cleanup_unknown=str(
             getattr(settings, "window_cleanup_unknown", "keep") or "keep"
         ),
+        # 终端驾驶舱的事件旁路；无该方法的 UI（serve/wechat/bridge）保持零副作用
+        on_event=getattr(ui, "on_trace_event", None),
     )
 
     # 通用窗口观察器：快照差分决定跟随，不依赖工具名（见 docs/plans/window-observer.md）

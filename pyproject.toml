@@ -30,6 +30,9 @@ dependencies = [
     # （serve 退出码 3 / 实时语音直接报错），2026-09 起升级为核心依赖。
     "websockets>=13.0",
     "tomli>=2.0; python_version < '3.11'",
+    # 网页结构化抽取（WebExtract，爬虫驾驶舱 P1）：完整 CSS 选择器 + 脏 HTML 容错。
+    # 解析后端固定用内置 html.parser，不引 lxml（避免桌面打包带编译依赖）。
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]

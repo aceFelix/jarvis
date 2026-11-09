@@ -89,6 +89,9 @@ class ToolResult:
         retryable: 本次失败是否适合由自愈层自动重试。默认 True；工具可置 False
             表示「换参重试再试一次」毫无意义且可能有副作用（如命令跑满超时、
             已产生外部副作用的失败），此时错误层会直接交回模型决策而不重跑。
+        trace_meta: 供 trace 派生结构化事件使用的轻量数据（如 WebExtract 的字段表）。
+            不进入 tool_result 文本、不参与结果截断；默认空字典。
+            @author aceFelix
     """
 
     data: Any = None
@@ -96,6 +99,7 @@ class ToolResult:
     is_error: bool = False
     images: list["ImageContent"] = field(default_factory=list)
     retryable: bool = True
+    trace_meta: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def ok(cls, data: Any, *, images: list["ImageContent"] | None = None) -> ToolResult:

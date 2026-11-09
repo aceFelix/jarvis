@@ -442,3 +442,282 @@ def test_chinese_path_survives_json_roundtrip(tmp_path) -> None:
     rec.finish_run()
     events = _read_events(rec)
     assert events[1]["target"]["path"] == "E:/项目/说明.md"
+
+
+def test_web_fetch_derived_after_webfetch(tmp_path) -> None:
+    """WebFetch 结束后派生 1 条 web_fetch：bytes=结果长度，耗时为同一步时长。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before(
+        {
+            "tool_name": "WebFetch",
+            "tool_use_id": "w1",
+            "tool_input": {"url": "https://example.com/a"},
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "WebFetch",
+            "tool_use_id": "w1",
+            "result": "x" * 12288,
+            "is_error": False,
+        }
+    )
+
+    events = rec.current_events
+    fetch = [e for e in events if e["type"] == "web_fetch"]
+    end = [e for e in events if e["type"] == "tool_end"][0]
+    assert len(fetch) == 1
+    assert fetch[0]["url"] == "https://example.com/a"
+    assert fetch[0]["status"] == "ok"
+    assert fetch[0]["bytes"] == 12288
+    assert fetch[0]["duration_ms"] == end["duration_ms"]
+    # 无数据源的字段直接省略，不写假值
+    assert "http_status" not in fetch[0]
+    assert "parent_url" not in fetch[0]
+    # web_fetch 不在实时滚动区重复打印（只在 /trace 回看时渲染）
+    assert not any("🌐" in line for line in rec.ui.lines)
+
+
+def test_web_fetch_derived_for_browser_navigate_without_bytes(tmp_path) -> None:
+    """BrowserNavigate 也派生 web_fetch，但不写不适用的 bytes。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before(
+        {
+            "tool_name": "BrowserNavigate",
+            "tool_use_id": "n1",
+            "tool_input": {"url": "https://example.com/b"},
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "BrowserNavigate",
+            "tool_use_id": "n1",
+            "result": "",
+            "is_error": False,
+        }
+    )
+
+    events = _read_events_after_finish(rec)
+    fetch = [e for e in events if e["type"] == "web_fetch"]
+    assert len(fetch) == 1
+    assert "bytes" not in fetch[0]
+
+
+def test_web_fetch_not_derived_for_search(tmp_path) -> None:
+    """WebSearch 的 query 不是 URL，不产生 web_fetch。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before(
+        {
+            "tool_name": "WebSearch",
+            "tool_use_id": "s1",
+            "tool_input": {"query": "react 19"},
+        }
+    )
+    rec.on_tool_after(
+        {"tool_name": "WebSearch", "tool_use_id": "s1", "result": "ok", "is_error": False}
+    )
+    rec.finish_run()
+
+    events = _read_events(rec)
+    assert not [e for e in events if e["type"] == "web_fetch"]
+
+
+def test_web_extract_derived_from_trace_meta(tmp_path) -> None:
+    """WebExtract 的 trace_meta 派生 1 条 web_extract；缺失/作用范围按需写入。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before(
+        {
+            "tool_name": "WebExtract",
+            "tool_use_id": "e1",
+            "tool_input": {"url": "https://example.com/post"},
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "WebExtract",
+            "tool_use_id": "e1",
+            "result": "抽取 1/2 个字段",
+            "is_error": False,
+            "trace_meta": {
+                "web_extract": {
+                    "url": "https://example.com/post",
+                    "fields": {"title": "React 19 新特性"},
+                    "missing": ["summary"],
+                    "selector": "article",
+                }
+            },
+        }
+    )
+
+    events = rec.current_events
+    extracted = [e for e in events if e["type"] == "web_extract"]
+    assert len(extracted) == 1
+    assert extracted[0]["url"] == "https://example.com/post"
+    assert extracted[0]["fields"] == {"title": "React 19 新特性"}
+    assert extracted[0]["missing"] == ["summary"]
+    assert extracted[0]["selector"] == "article"
+
+
+def test_crawl_batch_derives_fetches_extracts_and_stats(tmp_path) -> None:
+    """Crawl 的 trace_meta 批量派生：web_fetch 多条 + web_extract + crawl_stats。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before(
+        {
+            "tool_name": "Crawl",
+            "tool_use_id": "c1",
+            "tool_input": {"url": "https://site.test/"},
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "Crawl",
+            "tool_use_id": "c1",
+            "result": "抓取 2 页",
+            "is_error": False,
+            "trace_meta": {
+                "web_fetch": [
+                    {
+                        "url": "https://site.test/",
+                        "status": "ok",
+                        "duration_ms": 10,
+                        "bytes": 5,
+                        "depth": 0,
+                        "kind": "http",
+                    },
+                    {
+                        "url": "https://site.test/a",
+                        "status": "ok",
+                        "duration_ms": 11,
+                        "bytes": 6,
+                        "parent_url": "https://site.test/",
+                        "depth": 1,
+                        "kind": "http",
+                    },
+                ],
+                "web_extract": [
+                    {"url": "https://site.test/a", "fields": {"t": "A"}, "missing": []}
+                ],
+                "crawl_stats": {
+                    "queued": 0,
+                    "done": 2,
+                    "failed": 0,
+                    "dedup_hits": 1,
+                    "bytes": 11,
+                    "elapsed_ms": 100,
+                    "max_pages": 10,
+                    "max_depth": 2,
+                },
+            },
+        }
+    )
+
+    events = rec.current_events
+    fetches = [e for e in events if e["type"] == "web_fetch"]
+    assert [e["url"] for e in fetches] == ["https://site.test/", "https://site.test/a"]
+    assert fetches[1]["parent_url"] == "https://site.test/"
+    assert fetches[1]["depth"] == 1
+    extracts = [e for e in events if e["type"] == "web_extract"]
+    assert len(extracts) == 1
+    assert extracts[0]["fields"] == {"t": "A"}
+    stats = [e for e in events if e["type"] == "crawl_stats"]
+    assert len(stats) == 1
+    assert stats[0]["max_depth"] == 2
+
+
+def test_sink_receives_events(tmp_path) -> None:
+    """on_event 旁路按顺序拿到每条记录。"""
+    rec = _recorder(tmp_path)
+    seen: list[str] = []
+    rec.on_event = lambda event: seen.append(event["type"])
+    rec.start_run()
+    rec.on_tool_before({"tool_name": "Bash", "tool_use_id": "b1", "tool_input": {}})
+    rec.on_tool_after(
+        {"tool_name": "Bash", "tool_use_id": "b1", "result": "ok", "is_error": False}
+    )
+    assert seen == ["run_start", "tool_start", "tool_end"]
+
+
+def test_subagent_events_carry_agent_meta_without_counting(tmp_path) -> None:
+    """子代理工具事件带 agent 元数据，且不计入主任务步数/失败数。
+
+    主 HUD 与工具卡靠 ``agent_id`` 过滤；``/trace`` 回看靠 ``agent_name``
+    标注来源。元数据缺失时不能写假值（主任务事件仍只有 run_id）。
+    """
+    from types import SimpleNamespace
+
+    rec = _recorder(tmp_path)
+    ctx = SimpleNamespace(
+        workdir="E:/proj",
+        extra={
+            "agent_id": "sub-explorer-1",
+            "agent_name": "explorer-1",
+            "agent_mode": "subagent",
+        },
+    )
+    rec.on_tool_before(
+        {
+            "tool_name": "Grep",
+            "tool_use_id": "a1",
+            "tool_input": {"pattern": "TODO"},
+            "ctx": ctx,
+        }
+    )
+    rec.on_tool_after(
+        {
+            "tool_name": "Grep",
+            "tool_use_id": "a1",
+            "result": "权限不足",
+            "is_error": True,
+            "ctx": ctx,
+        }
+    )
+    # 主任务工具照常计数，作为对照
+    rec.on_tool_before(
+        {"tool_name": "Bash", "tool_use_id": "m1", "tool_input": {"command": "date"}}
+    )
+    rec.on_tool_after(
+        {"tool_name": "Bash", "tool_use_id": "m1", "result": "ok", "is_error": False}
+    )
+    rec.finish_run()
+
+    events = _read_events(rec)
+    agent_start = [
+        e for e in events if e["type"] == "tool_start" and e.get("agent_id")
+    ][0]
+    assert agent_start["agent_id"] == "sub-explorer-1"
+    assert agent_start["agent_name"] == "explorer-1"
+    assert agent_start["agent_mode"] == "subagent"
+
+    agent_end = [
+        e for e in events if e["type"] == "tool_end" and e.get("agent_id")
+    ][0]
+    assert agent_end["ok"] is False
+    assert agent_end["agent_id"] == "sub-explorer-1"
+
+    run_end = [e for e in events if e["type"] == "run_end"][0]
+    assert run_end["steps"] == 1   # 只有主任务的 Bash
+    assert run_end["failed"] == 0  # 子代理失败不算主任务失败
+
+
+def test_sink_failure_does_not_break_trace(tmp_path) -> None:
+    """on_event 抛异常：JSONL 照写、滚动行照打。"""
+    rec = _recorder(tmp_path)
+    rec.on_event = lambda event: (_ for _ in ()).throw(RuntimeError("sink boom"))
+    rec.start_run()
+    rec.on_tool_before({"tool_name": "Bash", "tool_use_id": "b2", "tool_input": {}})
+    rec.finish_run()
+
+    events = _read_events(rec)
+    assert [e["type"] for e in events] == ["run_start", "tool_start", "run_end"]
+    assert any("▶ Bash" in line for line in rec.ui.lines)
+
+
+def _read_events_after_finish(rec: TraceRecorder) -> list[dict]:
+    """结束当前轮并读取落盘事件（保持既有断言 helper 的语义）。"""
+    rec.finish_run()
+    return _read_events(rec)

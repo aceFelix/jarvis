@@ -18,6 +18,8 @@ from agent.tools.file_ops.grep import GrepTool
 from agent.tools.todo import TodoWriteTool
 from agent.tools.track_goal import TrackGoalTool
 from agent.tools.location import LocationTool
+from agent.tools.web.crawl import CrawlTool
+from agent.tools.web.extract import WebExtractTool
 from agent.tools.web.web import WebFetchTool, WebSearchTool
 
 __all__ = [
@@ -31,6 +33,8 @@ __all__ = [
     "LocationTool",
     "TodoWriteTool",
     "TrackGoalTool",
+    "CrawlTool",
+    "WebExtractTool",
     "WebFetchTool",
     "WebSearchTool",
 ]

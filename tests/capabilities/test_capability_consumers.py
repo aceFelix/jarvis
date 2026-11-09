@@ -201,7 +201,7 @@ class TestToolSearchNote:
         assert "playwright 浏览器内核" in text
         # 仍然列出了工具本体：只告知，不隐藏
         assert f"## {_BROWSER_TOOL}" in text
-        assert "已加载到可用列表" in text
+        assert "已找到 1 个工具" in text
 
     async def test_all_ok_emits_no_note(self, monkeypatch):
         monkeypatch.setattr(probe_mod, "_probe_all_requirements", _drive_state(ReqState.OK))

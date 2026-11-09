@@ -518,6 +518,9 @@ class ToolOrchestrator:
                 "tool_use_id": tu.id,
                 "result": content_str,
                 "is_error": result.is_error,
+                # 结构化旁路：工具把要上驾驶舱的轻量数据放这里，
+                # 避免 trace 去解析可能被截断的结果文本。@author aceFelix
+                "trace_meta": result.trace_meta,
                 "window_policy": window_policy,
             })
         except Exception:
