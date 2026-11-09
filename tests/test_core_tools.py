@@ -725,6 +725,36 @@ def _registry_with_deferred() -> ToolRegistry:
     return reg
 
 
+class _CoreBrowserTool(Tool):
+    """测试用常驻内置浏览器工具（deferred=False）。"""
+
+    name = "BrowserNavigate"
+    description = "在浏览器中打开网页"
+    input_schema = {"type": "object", "properties": {"url": {"type": "string"}}}
+    deferred = False
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        return ToolResult.ok("ok")
+
+
+class _HugeSchemaTool(Tool):
+    """schema 超大工具：用于验证返回体限长，避免 56KB 级输出被截断。"""
+
+    name = "huge__tool"
+    description = "巨型 schema 工具"
+    input_schema = {
+        "type": "object",
+        "properties": {
+            f"field_{index}": {"type": "string", "description": "x" * 60}
+            for index in range(80)
+        },
+    }
+    deferred = True
+
+    async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        return ToolResult.ok("ok")
+
+
 class TestToolSearch:
     """ToolSearch 延迟工具发现。"""
 
@@ -741,9 +771,17 @@ class TestToolSearch:
         r = await tool.call({"query": "browser"}, ctx)
         assert r.is_error is False
         assert "mcp__browser__navigate" in str(r.data)
-        assert "已加载" in str(r.data)
+        assert "已找到" in str(r.data)
         # 标记为已发现
         assert "mcp__browser__navigate" in ctx.extra["discovered_tools"]
+
+    @pytest.mark.asyncio
+    async def test_chinese_phrase_hits_browser_tool(self) -> None:
+        """中文长词要拆词：实机「浏览器 打开网页」曾整词匹配不到内置浏览器工具。"""
+        tool = ToolSearchTool(_registry_with_deferred())
+        r = await tool.call({"query": "浏览器 打开网页"}, make_ctx("/tmp"))
+        assert r.is_error is False
+        assert "mcp__browser__navigate" in str(r.data)
 
     @pytest.mark.asyncio
     async def test_finds_tool_by_description(self) -> None:
@@ -777,6 +815,40 @@ class TestToolSearch:
         assert "未找到匹配" in text
         assert "未注册" in text  # 说明该能力可能未在本环境注册
         assert "不要继续反复搜索" in text
+
+    @pytest.mark.asyncio
+    async def test_core_tool_marked_available(self) -> None:
+        """已常驻的内置工具也要能搜到，并标注“已可用”（无需加载/无需再猜 schema）。"""
+        reg = ToolRegistry()
+        reg.register(_CoreBrowserTool())
+        tool = ToolSearchTool(reg)
+        ctx = make_ctx("/tmp")
+        r = await tool.call({"query": "浏览器"}, ctx)
+        text = str(r.data)
+        assert "BrowserNavigate" in text
+        assert "已可用" in text
+        # 常驻工具不需要“发现”
+        assert "BrowserNavigate" not in ctx.extra.get("discovered_tools", set())
+
+    @pytest.mark.asyncio
+    async def test_result_body_is_size_capped(self) -> None:
+        """超大 schema 必须被截断，避免一次 ToolSearch 返回几十 KB 被宿主截掉。"""
+        reg = ToolRegistry()
+        reg.register(_HugeSchemaTool())
+        tool = ToolSearchTool(reg)
+        r = await tool.call({"query": "巨型"}, make_ctx("/tmp"))
+        text = str(r.data)
+        assert "huge__tool" in text
+        assert "已截断" in text
+        assert len(text) <= 7000
+
+    def test_expand_keywords_splits_chinese(self) -> None:
+        """中文长词拆二元组并补英文别名。"""
+        from agent.tools.tool_search import _expand_keywords
+
+        words = _expand_keywords("打开网页")
+        assert "打开" in words and "网页" in words
+        assert "navigate" in words and "browser" in words
 
     def test_score_name_hit_high(self) -> None:
         score = ToolSearchTool._score(_DeferredTool(), ["browser"])
