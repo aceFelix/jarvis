@@ -66,13 +66,17 @@ _FRONTIER_FACTOR = 10
 _SUMMARY_PAGES = 15
 _MAX_ERROR_CHARS = 120
 
+# 目录默认页文件名：归一化时从路径尾剥掉（`/a/index.html` ≡ `/a`）
+_INDEX_FILES = frozenset({"index.html", "index.htm", "default.html", "default.htm"})
+
 
 # ---- 纯函数（可单测，不触网）----
 
 
 def normalize_url(url: str) -> str:
     """规范化 URL：去 fragment、scheme/host 小写、去默认端口、路径尾斜杠统一、
-    query 按键排序（避免 ``?a=1&b=2`` 与 ``?b=2&a=1`` 被当成两页）。
+    query 按键排序（避免 ``?a=1&b=2`` 与 ``?b=2&a=1`` 被当成两页），
+    目录默认页归一化（``/index.html`` ≡ ``/``，同页不同 URL 只抓一次）。
 
     Args:
         url: 原始 URL。
@@ -92,6 +96,12 @@ def normalize_url(url: str) -> str:
     default_port = 80 if scheme == "http" else 443
     netloc = host if (port is None or port == default_port) else f"{host}:{port}"
     path = parsed.path or "/"
+    # 目录默认页归一化：站点常同时给出 `/` 与 `/index.html` 两种链接，
+    # 不归一化会把同一页面抓两次（浪费页数额度、驾驶舱多出假节点）。
+    segments = [seg for seg in path.split("/") if seg]
+    if segments and segments[-1].lower() in _INDEX_FILES:
+        segments.pop()
+    path = "/" + "/".join(segments)
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/") or "/"
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))

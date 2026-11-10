@@ -1,18 +1,16 @@
-"""左侧“抓取网络”窗口（C2-lite）：URL 清单 + 汇总 + 抽取表。
+"""左侧“爬虫驾驶舱”窗口：URL 清单 + 汇总 + 抽取表 + 分层拓扑。
 
 用户 2026-11-09 决策：爬虫可视化**不再塞进右侧任务驾驶舱**（430px 放不下），
 改为在**屏幕最左侧**另开一个独立窗口，左右分工：右边看“做了什么”，左边看
 “网络抓了什么”。显示策略：本轮出现第一条抓取才弹出，任务结束保留最终汇总，
 点 ✕ 只隐藏，下一轮有新抓取再出现。
 
-数据全部来自 trace 的 ``web_fetch`` / ``web_extract`` / ``crawl_stats``：
-
-- ``web_fetch`` 由 ``TraceRecorder`` 从 WebFetch / BrowserNavigate 派生（工具零改动），
-  Crawl 的页面事件额外带 ``parent_url`` / ``depth`` / ``kind``；
-- ``web_extract`` 由 WebExtract / Crawl 的 ``ToolResult.trace_meta`` 派生（P1/P2，已接入）；
-- ``crawl_stats`` 由 Crawl 结束时上报的 ``trace_meta`` 派生（P2，已接入）；
-- **拓扑区（P3）**：分层节点 + 父→子连线，节点与抽取行点击互相高亮；
-  单页抓取没有层级时显示“单页抓取，无拓扑”。
+数据全部来自 trace 的 ``web_fetch`` / ``web_extract`` / ``crawl_stats``。
+2026-11-10 P3.5 增加浏览交互：URL/EXTRACT 鼠标滚轮滚动，拓扑 Ctrl+滚轮缩放、
+右键/中键拖动平移、双击右键重置视图，``+N`` 聚合可点击展开；抓取数据仍是只读。
+2026-11-10 P3.6：拓扑区**左键按住拖动 = 撕出为独立窗口**（960×720 可拉伸、
+适应画布），点 ✕ 以 220ms 动画收回原驾驶舱；视图状态经 ``TopoViewState``
+共享，外弹/收回不重置，跨窗口节点↔抽取行高亮联动保持。
 
 @author aceFelix
 """
@@ -22,8 +20,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Callable, Iterable
 
-from agent.ui.cockpit import CockpitState, VisualOptions, _fmt_bytes, _fmt_ms
-from agent.ui.cockpit_crawl_topo import TopologyLayout, build_topology
+from agent.ui.cockpit import FETCH_MAX, CockpitState, VisualOptions, _fmt_bytes, _fmt_ms
+from agent.ui.cockpit_crawl_topo import build_topology
+from agent.ui.cockpit_topo_detach import TearOffGhost, TopoDetachedWindow
+from agent.ui.cockpit_topo_view import TearOffGesture, TopoView, TopoViewState
 from agent.ui.hud_theme import (
     BG,
     CYAN,
@@ -40,6 +40,7 @@ from agent.ui.hud_theme import (
     RED,
     TEXT,
     clip,
+    display_width,
 )
 
 # 左侧窗口尺寸：560×640 容纳 URL 清单 / 抽取表 / 分层拓扑
@@ -79,6 +80,107 @@ def domain_of(url: Any) -> str:
             break
     host = text.split("/", 1)[0].split("?", 1)[0].strip()
     return host or "?"
+
+
+def _strip_scheme(url: Any) -> str:
+    """去掉 http/https 协议前缀，供清单紧凑显示。"""
+    text = str(url or "")
+    for prefix in ("https://", "http://"):
+        if text.startswith(prefix):
+            return text[len(prefix):]
+    return text
+
+
+def _tail_to_width(text: str, limit: int) -> str:
+    """按显示宽度保留字符串尾部。"""
+    out: list[str] = []
+    used = 0
+    for ch in reversed(str(text)):
+        width = 2 if ord(ch) > 0x2E7F else 1
+        if used + width > limit:
+            break
+        out.append(ch)
+        used += width
+    return "".join(reversed(out))
+
+
+def clip_url_tail(url: Any, limit: int = 44) -> str:
+    """URL 智能截断：保留域名和路径尾部，避免同类页面全显示成相同前缀。
+
+    Args:
+        url: 原始 URL。
+        limit: 最大显示宽度。
+
+    Returns:
+        类似 ``books.toscrape.com/…/fiction_10/index.html`` 的紧凑文本。
+    """
+    text = _strip_scheme(url)
+    if display_width(text) <= limit:
+        return text
+    host, sep, path = text.partition("/")
+    prefix_width = display_width(host) + (2 if sep else 1)  # '/' + '…'
+    if sep and prefix_width < limit - 6:
+        parts = [part for part in path.split("/") if part]
+        # index.html 本身没有辨识度，连同上一级目录一起保留
+        tail_parts = parts[-2:] if parts and parts[-1].lower() in {"index.html", "index.htm"} else parts[-1:]
+        tail = "/".join(tail_parts)
+        tail = _tail_to_width(tail, limit - prefix_width)
+        return f"{host}/…{tail}"
+    head_limit = max(4, limit // 2 - 1)
+    return f"{text[:head_limit]}…{_tail_to_width(text, limit - head_limit - 1)}"
+
+
+def _clamp(value: int, low: int, high: int) -> int:
+    """把整数钳制到闭区间。"""
+    return max(low, min(high, value))
+
+
+def visible_window(items: Iterable[dict[str, Any]], offset: int, limit: int) -> tuple[list[dict[str, Any]], int, int]:
+    """按 offset 取一个可见窗口，并返回 ``(窗口, 钳制后 offset, 总条数)``。"""
+    rows = list(items)
+    max_offset = max(0, len(rows) - max(1, limit))
+    start = _clamp(int(offset), 0, max_offset)
+    return rows[start:start + max(1, limit)], start, len(rows)
+
+
+def fetch_window(
+    fetches: Iterable[dict[str, Any]],
+    offset: int,
+    limit: int = _URL_ROWS,
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    """URL 清单窗口：根页固定置顶，其余按最新在前滚动。
+
+    Returns:
+        ``(可见行, 钳制后 offset, 总条数, 最大 offset)``；offset 只作用于根页以外。
+    """
+    rows = unique_fetches(fetches, FETCH_MAX)
+    root_index = next((i for i, row in enumerate(rows) if isinstance(row.get("depth"), int) and row["depth"] == 0), None)
+    pinned: list[dict[str, Any]] = []
+    if root_index is not None:
+        pinned.append(rows.pop(root_index))
+    capacity = max(1, limit - len(pinned))
+    max_offset = max(0, len(rows) - capacity)
+    start = _clamp(int(offset), 0, max_offset)
+    return pinned + rows[start:start + capacity], start, len(rows) + len(pinned), max_offset
+
+
+def scrollbar_geometry(
+    total: int,
+    visible: int,
+    offset: int,
+    *,
+    top: float,
+    bottom: float,
+    x: float,
+) -> tuple[float, float, float, float] | None:
+    """计算迷你滚动条滑块；无需滚动时返回 None。"""
+    if total <= visible or total <= 0 or bottom <= top:
+        return None
+    height = bottom - top
+    thumb_h = max(16.0, height * min(1.0, visible / total))
+    max_offset = max(1, total - visible)
+    y = top + (height - thumb_h) * (_clamp(offset, 0, max_offset) / max_offset)
+    return (x, y, x + 3, y + thumb_h)
 
 
 def unique_fetches(fetches: Iterable[dict[str, Any]], limit: int = _URL_ROWS) -> list[dict[str, Any]]:
@@ -154,19 +256,45 @@ def summarize(
     }
 
 
+def stats_parts(state: CockpitState) -> list[str]:
+    """底部统计文案：明确区分剩余队列、配置上限与实际到达深度。"""
+    stats = state.stats or {}
+    parts: list[str] = []
+    for label, key in (
+        ("剩余", "queued"), ("完成", "done"), ("失败", "failed"), ("去重", "dedup_hits")
+    ):
+        if stats.get(key) is not None:
+            parts.append(f"{label} {stats.get(key)}")
+    actual_depth = max(
+        (int(item["depth"]) for item in state.fetches if isinstance(item.get("depth"), int)),
+        default=None,
+    )
+    if actual_depth is not None:
+        parts.append(f"实达 L{actual_depth}")
+    if stats.get("max_depth") is not None:
+        parts.append(f"上限 L{stats.get('max_depth')}")
+    if stats.get("bytes") is not None:
+        parts.append(f"字节 {_fmt_bytes(stats.get('bytes'))}")
+    if stats.get("elapsed_ms") is not None:
+        parts.append(f"{float(stats['elapsed_ms']) / 1000:.1f}s")
+    return parts
+
+
 class CrawlWindow:
     """左侧抓取窗口（只在 Tk 线程使用）。
 
-    形态：520×520、无边框、置顶、整面可拖；青色 HUD 造型，与右侧驾驶舱同一
-    视觉语言。内容：四格汇总 + URL 清单 + 抽取表 + 拓扑占位。
+    形态：560×640、无边框、置顶、整面可拖；内容：四格汇总 + 可滚动 URL
+    清单 + 可滚动抽取表 + 可缩放/平移拓扑。
 
     @author aceFelix
     """
 
-    def __init__(self, root: Any, options: VisualOptions, on_close: Callable[[], None]) -> None:
+    def __init__(self, root: Any, options: VisualOptions, on_close: Callable[[], None],
+                 controller: Any) -> None:
         import tkinter as tk
 
         self._options = options
+        self._controller = controller
         self.top = tk.Toplevel(root)
         self.top.overrideredirect(True)
         self.top.attributes("-topmost", True)
@@ -180,17 +308,44 @@ class CrawlWindow:
         )
         self.canvas.pack(fill="both", expand=True)
         self._drag_offset = (0, 0)
-        # 整面可拖（与驾驶舱一致）；关闭按钮用 tag 命中，不影响拖动
+        # 拓扑绘制与视图状态走共享组件；撕出手势只看区域 + 位移（无时间阈值）
+        self.view = TopoView(self.canvas, controller.topo_state, on_change=controller.rerender_all)
+        self._gesture = TearOffGesture()
+        self._press_mode: str | None = None
+        # 整面可拖（拓扑区除外：那里左键拖动 = 撕出）；关闭按钮用 tag 命中
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<ButtonPress-2>", self._on_pan_start)
+        self.canvas.bind("<B2-Motion>", self._on_pan)
+        self.canvas.bind("<ButtonPress-3>", self._on_pan_start)
+        self.canvas.bind("<B3-Motion>", self._on_pan)
+        self.canvas.bind("<Double-Button-3>", lambda _e: self.view.reset_view())
+        self.top.bind("<Escape>", self._on_escape)
         self.canvas.tag_bind("crawl_close", "<Button-1>", lambda _e: on_close())
-        # 节点/抽取行点击：高亮联动（P3，不阻止整窗拖动）
+        # 节点/抽取行/聚合点击：高亮联动或展开；占位区点击收回独立窗
         self.canvas.tag_bind("topo_node", "<Button-1>", self._on_item_click)
+        self.canvas.tag_bind("topo_aggregate", "<Button-1>", self._on_item_click)
         self.canvas.tag_bind("extract_row", "<Button-1>", self._on_item_click)
-        self._selected_url: str | None = None
+        self.canvas.tag_bind("topo_redock", "<Button-1>", lambda _e: controller.undock())
         self._last_state: CockpitState | None = None
-        self._topo_urls: dict[int, str] = {}
         self._extract_urls: dict[int, str] = {}
+        self._url_scroll = 0
+        self._extract_scroll: int | None = None
+
+    # 选中态与命中映射都在共享视图组件里（外弹/收回零迁移）
+    @property
+    def _selected_url(self) -> str | None:
+        return self.view.state.selected_url
+
+    @property
+    def _topo_urls(self) -> dict[int, str]:
+        return self.view.topo_urls
+
+    @property
+    def _aggregate_depths(self) -> dict[int, int]:
+        return self.view.aggregate_depths
 
     # ---- 窗口生命周期 ----
 
@@ -232,6 +387,14 @@ class CrawlWindow:
         except Exception:
             pass
 
+    def reset_interaction(self) -> None:
+        """新一轮抓取重置滚动、选择、展开与拓扑视图（共享状态两窗同步）。"""
+        self.view.state.reset()
+        self._gesture.cancel()
+        self._press_mode = None
+        self._url_scroll = 0
+        self._extract_scroll = None
+
     def destroy(self) -> None:
         """销毁窗口并断开 Tk 引用（必须在 Tk 线程调用）。
 
@@ -248,10 +411,20 @@ class CrawlWindow:
             pass
         del canvas
 
-    # ---- 拖动 ----
+    # ---- 拖动与撕出 ----
+
+    def _can_tear_off(self) -> bool:
+        """拓扑区可撕出的前提：有层级数据、拓扑开启、尚未外弹。"""
+        state = self._last_state
+        return (
+            self._controller.detached is None
+            and self._options.crawl_topology_on()
+            and state is not None
+            and any(isinstance(item.get("depth"), int) for item in state.fetches)
+        )
 
     def _on_press(self, event: Any) -> None:
-        """记录拖动起点。"""
+        """记录拖动起点；拓扑区内左键按下进入撕出跟踪，区外仍为整窗拖动。"""
         try:
             if self.top is not None:
                 self._drag_offset = (
@@ -259,12 +432,29 @@ class CrawlWindow:
                     event.y_root - self.top.winfo_y(),
                 )
                 self.top.lift()
+            y = float(getattr(event, "y", 0))
+            if self._can_tear_off() and _TOPO_TOP <= y <= _TOPO_BOTTOM:
+                self._press_mode = "topo"
+                self._gesture.press(event.x, event.y)
+            else:
+                self._press_mode = "window"
         except Exception:
             pass
 
     def _on_drag(self, event: Any) -> None:
-        """按位移移动窗口，尺寸不变。"""
+        """撕出模式：驱动幽灵预览；否则按位移移动窗口，尺寸不变。"""
         try:
+            if self._press_mode == "topo" and self._gesture.active:
+                was_armed = self._gesture.armed
+                if self._gesture.motion(event.x, event.y):
+                    if not was_armed:
+                        count = sum(
+                            1 for item in (self._last_state.fetches if self._last_state else [])
+                            if isinstance(item.get("depth"), int)
+                        )
+                        self._controller.start_ghost(count)
+                    self._controller.move_ghost(event.x_root, event.y_root)
+                return
             if self.top is not None:
                 x = event.x_root - self._drag_offset[0]
                 y = event.y_root - self._drag_offset[1]
@@ -272,19 +462,74 @@ class CrawlWindow:
         except Exception:
             pass
 
-    def _select(self, url: str) -> None:
-        """选中 URL 并重绘：拓扑节点与抽取行互相高亮；再次点击取消。
-
-        @author aceFelix
-        """
-        if not url:
+    def _on_release(self, event: Any) -> None:
+        """松手：落点判定撕出 / 取消；未武装时按原点击处理（tag 已在按下时触发）。"""
+        if self._press_mode != "topo":
             return
-        self._selected_url = None if self._selected_url == url else url
+        self._press_mode = None
+        try:
+            y = float(getattr(event, "y", 0))
+            inside = _TOPO_TOP <= y <= _TOPO_BOTTOM
+            result = self._gesture.release(event.x, event.y, inside_topo=inside)
+            if result == "detach":
+                self._controller.detach_topology(event.x_root, event.y_root)
+            else:
+                self._controller.cancel_ghost()
+        except Exception:
+            self._controller.cancel_ghost()
+
+    def _on_escape(self, _event: Any = None) -> None:
+        """Esc：取消撕出拖动，无副作用。"""
+        self._gesture.cancel()
+        self._press_mode = None
+        self._controller.cancel_ghost()
+
+    # ---- 滚动与拓扑视图 ----
+
+    def _on_mouse_wheel(self, event: Any) -> None:
+        """普通滚轮滚动 URL/EXTRACT；Ctrl+滚轮缩放拓扑。"""
+        y = float(getattr(event, "y", 0))
+        delta = int(getattr(event, "delta", 0) or 0)
+        step = -1 if delta > 0 else 1
+        if int(getattr(event, "state", 0)) & 0x0004:  # Ctrl
+            if _TOPO_TOP <= y <= _TOPO_BOTTOM:
+                self.view.zoom(
+                    float(getattr(event, "x", 0)), y, 1.12 if delta > 0 else 1 / 1.12,
+                    CRAWL_PAD, _TOPO_TOP, CRAWL_W - 2 * CRAWL_PAD, _TOPO_BOTTOM - _TOPO_TOP,
+                )
+            return
+        if 166 <= y <= 314:
+            self._url_scroll = max(0, self._url_scroll + step)
+            self._rerender()
+        elif 338 <= y <= 412:
+            current = self._extract_scroll if self._extract_scroll is not None else 10**9
+            self._extract_scroll = max(0, current + step)
+            self._rerender()
+
+    def _on_pan_start(self, event: Any) -> None:
+        """右键/中键在拓扑区按下：开始平移。"""
+        self.view.pan_start(float(getattr(event, "x", 0)), float(getattr(event, "y", 0)),
+                            _TOPO_TOP, _TOPO_BOTTOM)
+
+    def _on_pan(self, event: Any) -> None:
+        """按鼠标位移平移拓扑。"""
+        self.view.pan_to(float(getattr(event, "x", 0)), float(getattr(event, "y", 0)),
+                         CRAWL_W - 2 * CRAWL_PAD, _TOPO_BOTTOM - _TOPO_TOP)
+
+    def _rerender(self) -> None:
+        """交互状态变化后按最后一份状态重绘。"""
         if self._last_state is not None:
             self.render(self._last_state)
 
+    def _select(self, url: str) -> None:
+        """选中 URL 并重绘双方窗口：拓扑节点与抽取行互相高亮；再次点击取消。
+
+        @author aceFelix
+        """
+        self._controller.select_url(url)
+
     def _on_item_click(self, _event: Any) -> None:
-        """处理拓扑节点/抽取行点击。
+        """处理拓扑节点/抽取行/+N 聚合点击。
 
         tag 里只带行号（``topo_idx:N`` / ``extract_idx:N``），URL 存在映射表里，
         避免 URL 中的特殊字符破坏 Tk 标签。
@@ -295,15 +540,20 @@ class CrawlWindow:
             current = self.canvas.find_withtag("current")
             if not current:
                 return
-            for tag in self.canvas.gettags(current[0]):
-                if tag.startswith("topo_idx:"):
-                    index = int(tag.split(":", 1)[1])
-                    self._select(self._topo_urls.get(index, ""))
-                    return
+            tags = self.canvas.gettags(current[0])
+            for tag in tags:
                 if tag.startswith("extract_idx:"):
                     index = int(tag.split(":", 1)[1])
                     self._select(self._extract_urls.get(index, ""))
                     return
+            hit = self.view.hit(tags)
+            if hit is None:
+                return
+            kind, value = hit
+            if kind == "aggregate":
+                self.view.expand(value)
+            elif value:
+                self._select(value)
         except Exception:
             pass
 
@@ -314,7 +564,6 @@ class CrawlWindow:
         if self.canvas is None:
             return
         self._last_state = state
-        self._topo_urls = {}
         self._extract_urls = {}
         self.canvas.delete("all")
         self._draw_grid()
@@ -352,6 +601,14 @@ class CrawlWindow:
         """小节标题 + 右侧延长线。"""
         self._text(CRAWL_PAD, y, title, fill=CYAN_DIM, font=FONT_LABEL)
         self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, GRID)
+
+    def _draw_scrollbar(self, total: int, visible: int, offset: int, top: float, bottom: float) -> None:
+        """在窗口右缘画一条迷你滚动条。"""
+        x = CRAWL_W - 9
+        self._line(x + 1, top, x + 1, bottom, GRID)
+        geometry = scrollbar_geometry(total, visible, offset, top=top, bottom=bottom, x=x)
+        if geometry is not None:
+            self.canvas.create_rectangle(*geometry, fill=CYAN_DIM, outline="")
 
     def _draw_grid(self) -> None:
         """背景网格：与驾驶舱同款低亮度底噪。"""
@@ -433,12 +690,18 @@ class CrawlWindow:
         )
 
     def _draw_urls(self, state: CockpitState) -> None:
-        """URL 清单：去重后最新在前，带状态、层号、耗时、字节与重复次数。"""
+        """URL 清单：根页固定，其余滚轮浏览；路径尾部优先保留。"""
         self._section("URL 清单 // URLS", 158)
-        rows = unique_fetches(state.fetches, _URL_ROWS)
+        rows, self._url_scroll, total, _max_offset = fetch_window(
+            state.fetches, self._url_scroll, _URL_ROWS
+        )
         if not rows:
             self._text(CRAWL_PAD, 182, "— 暂无抓取", fill=DIM, font=FONT_SMALL)
             return
+        self._text(
+            CRAWL_W - CRAWL_PAD, 158, f"{len(rows)}/{total}  滚轮",
+            fill=DIM, font=FONT_SMALL, anchor="e",
+        )
         y = 180
         for item in rows:
             ok = item.get("status") == "ok"
@@ -447,13 +710,10 @@ class CrawlWindow:
             depth = item.get("depth")
             layer = f"L{depth}" if isinstance(depth, int) else "L-"
             self._text(CRAWL_PAD + 16, y, layer, fill=CYAN_DIM, font=FONT_MONO)
-            # URL 去掉协议前缀后按显示宽度截断；域名单独一列便于快速扫读
-            url = str(item.get("url") or "")
-            for prefix in ("https://", "http://"):
-                if url.startswith(prefix):
-                    url = url[len(prefix):]
-                    break
-            self._text(CRAWL_PAD + 40, y, clip(url, 38), fill=TEXT, font=FONT_MONO)
+            self._text(
+                CRAWL_PAD + 40, y, clip_url_tail(item.get("url"), 44),
+                fill=TEXT, font=FONT_MONO,
+            )
             meta = " · ".join(
                 part for part in (
                     _fmt_ms(item.get("duration_ms")),
@@ -466,18 +726,26 @@ class CrawlWindow:
             if meta:
                 self._text(CRAWL_W - CRAWL_PAD, y, meta, fill=DIM, font=FONT_MONO, anchor="e")
             y += 22
+        self._draw_scrollbar(total, len(rows), self._url_scroll, 180, 312)
 
     def _draw_extracts(self, state: CockpitState) -> None:
-        """抽取表：最近几页抽取出的结构化字段；点击行高亮对应拓扑节点。"""
+        """抽取表：可滚轮浏览全部记录；点击行高亮对应拓扑节点。"""
         self._section("抽取 // EXTRACT", 326)
-        rows = list(state.extracts)[-_EXTRACT_ROWS:]
-        if not rows:
+        all_rows = list(state.extracts)
+        if not all_rows:
             self._text(
                 CRAWL_PAD, 350,
                 "— 暂无抽取（用 WebExtract 按 CSS 选择器抽字段）",
                 fill=DIM, font=FONT_SMALL,
             )
+            self._extract_scroll = None
             return
+        rows, offset, total = visible_window(all_rows, self._extract_scroll or 0, _EXTRACT_ROWS)
+        self._extract_scroll = offset
+        self._text(
+            CRAWL_W - CRAWL_PAD, 326, f"{len(rows)}/{total}  滚轮",
+            fill=DIM, font=FONT_SMALL, anchor="e",
+        )
         y = 348
         for index, item in enumerate(rows):
             url = str(item.get("url") or "")
@@ -506,12 +774,13 @@ class CrawlWindow:
             )
             self._extract_urls[index] = url
             y += 20
+        self._draw_scrollbar(total, len(rows), offset, 348, 404)
 
     def _draw_topology(self, state: CockpitState) -> None:
-        """拓扑区（P3）：分层节点 + 父→子连线 + 队列统计，节点可点击联动。
+        """拓扑区：分层节点 + 父→子连线 + 统计；可撕出为独立窗（P3.6）。
 
         ``crawl_topology = off`` 时只保留统计；单页抓取没有 depth，显示
-        “单页抓取，无拓扑”，不画假节点。
+        “单页抓取，无拓扑”，不画假节点。已外弹时显示占位（点击收回）。
         """
         self._section("拓扑 // TOPOLOGY", 424)
         rows = [item for item in state.fetches if isinstance(item.get("depth"), int)]
@@ -520,73 +789,45 @@ class CrawlWindow:
             self._text(CRAWL_PAD, 442, hint, fill=DIM, font=FONT_SMALL)
             self._draw_stats(state)
             return
-        if self._options.crawl_topology_on():
-            layout = build_topology(
-                state.fetches,
-                width=CRAWL_W - 2 * CRAWL_PAD,
-                height=_TOPO_BOTTOM - _TOPO_TOP,
-                x0=CRAWL_PAD,
-                y0=_TOPO_TOP,
-                max_nodes=self._options.crawl_max_nodes,
-            )
-            self._draw_topo_layout(layout)
-        else:
+        if not self._options.crawl_topology_on():
             self._text(
                 CRAWL_PAD, 442,
                 "— 拓扑已关闭（[visualization] crawl_topology = off）",
                 fill=DIM, font=FONT_SMALL,
             )
+            self._draw_stats(state)
+            return
+        if self._controller.detached is not None:
+            self._text(
+                CRAWL_PAD, 470, "— 拓扑已外弹至独立窗口查看",
+                fill=CYAN_DIM, font=FONT_SMALL,
+            )
+            self._text(
+                CRAWL_PAD, 500, "点击此处收回（或在独立窗点 ✕）",
+                fill=CYAN, font=FONT_SMALL, tags=("topo_redock",),
+            )
+            self._draw_stats(state)
+            return
+        layout = build_topology(
+            state.fetches,
+            width=CRAWL_W - 2 * CRAWL_PAD,
+            height=_TOPO_BOTTOM - _TOPO_TOP,
+            x0=CRAWL_PAD,
+            y0=_TOPO_TOP,
+            max_nodes=self._options.crawl_max_nodes,
+            layer_limits=dict(self.view.state.expanded_layers) or None,
+        )
+        self.view.draw(layout, pad=CRAWL_PAD, top=_TOPO_TOP)
+        self._text(
+            CRAWL_PAD, 604,
+            "左键拖出独立窗 · Ctrl+滚轮缩放 · 右键拖动 · 双击右键复位",
+            fill=DIM, font=FONT_SMALL,
+        )
         self._draw_stats(state)
 
-    def _draw_topo_layout(self, layout: TopologyLayout) -> None:
-        """按布局画边、节点与 +N 聚合；选中节点加亮环。"""
-        if layout.is_empty():
-            self._text(CRAWL_PAD, 442, "— 无拓扑数据", fill=DIM, font=FONT_SMALL)
-            return
-        # 边先画，节点覆盖在线条上方
-        for parent, child in layout.edges:
-            self._line(parent.x, parent.y, child.x, child.y, CYAN_DIM)
-        for index, node in enumerate(layout.nodes):
-            color = GREEN if node.status == "ok" else (RED if node.status == "error" else DIM)
-            tags = ("topo_node", f"topo_idx:{index}")
-            selected = node.url == self._selected_url
-            if selected:
-                self.canvas.create_oval(
-                    node.x - 7, node.y - 7, node.x + 7, node.y + 7,
-                    outline=CYAN, width=1, tags=tags,
-                )
-            self.canvas.create_oval(
-                node.x - 4, node.y - 4, node.x + 4, node.y + 4,
-                fill=color, outline="", tags=tags,
-            )
-            self._text(
-                node.x, node.y + 12, clip(node.label, 10),
-                fill=CYAN if selected else DIM, font=FONT_SMALL, anchor="n", tags=tags,
-            )
-            self._topo_urls[index] = node.url
-        for item in layout.aggregates:
-            self._text(
-                item["x"], item["y"], f"+{item['count']}",
-                fill=DIM, font=FONT_SMALL, anchor="center",
-            )
-
     def _draw_stats(self, state: CockpitState) -> None:
-        """拓扑区底部统计行：队列/完成/失败/去重/深度/字节/耗时。"""
-        stats = state.stats or {}
-        if not stats:
-            return
-        parts = []
-        for label, key in (
-            ("队列", "queued"), ("完成", "done"), ("失败", "failed"), ("去重", "dedup_hits")
-        ):
-            if stats.get(key) is not None:
-                parts.append(f"{label} {stats.get(key)}")
-        if stats.get("max_depth") is not None:
-            parts.append(f"深度 {stats.get('max_depth')}")
-        if stats.get("bytes") is not None:
-            parts.append(f"字节 {_fmt_bytes(stats.get('bytes'))}")
-        if stats.get("elapsed_ms") is not None:
-            parts.append(f"{float(stats['elapsed_ms']) / 1000:.1f}s")
+        """拓扑区底部统计行：剩余队列/完成/失败/去重/实达深度/上限/字节/耗时。"""
+        parts = stats_parts(state)
         self._text(
             CRAWL_PAD, _STATS_Y, clip(" · ".join(parts) or "—", 88),
             fill=CYAN_DIM, font=FONT_MONO,
@@ -610,10 +851,22 @@ class CrawlManager:
         self._disabled = False
         self._hidden = False
         self._hidden_run_id: str | None = None
-        # 最近一次渲染所属轮次（用户点 ✕ 时据此判定“本轮不再弹”）
+        # 最近一次渲染所属轮次（用户点 ✕ 时据此判定“本轮不再弹”；
+        # 换轮时用它重置滚动/缩放等交互状态）
         self._run_id = ""
+        self._rendered_run_id: str | None = None
         # 当前是否允许置顶（终端在前台时由 zorder 策略置 False）
         self._topmost_allowed = True
+        # P3.6：共享拓扑视图状态 + 撕出独立窗 + 拖拽幽灵
+        self.topo_state = TopoViewState()
+        self._detached: TopoDetachedWindow | None = None
+        self._ghost: TearOffGhost | None = None
+        self._last_state: CockpitState | None = None
+
+    @property
+    def detached(self) -> TopoDetachedWindow | None:
+        """当前撕出的独立拓扑窗（未外弹为 None）。"""
+        return self._detached
 
     @staticmethod
     def has_data(state: CockpitState) -> bool:
@@ -627,6 +880,7 @@ class CrawlManager:
         if not self.has_data(state):
             return
         self._run_id = run_id
+        self._last_state = state
         if self._hidden and self._hidden_run_id == run_id:
             return
         # 新一轮（或从未关过）：解除隐藏标记，后续 show_all 也同步生效
@@ -634,9 +888,14 @@ class CrawlManager:
         window = self._ensure_window()
         if window is None:
             return
+        if run_id != self._rendered_run_id:
+            window.reset_interaction()
+            self._rendered_run_id = run_id
         try:
             window.render(state)
             window.show()
+            if self._detached is not None:
+                self._detached.render(state)
         except Exception as exc:  # noqa: BLE001 - 抓取窗故障不能影响主流程
             # 渲染异常不能静默：否则窗口只剩半截内容（P3 实测拓扑整块空白）。
             # @author aceFelix
@@ -645,25 +904,34 @@ class CrawlManager:
             diag_info("ui", f"爬虫驾驶舱渲染失败: {exc}")
 
     def hide_all(self) -> None:
-        """主 HUD 关闭时隐藏（不销毁、不影响下轮重现）。"""
+        """主 HUD 关闭时隐藏（不销毁、不影响下轮重现）；独立窗同步。"""
+        self.cancel_ghost()
+        if self._detached is not None:
+            self._detached.hide()
         if self._window is not None:
             self._window.hide()
 
     def set_topmost(self, enabled: bool) -> None:
         """切换置顶并记住状态：终端在前台时新弹的抓取窗也应让位。"""
         self._topmost_allowed = bool(enabled)
+        if self._detached is not None:
+            self._detached.set_topmost(enabled)
         if self._window is not None:
             self._window.set_topmost(enabled)
 
     def show_all(self, state: CockpitState) -> None:
-        """主 HUD 重现时同步显示（有数据才显示）。"""
+        """主 HUD 重现时同步显示（有数据才显示）；独立窗一并刷新。"""
         if self._disabled or not self.options.crawl_on():
             return
         if self._window is None or not self.has_data(state):
             return
+        self._last_state = state
         try:
             self._window.render(state)
             self._window.show()
+            if self._detached is not None:
+                self._detached.render(state)
+                self._detached.show()
         except Exception as exc:  # noqa: BLE001 - 抓取窗故障不能影响主流程
             from agent.core.diag import diag_info
 
@@ -671,10 +939,104 @@ class CrawlManager:
 
     def detach(self) -> None:
         """销毁窗口并断开 Tk 根引用（退出时防跨线程 GC 崩溃）。"""
+        self.cancel_ghost()
+        if self._detached is not None:
+            detached, self._detached = self._detached, None
+            detached.destroy()
         if self._window is not None:
             self._window.destroy()
             self._window = None
         self.root = None
+
+    # ---- P3.6：撕出 / 收回 / 跨窗联动 ----
+
+    def rerender_all(self) -> None:
+        """视图状态变化后重绘驾驶舱与独立窗（render 幂等，不会递归）。"""
+        state = self._last_state
+        if state is None:
+            return
+        try:
+            if self._window is not None:
+                self._window.render(state)
+            if self._detached is not None:
+                self._detached.render(state)
+        except Exception as exc:  # noqa: BLE001 - 渲染故障不能影响主流程
+            from agent.core.diag import diag_info
+
+            diag_info("ui", f"爬虫驾驶舱联动重绘失败: {exc}")
+
+    def select_url(self, url: str) -> None:
+        """节点↔抽取行选中切换（共享状态，双窗同步高亮）。"""
+        if not url:
+            return
+        state = self.topo_state
+        state.selected_url = None if state.selected_url == url else url
+        self.rerender_all()
+
+    def start_ghost(self, node_count: int) -> None:
+        """撕出武装：创建半透明跟随预览。"""
+        if self._ghost is not None or self._window is None or self._window.top is None:
+            return
+        try:
+            self._ghost = TearOffGhost(self._window.top, node_count)
+        except Exception:
+            self._ghost = None
+
+    def move_ghost(self, x_root: float, y_root: float) -> None:
+        """幽灵跟随光标。"""
+        if self._ghost is not None:
+            self._ghost.move(x_root, y_root)
+
+    def cancel_ghost(self) -> None:
+        """销毁幽灵（取消 / 落点 / 隐藏 / 退出）。"""
+        if self._ghost is not None:
+            ghost, self._ghost = self._ghost, None
+            ghost.destroy()
+
+    def detach_topology(self, x_root: float, y_root: float) -> None:
+        """松手落点：在光标处生成独立拓扑窗并自动适应画布展开大图。
+
+        先生 2026-11-10 实测反馈：拖出后还要手动点「适应画布」才能铺开，
+        直接默认 fit，让撕出的第一帧就是完整大图。
+        """
+        self.cancel_ghost()
+        if self._detached is not None or self._last_state is None:
+            return
+        try:
+            self._detached = TopoDetachedWindow(
+                self.root, self.options, self.topo_state, self, x_root, y_root,
+            )
+            self._detached.set_topmost(self._topmost_allowed)
+            self.rerender_all()
+            self._detached.fit()
+        except Exception as exc:  # noqa: BLE001 - 外弹失败不拖垮驾驶舱
+            from agent.core.diag import diag_info
+
+            diag_info("ui", f"拓扑独立窗创建失败: {exc}")
+            self._detached = None
+
+    def dock_rect(self) -> tuple[float, float, float, float]:
+        """驾驶舱拓扑区的实时屏幕矩形（收回动画终点）。"""
+        window = self._window
+        try:
+            if window is not None and window.top is not None:
+                return (
+                    float(window.top.winfo_rootx()) + CRAWL_PAD,
+                    float(window.top.winfo_rooty()) + _TOPO_TOP,
+                    float(CRAWL_W - 2 * CRAWL_PAD),
+                    float(_TOPO_BOTTOM - _TOPO_TOP),
+                )
+        except Exception:
+            pass
+        return (24.0, 200.0, float(CRAWL_W - 2 * CRAWL_PAD), float(_TOPO_BOTTOM - _TOPO_TOP))
+
+    def undock(self) -> None:
+        """收回：销毁独立窗，拓扑在驾驶舱原位置按共享状态重绘。"""
+        if self._detached is None:
+            return
+        detached, self._detached = self._detached, None
+        detached.destroy()
+        self.rerender_all()
 
     # ---- 内部 ----
 
@@ -683,7 +1045,7 @@ class CrawlManager:
         if self._window is not None:
             return self._window
         try:
-            self._window = CrawlWindow(self.root, self.options, self._on_close)
+            self._window = CrawlWindow(self.root, self.options, self._on_close, controller=self)
             # 新窗口沿用当前置顶策略（终端在前台时不应置顶）
             self._window.set_topmost(self._topmost_allowed)
             try:

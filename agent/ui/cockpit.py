@@ -27,7 +27,7 @@ from agent.ui.trace_view import describe_target, render_event
 FEED_MAX = 8
 STEP_MAX = 4
 FETCH_MAX = 200
-EXTRACT_MAX = 10
+EXTRACT_MAX = 200
 
 _MODE_OFF = "off"
 _MODE_WINDOW = "window"

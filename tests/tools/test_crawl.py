@@ -80,6 +80,24 @@ class TestUrlHelpers:
         assert normalize_url("ftp://site.test/a") == ""
         assert normalize_url("") == ""
 
+    def test_normalize_merges_directory_index_pages(self) -> None:
+        """目录默认页归一化：`/index.html` ≡ `/`，同页不同 URL 只抓一次。"""
+        assert normalize_url("https://site.test/index.html") == "https://site.test/"
+        assert normalize_url("https://site.test/") == normalize_url(
+            "https://site.test/index.html"
+        )
+        # 子目录同理，大小写不敏感
+        assert normalize_url("https://site.test/a/index.htm") == "https://site.test/a"
+        assert normalize_url("https://site.test/INDEX.HTML") == "https://site.test/"
+        # 非默认页文件名不受影响
+        assert normalize_url("https://site.test/a/page.html") == (
+            "https://site.test/a/page.html"
+        )
+        # 带 query 的默认页与裸目录仍是不同文档，不归并
+        assert normalize_url("https://site.test/a/index.html?p=1") == (
+            "https://site.test/a?p=1"
+        )
+
     def test_same_domain_includes_subdomain(self) -> None:
         assert is_same_domain("https://cdn.site.test/a", "site.test") is True
         assert is_same_domain("https://other.test/a", "site.test") is False

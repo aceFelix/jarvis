@@ -1,14 +1,15 @@
-"""爬虫拓扑布局（P3）：分层 DAG → 画布坐标（纯函数，可单测）。
+"""爬虫拓扑布局（P3/P3.5）：分层 DAG → 画布坐标（纯函数，可单测）。
 
 输入 ``CockpitState.fetches`` 里由 Crawl 派生的 ``web_fetch``（带
 ``parent_url`` / ``depth`` / ``status``），输出节点、边、聚合占位与坐标；
-Tk 层只按坐标画线画点，交互（节点↔抽取行高亮）在 ``cockpit_crawl.py``。
+Tk 层负责缩放/平移和点击命中，本模块不保存任何视图状态。
 
-布局规则（2026-11-09 已确认）：
+布局规则（2026-11-10 实测后调整）：
 - 层号 = depth，同层按发现顺序从左到右，根页居中；
-- 单层最多 ``max_per_layer`` 个节点，超出用 ``+N`` 聚合占位，避免标签重叠；
-- 总节点最多 ``max_nodes`` 个，超出后更深层节点同样折叠成 ``+N``；
-- 不做缩放、平移与节点拖拽（P3.5 仅在实测重叠时再议）。
+- 单层默认最多 ``max_per_layer`` 个节点，超出用可点击的 ``+N`` 聚合占位；
+- ``layer_limits`` 可按层展开更多节点（点击 +N 时使用），总预算仍受
+  ``max_nodes`` 限制；
+- 节点标签取路径尾部语义段，避免一长串相同前缀挤在一起。
 
 @author aceFelix
 """
@@ -62,7 +63,11 @@ class TopologyLayout:
 
 
 def short_label(url: str, limit: int = LABEL_LIMIT) -> str:
-    """取 URL 的 path（可带 query）作为节点标签，超长截断。
+    """取 URL 的路径尾部语义段作为节点标签，超长截断。
+
+    拓扑节点横向排列，若沿用完整 path，多个同目录页面会全部显示成相同
+    前缀（实测 books.toscrape.com 一片 ``/catalogu…``）。因此标签优先取
+    最后一个有语义的路径段；目录首页 ``index.html`` 不算语义段。
 
     Args:
         url: 页面 URL。
@@ -78,12 +83,15 @@ def short_label(url: str, limit: int = LABEL_LIMIT) -> str:
         return text[:limit]
     if not parsed.scheme and not parsed.netloc:
         return text[:limit] or "/"
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-    if len(path) > limit:
-        return path[: max(1, limit - 1)] + "…"
-    return path
+    segments = [part for part in (parsed.path or "").split("/") if part]
+    if segments and segments[-1].lower() in {"index.html", "index.htm"}:
+        segments.pop()
+    label = segments[-1] if segments else "/"
+    if parsed.query and label != "/":
+        label = f"{label}?{parsed.query}"
+    if len(label) > limit:
+        return label[: max(1, limit - 1)] + "…"
+    return label
 
 
 def build_topology(
@@ -95,6 +103,7 @@ def build_topology(
     y0: float = 0.0,
     max_nodes: int = 60,
     max_per_layer: int = 8,
+    layer_limits: dict[int, int] | None = None,
 ) -> TopologyLayout:
     """把抓取记录排成分层拓扑（纯函数）。
 
@@ -106,7 +115,9 @@ def build_topology(
         width / height: 可用画布尺寸。
         x0 / y0: 画布左上角偏移。
         max_nodes: 可见节点总上限（含各层可见节点）。
-        max_per_layer: 单层可见节点上限，超出折叠为 ``+N``。
+        max_per_layer: 单层可见节点默认上限，超出折叠为 ``+N``。
+        layer_limits: 可选的按层覆盖上限；点击 ``+N`` 展开时由 UI 传入。
+            它只改变本层可见数，不突破 ``max_nodes`` 总预算。
 
     Returns:
         ``TopologyLayout``；无有效层级数据时 ``is_empty()`` 为真。
@@ -136,6 +147,7 @@ def build_topology(
     row_h = height / max(1, layer_count)
     budget = max(1, int(max_nodes))
     per_layer = max(2, int(max_per_layer))
+    limits = layer_limits or {}
     nodes: list[TopoNode] = []
     aggregates: list[dict[str, Any]] = []
     visible_by_url: dict[str, TopoNode] = {}
@@ -144,7 +156,11 @@ def build_topology(
         layer = buckets.get(depth, [])
         if not layer:
             continue
-        keep = min(len(layer), per_layer, budget)
+        try:
+            layer_limit = max(2, int(limits.get(depth, per_layer)))
+        except (TypeError, ValueError):
+            layer_limit = per_layer
+        keep = min(len(layer), layer_limit, budget)
         visible = layer[:keep]
         hidden = len(layer) - keep
         # 多留一个位置给 +N，保证聚合占位不被挤出画布

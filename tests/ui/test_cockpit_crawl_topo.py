@@ -19,12 +19,20 @@ def _node(url: str, depth: int, parent: str | None = None, status: str = "ok") -
 
 
 class TestShortLabel:
-    def test_root_and_path(self) -> None:
+    def test_root_and_last_segment(self) -> None:
+        """2026-11-10 起标签取尾部语义段，避免同前缀标签一片相同。"""
         assert short_label("https://site.test/") == "/"
-        assert short_label("https://site.test/a/b") == "/a/b"
+        assert short_label("https://site.test/a/b") == "b"
+
+    def test_tail_semantic_segment(self) -> None:
+        """同类页面取最后语义段，避免一排相同前缀。"""
+        assert short_label(
+            "https://books.toscrape.com/catalogue/category/books/fiction_10/index.html"
+        ) == "fiction_10"
+        assert short_label("https://s/posts/1") == "1"
 
     def test_query_and_truncate(self) -> None:
-        assert short_label("https://site.test/a?b=1") == "/a?b=1"
+        assert short_label("https://site.test/a?b=1") == "a?b=1"
         label = short_label("https://site.test/" + "x" * 40)
         assert len(label) == 16
         assert label.endswith("…")
@@ -107,3 +115,22 @@ class TestBuildTopology:
         aggregate_depths = {item["depth"] for item in layout.aggregates}
         assert aggregate_depths == {3, 4}
         assert all(item["count"] == 1 for item in layout.aggregates)
+
+    def test_layer_limits_expand_without_breaking_budget(self) -> None:
+        """layer_limits 只展开指定层，仍受 max_nodes 总预算限制。"""
+        fetches = [_node("https://s/", 0)]
+        fetches += [_node(f"https://s/{i}", 1, "https://s/") for i in range(6)]
+        base = build_topology(fetches, width=400, height=120, max_per_layer=4)
+        assert len([n for n in base.nodes if n.depth == 1]) == 4
+
+        expanded = build_topology(
+            fetches, width=400, height=120, max_per_layer=4, layer_limits={1: 6}
+        )
+        assert len([n for n in expanded.nodes if n.depth == 1]) == 6
+        assert expanded.aggregates == []
+
+        capped = build_topology(
+            fetches, width=400, height=120, max_per_layer=4,
+            layer_limits={1: 6}, max_nodes=5,
+        )
+        assert len(capped.nodes) == 5

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-09T15:13:52Z",
+  "updated_at": "2026-11-10T09:04:02Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -71,9 +71,9 @@
     },
     "README.md": {
       "role": "index",
-      "sha256": "3b732ef4463a31cf27cd51aa52e7907e049da5491420dae11ba6719c7d246bf9",
-      "size": 30262,
-      "normalized_sha256": "3b732ef4463a31cf27cd51aa52e7907e049da5491420dae11ba6719c7d246bf9"
+      "sha256": "5bc308a9b3e5224b25519d8aed4207f0bb76f194904927c247a505cff868e1ce",
+      "size": 30783,
+      "normalized_sha256": "5bc308a9b3e5224b25519d8aed4207f0bb76f194904927c247a505cff868e1ce"
     },
     "USER_GUIDE.md": {
       "role": "index",
@@ -1856,9 +1856,9 @@
     },
     "agent/tools/web/crawl.py": {
       "role": "index",
-      "sha256": "e9ca08acbf1c4d0174ce0854abb6bf083f8348ca40e9126ac51da5227c5a9b05",
-      "size": 29204,
-      "normalized_sha256": "e9ca08acbf1c4d0174ce0854abb6bf083f8348ca40e9126ac51da5227c5a9b05"
+      "sha256": "0e0662b67195ebfbddfd9fdf03d0dc1b50780e83b4f44ad3c923ced1c248ced7",
+      "size": 29840,
+      "normalized_sha256": "0e0662b67195ebfbddfd9fdf03d0dc1b50780e83b4f44ad3c923ced1c248ced7"
     },
     "agent/tools/web/extract.py": {
       "role": "index",
@@ -1898,9 +1898,9 @@
     },
     "agent/ui/cockpit.py": {
       "role": "index",
-      "sha256": "627d2d5a921b53d192b698de605d27a56501ae00f78c4b907a66f9b3401e3bda",
-      "size": 21586,
-      "normalized_sha256": "627d2d5a921b53d192b698de605d27a56501ae00f78c4b907a66f9b3401e3bda"
+      "sha256": "4d27918bb797db09cfad075ab3c64f1d2e92687802f4d954dcd697ae88002aa7",
+      "size": 21587,
+      "normalized_sha256": "4d27918bb797db09cfad075ab3c64f1d2e92687802f4d954dcd697ae88002aa7"
     },
     "agent/ui/cockpit_agents.py": {
       "role": "index",
@@ -1916,15 +1916,15 @@
     },
     "agent/ui/cockpit_crawl.py": {
       "role": "index",
-      "sha256": "31d6ab6587f26cf939226a6e1fc82457671f0e315bea7ba913b69d2c54a47acc",
-      "size": 27781,
-      "normalized_sha256": "31d6ab6587f26cf939226a6e1fc82457671f0e315bea7ba913b69d2c54a47acc"
+      "sha256": "82ded121a47b74060c40ad25e42e9eb1ab0c5b0e03f32d0706107c1fe5f0409c",
+      "size": 42742,
+      "normalized_sha256": "82ded121a47b74060c40ad25e42e9eb1ab0c5b0e03f32d0706107c1fe5f0409c"
     },
     "agent/ui/cockpit_crawl_topo.py": {
       "role": "index",
-      "sha256": "dbe931bb1b35aff67fed511746e9139647de4303bdf3d195011c5aeffcf9bd64",
-      "size": 6805,
-      "normalized_sha256": "dbe931bb1b35aff67fed511746e9139647de4303bdf3d195011c5aeffcf9bd64"
+      "sha256": "0e39e07f4ef2e2534a212fd7e0063f1f3e55d0b24569b14003f162e4bd49757c",
+      "size": 7730,
+      "normalized_sha256": "0e39e07f4ef2e2534a212fd7e0063f1f3e55d0b24569b14003f162e4bd49757c"
     },
     "agent/ui/cockpit_demo.py": {
       "role": "index",
@@ -1943,6 +1943,18 @@
       "sha256": "47a8f644f97fd29ae4214bbc7c2bd89f1c20084d459644999d2fa70b2adc7f82",
       "size": 1543,
       "normalized_sha256": "47a8f644f97fd29ae4214bbc7c2bd89f1c20084d459644999d2fa70b2adc7f82"
+    },
+    "agent/ui/cockpit_topo_detach.py": {
+      "role": "index",
+      "sha256": "3a91de69142508155dff0330e6b997406b7f262b095ff7463f9b9bc4d620a9de",
+      "size": 13039,
+      "normalized_sha256": "3a91de69142508155dff0330e6b997406b7f262b095ff7463f9b9bc4d620a9de"
+    },
+    "agent/ui/cockpit_topo_view.py": {
+      "role": "index",
+      "sha256": "2a1147e51f00c746650f4a1df286fbf25356bc801215f2fd9626820566036854",
+      "size": 11911,
+      "normalized_sha256": "2a1147e51f00c746650f4a1df286fbf25356bc801215f2fd9626820566036854"
     },
     "agent/ui/cockpit_window.py": {
       "role": "index",
@@ -2390,9 +2402,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "9393b22123d62ffa4049bf9d39eaf18e43eb2808c31f032880d96874612fcd24",
-      "size": 272584,
-      "normalized_sha256": "9393b22123d62ffa4049bf9d39eaf18e43eb2808c31f032880d96874612fcd24"
+      "sha256": "a8a403a5251f749544c8da9c7585698c34caf5dd76e492411b31cb74767bbe62",
+      "size": 277174,
+      "normalized_sha256": "a8a403a5251f749544c8da9c7585698c34caf5dd76e492411b31cb74767bbe62"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2801,6 +2813,24 @@
       "sha256": "6bc27d3540abb56f7d809bc5dd1506b01c7c6cddc4e815eb4d6e991e3faa2c00",
       "size": 4297,
       "normalized_sha256": "6bc27d3540abb56f7d809bc5dd1506b01c7c6cddc4e815eb4d6e991e3faa2c00"
+    },
+    "docs/fixlogs/crawl-cockpit-p35.md": {
+      "role": "index",
+      "sha256": "5b7eafaba167f8a946c939f1c250b774f539623726a4e49cdcd6bc583e3b9fe8",
+      "size": 3800,
+      "normalized_sha256": "5b7eafaba167f8a946c939f1c250b774f539623726a4e49cdcd6bc583e3b9fe8"
+    },
+    "docs/fixlogs/crawl-index-page-canonicalization.md": {
+      "role": "index",
+      "sha256": "66e456167e70711ff3e9d66cc45beb54a604759a402a671c2e9c22e588a186e2",
+      "size": 1699,
+      "normalized_sha256": "66e456167e70711ff3e9d66cc45beb54a604759a402a671c2e9c22e588a186e2"
+    },
+    "docs/fixlogs/crawl-topology-detach.md": {
+      "role": "index",
+      "sha256": "82fc1393e154549f8a0c6a305c0f6a1b5aa66d1b46c95cf8ac64c3007000cd88",
+      "size": 3234,
+      "normalized_sha256": "82fc1393e154549f8a0c6a305c0f6a1b5aa66d1b46c95cf8ac64c3007000cd88"
     },
     "docs/fixlogs/dangling-tool-use-fix.md": {
       "role": "index",
@@ -3462,11 +3492,17 @@
       "size": 19852,
       "normalized_sha256": "f058dac790d8973621fa6711807515c8c8923ce941f7dae0a05c6d406cb65570"
     },
+    "docs/plans/crawl-topology-detach.md": {
+      "role": "index",
+      "sha256": "3d714a08562afcdd8d7f76a77b0cf8370dfce7a17ca1689b7259f8949cc5903e",
+      "size": 10185,
+      "normalized_sha256": "3d714a08562afcdd8d7f76a77b0cf8370dfce7a17ca1689b7259f8949cc5903e"
+    },
     "docs/plans/crawler-cockpit.md": {
       "role": "index",
-      "sha256": "4dfe5aa8d692ae5d4098c37beab6462a713b8b86f86316d3df3831ce62232815",
-      "size": 19885,
-      "normalized_sha256": "4dfe5aa8d692ae5d4098c37beab6462a713b8b86f86316d3df3831ce62232815"
+      "sha256": "c7568add181904da02b2d7776bcc5d5050bfd4a6febde26ede7ca9b952417735",
+      "size": 21278,
+      "normalized_sha256": "c7568add181904da02b2d7776bcc5d5050bfd4a6febde26ede7ca9b952417735"
     },
     "docs/plans/fileops-desktop-upgrade.md": {
       "role": "index",
@@ -4997,9 +5033,9 @@
     },
     "tests/tools/test_crawl.py": {
       "role": "observe",
-      "sha256": "a0d54f202994a9cb1f9d4bfbf5a2d6eae839a64368a86d39f8998a7bf140afe5",
-      "size": 15044,
-      "normalized_sha256": "a0d54f202994a9cb1f9d4bfbf5a2d6eae839a64368a86d39f8998a7bf140afe5"
+      "sha256": "8471369d2776bf38b35b23b02da3def7fb56d8b298fdc87f2f813094d75819f1",
+      "size": 15996,
+      "normalized_sha256": "8471369d2776bf38b35b23b02da3def7fb56d8b298fdc87f2f813094d75819f1"
     },
     "tests/tools/test_dev_server_tool.py": {
       "role": "observe",
@@ -5111,15 +5147,21 @@
     },
     "tests/ui/test_cockpit_crawl.py": {
       "role": "observe",
-      "sha256": "9894d7aafc53e7d63597ac269898eb044f551fb98719a59c53539ddde0083713",
-      "size": 7821,
-      "normalized_sha256": "9894d7aafc53e7d63597ac269898eb044f551fb98719a59c53539ddde0083713"
+      "sha256": "4a5e217cc3c5ffc31036ec350093f4f3dd5d2969f703dfde8b6190bde92c476a",
+      "size": 19500,
+      "normalized_sha256": "4a5e217cc3c5ffc31036ec350093f4f3dd5d2969f703dfde8b6190bde92c476a"
     },
     "tests/ui/test_cockpit_crawl_topo.py": {
       "role": "observe",
-      "sha256": "5bcf4bbb2b36c6de4216231dc034be1b82567f611e194148be943889bf7c1bfd",
-      "size": 4036,
-      "normalized_sha256": "5bcf4bbb2b36c6de4216231dc034be1b82567f611e194148be943889bf7c1bfd"
+      "sha256": "34657bb446a0e1f82b91f9b62f6c17b9109476979d552eb849278e409114d75d",
+      "size": 5305,
+      "normalized_sha256": "34657bb446a0e1f82b91f9b62f6c17b9109476979d552eb849278e409114d75d"
+    },
+    "tests/ui/test_cockpit_topo_view.py": {
+      "role": "observe",
+      "sha256": "ca6c40d6f452d06dcec4292201d1c17ac6ab8e6072e27aa9d5475b35e0309155",
+      "size": 6795,
+      "normalized_sha256": "ca6c40d6f452d06dcec4292201d1c17ac6ab8e6072e27aa9d5475b35e0309155"
     },
     "tests/ui/test_cockpit_zorder.py": {
       "role": "observe",
