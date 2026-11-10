@@ -459,6 +459,14 @@ def run_doctor() -> int:
 
     @return 退出码（0=全通过，1=有缺失）
     """
+    # 本函数是唯二入口（`jarvis --doctor` 与 `python -m agent.doctor`）的公共落点，
+    # 在这里再上一道编码兜底：`python -m agent.doctor > log.txt` 不经过 main()，
+    # 而下面表格标题带的 emoji 在 cp936 管道上会抛 UnicodeEncodeError（2026-11-10 实修）。
+    # 幂等，和 main() 里那次重复调用无副作用。@author aceFelix
+    from agent.core.stdio import make_stdio_crash_proof
+
+    make_stdio_crash_proof()
+
     console = Console()
 
     # 顶部标题

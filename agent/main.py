@@ -707,6 +707,14 @@ def main(argv: list[str] | None = None) -> int:
 
     @author aceFelix
     """
+    # 打印层的编码兜底必须排在第一个：`jarvis --doctor > log.txt` 这类重定向场景下，
+    # stdout 用的是区域编码（简体中文 Windows = cp936）且 errors=strict，表格里的
+    # emoji 编不出去就会把整条命令打崩（2026-11-10 实修，见 agent/core/stdio.py）。
+    # @author aceFelix
+    from agent.core.stdio import make_stdio_crash_proof
+
+    make_stdio_crash_proof()
+
     args = parse_args(argv)
 
     # 健康检查：放在最前面，避免 settings 加载失败时无法诊断
