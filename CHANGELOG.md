@@ -2,6 +2,27 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [2.5.3] — 2026-11-10
+
+### 修复（发版后安装态验收发现，2026-11-10）
+
+- **重定向下 `jarvis --doctor` 直接崩**：`jarvis --doctor > log.txt`（以及 `| tee`、被父进程
+  捕获）在简体中文 Windows 上以 `UnicodeEncodeError: 'gbk' codec can't encode character
+  '\U0001f4e6'` 退出，日志里一张表都没有。根因不在 Rich，而在 Python 给**非控制台**
+  的 stdout 选的是区域编码（cp936）且 `errors=strict`，而诊断表格标题带 `📦`；直连控制台
+  时 Python 走 WindowsConsoleIO（utf-8）所以平时看不见。
+- **修法：新增 `agent/core/stdio.py::make_stdio_crash_proof()`**，只把 `errors` 放宽为
+  `replace`（不可编字符降级成 `?`）、**不换编码**——换 utf-8 会让下游按 cp936 解码的管道
+  把中文读成乱码。接入两个入口：`main()`（覆盖所有 CLI 路径，排在 `parse_args` 之前）与
+  `run_doctor()`（覆盖不经 main 的 `python -m agent.doctor`），幂等。
+- **影响面不止 doctor**：任何经 Rich 输出 emoji 的命令，在 stdout 被重定向时都会走同一条
+  崩溃路径；修在入口一次覆盖所有未来字符，而不是逐处删 emoji。
+- **非本版引入**：`git log -S` 追到 `06fc104`，属长期潜伏缺陷（没人一边接管道一边看诊断）。
+- 新增 `tests/core/test_stdio_guard.py` 8 例（反证必抛、降级后中文不受伤、无 `reconfigure` /
+  `None` / `reconfigure` 抛错三种流静默跳过、幂等、两条入口接线），并做反向变异验牙
+  （撤掉调用 → 入口级用例立刻红）。复盘见
+  [doctor-redirect-encoding-fix.md](docs/fixlogs/doctor-redirect-encoding-fix.md)。
+
 ## [2.5.2] — 2026-11-10
 
 ### 新增（爬虫 P4：浏览器降级，2026-11-09）
