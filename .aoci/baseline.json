@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-10T09:04:02Z",
+  "updated_at": "2026-11-10T09:38:54Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -1916,9 +1916,15 @@
     },
     "agent/ui/cockpit_crawl.py": {
       "role": "index",
-      "sha256": "82ded121a47b74060c40ad25e42e9eb1ab0c5b0e03f32d0706107c1fe5f0409c",
-      "size": 42742,
-      "normalized_sha256": "82ded121a47b74060c40ad25e42e9eb1ab0c5b0e03f32d0706107c1fe5f0409c"
+      "sha256": "e6e7655a2dfdc5b20340f03630267e9838d3757ee8f9084452d616cb860656ff",
+      "size": 35803,
+      "normalized_sha256": "208759a5b7fbd2459160c07013787eccd53020c4a6c101eed6457f4e21115c38"
+    },
+    "agent/ui/cockpit_crawl_data.py": {
+      "role": "index",
+      "sha256": "c0b5abedf598e4269ebf22108ee42373822d89b60601ff735193445b2e0b3690",
+      "size": 8850,
+      "normalized_sha256": "c0b5abedf598e4269ebf22108ee42373822d89b60601ff735193445b2e0b3690"
     },
     "agent/ui/cockpit_crawl_topo.py": {
       "role": "index",
@@ -2402,9 +2408,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "a8a403a5251f749544c8da9c7585698c34caf5dd76e492411b31cb74767bbe62",
-      "size": 277174,
-      "normalized_sha256": "a8a403a5251f749544c8da9c7585698c34caf5dd76e492411b31cb74767bbe62"
+      "sha256": "29f9e8624e655737e7588f2aba2b784af974433ba6beffbfba64a36b49a1e4fd",
+      "size": 278210,
+      "normalized_sha256": "29f9e8624e655737e7588f2aba2b784af974433ba6beffbfba64a36b49a1e4fd"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2819,6 +2825,12 @@
       "sha256": "5b7eafaba167f8a946c939f1c250b774f539623726a4e49cdcd6bc583e3b9fe8",
       "size": 3800,
       "normalized_sha256": "5b7eafaba167f8a946c939f1c250b774f539623726a4e49cdcd6bc583e3b9fe8"
+    },
+    "docs/fixlogs/crawl-cockpit-split-900.md": {
+      "role": "index",
+      "sha256": "6eb80fab4cadeed503458fe915c4b19bbdadb1df6ecdede8442ee7952a20df8b",
+      "size": 2117,
+      "normalized_sha256": "6eb80fab4cadeed503458fe915c4b19bbdadb1df6ecdede8442ee7952a20df8b"
     },
     "docs/fixlogs/crawl-index-page-canonicalization.md": {
       "role": "index",
