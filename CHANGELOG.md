@@ -2,7 +2,7 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [Unreleased]
+## [2.5.2] — 2026-11-10
 
 ### 新增（爬虫 P4：浏览器降级，2026-11-09）
 
