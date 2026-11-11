@@ -214,6 +214,10 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
 
 # 前缀匹配命令表（按注册顺序优先匹配）
 PREFIX_HANDLERS: list[tuple[str, CommandHandler]] = [
+    # 带空格的前缀：接住 /cost --raw 这类带参数写法，又不吞掉 /costly 这种同前缀命令。
+    # 精确匹配只看整行，`/cost --raw` 在 COMMAND_HANDLERS 里取不到，必须走前缀表，
+    # 否则参数会被静默丢弃（2026-11-11 实测：/cost --raw 无任何输出）。@author aceFelix
+    ("/cost ", handle_cost),
     ("/mode ", handle_mode),
     ("/save ", handle_save),
     ("/load ", handle_load),

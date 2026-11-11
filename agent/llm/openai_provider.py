@@ -273,6 +273,7 @@ def normalize_usage(usage_obj: Any, cached: int, created: int) -> Usage:
         cache_creation_tokens=int(created or 0),
         reasoning_tokens=reasoning,
         raw_usage=raw or None,
+        last_input_tokens=int(getattr(usage_obj, "prompt_tokens", 0) or 0),
     )
 
 

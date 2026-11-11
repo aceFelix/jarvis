@@ -637,6 +637,8 @@ class QueryLoop:
             reasoning_tokens=prev.reasoning_tokens + turn.reasoning_tokens,
             # 只保留最近一次：/cost --raw 用它核对厂商返回的字段口径
             raw_usage=turn.raw_usage or prev.raw_usage,
+            # 当前上下文的真实规模（最近一次请求的输入 token，API 实计）
+            last_input_tokens=turn.last_input_tokens or prev.last_input_tokens,
         )
 
         return stats

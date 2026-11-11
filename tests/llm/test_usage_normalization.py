@@ -102,6 +102,12 @@ class TestRawUsage:
         assert (out.input_tokens, out.output_tokens) == (100, 10)
         assert (out.cache_read_tokens, out.cache_creation_tokens) == (7, 3)
 
+    def test_last_input_tokens_is_the_real_context_size(self):
+        """上下文规模取实测：最近一次请求的 prompt_tokens。"""
+        u = _Usage(prompt_tokens=23_456, completion_tokens=10)
+        out = normalize_usage(u, cached=0, created=0)
+        assert out.last_input_tokens == 23_456
+
 
 class TestWeightedEstimator:
     """按官方语种比例估算：中文 0.6 / 其他 0.3 每字符。"""

@@ -260,32 +260,30 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
 
     @author aceFelix
     """
-    from agent.core.memory.compactor import (
-        estimate_text_tokens_weighted,
-        estimate_tokens,
-    )
+    from agent.core.memory.compactor import estimate_tokens
     from agent.llm.base import Usage
     from agent.llm.pricing import VERIFIED_AT as PRICING_VERIFIED_AT
 
-    # System Prompt token 估算（独立计算，原 estimate_tokens 不含 system）。
-    # 用按语种计权的版本：官方比例中文 0.6 / 其他 0.3 每字符，一律 len/4 会误差一倍。
-    system_tokens = (
-        estimate_text_tokens_weighted(ctx.system_prompt) if ctx.system_prompt else 0
-    )
+    session = ctx.loop.session_usage if ctx.loop is not None else Usage()
     dialog_tokens = estimate_tokens(messages)
-    total_tokens = system_tokens + dialog_tokens
     rows = [
         ["对话轮数", str(dialog_count)],
         ["消息数", str(len(messages))],
-        ["System Prompt token（估算）", f"{system_tokens:,}"],
-        ["对话历史 token（估算）", f"{dialog_tokens:,}"],
-        ["完整上下文 token（含 system）", f"{total_tokens:,}"],
-        ["模型", model],
-        ["Provider", provider_name],
     ]
+    # 上下文规模：优先报**实测**（最近一次请求的输入 token），没有实测才留空。
+    # 不再用字符比例估算——实测反推显示中文/英文粗估都比真值大一档到一倍，
+    # 有 API 实计数还去估算，等于把准数据换成不准的。@author aceFelix
+    if session.last_input_tokens:
+        rows.append(["当前上下文（最近一次请求实计）", f"{session.last_input_tokens:,}"])
+    else:
+        rows.append(["当前上下文（尚无请求）", "—"])
+    # 系统提示只报字符数：字符数是确定的，换算成 token 必然带估算误差
+    rows.append(["System Prompt 字符数", f"{len(ctx.system_prompt or ''):,}"])
+    rows.append(["对话历史 token（字符估算）", f"{dialog_tokens:,}"])
+    rows.append(["模型", model])
+    rows.append(["Provider", provider_name])
 
     # 会话级真实用量统计（含缓存命中，来自各 Provider 归一化后的 usage）
-    session = ctx.loop.session_usage if ctx.loop is not None else Usage()
     if session.input_tokens:
         rows.append(["累计输入 token（API 实计）", f"{session.input_tokens:,}"])
         rows.append(["累计输出 token（API 实计）", f"{session.output_tokens:,}"])
@@ -337,7 +335,12 @@ def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
     deepseek），而非 settings.provider 静态配置。
     """
     provider_name = getattr(ctx.provider, "name", None) or ctx.settings.provider
-    show_raw = "--raw" in (stripped or "")
+    args = (stripped or "").split()[1:]   # 首段是命令名本身
+    show_raw = "--raw" in args
+    unknown = [a for a in args if a not in ("--raw",)]
+    if unknown:
+        # 静默忽略参数会让人以为命令生效了（/cost --raww 这种手滑最难查）
+        ctx.ui.warn(f"未知参数: {' '.join(unknown)}（可用: --raw）")
     _print_cost(ctx.ui, ctx.messages, ctx.dialog_count, ctx.model, provider_name, ctx, show_raw)
     return True
 

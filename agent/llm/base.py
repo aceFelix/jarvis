@@ -61,6 +61,9 @@ class Usage:
     reasoning_tokens: int = 0
     # 最近一次请求的原始 usage 键值（供 /cost --raw 核对口径，不参与任何计算）
     raw_usage: dict[str, int] | None = None
+    # 最近一次请求的输入 token（API 实计）。这就是**当前上下文的真实规模**，
+    # 比任何字符估算都准——有实测就不要估算。@author aceFelix
+    last_input_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
