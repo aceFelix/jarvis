@@ -1,4 +1,4 @@
-# 图片可视化窗口（P0）工程方案
+# 图片驾驶舱（P0）工程方案
 
 > 状态：**已定稿，P0 开发中**（2026-11-11 先生批准：§11 四项全按默认，唯一改动是窗口位置——**屏幕左上角、可自由移动**）
 > 作者：aceFelix
@@ -28,7 +28,7 @@
 ### 2.1 目标
 
 1. 工具产出的图**多一条落点**：不改变送给模型的图片块，另在 trace 上派生 `image_show` 事件（只带路径与元信息，不带 base64）。
-2. 新增**独立图片窗口**（Tk，复用驾驶舱的线程模型与视觉语言），显示最近 N 张图的缩略条 + 当前大图 + 元信息（来源工具 / 尺寸 / 格式 / 路径 / 时间）；默认停靠**屏幕左上角**，整面可拖动且记住位置。
+2. 新增**独立图片驾驶舱**（Tk，复用驾驶舱的线程模型与视觉语言），显示最近 N 张图的缩略条 + 当前大图 + 元信息（来源工具 / 尺寸 / 格式 / 路径 / 时间）；默认停靠**屏幕左上角**，整面可拖动且记住位置。
 3. 与既有窗口同生命周期：本轮有图才弹、结束保留、点 ✕ 只隐藏、下轮自动重现、主 HUD 隐藏时同步隐藏、终端前台时让位置顶。
 4. `[visualization]` 增三项配置（`image_window` / `image_max` / `image_thumb_px`），默认开，可一键关。
 5. **不新增运行依赖**：Pillow 已是既存依赖（`encode_pil_image` 在用），`PIL.ImageTk` 只需 tkinter（Windows 自带）。
@@ -111,7 +111,7 @@ return ToolResult.ok(summary, images=images,
 
 | 工具 | 现状 | 方案 | 理由 |
 |---|---|---|---|
-| `ScreenShot` | 落**系统临时目录** `jarvis-shots/`（`screen.py:39-43`），用户可传 `path` 覆盖 | **不改默认落点**，`ImageRef.path` 指该临时文件 | 改落点会牵动既有测试与用户可见行为；图片窗按「过期占位」优雅降级 |
+| `ScreenShot` | 落**系统临时目录** `jarvis-shots/`（`screen.py:39-43`），用户可传 `path` 覆盖 | **不改默认落点**，`ImageRef.path` 指该临时文件 | 改落点会牵动既有测试与用户可见行为；图片驾驶舱按「过期占位」优雅降级 |
 | `CameraShot` | 落 `~/.jarvis/cam/`（`camera.py:58,178`），已经持久 | 直接用该路径 | 零改动 |
 | `BrowserScreenshot` | **完全不落盘**，`page.screenshot()` bytes 直进 `encode_pil_image`（`browser.py:288-299`） | **新增落盘**到 `~/.jarvis/media/browser_<ts>.png`，再编码 | 网页截图是用户最想留存的图；且没有路径就没法展示 |
 
@@ -171,7 +171,7 @@ orchestrator tool_after ──► trace.on_tool_after ──► ② _emit("image
 |---|---|---|---|
 | `agent/ui/cockpit_image.py` | **新增** | `ImageWindow`（Tk 绘制/缩略条/大图/元信息/命中/拖动）+ `ImageManager`（生命周期四件套）+ `PhotoImage` 缓存 | 584 行 |
 | `agent/ui/image_cache.py` | **新增** | 纯逻辑：缩放尺寸、缓存键、存活判定、布局坐标、元信息文案（可单测，无 Tk） | 194 行 |
-| `agent/ui/image_demo.py` | **新增** | 开发期预览：`python -m agent.ui.image_demo` 生成三张测试图并只弹图片窗（不跑对话、不需要 pyautogui） | 78 行 |
+| `agent/ui/image_demo.py` | **新增** | 开发期预览：`python -m agent.ui.image_demo` 生成三张测试图并只弹图片驾驶舱（不跑对话、不需要 pyautogui） | 78 行 |
 | `agent/ui/cockpit_window.py` | 修改 | 瘦身：`_draw_feed`/`_draw_fetches`/`_section` 迁入 `cockpit_detail`；新增 `image_show` 分发与 `ImageManager` 装配 | 900 → **894** |
 | `agent/ui/cockpit.py` | 修改 | `IMAGE_MAX`、`CockpitState.images` 有界容器、`normalize_image_window()`、`VisualOptions` 三项、`image_on()`、`any_enabled()` | 575 → 621 |
 | `agent/core/images.py` | 修改 | `ImageRef` + `to_dict`/`from_dict` + `make_image_ref()` | 178 → 297 |
@@ -187,7 +187,7 @@ orchestrator tool_after ──► trace.on_tool_after ──► ② _emit("image
 | `tests/ui/test_cockpit_image.py` | **新增** | 缩略尺寸、缓存键含 mtime、存活判定、左上默认位置、缩略条布局、元信息文案 | 145 行 |
 | `tests/ui/test_image_state.py` | **新增** | `images` 有界/换轮清空/无路径丢弃/子代理图保留、`VisualOptions` 归一化、`ImageManager` 生命周期（假窗口） | 233 行 |
 | `tests/core/test_trace_images.py` | **新增** | `trace_meta["image"]` 派生、dict/list/脏值、**无 base64**、JSONL 落盘、agent 标注 | 126 行 |
-| `tests/ui/test_cli_cockpit.py` | 修改 | 「全 off」补上图片窗 + 新增「只开图片窗仍建根窗口」 | 219 → 239 |
+| `tests/ui/test_cli_cockpit.py` | 修改 | 「全 off」补上图片驾驶舱 + 新增「只开图片驾驶舱仍建根窗口」 | 219 → 239 |
 
 合计 **+1311 行（含测试）**，无新依赖（Pillow 既存，`ImageTk` 只需 tkinter）。
 
@@ -207,7 +207,7 @@ orchestrator tool_after ──► trace.on_tool_after ──► ② _emit("image
 
 ```toml
 [visualization]
-# 图片窗口：auto = 本轮出现工具产出的图就弹、结束保留、点 ✕ 只隐藏；off = 完全不创建。
+# 图片驾驶舱：auto = 本轮出现工具产出的图就弹、结束保留、点 ✕ 只隐藏；off = 完全不创建。
 image_window = "auto"
 # 缩略条最多保留几张（1–24）。超出后最旧的滑出，只留最近 N 张。
 image_max = 12
@@ -230,13 +230,13 @@ image_thumb_px = 88
 
 ```python
 def normalize_image_window(value: Any) -> str:
-    """图片窗口模式：``auto`` / ``off``；未知值降级为 auto。"""
+    """图片驾驶舱模式：``auto`` / ``off``；未知值降级为 auto。"""
     return "off" if str(value or "").strip().lower() == "off" else "auto"
 ```
 
 `VisualOptions` 增 `image_window: str = "auto"`、`image_max: int = 12`、`image_thumb_px: int = 88`，
 并提供 `image_on()`（与 `crawl_on()` 同构，受总开关 `enabled` 约束），
-并计入 `any_enabled()`——**否则只开图片窗时 `feed()` 会在 `:136` 直接返回**。
+并计入 `any_enabled()`——**否则只开图片驾驶舱时 `feed()` 会在 `:136` 直接返回**。
 
 ## 7. 缩略图缓存与性能（**按实测回填**）
 
@@ -260,11 +260,11 @@ def normalize_image_window(value: Any) -> str:
 | `PhotoImage` 未持引用被 GC | 窗口全白，最难查 | 实例属性持有 + 回归测试断言引用存在 |
 | Tk 非线程安全 | 崩解释器 | 所有 Tk 调用只在 Tk 线程；主线程只 `queue.put` |
 | `cockpit_window.py` 撞 900 行门禁 | CI 红 | §5.1 先瘦身再接线的固定顺序 |
-| 收尾清理误关图片窗 | 图窗在任务结束时被关掉 | 默认 `window_cleanup_unknown="keep"` 下安全（`trace.py:509-585`）；若用户配 `transient` 会误关，P1 给 `TraceRecorder` 加"自家窗口 hwnd 忽略集" |
+| 收尾清理误关图片驾驶舱 | 图窗在任务结束时被关掉 | 默认 `window_cleanup_unknown="keep"` 下安全（`trace.py:509-585`）；若用户配 `transient` 会误关，P1 给 `TraceRecorder` 加"自家窗口 hwnd 忽略集" |
 | 系统清理临时目录 | ScreenShot 的图过期 | 过期占位 + 保留元信息，绝不弹错 |
-| 隐私（截图含敏感内容） | 泄露到屏幕 | 不落 trace 正文（只有路径）；`Esc` 立即隐藏；`image_window="off"` 一键关；图片窗不进 `tool_result` 文案 |
+| 隐私（截图含敏感内容） | 泄露到屏幕 | 不落 trace 正文（只有路径）；`Esc` 立即隐藏；`image_window="off"` 一键关；图片驾驶舱不进 `tool_result` 文案 |
 | 文案越权 | 模型以为用户已核对 | **禁止**在回执里写"已为你显示/已确认"；`image_receipt` 的「附上不等于看见」原样保留（`images.py:137-157`） |
-| 打包缺 `ImageTk` | 冻结版窗口不可用 | `packaging/build_serve.ps1` 冒烟补一条：起 `ImageTk.PhotoImage` 自检；失败只禁用图片窗并记 diag，不影响主流程 |
+| 打包缺 `ImageTk` | 冻结版窗口不可用 | `packaging/build_serve.ps1` 冒烟补一条：起 `ImageTk.PhotoImage` 自检；失败只禁用图片驾驶舱并记 diag，不影响主流程 |
 
 ## 9. 验收清单
 
@@ -280,22 +280,22 @@ def normalize_image_window(value: Any) -> str:
 
 ### 9.2 人工走查（Windows + Git Bash）
 
-1. 让模型调 `ScreenShot` → 图片窗自动出现在 HUD 左侧，大图为刚截的屏，元信息与工具回执里的路径一致；
+1. 让模型调 `ScreenShot` → 图片驾驶舱自动出现在 HUD 左侧，大图为刚截的屏，元信息与工具回执里的路径一致；
 2. 连截 3 张 → 缩略条 3 张，点击切换，大图与缩略图对应；
 3. 双击大图 → `fit / 1:1` 切换；滚轮 → 缩略条横向滚动；
 4. 点 `✕` → 只隐藏；下一轮再截图 → 自动重现；
-5. Git Bash 切到前台 → 图片窗与 HUD 一并取消置顶，切走恢复；
+5. Git Bash 切到前台 → 图片驾驶舱与 HUD 一并取消置顶，切走恢复；
 6. 手工删掉临时目录里的图 → 大图区显示「图已过期」，元信息仍在，不崩不弹错；
-7. `[visualization] image_window = "off"` 重启 → 全程无图片窗，其余可视化照旧；
+7. `[visualization] image_window = "off"` 重启 → 全程无图片驾驶舱，其余可视化照旧；
 8. `CameraShot`、`BrowserScreenshot` 各跑一次，确认落点分别为 `~/.jarvis/cam`、`~/.jarvis/media`。
 
 ## 10. 分期
 
 | 期 | 内容 |
 |---|---|
-| **P0**（本文） | 三来源 `ImageRef` → `image_show` → 图片窗显示/隐藏/置顶/过期降级 + 三项配置 + 测试 |
+| **P0**（本文） | 三来源 `ImageRef` → `image_show` → 图片驾驶舱显示/隐藏/置顶/过期降级 + 三项配置 + 测试 |
 | P1 | 失败步联动（补 `operation-visibility` 的「失败截图未做」）、`VisualClick` 匹配矩形叠加在人看的那张图上 |
-| P2 | 桌面壳 `<img>` 消费 `image_show`（兄弟仓）；图片窗"另存到 media" |
+| P2 | 桌面壳 `<img>` 消费 `image_show`（兄弟仓）；图片驾驶舱"另存到 media" |
 | P3 | 终端 half-block 文本降级（无 Tk / 非 TTY 环境） |
 
 ## 11. 已确认项（2026-11-11 先生定稿）
@@ -317,7 +317,7 @@ P0 交付后先看效果，再决定 P1（失败步联动 + 匹配矩形叠加�
 | 事件派生直接 `**image` 展开 | 改为 `ImageRef.from_dict` 白名单重建 | 测试当场暴露：上游误塞的 base64 会一路落进 JSONL 与事件流 |
 | `CockpitState` 只按事件类型收集 | 增加「无 path 不入库」 | 否则窗口会画一张空图（显示成「图已过期」占位） |
 | `save_position` 整文件覆盖 | 改**分段读-改-写**（`_write_section`） | 新增 `image` 段后，两个窗口会互相冲掉对方的位置 |
-| `TerminalAwareTopmost(root, crawl)` | 新增 `peers=()` | 图片窗也要跟 Git Bash / cmd 一起让出置顶 |
+| `TerminalAwareTopmost(root, crawl)` | 新增 `peers=()` | 图片驾驶舱也要跟 Git Bash / cmd 一起让出置顶 |
 | 计划估 +1150 行 | 实测 **+1311 行** | `cockpit_image.py` 584 行（拖动/滚轮/命中/缓存/占位/元信息比预估多） |
 
 全量测试 **4970 passed / 2 skipped**；`test_engine_split_guards` 行数门禁通过（894 < 900）。
@@ -328,3 +328,51 @@ P0 交付后先看效果，再决定 P1（失败步联动 + 匹配矩形叠加�
 - 位置只在拖动结束时落盘，拖动过程中不节流写盘；
 - `ScreenShot` 仍落系统临时目录，被清理后只剩元信息；
 - 桌面壳（兄弟仓 `jarvis-desktop`）尚未消费 `image_show`，右栏暂无图片位。
+
+## 13. 三舱视觉规范（2026-11-12）
+
+依据 `posters/jarvis-cyberpunk-design-philosophy.md`（Neon Doctrine）落地，先生指定三色分工。
+
+### 13.1 三色纪律
+
+| 舱 | 主色 | 谱系 | 位置 |
+|---|---|---|---|
+| 任务驾驶舱 TASK | 电光青 | `#00d4ff` | 屏幕右侧 |
+| 爬虫驾驶舱 CRAWL | 品红电流 | `#ff2d78` | 屏幕左侧 |
+| 图片驾驶舱 IMAGE | 荧光绿 | `#39ff88` | 屏幕左上（可拖） |
+
+**语义色跨舱统一**（成 `#33f0c0` / 败 `#ff4d6a` / 警告 `#ffb347`），只有主色随舱变——
+否则品红舱里的「失败红」会和主色糊成一片，成/败看不出来。品红舱的失败色因此刻意偏橙红。
+
+### 13.2 共享材质（`agent/ui/hud_theme.py`）
+
+| 函数 / 数据 | 作用 |
+|---|---|
+| `HudTheme` | 一舱一套色板（bg / bg_panel / grid / scan / accent / accent_dim / accent_glow / text / dim / ok / fail / warn） |
+| `THEME_TASK` / `THEME_CRAWL` / `THEME_IMAGE` | 三个实例；**任务舱是全局默认**，旧常量名（`CYAN`/`GRID`…）继续指向它，既有子组件（工具卡、代理卡、详情浮层）零改动换新色 |
+| `draw_background()` | 深渊黑 + 扫描线（每 4px）+ 网格（每 28px）+ 颗粒（固定种子 96 粒）+ 左右侧刻度 |
+| `draw_frame()` | 外框（accent_dim）+ 四角 HUD 括号（accent，臂长 16） |
+| `glow_text()` | 先铺 accent_glow 偏移一层再叠亮字；支持 `fill`/`glow` 覆盖，让语义色数字也能发光 |
+
+三舱的背景材质**只有一份实现**：材质若各写一份，颗粒密度与网格间距迟早漂。
+
+### 13.3 改名
+
+「图片窗口」→「图片驾驶舱」：UI 标题 `IMAGE COCKPIT // 图片驾驶舱`，类名
+`ImageWindow` → `ImageCockpit`，配置说明与 README/文档同步。
+
+**刻意不动的两处**：配置键仍是 `[visualization] image_window`（改名会破坏用户已有配置）、
+文件仍是 `docs/plans/image-window.md`（改名会断已提交的链接与历史）。
+
+### 13.4 预览
+
+```bash
+python -m agent.ui.hud_preview     # 三舱一起弹：图片(左上) / 爬虫(左) / 任务(右)
+python -m agent.ui.image_demo      # 只看图片驾驶舱
+```
+
+### 13.5 取舍（不做的事）
+
+- **不引入 Tektur / Silkscreen 字体文件**：打包体积 + 缺失风险，用 Consolas + 微软雅黑近似；
+- **不做 GPU 级辉光**：Tk 只有偏移叠色，接受「够用」而非丝滑；
+- **颗粒限 96 粒/舱**：单舱全量重绘 344 个 item 约 10–20ms，再加会让事件密集时卡顿。

@@ -36,20 +36,16 @@ from agent.ui.cockpit_crawl_topo import build_topology
 from agent.ui.cockpit_topo_detach import TearOffGhost, TopoDetachedWindow
 from agent.ui.cockpit_topo_view import TearOffGesture, TopoView, TopoViewState
 from agent.ui.hud_theme import (
-    BG,
-    CYAN,
-    CYAN_DIM,
-    DIM,
+    THEME_CRAWL as _C,
+    draw_background,
+    draw_frame,
+    glow_text,
     FONT_LABEL,
     FONT_MONO,
     FONT_NUM,
     FONT_SMALL,
     FONT_TEXT,
     FONT_TITLE,
-    GREEN,
-    GRID,
-    RED,
-    TEXT,
     clip,
 )
 
@@ -89,7 +85,7 @@ class CrawlWindow:
             self.top,
             width=CRAWL_W,
             height=CRAWL_H,
-            bg=BG,
+            bg=_C.bg,
             highlightthickness=0,
             bd=0,
         )
@@ -367,7 +363,7 @@ class CrawlWindow:
         y: float,
         content: Any,
         *,
-        fill: str = TEXT,
+        fill: str = _C.text,
         font: Any = FONT_TEXT,
         anchor: str = "w",
         tag: str | None = None,
@@ -386,82 +382,69 @@ class CrawlWindow:
 
     def _section(self, title: str, y: int) -> None:
         """小节标题 + 右侧延长线。"""
-        self._text(CRAWL_PAD, y, title, fill=CYAN_DIM, font=FONT_LABEL)
-        self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, GRID)
+        self._text(CRAWL_PAD, y, title, fill=_C.accent_dim, font=FONT_LABEL)
+        self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, _C.grid)
 
     def _draw_scrollbar(self, total: int, visible: int, offset: int, top: float, bottom: float) -> None:
         """在窗口右缘画一条迷你滚动条。"""
         x = CRAWL_W - 9
-        self._line(x + 1, top, x + 1, bottom, GRID)
+        self._line(x + 1, top, x + 1, bottom, _C.grid)
         geometry = scrollbar_geometry(total, visible, offset, top=top, bottom=bottom, x=x)
         if geometry is not None:
-            self.canvas.create_rectangle(*geometry, fill=CYAN_DIM, outline="")
+            self.canvas.create_rectangle(*geometry, fill=_C.accent_dim, outline="")
 
     def _draw_grid(self) -> None:
-        """背景网格：与驾驶舱同款低亮度底噪。"""
-        for x in range(0, CRAWL_W, 28):
-            self._line(x, 0, x, CRAWL_H, GRID)
-        for y in range(0, CRAWL_H, 28):
-            self._line(0, y, CRAWL_W, y, GRID)
+        """背景材质：深渊黑 + 扫描线 + 网格 + 颗粒 + 侧刻度（统一在 hud_theme）。"""
+        draw_background(self.canvas, _C, CRAWL_W, CRAWL_H)
 
     def _draw_frame(self) -> None:
-        """外框 + 四角角标。"""
-        self.canvas.create_rectangle(
-            6, 6, CRAWL_W - 6, CRAWL_H - 6, outline=CYAN_DIM
-        )
-        corner = 16
-        for x, y, dx, dy in (
-            (6, 6, 1, 1),
-            (CRAWL_W - 6, 6, -1, 1),
-            (6, CRAWL_H - 6, 1, -1),
-            (CRAWL_W - 6, CRAWL_H - 6, -1, -1),
-        ):
-            self._line(x, y, x + dx * corner, y, CYAN, 2)
-            self._line(x, y, x, y + dy * corner, CYAN, 2)
+        """外框 + 四角 HUD 括号（统一在 hud_theme）。"""
+        draw_frame(self.canvas, _C, CRAWL_W, CRAWL_H)
 
     def _draw_header(self, state: CockpitState) -> None:
         """标题、运行状态点、关闭按钮。"""
-        self._text(CRAWL_PAD, 26, "J.A.R.V.I.S", fill=CYAN_DIM, font=FONT_TITLE)
-        self._text(CRAWL_PAD + 1, 25, "J.A.R.V.I.S", fill=CYAN, font=FONT_TITLE)
-        self._text(CRAWL_PAD, 46, "CRAWL // 爬虫驾驶舱", fill=DIM, font=FONT_SMALL)
+        glow_text(self.canvas, CRAWL_PAD, 25, "J.A.R.V.I.S", theme=_C, font=FONT_TITLE)
+        self._text(CRAWL_PAD, 46, "CRAWL COCKPIT // 爬虫驾驶舱", fill=_C.dim, font=FONT_SMALL)
 
         running = state.current is not None
-        dot = GREEN if state.finished else (CYAN if running else DIM)
+        dot = _C.ok if state.finished else (_C.accent if running else _C.dim)
         self.canvas.create_oval(
             CRAWL_W - 96, 20, CRAWL_W - 88, 28, fill=dot, outline=""
         )
         self._text(
             CRAWL_W - 70, 24, "RUN" if running else "IDLE",
-            fill=DIM, font=FONT_SMALL, anchor="e",
+            fill=_C.dim, font=FONT_SMALL, anchor="e",
         )
 
         # 关闭按钮：只隐藏，下一轮有新抓取自动重现
         self.canvas.create_oval(
             CRAWL_W - 40, 12, CRAWL_W - 14, 38,
-            outline=CYAN_DIM, width=1, tags=("crawl_close",),
+            outline=_C.accent_dim, width=1, tags=("crawl_close",),
         )
         self._text(
-            CRAWL_W - 27, 25, "✕", fill=DIM, font=("Microsoft YaHei UI", 10),
+            CRAWL_W - 27, 25, "✕", fill=_C.dim, font=("Microsoft YaHei UI", 10),
             anchor="center", tag="crawl_close",
         )
-        self._line(CRAWL_PAD, 60, CRAWL_W - CRAWL_PAD, 60, CYAN_DIM)
+        self._line(CRAWL_PAD, 60, CRAWL_W - CRAWL_PAD, 60, _C.accent_dim)
 
     def _draw_metrics(self, state: CockpitState) -> None:
         """四格汇总：抓取 / 成功 / 失败 / 去重，外加字节与域名分布。"""
         info = summarize(state.fetches, state.stats)
         cells = (
-            ("抓取 TOTAL", str(info["total"]), CYAN),
-            ("成功 OK", str(info["ok"]), GREEN),
-            ("失败 FAIL", str(info["failed"]), RED if info["failed"] else GREEN),
-            ("去重 DUP", str(info["duplicates"]), CYAN),
+            ("抓取 TOTAL", str(info["total"]), _C.accent),
+            ("成功 OK", str(info["ok"]), _C.ok),
+            ("失败 FAIL", str(info["failed"]), _C.fail if info["failed"] else _C.ok),
+            ("去重 DUP", str(info["duplicates"]), _C.accent),
         )
         cell_w = (CRAWL_W - 2 * CRAWL_PAD - 24) // 4
         for index, (label, value, color) in enumerate(cells):
             x = CRAWL_PAD + index * (cell_w + 8)
-            self.canvas.create_rectangle(x, 70, x + cell_w, 126, outline=GRID)
-            self._text(x + 8, 82, label, fill=DIM, font=FONT_LABEL)
-            self._text(x + 9, 106, value, fill=CYAN_DIM, font=FONT_NUM)
-            self._text(x + 8, 105, value, fill=color, font=FONT_NUM)
+            self.canvas.create_rectangle(x, 70, x + cell_w, 126, outline=_C.grid)
+            self._text(x + 8, 82, label, fill=_C.dim, font=FONT_LABEL)
+            glow_text(
+                self.canvas, x + 8, 105, value,
+                theme=_C, font=FONT_NUM, fill=color,
+            )
 
         # 第二行：累计字节 + 域名分布（最多 3 个，超出只报总数）
         parts = []
@@ -473,7 +456,7 @@ class CrawlWindow:
         self._text(
             CRAWL_PAD, 140,
             clip("  |  ".join(parts) if parts else "— 等待抓取", 84),
-            fill=DIM, font=FONT_SMALL,
+            fill=_C.dim, font=FONT_SMALL,
         )
 
     def _draw_urls(self, state: CockpitState) -> None:
@@ -483,23 +466,23 @@ class CrawlWindow:
             state.fetches, self._url_scroll, _URL_ROWS
         )
         if not rows:
-            self._text(CRAWL_PAD, 182, "— 暂无抓取", fill=DIM, font=FONT_SMALL)
+            self._text(CRAWL_PAD, 182, "— 暂无抓取", fill=_C.dim, font=FONT_SMALL)
             return
         self._text(
             CRAWL_W - CRAWL_PAD, 158, f"{len(rows)}/{total}  滚轮",
-            fill=DIM, font=FONT_SMALL, anchor="e",
+            fill=_C.dim, font=FONT_SMALL, anchor="e",
         )
         y = 180
         for item in rows:
             ok = item.get("status") == "ok"
-            self._text(CRAWL_PAD, y, "✓" if ok else "✗", fill=GREEN if ok else RED, font=FONT_TEXT)
+            self._text(CRAWL_PAD, y, "✓" if ok else "✗", fill=_C.ok if ok else _C.fail, font=FONT_TEXT)
             # 层号：Crawl 提供 depth 时显示 L0/L1…；单页抓取无深度显示 L-
             depth = item.get("depth")
             layer = f"L{depth}" if isinstance(depth, int) else "L-"
-            self._text(CRAWL_PAD + 16, y, layer, fill=CYAN_DIM, font=FONT_MONO)
+            self._text(CRAWL_PAD + 16, y, layer, fill=_C.accent_dim, font=FONT_MONO)
             self._text(
                 CRAWL_PAD + 40, y, clip_url_tail(item.get("url"), 44),
-                fill=TEXT, font=FONT_MONO,
+                fill=_C.text, font=FONT_MONO,
             )
             meta = " · ".join(
                 part for part in (
@@ -511,7 +494,7 @@ class CrawlWindow:
             if hits > 1:
                 meta = f"×{hits} · {meta}" if meta else f"×{hits}"
             if meta:
-                self._text(CRAWL_W - CRAWL_PAD, y, meta, fill=DIM, font=FONT_MONO, anchor="e")
+                self._text(CRAWL_W - CRAWL_PAD, y, meta, fill=_C.dim, font=FONT_MONO, anchor="e")
             y += 22
         self._draw_scrollbar(total, len(rows), self._url_scroll, 180, 312)
 
@@ -523,7 +506,7 @@ class CrawlWindow:
             self._text(
                 CRAWL_PAD, 350,
                 "— 暂无抽取（用 WebExtract 按 CSS 选择器抽字段）",
-                fill=DIM, font=FONT_SMALL,
+                fill=_C.dim, font=FONT_SMALL,
             )
             self._extract_scroll = None
             return
@@ -531,7 +514,7 @@ class CrawlWindow:
         self._extract_scroll = offset
         self._text(
             CRAWL_W - CRAWL_PAD, 326, f"{len(rows)}/{total}  滚轮",
-            fill=DIM, font=FONT_SMALL, anchor="e",
+            fill=_C.dim, font=FONT_SMALL, anchor="e",
         )
         y = 348
         for index, item in enumerate(rows):
@@ -542,7 +525,7 @@ class CrawlWindow:
                 # 选中行加一层细框：与拓扑节点的高亮环对应
                 self.canvas.create_rectangle(
                     CRAWL_PAD - 4, y - 9, CRAWL_W - CRAWL_PAD, y + 9,
-                    outline=CYAN_DIM, tags=tags,
+                    outline=_C.accent_dim, tags=tags,
                 )
             fields = item.get("fields") or {}
             if isinstance(fields, dict) and fields:
@@ -557,7 +540,7 @@ class CrawlWindow:
             self._text(
                 CRAWL_PAD, y,
                 f"{clip(domain_of(url), 20)}  {pairs}{note}",
-                fill=CYAN if selected else DIM, font=FONT_MONO, tags=tags,
+                fill=_C.accent if selected else _C.dim, font=FONT_MONO, tags=tags,
             )
             self._extract_urls[index] = url
             y += 20
@@ -573,25 +556,25 @@ class CrawlWindow:
         rows = [item for item in state.fetches if isinstance(item.get("depth"), int)]
         if not rows:
             hint = "— 单页抓取，无拓扑" if state.fetches else "— 等待拓扑数据"
-            self._text(CRAWL_PAD, 442, hint, fill=DIM, font=FONT_SMALL)
+            self._text(CRAWL_PAD, 442, hint, fill=_C.dim, font=FONT_SMALL)
             self._draw_stats(state)
             return
         if not self._options.crawl_topology_on():
             self._text(
                 CRAWL_PAD, 442,
                 "— 拓扑已关闭（[visualization] crawl_topology = off）",
-                fill=DIM, font=FONT_SMALL,
+                fill=_C.dim, font=FONT_SMALL,
             )
             self._draw_stats(state)
             return
         if self._controller.detached is not None:
             self._text(
                 CRAWL_PAD, 470, "— 拓扑已外弹至独立窗口查看",
-                fill=CYAN_DIM, font=FONT_SMALL,
+                fill=_C.accent_dim, font=FONT_SMALL,
             )
             self._text(
                 CRAWL_PAD, 500, "点击此处收回（或在独立窗点 ✕）",
-                fill=CYAN, font=FONT_SMALL, tags=("topo_redock",),
+                fill=_C.accent, font=FONT_SMALL, tags=("topo_redock",),
             )
             self._draw_stats(state)
             return
@@ -608,7 +591,7 @@ class CrawlWindow:
         self._text(
             CRAWL_PAD, 604,
             "左键拖出独立窗 · Ctrl+滚轮缩放 · 右键拖动 · 双击右键复位",
-            fill=DIM, font=FONT_SMALL,
+            fill=_C.dim, font=FONT_SMALL,
         )
         self._draw_stats(state)
 
@@ -617,7 +600,7 @@ class CrawlWindow:
         parts = stats_parts(state)
         self._text(
             CRAWL_PAD, _STATS_Y, clip(" · ".join(parts) or "—", 88),
-            fill=CYAN_DIM, font=FONT_MONO,
+            fill=_C.accent_dim, font=FONT_MONO,
         )
 
 

@@ -45,6 +45,10 @@ from agent.ui.hud_theme import (
     CYAN,
     CYAN_DIM,
     DIM,
+    THEME_TASK,
+    draw_background,
+    draw_frame,
+    glow_text,
     FONT_LABEL,
     FONT_MONO,
     FONT_NUM,
@@ -102,7 +106,7 @@ class CockpitWindow:
         self._agent_cards: AgentCardManager | None = None
         # 左侧抓取网络窗（C2-lite）：有抓取才弹；终端优先置顶策略在 Tk 线程内创建
         self._crawl: CrawlManager | None = None
-        # 图片窗（2026-11-11）：懒创建 Toplevel，首次出现 image_show 才真正出现
+        # 图片驾驶舱（2026-11-11）：懒创建 Toplevel，首次出现 image_show 才真正出现
         self._images: ImageManager | None = None
         self._zorder: TerminalAwareTopmost | None = None
         self._observer_bound = False
@@ -318,9 +322,9 @@ class CockpitWindow:
             self._agent_cards = AgentCardManager(root, self.options, self._anchor)
             # 左侧抓取窗（懒创建 Toplevel，首次有抓取才真正出现）
             self._crawl = CrawlManager(root, self.options)
-            # 图片窗（懒创建 Toplevel，首次有工具产出的图才真正出现）
+            # 图片驾驶舱（懒创建 Toplevel，首次有工具产出的图才真正出现）
             self._images = ImageManager(root, self.options)
-            # 终端优先：Git Bash / cmd 在前台时所有子窗让出置顶（图片窗 2026-11-11 并入）
+            # 终端优先：Git Bash / cmd 在前台时所有子窗让出置顶（图片驾驶舱 2026-11-11 并入）
             self._zorder = TerminalAwareTopmost(
                 root, self._crawl, enabled=self._topmost, peers=(self._images,)
             )
@@ -476,7 +480,7 @@ class CockpitWindow:
                     self._crawl.sync(self._state, self._run_id)
                 except Exception:
                     pass
-            # 图片窗：工具产出的图出现才弹（2026-11-11）
+            # 图片驾驶舱：工具产出的图出现才弹（2026-11-11）
             if (
                 self._images is not None
                 and not self._hidden
@@ -656,30 +660,16 @@ class _Hud:
         self.canvas.create_rectangle(x1, y1, x2, y2, outline=outline, width=width)
 
     def _draw_grid(self) -> None:
-        """背景网格：低亮度，制造 HUD 底噪。"""
-        step = 28
-        for x in range(0, WINDOW_W, step):
-            self._line(x, 0, x, WINDOW_H, GRID)
-        for y in range(0, WINDOW_H, step):
-            self._line(0, y, WINDOW_W, y, GRID)
+        """背景材质：深渊黑 + 扫描线 + 网格 + 颗粒 + 侧刻度（统一在 hud_theme）。"""
+        draw_background(self.canvas, THEME_TASK, WINDOW_W, WINDOW_H)
 
     def _draw_frame(self) -> None:
-        """外框 + 四角角标。"""
-        self._rect(6, 6, WINDOW_W - 6, WINDOW_H - 6, CYAN_DIM)
-        corner = 16
-        for x, y, dx, dy in (
-            (6, 6, 1, 1),
-            (WINDOW_W - 6, 6, -1, 1),
-            (6, WINDOW_H - 6, 1, -1),
-            (WINDOW_W - 6, WINDOW_H - 6, -1, -1),
-        ):
-            self._line(x, y, x + dx * corner, y, CYAN, 2)
-            self._line(x, y, x, y + dy * corner, CYAN, 2)
+        """外框 + 四角 HUD 括号（统一在 hud_theme）。"""
+        draw_frame(self.canvas, THEME_TASK, WINDOW_W, WINDOW_H)
 
     def _draw_header(self, state: CockpitState) -> None:
         """标题、状态点、关闭按钮。"""
-        self._text(PAD, 26, "J.A.R.V.I.S", fill=CYAN_DIM, font=FONT_TITLE)
-        self._text(PAD + 1, 25, "J.A.R.V.I.S", fill=CYAN, font=FONT_TITLE)
+        glow_text(self.canvas, PAD, 25, "J.A.R.V.I.S", theme=THEME_TASK, font=FONT_TITLE)
         self._text(PAD, 46, "TASK COCKPIT // 任务驾驶舱", fill=DIM, font=FONT_SMALL)
 
         if state.finished:

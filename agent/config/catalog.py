@@ -224,9 +224,9 @@ FIELD_DOCS: dict[str, str] = {
     # 左侧窗口分层拓扑（P3，2026-11-09）@author aceFelix
     "visual_crawl_topology": "左侧窗口分层拓扑：auto 画节点与父→子连线（节点与抽取行点击联动）；off 只保留清单/抽取/统计",
     "visual_crawl_max_nodes": "拓扑可见节点上限（20–200，默认 60），超出的节点折叠为 +N",
-    # 图片窗口（P0，2026-11-11）@author aceFelix
-    "visual_image_window": "图片窗口：把 ScreenShot / CameraShot / BrowserScreenshot 产出的图显示给人看（终端原本只能把图送给模型，人看不到）；auto 有图才弹、结束保留、✕ 只隐藏，off 关闭",
-    "visual_image_max": "图片窗口缩略条保留张数（1–24，默认 12），超出后最旧的滑出",
+    # 图片驾驶舱（P0，2026-11-11）@author aceFelix
+    "visual_image_window": "图片驾驶舱：把 ScreenShot / CameraShot / BrowserScreenshot 产出的图显示给人看（终端原本只能把图送给模型，人看不到）；auto 有图才弹、结束保留、✕ 只隐藏，off 关闭",
+    "visual_image_max": "图片驾驶舱缩略条保留张数（1–24，默认 12），超出后最旧的滑出",
     "visual_image_thumb_px": "缩略条单张缩略图最长边像素（48–160，默认 88）；大图区恒按窗宽适配，不受此值影响",
     # 真爬虫（P2，2026-11-09）@author aceFelix
     "crawl_enabled": "真爬虫总开关：关闭后 Crawl / WebExtract 直接拒绝执行",

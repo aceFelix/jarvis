@@ -20,12 +20,8 @@ from typing import Any, Callable, Iterable
 
 from agent.ui.cockpit_crawl_topo import TopologyLayout
 from agent.ui.hud_theme import (
-    CYAN,
-    CYAN_DIM,
-    DIM,
+    THEME_CRAWL as _C,
     FONT_SMALL,
-    GREEN,
-    RED,
     clip,
 )
 
@@ -197,22 +193,22 @@ class TopoView:
         self.topo_urls = {}
         self.aggregate_depths = {}
         if layout.is_empty():
-            self.canvas.create_text(pad, top + 4, text="— 无拓扑数据", fill=DIM, font=FONT_SMALL, anchor="w")
+            self.canvas.create_text(pad, top + 4, text="— 无拓扑数据", fill=_C.dim, font=FONT_SMALL, anchor="w")
             return
         for parent, child in layout.edges:
             x1, y1 = self.point(parent.x - pad, parent.y - top, pad, top)
             x2, y2 = self.point(child.x - pad, child.y - top, pad, top)
-            self.canvas.create_line(x1, y1, x2, y2, fill=CYAN_DIM, width=1)
+            self.canvas.create_line(x1, y1, x2, y2, fill=_C.accent_dim, width=1)
         scale = self.state.scale
         for index, node in enumerate(layout.nodes):
-            color = GREEN if node.status == "ok" else (RED if node.status == "error" else DIM)
+            color = _C.ok if node.status == "ok" else (_C.fail if node.status == "error" else _C.dim)
             tags = ("topo_node", f"topo_idx:{index}")
             x, y = self.point(node.x - pad, node.y - top, pad, top)
             selected = node.url == self.state.selected_url
             if selected:
                 self.canvas.create_oval(
                     x - 7 * scale, y - 7 * scale, x + 7 * scale, y + 7 * scale,
-                    outline=CYAN, width=1, tags=tags,
+                    outline=_C.accent, width=1, tags=tags,
                 )
             self.canvas.create_oval(
                 x - 4 * scale, y - 4 * scale, x + 4 * scale, y + 4 * scale,
@@ -220,13 +216,13 @@ class TopoView:
             )
             self.canvas.create_text(
                 x, y + 12 * scale, text=clip(node.label, 10),
-                fill=CYAN if selected else DIM, font=FONT_SMALL, anchor="n", tags=tags,
+                fill=_C.accent if selected else _C.dim, font=FONT_SMALL, anchor="n", tags=tags,
             )
             self.topo_urls[index] = node.url
         for index, item in enumerate(layout.aggregates):
             ax, ay = self.point(item["x"] - pad, item["y"] - top, pad, top)
             self.canvas.create_text(
-                ax, ay, text=f"+{item['count']}", fill=CYAN_DIM, font=FONT_SMALL,
+                ax, ay, text=f"+{item['count']}", fill=_C.accent_dim, font=FONT_SMALL,
                 anchor="center", tags=("topo_aggregate", f"aggregate_idx:{index}"),
             )
             self.aggregate_depths[index] = int(item.get("depth", 0))

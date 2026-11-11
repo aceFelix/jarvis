@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-### 新增（图片窗口 P0：终端终于能看见图，2026-11-11）
+### 新增（图片驾驶舱 P0：终端终于能看见图，2026-11-11）
 
 - **背景**：终端此前只有图片**入站**通道——`ScreenShot` / `CameraShot` / `BrowserScreenshot`
   把图编码成 base64 送给模型，人却看不见。模型说「我看了截图，按钮在右下角」时，用户无法
@@ -35,23 +35,23 @@
   900 → 894 后再接线。
 - **测试**：新增 `tests/ui/test_cockpit_image.py`（纯逻辑）、`tests/ui/test_image_state.py`
   （状态与生命周期，假窗口注入）、`tests/core/test_trace_images.py`（派生、脏值、无 base64）；
-  `tests/ui/test_cli_cockpit.py` 的「全 off」用例同步补上图片窗，并新增「只开图片窗仍建根窗口」。
+  `tests/ui/test_cli_cockpit.py` 的「全 off」用例同步补上图片驾驶舱，并新增「只开图片驾驶舱仍建根窗口」。
   全量 **4970 passed / 2 skipped**。
-- **本地预览**：`python -m agent.ui.image_demo` 生成三张不同尺寸的测试图并只弹图片窗，
+- **本地预览**：`python -m agent.ui.image_demo` 生成三张不同尺寸的测试图并只弹图片驾驶舱，
   不跑真实对话、不需要模型与 pyautogui，用来快速看形态（`agent/ui/image_demo.py`）。
 
-### 修复（图片窗口把三个截图工具打挂，2026-11-11）
+### 修复（图片驾驶舱把三个截图工具打挂，2026-11-11）
 
 - **现象**：真实会话里 `ScreenShot` 连试三次全挂，报
   `TypeError: ToolResult.ok() got an unexpected keyword argument 'trace_meta'`；
   同一路径的 `CameraShot` / `BrowserScreenshot` 一起挂（`Crawl` / `WebExtract` 不受影响，
   它们用 `ToolResult(data=..., trace_meta=...)` 直接构造）。
 - **根因**：`ToolResult` 这个 dataclass **早就有** `trace_meta` 字段，但 `ok()` 工厂方法
-  从来没透传它。图片窗口那三处写成 `ToolResult.ok(..., trace_meta=...)`，于是每次调用都在
+  从来没透传它。图片驾驶舱那三处写成 `ToolResult.ok(..., trace_meta=...)`，于是每次调用都在
   构造结果时抛 `TypeError`——典型的「加字段忘了改 classmethod」。
 - **修法**：`ok()` 增加 `trace_meta` 参数并透传（`error()` 不收该参数，守卫明确禁止绕过）。
 - **为什么测试没拦住**：全仓此前**没有任何用例真的跑过 `call()`**（需要 pyautogui / 摄像头 /
-  浏览器），图片窗口的测试都停在 `trace_meta` dict 的派生逻辑上。已补两道门禁：
+  浏览器），图片驾驶舱的测试都停在 `trace_meta` dict 的派生逻辑上。已补两道门禁：
   - `tests/core/test_tool_result_contract.py`：AST 扫 `agent/` 下所有 `ToolResult.ok/error(...)`
     调用，把 keyword 名与签名（唯一真源）逐个比对，命中即报**文件:行号**。反向变异验证过：
     把 `trace_meta` 从签名里去掉，守卫立刻抓到 `screen.py:205` / `camera.py:213` /
@@ -64,7 +64,7 @@
 
 - **现象**：`deepseek-flash` 官方已是**多模态**（[Vision 文档](https://api-docs.deepseek.com/guides/vision)：
   能读截图里的文字），但 jarvis 截图后模型反复回报「我拿不到画面内容」，还写了十几秒
-  内心戏。图片窗口里人类看得见，模型看不见——两边各自以为对方知道。
+  内心戏。图片驾驶舱里人类看得见，模型看不见——两边各自以为对方知道。
 - **根因两层**：
   1. `_messages_to_openai` 里 `role="tool"` 的 content **只能是字符串**，图片塞不进去。
      代码只在末尾拼一句 `[附带 N 张图片]`，注释写着「后续如需视觉 tool_result 再追加
@@ -84,6 +84,25 @@
 - **顺带记录**：`max_tokens` 太小 + 思考模式会让视觉任务返回空 `content`
   （首次验证 `max_tokens=60` 全被 `reasoning_tokens` 吃掉）；依赖看图的任务要给够
   输出预算。
+
+### 重构（三舱视觉：三色纪律 + 共享材质，2026-11-12）
+
+- **依据**：`posters/jarvis-cyberpunk-design-philosophy.md`（Neon Doctrine）。先生指定三舱
+  主色：任务驾驶舱电光青 `#00d4ff`、爬虫驾驶舱品红电流 `#ff2d78`、图片驾驶舱荧光绿 `#39ff88`。
+- **`hud_theme` 重写为色板模型**：`HudTheme` + `THEME_TASK/CRAWL/IMAGE` 三个实例；
+  **任务舱是全局默认**，旧常量名（`CYAN`/`GRID`…）继续指向它，因此工具卡、代理卡、
+  详情浮层三个子组件零改动即换新色。
+- **材质三舱共用一份**：`draw_background`（深渊黑 + 4px 扫描线 + 28px 网格 + 固定种子
+  96 粒噪点 + 左右侧刻度）与 `draw_frame`（外框 + 四角 HUD 括号），替掉三个舱各自手写
+  的网格/角标；`glow_text` 统一「先辉光后亮字」，支持 `fill` 覆盖让成/败数字也能发光。
+- **语义色跨舱统一**：成 `#33f0c0` / 败 `#ff4d6a` / 警告 `#ffb347`，只有主色随舱变；
+  品红舱的失败色刻意偏橙红，避免与主色糊成一片导致成/败不可辨。
+- **改名**：「图片窗口」→「图片驾驶舱」，类 `ImageWindow` → `ImageCockpit`，标题
+  `IMAGE COCKPIT // 图片驾驶舱`；爬虫舱标题补全为 `CRAWL COCKPIT // 爬虫驾驶舱`。
+  配置键 `image_window` 与文件名 `image-window.md` 刻意保留（改名会破坏既有配置与链接）。
+- **新增预览**：`python -m agent.ui.hud_preview` 一次弹三舱对比配色（不跑模型、不需要 key）。
+- 行数：`cockpit_window` 894 → 884、`cockpit_crawl` 857 → 838（删掉重复的网格/角标实现），
+  `hud_theme` 89 → 约 340。全量 **5007 passed / 2 skipped**。
 
 ## [2.5.4] — 2026-11-11
 

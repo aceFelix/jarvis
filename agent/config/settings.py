@@ -223,7 +223,7 @@ class Settings:
     visual_crawl_topology: str = "auto"
     visual_crawl_max_nodes: int = 60
 
-    # 图片窗口（P0，2026-11-11）：把 ScreenShot / CameraShot / BrowserScreenshot
+    # 图片驾驶舱（P0，2026-11-11）：把 ScreenShot / CameraShot / BrowserScreenshot
     # 产出的图显示给人看（终端原本只有图片入站通道）。
     # auto = 本轮出现工具产出的图才弹、结束保留、点 ✕ 只隐藏；off = 完全不创建。
     # image_max 为缩略条保留张数（1–24）；image_thumb_px 为缩略条单张最长边

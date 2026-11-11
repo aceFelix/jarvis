@@ -189,7 +189,7 @@ crawl_window = "auto"
 crawl_topology = "auto"
 crawl_max_nodes = 60    # 可见节点上限（20–200），超出折叠为 +N
 
-# 图片窗口（P0）：把 ScreenShot / CameraShot / BrowserScreenshot 产出的图显示出来。
+# 图片驾驶舱（P0）：把 ScreenShot / CameraShot / BrowserScreenshot 产出的图显示出来。
 # 终端本身只能把图送给模型，看不到图；这个独立窗口按路径显示原图 + 元信息。
 #   auto（默认）= 本轮出现工具产出的图才弹出，任务结束保留，点 ✕ 只隐藏
 #   off         = 完全不创建该窗口（其它可视化不受影响）

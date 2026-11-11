@@ -26,10 +26,7 @@ from agent.ui.cockpit_topo_view import (
     interpolate_rect,
 )
 from agent.ui.hud_theme import (
-    BG,
-    CYAN,
-    CYAN_DIM,
-    DIM,
+    THEME_CRAWL as _C,
     FONT_LABEL,
     FONT_SMALL,
     FONT_TITLE,
@@ -56,17 +53,17 @@ class TearOffGhost:
         self.top.attributes("-topmost", True)
         self.top.attributes("-alpha", 0.6)
         canvas = tk.Canvas(
-            self.top, width=self._W, height=self._H, bg=BG,
-            highlightthickness=1, highlightbackground=CYAN_DIM, bd=0,
+            self.top, width=self._W, height=self._H, bg=_C.bg,
+            highlightthickness=1, highlightbackground=_C.accent_dim, bd=0,
         )
         canvas.pack()
         canvas.create_text(
             self._W // 2, 42, text="拓扑 // TOPOLOGY",
-            fill=CYAN, font=FONT_TITLE, anchor="center",
+            fill=_C.accent, font=FONT_TITLE, anchor="center",
         )
         canvas.create_text(
             self._W // 2, 78, text=f"{node_count} 节点 · 松手生成独立窗口",
-            fill=DIM, font=FONT_SMALL, anchor="center",
+            fill=_C.dim, font=FONT_SMALL, anchor="center",
         )
 
     def move(self, x_root: float, y_root: float) -> None:
@@ -122,7 +119,7 @@ class TopoDetachedWindow:
         y = max(0, min(int(y_root - DETACH_H / 2), screen_h - DETACH_H))
         self.top.geometry(f"{DETACH_W}x{DETACH_H}+{x}+{y}")
         self.canvas = tk.Canvas(
-            self.top, width=DETACH_W, height=DETACH_H, bg=BG,
+            self.top, width=DETACH_W, height=DETACH_H, bg=_C.bg,
             highlightthickness=0, bd=0,
         )
         self.canvas.pack(fill="both", expand=True)
@@ -169,14 +166,14 @@ class TopoDetachedWindow:
         w, h = self._size_now()
         self._size = (w, h)
         bottom = h - _BOTTOM
-        self._text(_PAD, 26, "CRAWL TOPOLOGY", fill=CYAN, font=FONT_TITLE)
-        self._text(_PAD, 50, "看完点 ✕ 收回驾驶舱（视图状态保留）", fill=DIM, font=FONT_SMALL)
-        self._text(w - 96, 26, "✕ 收回", fill=CYAN_DIM, font=FONT_LABEL,
+        self._text(_PAD, 26, "CRAWL TOPOLOGY", fill=_C.accent, font=FONT_TITLE)
+        self._text(_PAD, 50, "看完点 ✕ 收回驾驶舱（视图状态保留）", fill=_C.dim, font=FONT_SMALL)
+        self._text(w - 96, 26, "✕ 收回", fill=_C.accent_dim, font=FONT_LABEL,
                  anchor="e", tags=("detach_close",))
-        self._text(w - 24, 50, "适应画布", fill=CYAN_DIM, font=FONT_SMALL,
+        self._text(w - 24, 50, "适应画布", fill=_C.accent_dim, font=FONT_SMALL,
                  anchor="e", tags=("detach_fit",))
-        self._line(_PAD, 66, w - _PAD, 66, CYAN_DIM)
-        self.canvas.create_rectangle(6, 6, w - 6, h - 6, outline=CYAN_DIM)
+        self._line(_PAD, 66, w - _PAD, 66, _C.accent_dim)
+        self.canvas.create_rectangle(6, 6, w - 6, h - 6, outline=_C.accent_dim)
         layout = build_topology(
             state.fetches,
             width=w - 2 * _PAD,
@@ -191,7 +188,7 @@ class TopoDetachedWindow:
         self._text(
             _PAD, h - 30,
             "Ctrl+滚轮缩放 · 右键拖动 · 双击右键复位 · 点+N展开 · 点节点联动抽取表",
-            fill=DIM, font=FONT_SMALL,
+            fill=_C.dim, font=FONT_SMALL,
         )
 
     def _text(self, x: float, y: float, content: Any, *, fill: str, font: Any,

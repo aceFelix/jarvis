@@ -1,4 +1,4 @@
-"""图片窗口（P0）：把「工具产出的图」显示给用户看。
+"""图片驾驶舱（P0）：把「工具产出的图」显示给用户看。
 
 ## 为什么要这个窗口
 
@@ -30,30 +30,24 @@ from agent.ui import image_cache as geo
 from agent.ui.cockpit import VisualOptions
 from agent.ui.cockpit_position import load_image_position, save_image_position
 from agent.ui.hud_theme import (
-    AMBER,
-    BG,
-    BG_PANEL,
-    CYAN,
-    CYAN_DIM,
-    DIM,
+    THEME_IMAGE as _C,
+    draw_background,
+    draw_frame,
+    glow_text,
     FONT_CARD_TITLE,
     FONT_LABEL,
     FONT_MONO,
     FONT_SMALL,
     FONT_TEXT,
     FONT_TITLE,
-    GREEN,
-    GRID,
-    RED,
-    TEXT,
     clip,
 )
 
-__all__ = ["ImageManager", "ImageWindow"]
+__all__ = ["ImageManager", "ImageCockpit"]
 
 
-class ImageWindow:
-    """图片窗口（只在 Tk 线程使用）。
+class ImageCockpit:
+    """图片驾驶舱（只在 Tk 线程使用）。
 
     形态：480×600、无边框、置顶、整面可拖；内容：当前大图 + 缩略条 + 元信息。
 
@@ -79,7 +73,7 @@ class ImageWindow:
             self.top,
             width=geo.WINDOW_W,
             height=geo.WINDOW_H,
-            bg=BG,
+            bg=_C.bg,
             highlightthickness=0,
             bd=0,
         )
@@ -195,7 +189,7 @@ class ImageWindow:
             self._index = geo.clamp_index(self._index, len(self._items))
             self._draw()
         except Exception as exc:  # noqa: BLE001 - 窗口故障不能影响主流程
-            diag_info("ui", f"图片窗口渲染失败: {exc}")
+            diag_info("ui", f"图片驾驶舱渲染失败: {exc}")
 
     def _draw(self) -> None:
         """全量重绘（元素少、事件驱动，与主 HUD 同一策略）。"""
@@ -211,47 +205,36 @@ class ImageWindow:
         self._draw_footer()
 
     def _draw_grid(self) -> None:
-        """背景网格：低亮度底噪。"""
-        step = 28
-        for x in range(0, geo.WINDOW_W, step):
-            self.canvas.create_line(x, 0, x, geo.WINDOW_H, fill=GRID)
-        for y in range(0, geo.WINDOW_H, step):
-            self.canvas.create_line(0, y, geo.WINDOW_W, y, fill=GRID)
+        """背景材质：深渊黑 + 扫描线 + 网格 + 颗粒 + 侧刻度（统一在 hud_theme）。"""
+        draw_background(self.canvas, _C, geo.WINDOW_W, geo.WINDOW_H)
 
     def _draw_frame(self) -> None:
-        """外框 + 四角角标。"""
-        self.canvas.create_rectangle(
-            6, 6, geo.WINDOW_W - 6, geo.WINDOW_H - 6, outline=CYAN_DIM
-        )
-        corner = 16
-        for x, y, dx, dy in (
-            (6, 6, 1, 1),
-            (geo.WINDOW_W - 6, 6, -1, 1),
-            (6, geo.WINDOW_H - 6, 1, -1),
-            (geo.WINDOW_W - 6, geo.WINDOW_H - 6, -1, -1),
-        ):
-            self.canvas.create_line(x, y, x + dx * corner, y, fill=CYAN, width=2)
-            self.canvas.create_line(x, y, x, y + dy * corner, fill=CYAN, width=2)
+        """外框 + 四角 HUD 括号（统一在 hud_theme）。"""
+        draw_frame(self.canvas, _C, geo.WINDOW_W, geo.WINDOW_H)
 
     def _draw_header(self) -> None:
         """标题、副标题与关闭按钮。"""
-        self._text(geo.PAD, 26, "J.A.R.V.I.S", fill=CYAN_DIM, font=FONT_TITLE)
-        self._text(geo.PAD + 1, 25, "J.A.R.V.I.S", fill=CYAN, font=FONT_TITLE)
-        self._text(geo.PAD, 46, "IMAGE // 图片 · 给你看", fill=DIM, font=FONT_SMALL)
-        # 关键的文案边界：这个窗口不改变模型侧回执，别让用户以为「模型也看到了」
+        glow_text(self.canvas, geo.PAD, 25, "J.A.R.V.I.S", theme=_C, font=FONT_TITLE)
+        self._text(geo.PAD, 46, "IMAGE COCKPIT // 图片驾驶舱", fill=_C.dim, font=FONT_SMALL)
+        # 文案边界：本舱只给「人看」，不改变模型侧回执，别让用户以为模型也看到了
         self._text(
-            geo.PAD + 150, 46, "（不改变模型的图片回执）", fill=CYAN_DIM, font=FONT_SMALL
+            geo.WINDOW_W - geo.PAD,
+            46,
+            "不代表模型已看见",
+            fill=_C.accent_dim,
+            font=FONT_SMALL,
+            anchor="e",
         )
         self.canvas.create_oval(
             geo.WINDOW_W - 40, 12, geo.WINDOW_W - 14, 38,
-            outline=CYAN_DIM, width=1, tags=("img_close",),
+            outline=_C.accent_dim, width=1, tags=("img_close",),
         )
         self._text(
-            geo.WINDOW_W - 27, 25, "✕", fill=DIM,
+            geo.WINDOW_W - 27, 25, "✕", fill=_C.dim,
             font=("Microsoft YaHei UI", 10), anchor="center", tags=("img_close",),
         )
         self.canvas.create_line(
-            geo.PAD, 60, geo.WINDOW_W - geo.PAD, 60, fill=CYAN_DIM
+            geo.PAD, 60, geo.WINDOW_W - geo.PAD, 60, fill=_C.accent_dim
         )
 
     def _current(self) -> dict[str, Any] | None:
@@ -264,25 +247,25 @@ class ImageWindow:
         """大图区：按窗宽适配；文件已清理时给占位，不弹错。"""
         left, top = geo.PAD, geo.MAIN_TOP
         right, bottom = geo.WINDOW_W - geo.PAD, geo.MAIN_BOTTOM
-        self.canvas.create_rectangle(left, top, right, bottom, fill=BG_PANEL, outline=GRID)
+        self.canvas.create_rectangle(left, top, right, bottom, fill=_C.bg_panel, outline=_C.grid)
         center_x = (left + right) / 2
         center_y = (top + bottom) / 2
 
         ref = self._current()
         if ref is None:
-            self._text(center_x, center_y, "— 等待第一张图", fill=DIM, font=FONT_SMALL, anchor="center")
+            self._text(center_x, center_y, "— 等待第一张图", fill=_C.dim, font=FONT_SMALL, anchor="center")
             return
 
         path = str(ref.get("path") or "")
         if not geo.file_alive(path):
-            self._text(center_x, center_y - 10, "‹图已过期›", fill=AMBER, font=FONT_CARD_TITLE, anchor="center")
-            self._text(center_x, center_y + 12, "原图已被清理，元信息仍保留", fill=DIM, font=FONT_SMALL, anchor="center")
+            self._text(center_x, center_y - 10, "‹图已过期›", fill=_C.warn, font=FONT_CARD_TITLE, anchor="center")
+            self._text(center_x, center_y + 12, "原图已被清理，元信息仍保留", fill=_C.dim, font=FONT_SMALL, anchor="center")
             return
 
         size = geo.main_size(ref.get("width"), ref.get("height"))
         photo = self._photo(path, size, kind="main")
         if photo is None:
-            self._text(center_x, center_y, "‹无法读取图片›", fill=RED, font=FONT_SMALL, anchor="center")
+            self._text(center_x, center_y, "‹无法读取图片›", fill=_C.fail, font=FONT_SMALL, anchor="center")
             return
         self.canvas.create_image(center_x, center_y, image=photo, anchor="center")
 
@@ -291,10 +274,10 @@ class ImageWindow:
         top = geo.STRIP_TOP
         self.canvas.create_rectangle(
             geo.PAD, top, geo.WINDOW_W - geo.PAD, top + geo.STRIP_HEIGHT,
-            fill=BG_PANEL, outline=GRID,
+            fill=_C.bg_panel, outline=_C.grid,
         )
         if not self._items:
-            self._text(geo.PAD + 10, top + geo.STRIP_HEIGHT / 2, "— 暂无图片", fill=DIM, font=FONT_SMALL)
+            self._text(geo.PAD + 10, top + geo.STRIP_HEIGHT / 2, "— 暂无图片", fill=_C.dim, font=FONT_SMALL)
             return
 
         limit = max(16, int(self._options.image_thumb_px))
@@ -311,14 +294,14 @@ class ImageWindow:
             if photo is not None:
                 self.canvas.create_image(x, y, image=photo, anchor="nw")
             else:
-                self.canvas.create_rectangle(x, y, x + tw, y + th, outline=CYAN_DIM)
+                self.canvas.create_rectangle(x, y, x + tw, y + th, outline=_C.accent_dim)
                 self._text(
                     x + tw / 2, y + th / 2, "✕" if not geo.file_alive(path) else "?",
-                    fill=DIM, font=FONT_SMALL, anchor="center",
+                    fill=_C.dim, font=FONT_SMALL, anchor="center",
                 )
             if index == self._index:
                 self.canvas.create_rectangle(
-                    x - 2, y - 2, x + tw + 2, y + th + 2, outline=CYAN, width=2
+                    x - 2, y - 2, x + tw + 2, y + th + 2, outline=_C.accent, width=2
                 )
             self._thumb_hits.append((x, x + tw, top, top + geo.STRIP_HEIGHT, index))
 
@@ -327,37 +310,37 @@ class ImageWindow:
         y = geo.META_TOP
         ref = self._current()
         if ref is None:
-            self._text(geo.PAD, y, "— 元信息", fill=DIM, font=FONT_SMALL)
+            self._text(geo.PAD, y, "— 元信息", fill=_C.dim, font=FONT_SMALL)
             return
         head, stamp, path = geo.describe_meta(ref)
-        self._text(geo.PAD, y, head, fill=TEXT, font=FONT_TEXT)
+        self._text(geo.PAD, y, head, fill=_C.text, font=FONT_TEXT)
         if stamp:
-            self._text(geo.PAD, y + 18, stamp, fill=DIM, font=FONT_MONO)
+            self._text(geo.PAD, y + 18, stamp, fill=_C.dim, font=FONT_MONO)
         shown = clip(path, 62)
-        self._text(geo.PAD, y + 36, shown, fill=DIM, font=FONT_MONO)
+        self._text(geo.PAD, y + 36, shown, fill=_C.dim, font=FONT_MONO)
         if shown != path and len(path) > 8:
-            self._text(geo.PAD, y + 52, "…" + path[-56:], fill=DIM, font=FONT_MONO)
+            self._text(geo.PAD, y + 52, "…" + path[-56:], fill=_C.dim, font=FONT_MONO)
 
     def _draw_footer(self) -> None:
         """底部操作提示与序号。"""
         self.canvas.create_line(
             geo.PAD, geo.WINDOW_H - 36, geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 36,
-            fill=CYAN_DIM,
+            fill=_C.accent_dim,
         )
         self._text(
             geo.PAD, geo.WINDOW_H - 20,
-            "点击缩略图切换 · 滚轮翻页 · Esc 隐藏", fill=DIM, font=FONT_SMALL,
+            "点击缩略图切换 · 滚轮翻页 · Esc 隐藏", fill=_C.dim, font=FONT_SMALL,
         )
         if self._items:
             self._text(
                 geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 20,
                 f"{self._index + 1}/{len(self._items)}",
-                fill=CYAN_DIM, font=FONT_LABEL, anchor="e",
+                fill=_C.accent_dim, font=FONT_LABEL, anchor="e",
             )
         else:
             self._text(
                 geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 20, "IMAGE",
-                fill=CYAN_DIM, font=FONT_SMALL, anchor="e",
+                fill=_C.accent_dim, font=FONT_SMALL, anchor="e",
             )
 
     # ---- 缩略图缓存 ----
@@ -470,7 +453,7 @@ class ImageWindow:
         y: float,
         content: Any,
         *,
-        fill: str = TEXT,
+        fill: str = _C.text,
         font: Any = FONT_TEXT,
         anchor: str = "w",
         tags: tuple[str, ...] = (),
@@ -482,7 +465,7 @@ class ImageWindow:
 
 
 class ImageManager:
-    """图片窗口的显示策略与生命周期（只在 Tk 线程使用）。
+    """图片驾驶舱的显示策略与生命周期（只在 Tk 线程使用）。
 
     策略与 ``CrawlManager`` 完全同构（2026-11-11）：
     - 本轮出现第一张工具产出的图才创建并弹出；
@@ -497,7 +480,7 @@ class ImageManager:
     def __init__(self, root: Any, options: VisualOptions) -> None:
         self.root = root
         self.options = options
-        self._window: ImageWindow | None = None
+        self._window: ImageCockpit | None = None
         self._disabled = False
         self._hidden = False
         self._hidden_run_id: str | None = None
@@ -547,7 +530,7 @@ class ImageManager:
         self._window.show()
 
     def set_topmost(self, enabled: bool) -> None:
-        """切换置顶并记住状态：终端在前台时新弹的图片窗也应让位。"""
+        """切换置顶并记住状态：终端在前台时新弹的图片驾驶舱也应让位。"""
         self._topmost_allowed = bool(enabled)
         if self._window is not None:
             self._window.set_topmost(enabled)
@@ -561,17 +544,17 @@ class ImageManager:
 
     # ---- 内部 ----
 
-    def _ensure_window(self) -> ImageWindow | None:
+    def _ensure_window(self) -> ImageCockpit | None:
         """懒创建窗口；失败置 disabled，不影响其它可视化。"""
         if self._window is not None:
             return self._window
         try:
-            self._window = ImageWindow(
+            self._window = ImageCockpit(
                 self.root, self.options, self._on_close, topmost=self._topmost_allowed
             )
             return self._window
-        except Exception as exc:  # noqa: BLE001 - 图片窗故障不能影响主流程
-            diag_info("ui", f"图片窗口创建失败，已禁用: {exc}")
+        except Exception as exc:  # noqa: BLE001 - 图片驾驶舱故障不能影响主流程
+            diag_info("ui", f"图片驾驶舱创建失败，已禁用: {exc}")
             self._disabled = True
             self._window = None
             return None
