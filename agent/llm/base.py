@@ -48,6 +48,13 @@ class Usage:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # 已结算金额（人民币）。由 query_loop 在每笔请求返回后按官方价目与该笔实际
+    # 时段（高峰/空闲）分别计算并累加，不是用「折扣系数」反推总额。
+    # @author aceFelix
+    cost_cny: float = 0.0
+    # 未收录价目的模型所占输入 token。>0 时 /cost 必须显示「部分未计价」，
+    # 不能把不完整的合计当成整账单。
+    unpriced_input_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:

@@ -262,6 +262,7 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
     """
     from agent.core.memory.compactor import estimate_tokens, estimate_text_tokens
     from agent.llm.base import Usage
+    from agent.llm.pricing import VERIFIED_AT as PRICING_VERIFIED_AT
 
     # System Prompt token 估算（独立计算，原 estimate_tokens 不含 system）
     system_tokens = estimate_text_tokens(ctx.system_prompt) if ctx.system_prompt else 0
@@ -289,9 +290,21 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
         # 同一份计算，避免两处各写一套分母规则导致指标对不上。@author aceFelix
         rows.append(["缓存命中率", f"{session.cache_hit_rate:.1f}%"])
 
-    ui.info("本会话成本统计（部分基于估算）")
+        # 金额：每笔请求返回时按「该笔实际时段」结算后累加，不是用折扣系数从
+        # 总 token 反推——DeepSeek 命中价是未命中的 1/50，系数近似会差几十倍。
+        # @author aceFelix
+        rows.append(["累计金额（人民币）", f"¥{session.cost_cny:.4f}"])
+        if session.unpriced_input_tokens:
+            rows.append([
+                "未计价部分",
+                f"{session.unpriced_input_tokens:,} 输入 token（该模型未收录官方价目）",
+            ])
+        rows.append(["价目来源", f"DeepSeek 官方中文页（核对于 {PRICING_VERIFIED_AT}）"])
+
+    ui.info("本会话成本统计：token 数为 API 实计，金额按官方价目逐笔结算")
     render_table(rows, headers=["指标", "值"])
-    ui.info("提示: 实际 API 计费以厂商账单为准；历史累计请查看 ~/.jarvis/logs/diag.log")
+    ui.info("提示: 高峰/空闲按北京时间周一至周五 9-12、14-18 点判定，空闲价 = 高峰价一半；"
+            "最终以厂商账单为准")
 
 
 def handle_cost(ctx: "CommandContext", stripped: str) -> bool:

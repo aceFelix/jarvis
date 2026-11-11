@@ -28,7 +28,11 @@ class EngineStatusMixin:
 
         除四类 token 外附 ``cache_hit_rate``（百分数，保留一位小数），口径
         统一由 Usage.cache_hit_rate 计算，与 REPL /cost 同一份实现；桌面壳
-        用量卡直接展示该值，不再自己重算分母。@author aceFelix
+        用量卡直接展示该值，不再自己重算分母。
+
+        另附 ``cost_cny`` / ``unpriced_input_tokens``：金额由 query_loop 逐笔按
+        官方价目与当时时段结算，桌面壳只显示不自算，否则会出现两套价格口径。
+        @author aceFelix
         """
         usage = getattr(getattr(self, "_query_loop", None), "session_usage", None)
         if usage is None:
@@ -38,6 +42,8 @@ class EngineStatusMixin:
                 "cache_read_tokens": 0,
                 "cache_creation_tokens": 0,
                 "cache_hit_rate": 0.0,
+                "cost_cny": 0.0,
+                "unpriced_input_tokens": 0,
             }
         return {
             "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
@@ -45,6 +51,8 @@ class EngineStatusMixin:
             "cache_read_tokens": int(getattr(usage, "cache_read_tokens", 0) or 0),
             "cache_creation_tokens": int(getattr(usage, "cache_creation_tokens", 0) or 0),
             "cache_hit_rate": round(float(getattr(usage, "cache_hit_rate", 0.0) or 0.0), 1),
+            "cost_cny": round(float(getattr(usage, "cost_cny", 0.0) or 0.0), 6),
+            "unpriced_input_tokens": int(getattr(usage, "unpriced_input_tokens", 0) or 0),
         }
 
     @property

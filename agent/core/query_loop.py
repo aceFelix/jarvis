@@ -610,12 +610,30 @@ class QueryLoop:
         except Exception:
             pass  # 非关键异常，不影响主流程
 
-        # 会话级累计（本轮 usage 并入，供 /cost 展示缓存命中统计）
+        # 会话级累计（本轮 usage 并入，供 /cost 展示缓存命中统计与金额）
+        # 金额按**本笔请求实际发生的时段**结算：会话跨峰谷时，用 /cost 那一刻的
+        # 时段统一折算会把谷时的便宜单算成高峰价（反之亦然）。@author aceFelix
+        from agent.llm import pricing
+
+        turn = stats.usage
+        # Anthropic 协议下 input_tokens 不含缓存命中部分；信号与 cache_hit_rate 同源
+        input_includes_cache = not (turn.cache_read_tokens > turn.input_tokens)
+        settled = pricing.summarize(
+            self._model,
+            input_tokens=turn.input_tokens,
+            cache_hit_tokens=turn.cache_read_tokens,
+            output_tokens=turn.output_tokens,
+            input_includes_cache=input_includes_cache,
+        )
+        prev = self._session_usage
         self._session_usage = Usage(
-            input_tokens=self._session_usage.input_tokens + stats.usage.input_tokens,
-            output_tokens=self._session_usage.output_tokens + stats.usage.output_tokens,
-            cache_read_tokens=self._session_usage.cache_read_tokens + stats.usage.cache_read_tokens,
-            cache_creation_tokens=self._session_usage.cache_creation_tokens + stats.usage.cache_creation_tokens,
+            input_tokens=prev.input_tokens + turn.input_tokens,
+            output_tokens=prev.output_tokens + turn.output_tokens,
+            cache_read_tokens=prev.cache_read_tokens + turn.cache_read_tokens,
+            cache_creation_tokens=prev.cache_creation_tokens + turn.cache_creation_tokens,
+            cost_cny=prev.cost_cny + (settled.cost_cny if settled.priced else 0.0),
+            unpriced_input_tokens=prev.unpriced_input_tokens
+            + (0 if settled.priced else turn.input_tokens),
         )
 
         return stats

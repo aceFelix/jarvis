@@ -41,7 +41,10 @@ class CachePolicy:
     max_markers: int = 0
     # 显式缓存最小可缓存 token 数（DashScope=1024，低于此值标记无效）
     min_cache_tokens: int = 0
-    # 命中缓存的价格折扣（0.1 = 标准价的 10%），用于 /cost 成本估算
+    # 命中缓存的价格折扣（0.1 = 标准价的 10%）
+    # 【已废弃，勿用于算钱】实际计费已改为 agent/llm/pricing.py 的「分段单价」：
+    # 缓存命中价与未命中价是两个独立单价（DeepSeek flash 相差 50 倍），
+    # 用一个折扣系数近似必然算错几十倍。本字段仅为读旧配置兼容保留。
     hit_discount: float = 1.0
     # 缓存 TTL（秒），显式缓存有限期，隐式为 0（系统管理）
     ttl_seconds: int = 0
