@@ -136,7 +136,7 @@ def handle_mode(ctx: "CommandContext", stripped: str) -> bool:
             "default": "默认：写操作需确认，危险命令拒绝",
             "plan": "规划：只读规划，拒绝所有写操作",
             "accept_edits": "接受编辑：文件编辑自动放行，其他需确认",
-            "yolo": "全自动：自动放行所有操作（危险命令除外）",
+            "yolo": "全自动：受保护根（默认 C 盘）之外全放行；C 盘上的不可逆动作需你点头一次",
         }
         items = [(m, m, mode_descs.get(m, "")) for m in modes]
         choice = pick_from_list(items, title="选择权限模式")

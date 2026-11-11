@@ -582,6 +582,13 @@ class ToolOrchestrator:
         cfg = actions_config(ctx)
         if not cfg["enabled"] or cfg["window_s"] <= 0:
             return None  # 窗口关闭：执行照常，由 _record_effect 记一笔"不可撤销"
+        # yolo 下默认不再挂第二道闸：那个"点头"已经发生在权限层，
+        # 再挂倒计时等于把同一个决定问两遍。可用 actions_hold_in_yolo 打开。
+        # @author aceFelix
+        if str(getattr(ctx, "permission_mode", "")) == "yolo" and not bool(
+            getattr(getattr(ctx, "settings", None), "actions_hold_in_yolo", False)
+        ):
+            return None
         if not is_irreversible_call(tool, args, cfg["extra_tools"]):
             return None
 

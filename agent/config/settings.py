@@ -90,6 +90,15 @@ class Settings:
     permissions_file: str = ""
     system_prompt_append: str = ""
 
+    # yolo 的目标域限制（2026-11）：默认保护 C 盘——受保护根之外的调用连 DENY
+    # 一起放行，根内的"不可逆动作"退化成一次确认。硬禁止清单连确认都不收。
+    # 口径与已知局限见 agent/permissions/yolo_gate.py 的模块说明。
+    # @author aceFelix
+    permissions_yolo_guard_roots: list = field(default_factory=lambda: ["c:\\"])
+    permissions_yolo_hard_deny: list = field(
+        default_factory=lambda: ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**"]
+    )
+
     # 调试
     debug: bool = False
     verbose: bool = False
@@ -213,6 +222,16 @@ class Settings:
     # @author aceFelix
     visual_crawl_topology: str = "auto"
     visual_crawl_max_nodes: int = 60
+
+    # 图片窗口（P0，2026-11-11）：把 ScreenShot / CameraShot / BrowserScreenshot
+    # 产出的图显示给人看（终端原本只有图片入站通道）。
+    # auto = 本轮出现工具产出的图才弹、结束保留、点 ✕ 只隐藏；off = 完全不创建。
+    # image_max 为缩略条保留张数（1–24）；image_thumb_px 为缩略条单张最长边
+    # （48–160；大图区恒按窗宽适配，不受此值影响）。
+    # @author aceFelix
+    visual_image_window: str = "auto"
+    visual_image_max: int = 12
+    visual_image_thumb_px: int = 88
 
     # 真爬虫（P2，2026-11-09）：Crawl / WebExtract 的默认值与总开关。
     # 单次工具调用可覆盖这些默认值；enabled=false 时两个工具直接拒绝执行。
@@ -498,6 +517,9 @@ class Settings:
     actions_track_local_writes: bool = True     # 本地破坏性写是否记一条可回滚条目
     actions_irreversible_tools: list = field(default_factory=list)  # 额外当不可逆处理的工具名
     actions_hold_blocks_equivalent: bool = True  # 待发窗口未结案时，等价外发命令不再自动放行
+    # yolo 下是否仍然挂延时窗口：默认 False——用户在 yolo 里已经"点头一次"，
+    # 再挂一道倒计时等于把同一个决定问两遍。@author aceFelix
+    actions_hold_in_yolo: bool = False
     # 文件级撤销（2026-10）：工具写文件前把原文留底，改错可按文件恢复，
     # 不必等整轮检查点。留底是**复制**，因此有体积闸。@author aceFelix
     actions_file_snapshots: int = 50            # 文件留底保留条数（超出滚最旧的）

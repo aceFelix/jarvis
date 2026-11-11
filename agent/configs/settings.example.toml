@@ -21,6 +21,12 @@ max_iterations = 50
 # ---- 权限规则文件 ----
 # permissions_file = "configs/permissions.yaml"
 
+# ---- yolo 的目标域限制（2026-11）----
+# yolo 默认"按目标域放行"：受保护根之外连 DENY 一起放行，根内不可逆动作降为一次确认；
+# 硬禁止清单连确认都不收。已知局限见 agent/permissions/yolo_gate.py。
+# permissions_yolo_guard_roots = ["c:\\"]
+# permissions_yolo_hard_deny = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**"]
+
 # ---- 系统提示追加 ----
 # system_prompt_append = ""
 
@@ -182,6 +188,15 @@ crawl_window = "auto"
 #   off         = 只保留清单/抽取/统计，不画节点
 crawl_topology = "auto"
 crawl_max_nodes = 60    # 可见节点上限（20–200），超出折叠为 +N
+
+# 图片窗口（P0）：把 ScreenShot / CameraShot / BrowserScreenshot 产出的图显示出来。
+# 终端本身只能把图送给模型，看不到图；这个独立窗口按路径显示原图 + 元信息。
+#   auto（默认）= 本轮出现工具产出的图才弹出，任务结束保留，点 ✕ 只隐藏
+#   off         = 完全不创建该窗口（其它可视化不受影响）
+# 注意：它只做“给人看”，不改变模型的图片回执，也不影响送给模型的图片尺寸。
+image_window = "auto"
+image_max = 12          # 缩略条保留张数（1–24），超出后最旧的滑出
+image_thumb_px = 88     # 缩略条单张最长边（48–160）；大图区恒按窗宽适配
 
 # 动效：off 静态；subtle（默认）扫描线 + 状态点脉冲；full 预留
 effects = "subtle"
@@ -409,6 +424,7 @@ undo_window_s = 30         # 不可逆动作延时窗口（秒）；0 = 不拦�
 track_local_writes = true  # 是否给本地破坏性写入记一条可回滚条目
 irreversible_tools = []    # 应急口子：确实要多保护的工具才填（拿只读工具演示窗口是错的测法）
 hold_blocks_equivalent = true  # 待发窗口未结案时，网络外发类命令不再自动放行（改问人）
+hold_in_yolo = false       # yolo 下是否仍挂延时窗口（默认否：那个"点头"已经在权限层发生过）
 
 [tasks]
 # W3.1 任务脊柱（阶段 10）：跨会话/跨天的目标台账 + 条件等待 + 断点续跑，

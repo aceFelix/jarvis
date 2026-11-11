@@ -461,20 +461,28 @@ class TestCheckerModes:
         result = checker.check(tool, {"command": "some command"}, _ctx(tmp_path))
         assert result.behavior == PermissionBehavior.ALLOW
 
-    def test_yolo_does_not_relax_deny(self, tmp_path: Path) -> None:
-        """yolo 模式下路径守护 DENY 依然生效。"""
+    def test_yolo_does_not_relax_hard_deny(self, tmp_path: Path) -> None:
+        """yolo 也碰不到硬禁止清单（~/.ssh 等）——连点头都不收。
+
+        2026-11 起 yolo 改为"按目标域放行"，DENY 不再是全局不可放宽；
+        硬禁止清单仍然终局，这条是新语义的守门测试。
+        """
         checker = PermissionChecker(rules=RuleSet(), mode=PermissionMode.YOLO)
         tool = _FakeTool(name="Write", path="~/.ssh/id_rsa")
         result = checker.check(tool, {"file_path": "~/.ssh/id_rsa"}, _ctx(tmp_path))
         assert result.behavior == PermissionBehavior.DENY
 
-    def test_yolo_does_not_relax_deny_rule(self, tmp_path: Path) -> None:
-        """yolo 模式下 deny 规则依然生效。"""
+    def test_yolo_relaxes_rule_deny_outside_guard(self, tmp_path: Path) -> None:
+        """yolo 下受保护根（默认 C 盘）之外的 deny 规则也放行。
+
+        用户 2026-11 明确要求：除 C 盘危险动作需要点头，其余地方 yolo 该有全部
+        权力。deny 规则属于配置层，不再压过模式判定（模式判定排在规则之后）。
+        """
         rules = RuleSet([PermissionRule("Bash(rm *)", RuleValue.DENY, RuleSource.USER)])
         checker = PermissionChecker(rules=rules, mode=PermissionMode.YOLO)
         tool = _FakeTool(name="Bash", matcher=PermissionMatcher("Bash", ["rm -rf /tmp"]))
         result = checker.check(tool, {"command": "rm -rf /tmp"}, _ctx(tmp_path))
-        assert result.behavior == PermissionBehavior.DENY
+        assert result.behavior == PermissionBehavior.ALLOW
 
     def test_with_mode_returns_new_checker(self, tmp_path: Path) -> None:
         """with_mode 返回换模式的副本，原 checker 不受影响。"""

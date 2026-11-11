@@ -108,6 +108,10 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         # 左侧窗口分层拓扑（P3）@author aceFelix
         ("crawl_topology", "visual_crawl_topology"),
         ("crawl_max_nodes", "visual_crawl_max_nodes"),
+        # 图片窗口（P0）@author aceFelix
+        ("image_window", "visual_image_window"),
+        ("image_max", "visual_image_max"),
+        ("image_thumb_px", "visual_image_thumb_px"),
     )),
     # [crawl] 真爬虫（P2）：Crawl / WebExtract 默认值与总开关 @author aceFelix
     ("crawl", (
@@ -238,6 +242,7 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("track_local_writes", "actions_track_local_writes"),
         ("irreversible_tools", "actions_irreversible_tools"),  # 数组，见 LIST_FIELDS
         ("hold_blocks_equivalent", "actions_hold_blocks_equivalent"),
+        ("hold_in_yolo", "actions_hold_in_yolo"),  # yolo 下是否仍挂延时窗口（默认 False）
         # 文件级撤销（2026-10）：写前留底的配额与体积闸
         ("file_snapshots", "actions_file_snapshots"),
         ("file_snapshot_mb", "actions_file_snapshot_mb"),
@@ -370,6 +375,9 @@ LIST_FIELDS: frozenset[str] = frozenset({
     "percept_vcs_repos",
     "percept_mail_watch_senders",
     "actions_irreversible_tools",
+    # yolo 目标域限制（2026-11）：两个都是路径数组
+    "permissions_yolo_guard_roots",
+    "permissions_yolo_hard_deny",
 })
 
 

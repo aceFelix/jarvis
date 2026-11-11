@@ -32,6 +32,13 @@ from agent.permissions.path_guard import is_dangerous_write_path, is_symlink_esc
 from agent.permissions.path_match import path_matches
 from agent.permissions.rules import PermissionRule, RuleSet, RuleValue
 from agent.permissions.shell_classifier import classify as classify_shell
+from agent.permissions import yolo_gate
+
+#: yolo 下仍然"必须点头"的目标根（可被 settings.permissions_yolo_guard_roots 覆盖）
+DEFAULT_YOLO_GUARD_ROOTS = ["c:\\"]
+
+#: yolo 下连点头都不收的硬禁止清单（可被 settings.permissions_yolo_hard_deny 覆盖）
+DEFAULT_YOLO_HARD_DENY = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**"]
 
 # 安全合并: 多个判定取更严格那个
 _SAFETY_RANK = {PermissionBehavior.ALLOW: 0, PermissionBehavior.ASK: 1, PermissionBehavior.DENY: 2}
@@ -116,6 +123,29 @@ def _relax_by_mode(current: PermissionResult, mode_result: PermissionResult | No
     return _stricter(current, mode_result)
 
 
+def _relax_by_yolo(current: PermissionResult, yolo_result: PermissionResult | None) -> PermissionResult:
+    """yolo 专用合并：按目标域覆盖 DENY。
+
+    与 ``_relax_by_mode`` 只差一条，但很关键：**它可以覆盖 DENY**。这是 2026-11
+    用户明确要求的语义——"除 C 盘的危险动作要我点头，其余地方 yolo 该有全部权力"。
+    代价是"DENY 永不可放宽"不再全局成立，所以边界收紧到三处：
+
+    - 覆盖只发生在 yolo 模式、且 ``yolo_gate`` 判定目标不在受保护根时；
+    - 受保护根内的不可逆动作**退化成一次确认**（不是放行），仍走审批；
+    - 硬禁止清单在 ``_apply_mode`` 里已直接返回 DENY，本函数不覆盖它，等于连
+      点头都不收。
+
+    除 yolo 外的所有模式仍走 ``_relax_by_mode``，那条不变量对它们继续成立。
+    """
+    if yolo_result is None:
+        return current
+    if yolo_result.behavior == PermissionBehavior.DENY:
+        return yolo_result  # 硬禁止清单：终局，连确认都不给
+    if yolo_result.behavior == PermissionBehavior.ASK:
+        return yolo_result  # 受保护根内的不可逆动作：点头（优先于 DENY 与 ALLOW）
+    return yolo_result       # ALLOW：覆盖包括 DENY 在内的一切
+
+
 class PermissionChecker:
     """权限校验器。
 
@@ -181,10 +211,11 @@ class PermissionChecker:
         if path_result is not None:
             result = _stricter(result, path_result)
 
-        # 3. 模式覆写（用 _relax_by_mode：yolo 可放宽 ASK，不可放宽 DENY）
-        mode_result = self._apply_mode(tool, args, ctx, effective)
-        if mode_result is not None:
-            result = _relax_by_mode(result, mode_result)
+        # 3. 模式覆写（yolo 例外：它的判定要看规则结果之后才定，见 4.5）
+        if effective != PermissionMode.YOLO:
+            mode_result = self._apply_mode(tool, args, ctx, effective)
+            if mode_result is not None:
+                result = _relax_by_mode(result, mode_result)
 
         # 4. 规则匹配：deny/ask 取更严侧；带 spec 的 allow 可放宽工具 ASK
         rule_hit = self._match_rules(tool, args, ctx.workdir)
@@ -208,6 +239,15 @@ class PermissionChecker:
                 result = _stricter(result, PermissionResult.ask(f"规则强制询问: {rule_hit.pattern}"))
             else:
                 result = _stricter(result, PermissionResult.deny(f"规则命中: {rule_hit.pattern}"))
+
+        # 4.5 yolo 终局覆写：目标域说了算。
+        # 必须排在规则之后——否则用户写的 deny 规则会把 yolo 的放行重新盖回去，
+        # 那就变成"改 yolo 也没用"。受保护根以外的调用连规则 deny 一起放行，
+        # 根内的不可逆动作降为一次确认，硬禁止清单仍是 DENY。@author aceFelix
+        if effective == PermissionMode.YOLO:
+            yolo_result = self._apply_mode(tool, args, ctx, effective)
+            if yolo_result is not None:
+                result = _relax_by_yolo(result, yolo_result)
 
         # 5. 默认 ASK（fail-closed）
         if result.behavior == PermissionBehavior.ASK and result.reason == _DEFAULT_ASK_REASON:
@@ -280,9 +320,37 @@ class PermissionChecker:
                 return PermissionResult.allow("accept_edits 模式放行文件编辑")
             return None  # 其他工具交给后续判定
 
-        # yolo: 非 deny 的全部放行（deny 由规则/守护处理）
+        # yolo: 按目标域放行——受保护根之外连 DENY 一起放行，受保护根内的不可逆
+        # 动作降为"点头一次"（见 yolo_gate 模块说明与已知局限）。@author aceFelix
         if effective == PermissionMode.YOLO:
-            return PermissionResult.allow("yolo 模式自动放行")
+            settings = getattr(ctx, "settings", None)
+            roots = list(
+                getattr(settings, "permissions_yolo_guard_roots", DEFAULT_YOLO_GUARD_ROOTS)
+                or DEFAULT_YOLO_GUARD_ROOTS
+            )
+            hard = list(
+                getattr(settings, "permissions_yolo_hard_deny", DEFAULT_YOLO_HARD_DENY)
+                or DEFAULT_YOLO_HARD_DENY
+            )
+            targets = yolo_gate.extract_targets(tool, args)
+
+            denied = yolo_gate.matches_hard_deny(targets, hard)
+            if denied:
+                return PermissionResult.deny(f"yolo 硬禁止（连确认都不收）: 目标命中 {denied}")
+
+            guarded = yolo_gate.under_any(targets, roots)
+            if guarded is None:
+                return PermissionResult.allow("yolo 放行：目标不在受保护根内")
+
+            try:
+                dangerous = bool(tool.is_irreversible(args))
+            except Exception:
+                dangerous = True  # 判不出来时按危险处理，宁可多问一句
+            if dangerous:
+                return PermissionResult.ask(
+                    f"yolo 确认：{guarded} 上的不可逆动作，点头后执行且不再拦截"
+                )
+            return PermissionResult.allow(f"yolo 放行：{guarded} 上的可逆动作")
 
         return None
 
