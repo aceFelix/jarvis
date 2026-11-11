@@ -4,6 +4,48 @@
 
 ## [Unreleased]
 
+## [2.5.4] — 2026-11-11
+
+### 新增（`/cost` 真的开始算钱了，2026-11-11）
+
+- **按官方价目逐笔结算**：新增 `agent/llm/pricing.py`，把 token 用量换算成人民币。
+  此前 `/cost` 只有 token 数与命中率、**一行金额都没有**，而 `CACHE_POLICIES` 里 13 处
+  `hit_discount` 是死字段（全仓无一处用它算钱）。DeepSeek 现行价目里缓存命中价是未命中的
+  **1/50**（flash 0.04 vs 2 元/百万），用「折扣系数」近似的误差是几十倍量级。
+- **峰谷按时段判定**：高峰为北京时间周一至周五 9:00–12:00、14:00–18:00（不含法定节假日），
+  其余时段半价。判定复用 `agent/core/daemon/holidays.py` 的节假日数据；时区用固定 UTC+8
+  （中国无夏令时，为省一个 tzdata 依赖不引入 zoneinfo）。金额按**每笔请求发生的时刻**结算后累加，
+  不是看 `/cost` 那一刻的时段——跨峰谷的会话否则会把谷时便宜单算成高峰价。
+- **旧模型名映射**：`deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-flash` 等按官方说明
+  归到现行计费名（旧名仍可调用，但按新模型价计费）。
+- **未收录价目就不算**：DashScope/Qwen、GLM、MiniMax、Kimi 等没有权威价目来源的模型返回
+  `priced=False`，`/cost` 显式写「该模型未收录官方价目」并照实列 token 数，不给假数字。
+- **桌面壳同源**：`cost.get` 直接取 `cost_cny`，只显示不自算，避免两套价格口径。
+- `/cost` 新增「缓存未命中 token」「其中思考 token（含在输出内）」「价目来源（含核对日期）」三行，
+  命中率可当场验算：`148,480 + 1,517 = 149,997`、`148,480 / 149,997 = 99.0%`。
+
+### 修复（用量口径，2026-11-11）
+
+- **`/cost --raw` 从未生效**：`dispatch_command` 用**整行**做精确匹配，而 `/cost` 只在精确表里，
+  带参数的命令要靠前缀表接住。于是 `--raw` 被静默丢弃，命令敲了什么都不发生。补
+  `("/cost ", handle_cost)`（带空格，不吞 `/costly` 一类同前缀命令），并对未知参数发 warn。
+- **思考 token 取明细且不重复计**：原来只读 `completion_tokens`，从不看
+  `completion_tokens_details.reasoning_tokens`。归一路径抽成可测纯函数 `normalize_usage()`：
+  reasoning 是 completion 的**子集**（只记录、不相加，相加即重复计费）；仅当
+  `reasoning > completion`（该厂商分开计量）才以 reasoning 为准。
+- **命中率不再猜协议**：厂商直接给 `prompt_cache_miss_tokens` 时用 `hit / (hit + miss)`
+  精确相除，与协议无关；拿不到才退回旧的「`cache_read > input` 视为 input 不含缓存」兜底。
+  金额结算同样改用显式未命中数，不再二次猜协议。
+- **上下文统计改为实计**：`/cost` 的「当前上下文」改报最近一次请求的 `prompt_tokens`，
+  系统提示改报字符数（字符数确定，换算成 token 必然带误差）。实测反推显示按官方语种比例
+  （中文 0.6 / 英文 0.3 每字符）估算反而偏离更远：估算 14,508 而真值约 8,300——
+  有实测就不该估算。
+- **`/context` 交底它缺什么**：原估算**不含 tools schema**（实测 8,500 vs 真实 23,456，
+  差约 64%）。现标注「字符估算，不含 tools schema」，并新增一行实计，与 `/cost` 同口径。
+- 新增 `tests/llm/test_pricing.py` 26 例、`test_usage_normalization.py` 13 例、
+  `test_cache_metrics.py` 11 例、`tests/commands/test_command_routing.py` 5 例；
+  其中一条专门盯 `("/cost ", handler)` 是否还在前缀表里，防止下次清理表格又把它删掉。
+
 ### 文档
 
 - **README 瘦身**：“任务驾驶舱”一行原本把滚轮滚动、缩放平移、动画时长等交互细节全写进表格（1172 字），
