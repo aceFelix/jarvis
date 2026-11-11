@@ -6,8 +6,9 @@
 
 ### 文档
 
-- **README 瘦身**：“任务驾驶舱”一行原本把滚轮滚动、缩放平移、动画时长等交互细节全写进表格（约 900 字），
-  改为概述 + 三篇方案文档链接；删掉语音行里与“三层记忆”重复的“共用 15 字标题生成”。
+- **README 瘦身**：“任务驾驶舱”一行原本把滚轮滚动、缩放平移、动画时长等交互细节全写进表格（1172 字），
+  改为“什么时候弹 / 显示什么 / 抓取能干什么”三条人话，细节交回三篇方案文档；
+  “15 字标题生成”这类内部实现从能力表整体撤除（语音行与记忆行各有一处）——README 讲能力，不讲实现。
 - **开发路线压缩**：阶段 10–13 各压成一行，实测数字与脚本路径留给架构文档；
   同时订正阶段 10 的“尚未发布”——它已随 v2.3.0 发布（阶段 11 同版）。`README.en.md` 同步全部三处，
   并补上此前缺失的 Phase 11–13（英文路线图长期只到 Phase 10）。
@@ -31,7 +32,7 @@
 - 新增 `tests/core/test_stdio_guard.py` 8 例（反证必抛、降级后中文不受伤、无 `reconfigure` /
   `None` / `reconfigure` 抛错三种流静默跳过、幂等、两条入口接线），并做反向变异验牙
   （撤掉调用 → 入口级用例立刻红）。复盘见
-  [doctor-redirect-encoding-fix.md](docs/fixlogs/doctor-redirect-encoding-fix.md)。
+  [doctor-redirect-encoding-fix.md](../fixlogs/doctor-redirect-encoding-fix.md)。
 
 ## [2.5.2] — 2026-11-10
 
@@ -114,12 +115,12 @@
 - **修复：长回答结束后误待机**：静默计时原先从“用户上次说话”开始算，LLM 思考 +
   工具 + TTS 播报超过 10 秒时，话一说完就立刻进待机。现在每轮回到聆听前重置
   `last_speech`，给用户完整的 10 秒窗口；连续“没听清”的空轮次仍会累计。
-  复盘见 [voice-idle-standby-after-reply-fix.md](docs/fixlogs/voice-idle-standby-after-reply-fix.md)。
+  复盘见 [voice-idle-standby-after-reply-fix.md](../fixlogs/voice-idle-standby-after-reply-fix.md)。
 - **修复：无声音自动唤醒 / 对话幻听**：对话与待机录音都不再下发唤醒热词（避免 ASR
   在静音/噪音/TTS 尾音时幻听「贾维斯」）；待机唤醒改用 `matches_wake`（整句≤12 字 +
   唤醒词在前 8 字）；对话/待机都加 VAD 门禁——没有服务端语音事件的结果直接丢弃，
   对话阶段也不会再出现“没出声却识别出「贾维斯」”。复盘见
-  [voice-false-wake-fix.md](docs/fixlogs/voice-false-wake-fix.md)。
+  [voice-false-wake-fix.md](../fixlogs/voice-false-wake-fix.md)。
 - **配置**：`[voice]` 新增 `idle_standby_seconds`；`/config` 语音面板同步展示。
 - 文档同步：`docs/guide/voice.md`、`docs/architecture/06-语音系统.md`、
   `docs/test/TEST_CHECKLIST.md`（T-129 空格打断、T-133 静默待机）。
@@ -141,7 +142,7 @@
      剥掉代码块/行内代码/URL/绝对路径再截；只有链接时回退原文。
   3. 驾驶舱执行序列只显示最近 4 步，8 步任务里唯一的失败被挤出，出现“失败 1”
      但列表全 ✓ 的矛盾。现在失败步固定置顶（总行数仍为 4）。
-  复盘见 [toolsearch-title-failed-step-fix.md](docs/fixlogs/toolsearch-title-failed-step-fix.md)。
+  复盘见 [toolsearch-title-failed-step-fix.md](../fixlogs/toolsearch-title-failed-step-fix.md)。
 - **新增左侧“爬虫驾驶舱”窗口（C2-lite，原名“抓取网络”）**：网页抓取可视化不再挤在右侧 430px 的
   驾驶舱里，改为**屏幕最左侧独立窗口**（520×520，与 HUD 同一视觉语言、整面可拖）。
   本轮出现第一条 `web_fetch` 才弹出，显示 URL 去重清单（状态/耗时/字节/×命中）、
@@ -154,7 +155,7 @@
   配对写入 `messages`，再用串行落库任务调用 `advance_session`——与文本、`/voice`
   共用「每轮保存 + 15 字标题」口径。配对规则与桌面 `WorkbenchRealtimeUI` 同口径：
   正常顺序 / 转写滞后 / 开场白 / 回声轮丢弃 / 打断轮 / 退出 flush。复盘见
-  [talk-session-persist-fix.md](docs/fixlogs/talk-session-persist-fix.md)。
+  [talk-session-persist-fix.md](../fixlogs/talk-session-persist-fix.md)。
 - **修复：`/voice` 会话只有时间戳、从不生成标题**：语音每轮走 `voice_loop` 直连
   `query_loop`，绕过了 REPL 的轮数统计与标题生成，退出时仍叫
   `session-YYYYMMDD-HHMMSS`。现在收尾逻辑收敛为 `advance_session`，**文本与语音
@@ -162,13 +163,13 @@
   语音都即时落盘**（此前只在退出时保存）。`voice_loop.on_turn_end` 支持 async 回调。
   会话元信息保留 `created_at`/`updated_at`，`/sessions` 与 `/load` 选择器新增
   **创建时间**，`sessions.list` 返回 `created_at`。复盘见
-  [voice-session-title-fix.md](docs/fixlogs/voice-session-title-fix.md)。
+  [voice-session-title-fix.md](../fixlogs/voice-session-title-fix.md)。
 - **修复：纯闲聊也会弹出任务驾驶舱**：旧逻辑在 `run_start` 就懒创建窗口，所以每轮
   不调用任何工具的闲聊都会弹出一张“共 0 步 · 0 工具 · 任务完成”的 HUD。
   现在 `run_start` 只缓存，等本轮首个工具/抓取事件才建窗并补投 `run_start`（耗时仍从
   任务开始算）；没有工具调用的 `run_end` 直接丢弃，已显示的窗口在闲聊期间保持上一轮
   真实汇总，不再被刷成“0 步”。复盘见
-  [cockpit-chat-pops-fix.md](docs/fixlogs/cockpit-chat-pops-fix.md)。
+  [cockpit-chat-pops-fix.md](../fixlogs/cockpit-chat-pops-fix.md)。
 - **任务驾驶舱执行序列可展开**：主 HUD 的“执行序列 // EXEC”行支持点击展开/收起，
   显示该步工具名、目标、调用入参（最多 3 个短字段）、耗时与失败错误；详情面板覆盖
   数据流/抓取区，再次点击同一步收起；拖动窗口不会误触展开。
@@ -207,7 +208,7 @@
 - **实现说明**：纯逻辑与 Tk 分离在 `agent/ui/cockpit_agents.py`
   （`AgentCardPlanner` / `AgentCardManager`），共享造型常量在
   `agent/ui/hud_theme.py`；方案见
-  [agent-cards.md](docs/plans/agent-cards.md)。
+  [agent-cards.md](../plans/agent-cards.md)。
 
 ### 新增（多任务浮窗 C3-lite，2026-11-08）
 
@@ -224,7 +225,7 @@
 - **实现说明**：卡片逻辑拆为 `agent/ui/cockpit_cards.py`（`CardPlanner` 纯逻辑 +
   `CardManager` Tk 线程），共享配色/截断工具抽到 `agent/ui/hud_theme.py`；
   退出时显式断开卡片对 Tk 根的引用，避免 `Tcl_AsyncDelete` 崩进程。
-  方案见 [cockpit-multicards.md](docs/plans/cockpit-multicards.md)。
+  方案见 [cockpit-multicards.md](../plans/cockpit-multicards.md)。
 
 ### 新增（独立任务驾驶舱 C1b，2026-11-08）
 
@@ -251,22 +252,22 @@
   整个进程；同时旧语义是“本会话永久关闭”，关闭后无法再显示。改为：点 ✕ 只
   `withdraw` 隐藏、不退出；下一轮任务首个工具自动 `deiconify` 重现；进程退出时
   单次销毁（不再调用任何已销毁 Tk 的方法）。复盘见
-  [cockpit-window-close-exit-fix.md](docs/fixlogs/cockpit-window-close-exit-fix.md)。
+  [cockpit-window-close-exit-fix.md](../fixlogs/cockpit-window-close-exit-fix.md)。
 - **cmd 下思考面板不显示**：cmd 是 legacy Windows 控制台（`legacy_windows=True`），
   Rich Live 的原地刷新/擦除不可靠，思考面板帧画不出来；Git Bash 因非 TTY 走静态
   打印反而正常。改为 legacy 控制台与“输出被重定向”同口径降级为静态模式，
   并用纯文本分隔块替代 Rich Panel（Panel 在 legacy 渲染器下会竖排乱码），
   思考结束一次性打印完整内容。复盘见
-  [cmd-thinking-panel-legacy-console-fix.md](docs/fixlogs/cmd-thinking-panel-legacy-console-fix.md)。
+  [cmd-thinking-panel-legacy-console-fix.md](../fixlogs/cmd-thinking-panel-legacy-console-fix.md)。
 - **窗口跟随首次动作被节流吞掉**：节流判断原来用 `0.0` 表示“从未执行”，
   Linux 上 `time.monotonic()` 是开机秒数，CI 新虚拟机的 uptime 低于阈值时
   首次“定位目录 / 显示窗口”会被误判为重复而直接跳过；改为 `None` 哨兵，
   首次一定放行、后续仍节流。复盘见
-  [window-follow-throttle-uptime-fix.md](docs/fixlogs/window-follow-throttle-uptime-fix.md)。
+  [window-follow-throttle-uptime-fix.md](../fixlogs/window-follow-throttle-uptime-fix.md)。
 - **任务收尾关不掉被操作窗口**：收尾清理把“当前前台窗口”一律当用户正在看而保留，
   但 WPS 等 COM 自动化会自己激活窗口，导致本轮新开的 WPS 壳窗口留在桌面上；
   现在只有“本轮没操作过”的前台窗口才保留。复盘见
-  [wps-window-cleanup-foreground-fix.md](docs/fixlogs/wps-window-cleanup-foreground-fix.md)。
+  [wps-window-cleanup-foreground-fix.md](../fixlogs/wps-window-cleanup-foreground-fix.md)。
 - **思考面板 Live 残留导致输出错乱**：窗口观察器（后台线程）与模型线程撞在
   同一份面板状态上，`_end_thinking` 又按“是否启动过”早退，一旦 stop 失败就留下
   泄漏的 Live，以 12fps 持续重绘把正文撕成一字一行；改为状态锁 + 句柄清单强制收口。
@@ -275,7 +276,7 @@
   口径识别并保留；同时新增 `Tool.window_policy` 契约（`keep` / `transient` / 未声明），
   未声明时默认保留（`[ui] window_cleanup_unknown = "keep"`），只有显式关闭动作
   或声明 `transient` 才收尾关闭。两处复盘见
-  [thinking-live-leak-and-gui-window-close-fix.md](docs/fixlogs/thinking-live-leak-and-gui-window-close-fix.md)。
+  [thinking-live-leak-and-gui-window-close-fix.md](../fixlogs/thinking-live-leak-and-gui-window-close-fix.md)。
 
 
 ## [2.5.1] — 2026-11-08
@@ -310,14 +311,14 @@
 - **窗口标题误配**：同一条文件名同时出现在记事本与 Notepad++ 标题里时，
   模糊匹配改为「精确优先、标题更短优先」，避免点击/输入发错窗口。
 - 复盘见
-  [docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md](docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md)。
+  [docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md](../fixlogs/operation-visibility-bash-multiline-sandbox-fix.md)。
 
 ### 修复（实机走查发现，2026-11-07）
 
 - **Bash 复合后台命令卡满 timeout**：`cd <dir> && notepad.exe ... &` 的 `&` 作用于
   整个列表，`> /dev/null 2>&1` 只落在后半段，后台子 shell 仍握着管道，工具等 EOF
   到 120 秒超时。现对复合体整组加括号重定向，详见
-  [docs/fixlogs/bash-compound-background-fix.md](docs/fixlogs/bash-compound-background-fix.md)。
+  [docs/fixlogs/bash-compound-background-fix.md](../fixlogs/bash-compound-background-fix.md)。
 - **摘要口径**：`文件工具 N 次` 只统计文件工具；GUI「另存为」产生的文件不计入，
   不再用「N 个文件」造成「没改文件」的误读。
 - **按键跟随**：`KeyTap` 执行后也跟随当前前台窗口，Ctrl+S 弹出的「另存为」对话框
@@ -369,8 +370,8 @@
 验证过了”，而本机根本没装 playwright 浏览器内核——代码层把“工具有没有”等价于“包能不能
 import”，所以它只能从“工具在列表里”推断“我做得到”。本轮把“能力”变成代码里一等的、
 带实测证据的事实，并给它一个受约束的动手权限。事故复盘见
-[snake-visual-claim-fix.md](docs/fixlogs/snake-visual-claim-fix.md)，设计取舍见
-[20-能力自检与自我修复](docs/architecture/20-能力自检与自我修复.md)。
+[snake-visual-claim-fix.md](../fixlogs/snake-visual-claim-fix.md)，设计取舍见
+[20-能力自检与自我修复](../architecture/20-能力自检与自我修复.md)。
 
 ### 新增（桌面多 Agent 协作，2026-11）
 
@@ -477,7 +478,7 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   存在。已改为 `ast` 静态扫源码取工具名全集（与装了什么包、开了哪些配置、什么平台无
   关），加一条防自身失效断言，并删掉要逐台机器手改的 `CONDITIONAL_TOOLS` 豁免表（表里
   已有一条 `RealtimeTalk` 根本不在能力表中）。只改测不改表，反方向对账刻意不静态化
-  的理由与实测数字见 [capability-tool-name-contract-fix.md](docs/fixlogs/capability-tool-name-contract-fix.md)。
+  的理由与实测数字见 [capability-tool-name-contract-fix.md](../fixlogs/capability-tool-name-contract-fix.md)。
 
 - **REPL 里打 `/doctor` 直接 NameError 把会话打崩**：`core_commands._doctor()` 用了
   `Path`，而这个模块从来没导入过它——`git log -S` 追到是 `4b77351`（main 拆分那次）
@@ -488,7 +489,7 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   所以从来没人撞到）。7 处真崩补模块级导入、10 处字符串注解补 `TYPE_CHECKING`；
   `ci.yml` / `publish.yml` 各加一步 `ruff check --select F821 agent/`（只选这一条：
   全量 lint 有上百条既存噪音，门禁要能长期绿着才有人看）。复盘见
-  [undefined-name-imports-fix.md](docs/fixlogs/undefined-name-imports-fix.md)。
+  [undefined-name-imports-fix.md](../fixlogs/undefined-name-imports-fix.md)。
 
 以下文档订正不改行为，只把**对外数字承诺**拉回与源码一致（真值由运行时实测得出）。
 
@@ -593,7 +594,7 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   厂商推不出 / keyring key 跟随 / keyring 异常降级），并给该测试文件加模块级 autouse fixture 隔离
   keyring（隔离点选在底层 `load_api_key` 而非被测函数，保证降级分支仍可测）；该文件 62 passed。
   4 类变异均被抓到，其中“host 比对退化回全串”会额外打红 3 条既有测试——反证该设计是既有契约
-  的要求。复盘见 [fixlogs/model-switch-vendor-endpoint-fix.md](docs/fixlogs/model-switch-vendor-endpoint-fix.md)。
+  的要求。复盘见 [fixlogs/model-switch-vendor-endpoint-fix.md](../fixlogs/model-switch-vendor-endpoint-fix.md)。
 
 ### 修复（厂商 5xx 被当成“你的网络问题”，以及它背后的六处缺陷）
 
@@ -636,7 +637,7 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
   全量 **4199 passed / 0 failed / 2 skipped**（修竞态前首次全量是 `1 failed, 4195 passed`，触发率
   约 1/4）；变异矩阵 **V1-V9 + M-A/M-B 均被抓到**（其中 V1 只让文案用例红、category 用例全绿，
   实证状态码与关键词是互补双路）。复盘见
-  [fixlogs/provider-busy-error-classification-fix.md](docs/fixlogs/provider-busy-error-classification-fix.md)。
+  [fixlogs/provider-busy-error-classification-fix.md](../fixlogs/provider-busy-error-classification-fix.md)。
 
 ### 测试（发布 / 打包契约）
 
@@ -876,7 +877,7 @@ import”，所以它只能从“工具在列表里”推断“我做得到”�
 ## [2.3.2] — 2026-10-31
 
 本次补齐电脑管家八件事中的三件：**清理磁盘 / 查杀病毒 / 性能诊断**（排前两版一直空着的 6.1、6.2、6.4）。
-设计取舍与实测数据见 [19-系统维护层](docs/architecture/19-系统维护层.md)。
+设计取舍与实测数据见 [19-系统维护层](../architecture/19-系统维护层.md)。
 
 ### 新增能力
 
@@ -943,8 +944,8 @@ allow_full_scan = false      # 是否允许 Defender 全盘扫描
 - `cleaners.toml` 已加进 `package-data`（`config/*.toml`），否则装包后规则库找不到。
 - 本机（Windows 10 22H2、非管理员、Defender 被第三方接管）跑穿隔离区闭环
   （moved 2 / protect 跳过 1 / restore 2 / 批次清空）与七区块体检（15.5s）。
-- 文档：新增 [19-系统维护层](docs/architecture/19-系统维护层.md)，同步更新配置指南、
-  命令参考、[系统维护层实机走查清单](docs/test/TEST_CHECKLIST-system-maintenance.md)
+- 文档：新增 [19-系统维护层](../architecture/19-系统维护层.md)，同步更新配置指南、
+  命令参考、[系统维护层实机走查清单](../test/TEST_CHECKLIST-system-maintenance.md)
   （新立分册，T-397–T-427）、BLUEPRINT 6.1/6.2/6.4/6.9 与第 11 节。
 
 ### 内部重构：CPU/内存/磁盘采样收口
@@ -1048,7 +1049,7 @@ monitor 的 1 秒阻塞采样截断），两边数字跟着抖。
 
 开发机（Windows）全绿，推到 GitHub 后 `ci.yml` 的 ubuntu 矩阵报 `13 failed,
 4024 passed, 38 skipped`。三类报错、一个根子：**这套能力是 Windows 专属，
-测试却没做平台门禁**。详见 [修复复盘](docs/fixlogs/maintenance-tests-linux-ci-fix.md)。
+测试却没做平台门禁**。详见 [修复复盘](../fixlogs/maintenance-tests-linux-ci-fix.md)。
 
 - **9 条规则库用例**：内置 19 条里 15 条 `paths` 型，路径全是 `%LOCALAPPDATA%` /
   `%SYSTEMROOT%` / `%SYSTEMDRIVE%`。POSIX 上这些环境变量不存在，`expand_path`
