@@ -288,10 +288,11 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
         rows.append(["累计输入 token（API 实计）", f"{session.input_tokens:,}"])
         rows.append(["累计输出 token（API 实计）", f"{session.output_tokens:,}"])
         rows.append(["缓存命中 token", f"{session.cache_read_tokens:,}"])
+        rows.append(["缓存未命中 token", f"{session.cache_miss_tokens:,}"])
         rows.append(["缓存创建 token", f"{session.cache_creation_tokens:,}"])
-        # 命中率分母按协议口径区分（OpenAI 兼容协议 input 已含缓存 / Anthropic
-        # 协议不含），口径实现见 Usage.cache_hit_rate —— 与桌面壳 cost.get 共用
-        # 同一份计算，避免两处各写一套分母规则导致指标对不上。@author aceFelix
+        # 命中率：厂商给了命中/未命中一对时直接相除（精确、协议无关）；否则按协议
+        # 口径兜底。实现见 Usage.cache_hit_rate —— 与桌面壳 cost.get 共用同一份
+        # 计算，避免两处各写一套分母规则导致指标对不上。@author aceFelix
         rows.append(["缓存命中率", f"{session.cache_hit_rate:.1f}%"])
         # 思考 token 已包含在输出 token 内（OpenAI/DeepSeek 口径下是子集），
         # 这里只作展示，不参与计价——相加会重复计费。@author aceFelix
@@ -347,7 +348,7 @@ def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
 
 def _print_context(
     ui: RichCLI, messages: list[Message], model: str, system_prompt: str = "",
-    window: int = 0, window_configured: bool = False,
+    window: int = 0, window_configured: bool = False, measured: int = 0,
 ) -> None:
     """/context: 显示上下文窗口使用情况，按角色分组统计消息数。
 
@@ -388,7 +389,22 @@ def _print_context(
         if role in role_counts
     ]
     render_table(rows, headers=["角色", "消息数", "tokens"])
-    ui.info(f"合计: {len(messages)} 条消息 + system prompt / {total:,} tokens / 窗口占比 {pct:.1f}%")
+    # 「字符估算」与「含 tools schema」两个限定必须写明：估算按字符比例算，
+    # 而真实请求还带工具 schema 那一大块（本机实测约占四成），不说明就会被
+    # 当成上下文总量的账。@author aceFelix
+    ui.info(
+        f"合计（字符估算，不含 tools schema）: {len(messages)} 条消息 + system prompt"
+        f" / {total:,} tokens / 窗口占比 {pct:.1f}%"
+    )
+    if measured:
+        # 上面各行是按字符比例的估算，只能用来**看构成**；真实占用以 API 实计为准。
+        # 两个数并列，避免把估算当账。@author aceFelix
+        ui.info(
+            f"实计: 最近一次请求输入 {measured:,} tokens（含 tools schema 与 system，"
+            f"与 /cost 同一口径）/ 窗口占比 {measured / window * 100:.1f}%"
+            if window
+            else f"实计: 最近一次请求输入 {measured:,} tokens（与 /cost 同一口径）"
+        )
     children = []
     for m in messages[-5:]:
         first_text = ""
@@ -408,9 +424,13 @@ def handle_context(ctx: "CommandContext", stripped: str) -> bool:
     # 优先使用用户配置的 context_window（比例压缩模式），未配置回退 128k 假设值；
     # window_configured 透传给文案层，配置值不叫「假设窗口」。@author aceFelix
     window = getattr(ctx.loop, "context_window", 0) if getattr(ctx, "loop", None) else 0
+    # 实计数与 /cost 同源：最近一次请求的输入 token。有它就报，避免两个命令
+    # 对「上下文多大」给出两个数。@author aceFelix
+    usage = getattr(getattr(ctx, "loop", None), "session_usage", None)
+    measured = int(getattr(usage, "last_input_tokens", 0) or 0)
     _print_context(
         ctx.ui, ctx.messages, ctx.model, ctx.system_prompt,
-        window=window or 128000, window_configured=bool(window),
+        window=window or 128000, window_configured=bool(window), measured=measured,
     )
     return True
 

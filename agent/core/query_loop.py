@@ -616,14 +616,14 @@ class QueryLoop:
         from agent.llm import pricing
 
         turn = stats.usage
-        # Anthropic 协议下 input_tokens 不含缓存命中部分；信号与 cache_hit_rate 同源
-        input_includes_cache = not (turn.cache_read_tokens > turn.input_tokens)
-        settled = pricing.summarize(
+        # 未命中 token 已在 provider 归一化时算好（厂商给 prompt_cache_miss_tokens
+        # 就取原值，否则按协议推导），这里直接用，不再二次猜协议——猜错会把
+        # 缓存单按全价或全价单按缓存价入账。@author aceFelix
+        settled = pricing.compute_cost(
             self._model,
-            input_tokens=turn.input_tokens,
             cache_hit_tokens=turn.cache_read_tokens,
+            cache_miss_tokens=turn.cache_miss_tokens,
             output_tokens=turn.output_tokens,
-            input_includes_cache=input_includes_cache,
         )
         prev = self._session_usage
         self._session_usage = Usage(
@@ -639,6 +639,7 @@ class QueryLoop:
             raw_usage=turn.raw_usage or prev.raw_usage,
             # 当前上下文的真实规模（最近一次请求的输入 token，API 实计）
             last_input_tokens=turn.last_input_tokens or prev.last_input_tokens,
+            cache_miss_tokens=prev.cache_miss_tokens + turn.cache_miss_tokens,
         )
 
         return stats

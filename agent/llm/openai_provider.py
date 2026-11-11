@@ -266,14 +266,27 @@ def normalize_usage(usage_obj: Any, cached: int, created: int) -> Usage:
     if details is not None and getattr(details, "reasoning_tokens", None) is not None:
         raw["reasoning_tokens"] = reasoning
 
+    # 未命中输入 token：厂商直接给了 prompt_cache_miss_tokens 就用原值——这是协议
+    # 无关的精确值；否则退回推导（hit > input 说明 input 不含缓存命中部分）。
+    # @author aceFelix
+    total_in = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
+    raw_miss = raw.get("prompt_cache_miss_tokens")
+    if raw_miss is not None:
+        miss = int(raw_miss)
+    elif int(cached or 0) > total_in:
+        miss = total_in
+    else:
+        miss = max(0, total_in - int(cached or 0))
+
     return Usage(
-        input_tokens=int(getattr(usage_obj, "prompt_tokens", 0) or 0),
+        input_tokens=total_in,
         output_tokens=completion,
         cache_read_tokens=int(cached or 0),
         cache_creation_tokens=int(created or 0),
         reasoning_tokens=reasoning,
         raw_usage=raw or None,
-        last_input_tokens=int(getattr(usage_obj, "prompt_tokens", 0) or 0),
+        last_input_tokens=total_in,
+        cache_miss_tokens=miss,
     )
 
 

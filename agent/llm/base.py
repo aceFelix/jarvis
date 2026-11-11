@@ -64,6 +64,9 @@ class Usage:
     # 最近一次请求的输入 token（API 实计）。这就是**当前上下文的真实规模**，
     # 比任何字符估算都准——有实测就不要估算。@author aceFelix
     last_input_tokens: int = 0
+    # 累计缓存**未命中**输入 token。厂商直接给了 prompt_cache_miss_tokens 时取原值，
+    # 否则从 input 与 hit 推导。有了它，命中率不必再猜协议。@author aceFelix
+    cache_miss_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -73,17 +76,16 @@ class Usage:
     def cache_hit_rate(self) -> float:
         """缓存命中率（百分数 0~100）：累计缓存命中 token / 真实总输入 token。
 
-        分母按**协议口径**区分（而非厂商名，同一厂商可能同时提供两种端点）：
-        - OpenAI / DashScope 兼容协议：``input_tokens`` 已包含缓存命中部分
-          → 分母 = ``input_tokens``；
-        - Anthropic 协议（含 DeepSeek 等的 ``/anthropic`` 兼容端点）：
-          ``input_tokens`` 只记未命中部分，缓存命中是独立增量
-          → 分母 = ``input_tokens + cache_read_tokens``。
+        **首选口径**：厂商同时给了命中与未命中（如 DeepSeek 的
+        ``prompt_cache_hit_tokens`` / ``prompt_cache_miss_tokens``）时，
+        直接 ``hit / (hit + miss)``。这是协议无关的精确值，不依赖任何推测。
+
+        **兜底口径**（厂商只给命中数）：按协议区分分母——
+        - OpenAI / DashScope 兼容协议：``input_tokens`` 已包含命中部分 → 分母 = input；
+        - Anthropic 协议：``input_tokens`` 只记未命中 → 分母 = input + hit。
 
         协议无法从 Usage 本身得知，用 ``cache_read > input`` 作为
-        「input 不含缓存」的信号（Anthropic 下 system prompt 全命中时命中数
-        会远大于未命中输入），代价是 OpenAI 协议下 input 极小、cache 极大时
-        分母偏大一档，属可接受近似。
+        「input 不含缓存」的信号，代价是极端情况下分母偏大一档，属可接受近似。
 
         无输入 token（尚未发生 API 调用）时返回 0，调用方据此隐藏指标。
 
@@ -91,6 +93,9 @@ class Usage:
         """
         if self.input_tokens <= 0:
             return 0.0
+        if self.cache_miss_tokens > 0:
+            # 精确路径：命中 / (命中 + 未命中)
+            return self.cache_read_tokens / (self.cache_read_tokens + self.cache_miss_tokens) * 100
         denom = (
             self.input_tokens + self.cache_read_tokens
             if self.cache_read_tokens > self.input_tokens
