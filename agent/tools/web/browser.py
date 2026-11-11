@@ -33,7 +33,7 @@ from agent.core.context import ToolContext
 # 图片编码也从这里同源：此前本文件内联了一份与 screen.py 逐字相同的编码实现，
 # 理由写的正是「独立内联避免跨模块耦合」——三份副本由此诞生，现已收拢。
 # @author aceFelix
-from agent.core.images import encode_pil_image, image_receipt
+from agent.core.images import encode_pil_image, image_receipt, vision_hint
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
 
@@ -302,13 +302,38 @@ class BrowserScreenshotTool(Tool):
 
         w, h = img.size
         scope = "整页" if full_page else "视口"
+
+        # 落盘一份原图（2026-11-11 图片窗口）：本工具此前只在内存里编码，
+        # 没有路径就没法「给人看」。落盘失败只降级（不写路径），不影响回传。
+        trace_meta: dict[str, Any] = {}
+        saved_note = ""
+        try:
+            from datetime import datetime
+            from pathlib import Path
+
+            from agent.core.images import make_image_ref
+
+            shots = Path.home() / ".jarvis" / "media"
+            shots.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            save_path = shots / f"browser_{stamp}.png"
+            save_path.write_bytes(img_bytes)
+            trace_meta["image"] = make_image_ref(
+                img, save_path, source="BrowserScreenshot", fmt="png"
+            ).to_dict()
+            saved_note = f"原图路径: {save_path}\n"
+        except Exception:
+            trace_meta = {}
+
         return ToolResult.ok(
             f"已截取浏览器{scope}截图\n"
             f"原始尺寸: {w} x {h}\n"
             f"回传格式: {image_block.media_type}, 最长边<={max_size or '原图'}\n"
+            + saved_note
             # 措辞走共用函数：工具只知道图片块挂上了，能不能被看见由 provider 定
-            + image_receipt(True),
+            + image_receipt(True, visible=vision_hint(ctx)),
             images=[image_block],
+            trace_meta=trace_meta,
         )
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:

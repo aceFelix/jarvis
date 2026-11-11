@@ -106,6 +106,7 @@ class TerminalAwareTopmost:
         *,
         enabled: bool = True,
         interval: float = 0.4,
+        peers: tuple[Any, ...] = (),
     ) -> None:
         """初始化策略。
 
@@ -114,9 +115,12 @@ class TerminalAwareTopmost:
             crawl: ``CrawlManager``（可空）；需实现 ``set_topmost``。
             enabled: 是否启用置顶（False 时永远不置顶）。
             interval: 前台窗口检测的最小间隔（秒），避免每帧都查进程。
+            peers: 其余需要一起让位的窗口管理器（如 ``ImageManager``）；
+                各自需实现 ``set_topmost(bool)``。
         """
         self._root = root
         self._crawl = crawl
+        self._peers = tuple(peers)
         self._enabled = bool(enabled)
         self._interval = interval
         self._last = 0.0
@@ -140,14 +144,15 @@ class TerminalAwareTopmost:
         self._apply()
 
     def _apply(self) -> None:
-        """把当前策略应用到 root 与抓取舱；异常静默（可视化不能影响主流程）。"""
+        """把当前策略应用到 root 与各子窗；异常静默（可视化不能影响主流程）。"""
         wanted = self.wanted
         try:
             self._root.attributes("-topmost", wanted)
         except Exception:
             pass
-        try:
-            if self._crawl is not None:
-                self._crawl.set_topmost(wanted)
-        except Exception:
-            pass
+        for panel in (self._crawl, *self._peers):
+            try:
+                if panel is not None:
+                    panel.set_topmost(wanted)
+            except Exception:
+                pass

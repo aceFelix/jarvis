@@ -87,7 +87,13 @@ class TestMessagesToOpenAI:
         assert "图片已省略" in out[1]["content"][0]["text"]
 
     def test_tool_result_images_multimodal(self) -> None:
-        """多模态下 tool_result 图片以文本描述附加。
+        """多模态下 tool_result 的图片另起一条 user 消息（图只在 user 里才合法）。
+
+        2026-11-12 行为变更：旧实现只在 tool 内容末尾拼「[附带 1 张图片]」，图等于
+        被丢掉——`deepseek-flash` 明明是多模态，却因此一直「看不见」截图。OpenAI 兼容
+        协议要求 ``role="tool"`` 的 content 为字符串，所以图必须转成独立 user 消息
+        （DeepSeek 明文规定图片只允许出现在 user 消息）。详见
+        ``tests/test_openai_tool_images.py``。
 
         输入必须含配对的 assistant tool_use——孤儿 tool_result（引用了不存在的
         调用）会被 ensure_tool_pairing 丢弃，无调用可配的结果在协议上非法。
@@ -102,9 +108,12 @@ class TestMessagesToOpenAI:
             ]),
         ]
         out = _messages_to_openai(msgs, "sys")
-        assert out[1]["role"] == "assistant"
-        assert out[2]["role"] == "tool"
-        assert "[附带 1 张图片]" in out[2]["content"]
+        assert [m["role"] for m in out] == ["system", "assistant", "tool", "user"]
+        assert "见下一条消息" in out[2]["content"]
+        assert out[3]["content"][1] == {
+            "type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64,BBB"},
+        }
 
     def test_tool_result_without_images(self) -> None:
         """无图片的 tool_result 直接透传 content（需有配对调用）。"""

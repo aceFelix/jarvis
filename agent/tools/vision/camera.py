@@ -29,7 +29,12 @@ from typing import Any
 from agent.core.context import ToolContext
 # 图片回执措辞的唯一出处（与截屏、网页截图同源）。
 # @author aceFelix
-from agent.core.images import encode_pil_image, image_receipt
+from agent.core.images import (
+    encode_pil_image,
+    image_receipt,
+    make_image_ref,
+    vision_hint,
+)
 from agent.core.message import ImageContent
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
@@ -197,10 +202,22 @@ class CameraShotTool(Tool):
             f"路径: {save_path}\n"
             f"尺寸: {w} x {h}\n"
             f"时间: {ts}\n"
-            + image_receipt(bool(images), fmt=fmt, max_size=max_size)
+            + image_receipt(
+                bool(images), fmt=fmt, max_size=max_size, visible=vision_hint(ctx)
+            )
             + encode_note
         )
-        return ToolResult.ok(summary, images=images)
+        # 「给人看」的引用（2026-11-11 图片窗口）：照片本来就落在 ~/.jarvis/cam，
+        # 这里只上报路径与元信息，窗口按路径显示原图。
+        trace_meta: dict[str, Any] = {}
+        if images:
+            try:
+                trace_meta["image"] = make_image_ref(
+                    pil_img, save_path, source="CameraShot", fmt=fmt
+                ).to_dict()
+            except Exception:
+                trace_meta = {}
+        return ToolResult.ok(summary, images=images, trace_meta=trace_meta)
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         cam_idx = args.get("camera_index", 0) if args else 0

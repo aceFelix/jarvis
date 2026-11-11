@@ -21,16 +21,20 @@ from agent.core.diag import diag_info
 from agent.ui.cockpit import (
     CockpitState,
     VisualOptions,
-    _fmt_bytes,
     _fmt_ms,
-    _short_url,
     describe_target,
     step_rows,
 )
 from agent.ui.cockpit_agents import AgentCardManager, AgentCardPlanner
 from agent.ui.cockpit_cards import CardManager, CardPlanner
 from agent.ui.cockpit_crawl import CrawlManager
-from agent.ui.cockpit_detail import draw_tool_detail
+from agent.ui.cockpit_detail import (
+    draw_feed,
+    draw_fetches,
+    draw_section,
+    draw_tool_detail,
+)
+from agent.ui.cockpit_image import ImageManager
 from agent.ui.cockpit_position import load_position as _load_hud_position
 from agent.ui.cockpit_position import save_position as _save_hud_position
 from agent.ui.cockpit_zorder import TerminalAwareTopmost
@@ -98,6 +102,8 @@ class CockpitWindow:
         self._agent_cards: AgentCardManager | None = None
         # 左侧抓取网络窗（C2-lite）：有抓取才弹；终端优先置顶策略在 Tk 线程内创建
         self._crawl: CrawlManager | None = None
+        # 图片窗（2026-11-11）：懒创建 Toplevel，首次出现 image_show 才真正出现
+        self._images: ImageManager | None = None
         self._zorder: TerminalAwareTopmost | None = None
         self._observer_bound = False
         self._state = CockpitState()
@@ -312,8 +318,12 @@ class CockpitWindow:
             self._agent_cards = AgentCardManager(root, self.options, self._anchor)
             # 左侧抓取窗（懒创建 Toplevel，首次有抓取才真正出现）
             self._crawl = CrawlManager(root, self.options)
-            # 终端优先：Git Bash / cmd 在前台时两个窗口让出置顶（2026-11-09）
-            self._zorder = TerminalAwareTopmost(root, self._crawl, enabled=self._topmost)
+            # 图片窗（懒创建 Toplevel，首次有工具产出的图才真正出现）
+            self._images = ImageManager(root, self.options)
+            # 终端优先：Git Bash / cmd 在前台时所有子窗让出置顶（图片窗 2026-11-11 并入）
+            self._zorder = TerminalAwareTopmost(
+                root, self._crawl, enabled=self._topmost, peers=(self._images,)
+            )
             # 观察者须在 _ready 前注册，Subagent 首次调用才能看到 has_card_observer
             self._bind_observer()
             self._ready.set()
@@ -342,6 +352,7 @@ class CockpitWindow:
             self._cards = None
             self._agent_cards = None
             self._crawl = None
+            self._images = None
             self._zorder = None
             self._unbind_observer()
             self._root = None
@@ -360,6 +371,8 @@ class CockpitWindow:
                 self._agent_cards.hide_all()
             if self._crawl is not None:
                 self._crawl.hide_all()
+            if self._images is not None:
+                self._images.hide_all()
         except Exception:
             pass
         self._remember_position()
@@ -378,6 +391,8 @@ class CockpitWindow:
                 self._agent_cards.show_all(self._agent_planner)
             if self._crawl is not None:
                 self._crawl.show_all(self._state)
+            if self._images is not None:
+                self._images.show_all(self._state)
         except Exception:
             pass
 
@@ -390,6 +405,9 @@ class CockpitWindow:
             if self._crawl is not None:
                 self._crawl.detach()
                 self._crawl = None
+            if self._images is not None:
+                self._images.detach()
+                self._images = None
             if self._agent_cards is not None:
                 self._agent_cards.detach()
                 self._agent_cards = None
@@ -456,6 +474,16 @@ class CockpitWindow:
             ):
                 try:
                     self._crawl.sync(self._state, self._run_id)
+                except Exception:
+                    pass
+            # 图片窗：工具产出的图出现才弹（2026-11-11）
+            if (
+                self._images is not None
+                and not self._hidden
+                and event.get("type") == "image_show"
+            ):
+                try:
+                    self._images.sync(self._state, self._run_id)
                 except Exception:
                     pass
             self._last_event_at = time.monotonic()
@@ -577,8 +605,8 @@ class _Hud:
         self._draw_metrics(state)
         self._draw_current(state)
         self._draw_steps(state)
-        self._draw_feed(state)
-        self._draw_fetches(state)
+        draw_feed(self.canvas, state, window_w=WINDOW_W, pad=PAD)
+        draw_fetches(self.canvas, state, window_w=WINDOW_W, pad=PAD)
         self._draw_detail()
         self._draw_footer(agents)
 
@@ -814,39 +842,6 @@ class _Hud:
             return
         draw_tool_detail(self.canvas, entry, window_w=WINDOW_W, pad=PAD)
 
-    def _draw_feed(self, state: CockpitState) -> None:
-        """数据流：最近 8 条事件摘要。"""
-        self._section("数据流 // STREAM", 312)
-        items = list(state.feed)[-8:]
-        if not items:
-            self._text(PAD, 340, "— 暂无事件", fill=DIM, font=FONT_SMALL)
-            return
-        y = 336
-        for line in items:
-            self._text(PAD, y, _clip(line, 56), fill=DIM, font=FONT_MONO)
-            y += 17
-
-    def _draw_fetches(self, state: CockpitState) -> None:
-        """抓取：最近 3 条 URL / 状态 / 耗时 / 字节。"""
-        self._section("抓取 // FETCH", 486)
-        items = list(state.fetches)[-3:]
-        if not items:
-            self._text(PAD, 512, "— 暂无抓取", fill=DIM, font=FONT_SMALL)
-            return
-        y = 508
-        for item in items:
-            ok = item.get("status") == "ok"
-            self._text(PAD, y, "✓" if ok else "✗", fill=GREEN if ok else RED, font=FONT_TEXT)
-            self._text(PAD + 16, y, _clip(_short_url(item.get("url")), 34), fill=TEXT, font=FONT_MONO)
-            meta = " · ".join(
-                part for part in (
-                    _fmt_ms(item.get("duration_ms")),
-                    _fmt_bytes(item.get("bytes")),
-                ) if part
-            )
-            self._text(WINDOW_W - PAD, y, meta, fill=DIM, font=FONT_MONO, anchor="e")
-            y += 22
-
     def _draw_footer(self, agents: str = "") -> None:
         """底部提示；有代理卡时在右侧显示代理总数与溢出数。"""
         self._line(PAD, WINDOW_H - 36, WINDOW_W - PAD, WINDOW_H - 36, CYAN_DIM)
@@ -857,9 +852,8 @@ class _Hud:
             self._text(WINDOW_W - PAD, WINDOW_H - 20, "HUD v1", fill=CYAN_DIM, font=FONT_SMALL, anchor="e")
 
     def _section(self, title: str, y: int) -> None:
-        """小节标题 + 右侧延长线。"""
-        self._text(PAD, y, title, fill=CYAN_DIM, font=FONT_LABEL)
-        self._line(PAD + 108, y, WINDOW_W - PAD, y, GRID)
+        """小节标题 + 右侧延长线（坐标与绘制统一在 ``cockpit_detail``）。"""
+        draw_section(self.canvas, title, y, window_w=WINDOW_W, pad=PAD)
 
     # ---- 拖动 ----
 

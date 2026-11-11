@@ -28,6 +28,8 @@ FEED_MAX = 8
 STEP_MAX = 4
 FETCH_MAX = 200
 EXTRACT_MAX = 200
+# 图片窗口保留的图片条数（2026-11-11）：只存路径与元信息，不存字节
+IMAGE_MAX = 12
 
 _MODE_OFF = "off"
 _MODE_WINDOW = "window"
@@ -98,6 +100,16 @@ def clamp_int(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
+def normalize_image_window(value: Any) -> str:
+    """归一化图片窗口模式：``auto`` / ``off``；未知值降级为 auto。
+
+    ``auto`` = 本轮出现工具产出的图才弹、结束保留、点 ✕ 只隐藏；
+    ``off`` = 完全不创建该窗口（其余可视化不受影响）。
+    @author aceFelix
+    """
+    return "off" if str(value or "").strip().lower() == "off" else "auto"
+
+
 def cockpit_enabled(mode: str, voice_mode: bool) -> bool:
     """兼容旧调用：判断主 HUD 是否启用（仅看 window/off）。
 
@@ -146,6 +158,13 @@ class VisualOptions:
     # @author aceFelix
     crawl_topology: str = "auto"
     crawl_max_nodes: int = 60
+    # 图片窗口（2026-11-11）：auto 只在工具产出图时弹、结束保留、✕ 只隐藏；
+    # off 完全不创建。image_max 为缩略条保留张数（1–24），
+    # image_thumb_px 为缩略条单张最长边（48–160；大图区恒按窗宽适配，不受此值影响）。
+    # @author aceFelix
+    image_window: str = "auto"
+    image_max: int = 12
+    image_thumb_px: int = 88
 
     @classmethod
     def from_values(
@@ -167,6 +186,9 @@ class VisualOptions:
         crawl_window: Any = "auto",
         crawl_topology: Any = "auto",
         crawl_max_nodes: Any = 60,
+        image_window: Any = "auto",
+        image_max: Any = 12,
+        image_thumb_px: Any = 88,
     ) -> "VisualOptions":
         """从原始配置值构造已归一化的选项。
 
@@ -189,6 +211,9 @@ class VisualOptions:
             crawl_window=normalize_crawl_window(crawl_window),
             crawl_topology=normalize_crawl_topology(crawl_topology),
             crawl_max_nodes=clamp_int(crawl_max_nodes, 60, 20, 200),
+            image_window=normalize_image_window(image_window),
+            image_max=clamp_int(image_max, 12, 1, 24),
+            image_thumb_px=clamp_int(image_thumb_px, 88, 48, 160),
         )
 
     @classmethod
@@ -211,6 +236,9 @@ class VisualOptions:
             crawl_window=getattr(settings, "visual_crawl_window", "auto"),
             crawl_topology=getattr(settings, "visual_crawl_topology", "auto"),
             crawl_max_nodes=getattr(settings, "visual_crawl_max_nodes", 60),
+            image_window=getattr(settings, "visual_image_window", "auto"),
+            image_max=getattr(settings, "visual_image_max", 12),
+            image_thumb_px=getattr(settings, "visual_image_thumb_px", 88),
         )
 
     def cockpit_on(self) -> bool:
@@ -228,7 +256,12 @@ class VisualOptions:
             or self.cards_on()
             or self.agent_cards_on()
             or self.crawl_on()
+            or self.image_on()
         )
+
+    def image_on(self) -> bool:
+        """图片窗口是否启用（总开关 + 子开关）。"""
+        return self.enabled and self.image_window != _MODE_OFF
 
     def agent_cards_on(self) -> bool:
         """子代理/队友卡是否启用（总开关 + 子开关）。"""
@@ -346,6 +379,8 @@ class CockpitState:
         self.feed: deque[str] = deque(maxlen=FEED_MAX)
         self.fetches: deque[dict[str, Any]] = deque(maxlen=FETCH_MAX)
         self.extracts: deque[dict[str, Any]] = deque(maxlen=EXTRACT_MAX)
+        # 图片窗口数据源（2026-11-11）：只存路径与元信息，绝不存 base64
+        self.images: deque[dict[str, Any]] = deque(maxlen=IMAGE_MAX)
         self.stats: dict[str, Any] = {}
 
     def reset(self, run_id: str = "") -> None:
@@ -366,6 +401,7 @@ class CockpitState:
         self.feed.clear()
         self.fetches.clear()
         self.extracts.clear()
+        self.images.clear()
         self.stats = {}
 
     def elapsed_ms(self) -> float:
@@ -458,6 +494,16 @@ class CockpitState:
                 )
                 if key in event
             }
+        elif etype == "image_show":
+            # 图片窗口（2026-11-11）：只收路径与元信息。子代理产出的图同样收下
+            # ——它不进步数/失败统计，但「谁截了什么图」用户要看得见。
+            record = {"path": event.get("path")}
+            for key in ("source", "width", "height", "media_type", "bytes", "ts"):
+                if event.get(key) is not None:
+                    record[key] = event[key]
+            # 没有路径就没有展示位：宁可不进清单，也不要让窗口画一张空图
+            if record["path"]:
+                self.images.append(record)
 
         summary = _summary_of(event)
         if summary:
@@ -558,6 +604,7 @@ __all__ = [
     "FEED_MAX",
     "STEP_MAX",
     "FETCH_MAX",
+    "IMAGE_MAX",
     "VisualOptions",
     "describe_target",
     "cockpit_enabled",
@@ -566,6 +613,7 @@ __all__ = [
     "normalize_effects",
     "normalize_crawl_window",
     "normalize_crawl_topology",
+    "normalize_image_window",
     "visual_enabled",
     "step_rows",
     "_fmt_ms",

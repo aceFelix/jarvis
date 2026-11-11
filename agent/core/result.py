@@ -102,8 +102,19 @@ class ToolResult:
     trace_meta: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def ok(cls, data: Any, *, images: list["ImageContent"] | None = None) -> ToolResult:
-        return cls(data=data, is_error=False, images=images or [])
+    def ok(
+        cls,
+        data: Any,
+        *,
+        images: list["ImageContent"] | None = None,
+        trace_meta: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        return cls(
+            data=data,
+            is_error=False,
+            images=images or [],
+            trace_meta=trace_meta or {},
+        )
 
     @classmethod
     def error(cls, message: str, *, retryable: bool = True) -> ToolResult:

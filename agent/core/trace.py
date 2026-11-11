@@ -386,6 +386,20 @@ class TraceRecorder:
                 stats = trace_meta.get("crawl_stats")
                 if isinstance(stats, dict):
                     self._emit({"type": "crawl_stats", **stats, **(agent_meta or {})})
+                # 图片（2026-11-11 图片窗口 P0）：只记路径与元信息，绝不带 base64。
+                # 走 trace_meta 而不是读 ToolResult.images —— tool_after 的 payload
+                # 压根不含 images，工具必须把「给人看」的那份引用自己上报上来。
+                # 用 ImageRef 白名单重建：直接 **image 展开会把上游误塞的 base64
+                # 一路落进 JSONL 与事件流（测试 test_no_base64_in_event 钉住这条）。
+                # @author aceFelix
+                if trace_meta.get("image"):
+                    from agent.core.images import ImageRef
+
+                    for image in _as_event_list(trace_meta.get("image")):
+                        ref = ImageRef.from_dict(image)
+                        if ref is None:
+                            continue
+                        self._emit({"type": "image_show", **ref.to_dict(), **(agent_meta or {})})
         # 记录这一步新出现的窗口，供收尾判定"哪些是中间产物、哪些是最终结果"
         current = self._snapshot_windows()
         self._step_new.append(set(current) - set(self._step_start))

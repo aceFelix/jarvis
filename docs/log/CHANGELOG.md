@@ -4,6 +4,87 @@
 
 ## [Unreleased]
 
+### 新增（图片窗口 P0：终端终于能看见图，2026-11-11）
+
+- **背景**：终端此前只有图片**入站**通道——`ScreenShot` / `CameraShot` / `BrowserScreenshot`
+  把图编码成 base64 送给模型，人却看不见。模型说「我看了截图，按钮在右下角」时，用户无法
+  核对它看的是不是同一张图；`operation-visibility` 计划里「失败截图未做」也卡在同一处。
+- **数据面**：新增 `ImageRef`（`agent/core/images.py`）——只带路径与元信息、**不含字节**，
+  与 provider 契约的 `ImageContent` 彻底分工：前者给人看（原图 + 屏幕适配），后者给模型看
+  （≤1280 / JPEG85），两条尺寸链不混用。工具把引用放进 `ToolResult.trace_meta["image"]`
+  （`tool_after` 的 payload 压根不含 images），`trace` 派生 `image_show` 事件时**用 `ImageRef`
+  白名单重建**：直接 `**image` 展开会把上游误塞的 base64 一路落进 JSONL 与事件流。
+- **展示面**：新增 `agent/ui/cockpit_image.py`（`ImageWindow` + `ImageManager`）与
+  `agent/ui/image_cache.py`（缩放尺寸/缓存键/存活判定/布局纯函数）。480×600 独立窗，
+  **默认屏幕左上角、整面可拖、位置记 `ui_state.json` 的 `image` 段**；大图按窗宽适配，
+  缩略条点击与滚轮切换，元信息显示来源/尺寸/格式/体积/时间/路径；文件被清理时显示
+  「图已过期」并保留元信息。
+- **生命周期**：与抓取舱同构——有图才弹、结束保留、✕ 只隐藏、下轮自动重现、主 HUD 隐藏时
+  同步隐藏、终端前台时让位置顶（`TerminalAwareTopmost` 新增 `peers`）。
+- **落点**：`CameraShot` 复用 `~/.jarvis/cam`；`BrowserScreenshot` **新增落盘**
+  `~/.jarvis/media/browser_*.png`（此前只在内存里编码，没有路径就没法展示）；
+  `ScreenShot` 落点不变（系统临时目录）。
+- **配置**：`[visualization]` 新增 `image_window`（auto/off）、`image_max`（1–24，默认 12）、
+  `image_thumb_px`（48–160，默认 88），四处同步（settings / settings_domains / catalog / 模板）。
+- **`ui_state.json` 改分段读-改-写**：原先 `save_position` 整文件覆盖、只写 `cockpit` 段；
+  新增 `image` 段后两个窗口会互相冲掉对方位置。写入统一走 `_write_section`。
+- **文案边界**：窗口标题写明「不改变模型的图片回执」，`image_receipt` 的「附上不等于看见」
+  一字未改；工具回执里禁止出现「已为你显示 / 已确认」。
+- **重构**：`cockpit_window.py` 已顶到 900 行门禁，先把 `_draw_feed` / `_draw_fetches` 与
+  `_section` 的坐标收进 `cockpit_detail.py`（`draw_feed` / `draw_fetches` / `draw_section`），
+  900 → 894 后再接线。
+- **测试**：新增 `tests/ui/test_cockpit_image.py`（纯逻辑）、`tests/ui/test_image_state.py`
+  （状态与生命周期，假窗口注入）、`tests/core/test_trace_images.py`（派生、脏值、无 base64）；
+  `tests/ui/test_cli_cockpit.py` 的「全 off」用例同步补上图片窗，并新增「只开图片窗仍建根窗口」。
+  全量 **4970 passed / 2 skipped**。
+- **本地预览**：`python -m agent.ui.image_demo` 生成三张不同尺寸的测试图并只弹图片窗，
+  不跑真实对话、不需要模型与 pyautogui，用来快速看形态（`agent/ui/image_demo.py`）。
+
+### 修复（图片窗口把三个截图工具打挂，2026-11-11）
+
+- **现象**：真实会话里 `ScreenShot` 连试三次全挂，报
+  `TypeError: ToolResult.ok() got an unexpected keyword argument 'trace_meta'`；
+  同一路径的 `CameraShot` / `BrowserScreenshot` 一起挂（`Crawl` / `WebExtract` 不受影响，
+  它们用 `ToolResult(data=..., trace_meta=...)` 直接构造）。
+- **根因**：`ToolResult` 这个 dataclass **早就有** `trace_meta` 字段，但 `ok()` 工厂方法
+  从来没透传它。图片窗口那三处写成 `ToolResult.ok(..., trace_meta=...)`，于是每次调用都在
+  构造结果时抛 `TypeError`——典型的「加字段忘了改 classmethod」。
+- **修法**：`ok()` 增加 `trace_meta` 参数并透传（`error()` 不收该参数，守卫明确禁止绕过）。
+- **为什么测试没拦住**：全仓此前**没有任何用例真的跑过 `call()`**（需要 pyautogui / 摄像头 /
+  浏览器），图片窗口的测试都停在 `trace_meta` dict 的派生逻辑上。已补两道门禁：
+  - `tests/core/test_tool_result_contract.py`：AST 扫 `agent/` 下所有 `ToolResult.ok/error(...)`
+    调用，把 keyword 名与签名（唯一真源）逐个比对，命中即报**文件:行号**。反向变异验证过：
+    把 `trace_meta` 从签名里去掉，守卫立刻抓到 `screen.py:205` / `camera.py:213` /
+    `browser.py:328` 三处；
+  - `tests/tools/test_screenshot_image_ref.py`：假 pyautogui 真跑 `ScreenShotTool.call()`，
+    断言 `trace_meta["image"]` 完整、尺寸取**原图**（不是回传模型的缩放值）、不含 base64、
+    回执仍带「附上不等于看见」。
+
+### 修复（多模态模型看不到工具截图，2026-11-12）
+
+- **现象**：`deepseek-flash` 官方已是**多模态**（[Vision 文档](https://api-docs.deepseek.com/guides/vision)：
+  能读截图里的文字），但 jarvis 截图后模型反复回报「我拿不到画面内容」，还写了十几秒
+  内心戏。图片窗口里人类看得见，模型看不见——两边各自以为对方知道。
+- **根因两层**：
+  1. `_messages_to_openai` 里 `role="tool"` 的 content **只能是字符串**，图片塞不进去。
+     代码只在末尾拼一句 `[附带 N 张图片]`，注释写着「后续如需视觉 tool_result 再追加
+     独立 user 消息」——**从未实现**，图等于被丢掉；
+  2. DeepSeek 明文规定**图片只允许出现在 user 消息**（出现在 system / assistant 里
+     直接 400），所以正确姿势就是另起一条 user 消息，这正是上面那步没做完的事。
+- **修法**：新增 `_tool_images_message()`，把工具结果里的图（取最近 `_MAX_TOOL_IMAGES=4`
+  张，远低于单请求 48MiB 上限）转成一条 `user` 消息带 `image_url`（base64 data URL，
+  与用户直接贴图同构）；tool 消息末尾改写成「见下一条消息」。
+- **文案配套**：`image_receipt()` 增加 `visible` 参数，判据由工具经 `vision_hint(ctx)`
+  取到（唯一真源仍是 `model_capability`）：已知有视觉就直说「你可以看到这张图」，
+  已知无视觉就直说「你只拿到路径，不要描述画面内容」，只有未确认时才保留旧的条件式
+  提醒。模型不再拿「附上: 是」误判自己看得见。
+- **实测**：造一张含 `JARVIS VISION CHECK / CODE 7391-ALPHA` 的图，走
+  `_messages_to_openai` → 真发 `deepseek-flash`，返回 **`7391-ALPHA`**（思考里逐行读出
+  了图上三行文字）。全量 **5007 passed / 2 skipped**。
+- **顺带记录**：`max_tokens` 太小 + 思考模式会让视觉任务返回空 `content`
+  （首次验证 `max_tokens=60` 全被 `reasoning_tokens` 吃掉）；依赖看图的任务要给够
+  输出预算。
+
 ## [2.5.4] — 2026-11-11
 
 ### 新增（`/cost` 真的开始算钱了，2026-11-11）

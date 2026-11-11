@@ -107,6 +107,22 @@ def _render_crawl_stats(event: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
+def _render_image_show(event: dict[str, Any]) -> str:
+    """``image_show`` → ``🖼 ScreenShot · 2560×1440 · 180KB``；缺失项省略。"""
+    parts = ["🖼"]
+    source = str(event.get("source") or "")
+    if source:
+        parts.append(source)
+    width = event.get("width")
+    height = event.get("height")
+    if width and height:
+        parts.append(f"{width}×{height}")
+    size = _fmt_bytes(event.get("bytes"))
+    if size:
+        parts.append(size)
+    return " · ".join(parts)
+
+
 def render_event(event: dict[str, Any], *, for_review: bool = False) -> str | None:
     """渲染单条事件；不需要上屏的事件返回 None。
 
@@ -164,6 +180,9 @@ def render_event(event: dict[str, Any], *, for_review: bool = False) -> str | No
         return _agent_tag(_render_web_extract(event)) if for_review else None
     if etype == "crawl_stats":
         return _render_crawl_stats(event) if for_review else None
+    # 图片：实时区不刷屏（图片窗自己展示），只在 /trace 回看时留一行记录
+    if etype == "image_show":
+        return _agent_tag(_render_image_show(event)) if for_review else None
     return None
 
 

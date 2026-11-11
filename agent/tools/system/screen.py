@@ -25,7 +25,12 @@ from typing import Any
 from agent.core.context import ToolContext
 # 图片回执措辞的唯一出处（与拍照、网页截图同源）：只说「附上」，不替模型说「看见」。
 # @author aceFelix
-from agent.core.images import encode_pil_image, image_receipt
+from agent.core.images import (
+    encode_pil_image,
+    image_receipt,
+    make_image_ref,
+    vision_hint,
+)
 from agent.core.message import ImageContent
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
@@ -189,10 +194,22 @@ class ScreenShotTool(Tool):
             f"尺寸: {w} x {h}\n"
             f"时间: {ts}\n"
             f"OS: {platform.system()}\n"
-            + image_receipt(bool(images), fmt=fmt, max_size=max_size)
+            + image_receipt(
+                bool(images), fmt=fmt, max_size=max_size, visible=vision_hint(ctx)
+            )
             + encode_note
         )
-        return ToolResult.ok(summary, images=images)
+        # 「给人看」的那份引用（2026-11-11 图片窗口）：只带路径与元信息，
+        # 由 trace 派生 image_show 供终端图片窗显示原图；与 images 无耦合。
+        trace_meta: dict[str, Any] = {}
+        if images:
+            try:
+                trace_meta["image"] = make_image_ref(
+                    img, save_path, source="ScreenShot", fmt=fmt
+                ).to_dict()
+            except Exception:
+                trace_meta = {}
+        return ToolResult.ok(summary, images=images, trace_meta=trace_meta)
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         return "截图" + ("（局部）" if args and args.get("region") else "（全屏）")

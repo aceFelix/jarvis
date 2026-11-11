@@ -12,6 +12,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,123 @@ from agent.ui.cli import RichCLI
 # 每一次图片回执里——只在 system prompt 里说过一次，长会话里它会被忘掉，
 # 而工具回执是模型当下唯一在读的东西。
 _IMAGE_SEE_CLAUSE = "，附上不等于看见：无视觉能力的模型只收到省略说明，不得声称亲眼看过"
+
+
+@dataclass(frozen=True)
+class ImageRef:
+    """一张「给人看」的图片引用：只带路径与元信息，**不含字节**。
+
+    为什么与 ``ImageContent`` 分开（2026-11-11 图片窗口 P0）：
+
+    - ``ImageContent`` 是送给 provider 的 base64 块，能不能被看见由
+      ``model_type`` 决定，是**给模型看**的尺寸链（≤1280 / JPEG85）；
+    - ``ImageRef`` 只服务终端图片窗口与 trace，是**给人看**的尺寸链（原图 + 屏幕适配），
+      永不参与 provider 序列化；
+    - 两条链混用会让用户误判「模型看到的分辨率」，也会让窗口去解 1280 的糊图。
+
+    Attributes:
+        path: 落盘绝对路径（唯一必填字段；没有路径就没有展示位）。
+        source: 产出工具名（ScreenShot / CameraShot / BrowserScreenshot）。
+        width: 原图宽（像素，不是回传给模型的缩放后宽度）。
+        height: 原图高。
+        media_type: 落盘文件的实际 MIME。
+        bytes: 落盘文件字节数。
+        ts: 产出时刻（ISO，带时区，展示用）。
+
+    @author aceFelix
+    """
+
+    path: str
+    source: str = ""
+    width: int = 0
+    height: int = 0
+    media_type: str = ""
+    bytes: int = 0
+    ts: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """转成可塞进 trace 事件/``trace_meta`` 的字典；缺省字段直接省略。"""
+        data: dict[str, Any] = {"path": self.path}
+        for key, value in (
+            ("source", self.source),
+            ("width", self.width),
+            ("height", self.height),
+            ("media_type", self.media_type),
+            ("bytes", self.bytes),
+            ("ts", self.ts),
+        ):
+            if value:
+                data[key] = value
+        return data
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "ImageRef | None":
+        """从事件/``trace_meta`` 还原；缺路径或类型不对时返回 ``None``。
+
+        宽容而非严格：脏数据只让这一条不展示，绝不抛给工具主流程
+        （与 ``trace._as_event_list`` 同口径：错了就不写，不写假值）。
+        """
+        if not isinstance(raw, dict):
+            return None
+        path = str(raw.get("path") or "").strip()
+        if not path:
+            return None
+        return cls(
+            path=path,
+            source=str(raw.get("source") or ""),
+            width=_as_int(raw.get("width")),
+            height=_as_int(raw.get("height")),
+            media_type=str(raw.get("media_type") or ""),
+            bytes=_as_int(raw.get("bytes")),
+            ts=str(raw.get("ts") or ""),
+        )
+
+
+def _as_int(value: Any) -> int:
+    """宽容转 int：None/非法/负数一律 0（元信息缺失比抛错重要）。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
+def make_image_ref(
+    img: Any,
+    path: str | Path,
+    *,
+    source: str = "",
+    fmt: str = "jpeg",
+) -> ImageRef:
+    """由 PIL 图与落盘路径构造 ``ImageRef``（尺寸取**原图**，与缩放链无关）。
+
+    Args:
+        img: PIL.Image.Image（编码前的那张）。
+        path: 实际落盘路径。
+        source: 产出工具名，供窗口标注。
+        fmt: 落盘/回传格式（``jpeg`` / ``png``），只影响 ``media_type``。
+
+    @author aceFelix
+    """
+    target = Path(path)
+    width = height = size_bytes = 0
+    try:
+        width, height = (int(v) for v in img.size)
+    except Exception:
+        pass
+    try:
+        size_bytes = int(target.stat().st_size)
+    except OSError:
+        pass
+    return ImageRef(
+        path=str(target),
+        source=source,
+        width=width,
+        height=height,
+        media_type="image/png" if fmt == "png" else "image/jpeg",
+        bytes=size_bytes,
+        ts=datetime.now().astimezone().isoformat(timespec="seconds"),
+    )
 
 
 def encode_pil_image(img: Any, fmt: str = "jpeg", max_size: int = 1280) -> ImageContent:
@@ -134,7 +253,13 @@ def _hash_image(img: ImageContent) -> str:
     return hashlib.md5(f"{img.media_type}:{img.data}".encode()).hexdigest()
 
 
-def image_receipt(attached: bool, *, fmt: str = "", max_size: int | None = None) -> str:
+def image_receipt(
+    attached: bool,
+    *,
+    fmt: str = "",
+    max_size: int | None = None,
+    visible: bool | None = None,
+) -> str:
     """图片类工具（截图 / 拍照 / 网页截图）回执里「图片」那一行的统一措辞。
 
     为什么三个工具要共用一个函数：这句是模型判断「我到底看不看得见」的唯一依据，
@@ -142,19 +267,52 @@ def image_receipt(attached: bool, *, fmt: str = "", max_size: int | None = None)
     能不能被看见由 provider 按 model_type 决定（``agent/llm/model_capability.py``）。
     措辞越权一次，模型就有依据把「我没看到」汇报成「我验证过」。
 
+    2026-11-12 补 ``visible``：光说「附上: 是」在跨协议时是误导——模型读成
+    「我收到了图」。已知能力时直说，未知时才退回那句有条件的提醒。
+
     Args:
         attached: 本次结果是否真带上了图片块（编码失败降级为纯路径时为 False）。
         fmt: 编码格式（如 ``jpeg``），空则不附体积说明。
         max_size: 最长边像素上限，``0`` / ``None`` 表示原图。
+        visible: 当前模型是否真能接收图片；``None`` 表示未确认（保留旧措辞）。
 
     @author aceFelix
     """
     line = "图片附上: 是" if attached else "图片附上: 否"
     if fmt:
         line += f"（{fmt}, 最长边<={max_size or '原图'}）"
-    if attached:
-        line += _IMAGE_SEE_CLAUSE
-    return line
+    if not attached:
+        return line
+    if visible is True:
+        # 模型确实有视觉：图会随下一次请求进上下文，直说，别让它再自我怀疑
+        return line + "，你可以看到这张图：它随下一次请求进入你的上下文"
+    if visible is False:
+        # 无视觉模型：明确说「你没拿到画面」，否则它会拿「附上: 是」当成看得见
+        return line + "，但当前模型无视觉输入：你只拿到路径，不要描述画面内容"
+    return line + _IMAGE_SEE_CLAUSE
+
+
+def vision_hint(ctx: Any) -> bool | None:
+    """当前会话的模型是否真能接收图片；拿不到配置时返回 ``None``（未确认）。
+
+    判据只有一处：``model_capability.resolve_model_type`` + ``model_has_vision``。
+    这里只负责「从 ToolContext 摸到 settings」这一小步，并把 import 延迟到函数内，
+    避免把 llm 层拖成 core/images 的模块级依赖。
+
+    Args:
+        ctx: ``ToolContext``（可缺 ``settings``，例如无头测试）。
+
+    @author aceFelix
+    """
+    settings = getattr(ctx, "settings", None)
+    if settings is None:
+        return None
+    try:
+        from agent.llm.model_capability import model_has_vision, resolve_model_type
+
+        return model_has_vision(resolve_model_type(settings))
+    except Exception:  # noqa: BLE001 - 判据取不到就按未确认处理，绝不猜"有"
+        return None
 
 
 def paste_clipboard_image(ctx: ToolContext, ui: RichCLI) -> int:

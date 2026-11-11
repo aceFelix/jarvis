@@ -86,7 +86,7 @@ class TestWindowRouting:
         assert len(_FakeWindow.instances) == 1
 
     def test_off_mode_creates_no_window(self, monkeypatch) -> None:
-        """主 HUD、浮窗、代理卡与抓取窗都 off 时完全不创建窗口。"""
+        """主 HUD、浮窗、代理卡、抓取窗与图片窗都 off 时完全不创建窗口。"""
         _FakeWindow.instances = []
         monkeypatch.setattr(cli_module, "CockpitWindow", _FakeWindow)
         from agent.ui.cockpit import VisualOptions
@@ -97,6 +97,7 @@ class TestWindowRouting:
                 tool_cards="off",
                 agent_cards="off",
                 crawl_window="off",
+                image_window="off",
             )
         )
 
@@ -152,7 +153,7 @@ class TestWindowRouting:
         assert len(_FakeWindow.instances) == 1
 
     def test_all_subfeatures_off_creates_no_window(self, monkeypatch) -> None:
-        """主 HUD、浮窗、代理卡与抓取窗都 off 时不创建任何窗口。"""
+        """主 HUD、浮窗、代理卡、抓取窗与图片窗都 off 时不创建任何窗口。"""
         _FakeWindow.instances = []
         monkeypatch.setattr(cli_module, "CockpitWindow", _FakeWindow)
         from agent.ui.cockpit import VisualOptions
@@ -163,6 +164,7 @@ class TestWindowRouting:
                 tool_cards="off",
                 agent_cards="off",
                 crawl_window="off",
+                image_window="off",
             )
         )
         ui.on_trace_event({"type": "run_start", "run_id": "r"})
@@ -194,6 +196,24 @@ class TestWindowRouting:
         ui = _make_ui(
             visual_options=VisualOptions.from_values(
                 task_cockpit="off", tool_cards="off", agent_cards="auto"
+            )
+        )
+        ui.on_trace_event({"type": "run_start", "run_id": "r"})
+        assert len(_FakeWindow.instances) == 1
+
+    def test_image_only_still_creates_window(self, monkeypatch) -> None:
+        """只开图片窗时也要拉起 Tk 根窗口（图片窗是需要父容器的 Toplevel）。"""
+        _FakeWindow.instances = []
+        monkeypatch.setattr(cli_module, "CockpitWindow", _FakeWindow)
+        from agent.ui.cockpit import VisualOptions
+
+        ui = _make_ui(
+            visual_options=VisualOptions.from_values(
+                task_cockpit="off",
+                tool_cards="off",
+                agent_cards="off",
+                crawl_window="off",
+                image_window="auto",
             )
         )
         ui.on_trace_event({"type": "run_start", "run_id": "r"})

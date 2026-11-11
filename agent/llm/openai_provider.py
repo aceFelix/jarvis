@@ -47,6 +47,45 @@ from agent.llm.model_capability import (
 )
 
 
+#: 单轮最多把几张「工具结果附带的图片」转成 user 消息重发。
+#: DeepSeek 单请求体积上限 48MiB，一屏 1280 宽 JPEG 约 200–300KB，4 张足够覆盖
+#: 「全屏 + 局部 + 网页」这类组合；再多只会挤占上下文，收益递减。
+_MAX_TOOL_IMAGES = 4
+
+
+def _tool_images_message(images: list[ImageContent]) -> dict[str, Any]:
+    """把工具结果附带的图片转成一条独立的 ``user`` 消息。
+
+    为什么必须单开一条消息（2026-11-12 实机）：
+
+    - OpenAI 兼容协议里 ``role="tool"`` 的 content **只能是字符串**，图片塞不进去；
+    - DeepSeek 明文规定「图片只允许出现在 user 消息，出现在 system / assistant
+      里直接 400」（api-docs.deepseek.com/guides/vision#restrictions）。
+
+    此前这里只拼了一句「[附带 N 张图片]」就结束，等于把图丢了——模型于是如实
+    回报「我拿不到画面内容」，用户每次截图都白费。图片本身仍以 base64 data URL
+    内联，与 user 直接贴图的写法完全一致。
+
+    @author aceFelix
+    """
+    selected = images[-_MAX_TOOL_IMAGES:]
+    hint = "（以下是工具结果附带的图片"
+    if len(images) > len(selected):
+        hint += f"，共 {len(images)} 张，仅保留最近 {len(selected)} 张"
+    hint += "）"
+    parts: list[dict[str, Any]] = [{"type": "text", "text": hint}]
+    for image in selected:
+        parts.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image.media_type};base64,{image.data}"
+                },
+            }
+        )
+    return {"role": "user", "content": parts}
+
+
 def _messages_to_openai(
     messages: list[Message], system: str, *, skip_images: bool = False
 ) -> list[dict[str, Any]]:
@@ -107,6 +146,8 @@ def _messages_to_openai(
             user_content: list[dict[str, Any]] = []
             has_user_image = False
             tool_results: list[ToolResultContent] = []
+            # 工具结果附带的图片：role="tool" 装不下，收集起来另起一条 user 消息
+            pending_images: list[ImageContent] = []
 
             for b in msg.content:
                 if isinstance(b, TextContent):
@@ -151,10 +192,14 @@ def _messages_to_openai(
                             b.content + f"\n[附带 {img_count} 张图片{IMAGE_OMITTED_NOTE}]"
                         )
                     else:
-                        # OpenAI 规范要求 role="tool" 的 content 为 string；
-                        # 智谱 GLM 等兼容接口在收到 list 类型 content 时可能挂起或报错。
-                        # 先把图片描述以文本形式附加，后续如需视觉 tool_result 再追加独立 user 消息。
-                        tool_content = b.content + f"\n[附带 {len(b.images)} 张图片]"
+                        # OpenAI 规范要求 role="tool" 的 content 为 string，图塞不进这里；
+                        # 统一改由 _tool_images_message 另起一条 user 消息带上。
+                        # （2026-11-12 实机：此前只拼「[附带 N 张图片]」就结束，图被丢掉，
+                        # 模型因此回报「拿不到画面」。）
+                        tool_content = b.content + (
+                            f"\n[附带 {len(b.images)} 张图片，见下一条消息]"
+                        )
+                        pending_images.extend(b.images)
                     out.append(
                         {
                             "role": "tool",
@@ -173,6 +218,9 @@ def _messages_to_openai(
 
             if user_content:
                 out.append({"role": "user", "content": user_content})
+            if pending_images:
+                # 工具结果里的图：另起一条 user 消息（图片只允许出现在 user 里）
+                out.append(_tool_images_message(pending_images))
     return out
 
 
