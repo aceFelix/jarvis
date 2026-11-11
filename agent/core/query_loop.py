@@ -634,6 +634,9 @@ class QueryLoop:
             cost_cny=prev.cost_cny + (settled.cost_cny if settled.priced else 0.0),
             unpriced_input_tokens=prev.unpriced_input_tokens
             + (0 if settled.priced else turn.input_tokens),
+            reasoning_tokens=prev.reasoning_tokens + turn.reasoning_tokens,
+            # 只保留最近一次：/cost --raw 用它核对厂商返回的字段口径
+            raw_usage=turn.raw_usage or prev.raw_usage,
         )
 
         return stats

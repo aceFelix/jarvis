@@ -120,6 +120,34 @@ def estimate_text_tokens(text: str) -> int:
     return int(max(1, len(text) // _CHARS_PER_TOKEN))
 
 
+#: DeepSeek 官方换算比例（见 api-docs.deepseek.com/zh-cn/quick_start/token_usage）：
+#: 1 个英文字符 ≈ 0.3 token，1 个中文字符 ≈ 0.6 token。两者相差一倍，
+#: 所以「一律 len/4」在纯中文文本上会偏低约六成、在纯英文上略偏高。
+_TOKEN_PER_ASCII_CHAR = 0.3
+_TOKEN_PER_CJK_CHAR = 0.6
+
+
+def estimate_text_tokens_weighted(text: str) -> int:
+    """按**官方语种比例**估算 token（中文 0.6 / 其他 0.3 每字符）。
+
+    与 ``estimate_text_tokens`` 的区别：后者一律按 4 字符/token 折算，不区分语种，
+    只适合看趋势；本函数按官方公布的比例分语种计权，用于 /cost 这类要对外报数的地方。
+
+    为什么不直接替换 estimate_text_tokens：后者同时驱动上下文压缩阈值，换口径会
+    整体移动「何时压缩」这条行为边界，需要单独做一轮评估，不能顺手改。
+    @author aceFelix
+    """
+    if not text:
+        return 0
+    cjk = 0
+    for ch in text:
+        if "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f" or "\uff00" <= ch <= "\uffef":
+            cjk += 1
+    ascii_like = len(text) - cjk
+    tokens = cjk * _TOKEN_PER_CJK_CHAR + ascii_like * _TOKEN_PER_ASCII_CHAR
+    return int(max(1, round(tokens)))
+
+
 def estimate_tokens(
     messages: list[Message],
     *,

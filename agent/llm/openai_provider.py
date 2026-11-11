@@ -226,6 +226,56 @@ async def close_shared_http_client() -> None:
     _shared_http_client = None
 
 
+def normalize_usage(usage_obj: Any, cached: int, created: int) -> Usage:
+    """把厂商原始 usage 归一化成 Usage，并保留一份原样键值供人工核对。
+
+    思考 token 的处理是这里唯一的判断点：OpenAI / DeepSeek 口径下
+    ``completion_tokens_details.reasoning_tokens`` 是 ``completion_tokens`` 的
+    **子集**（明细拆分，不是额外增量），相加会重复计费。所以默认只记录、不相加；
+    只有当 reasoning 大于 completion（数学上不可能是子集，说明该厂商把两者分开
+    计量）时才以 reasoning 为准。
+
+    原始键值写进 ``raw_usage``，供 ``/cost --raw`` 直接对照官方文档，
+    不参与任何计算。
+
+    @author aceFelix
+    """
+    details = getattr(usage_obj, "completion_tokens_details", None)
+    reasoning = int(getattr(details, "reasoning_tokens", 0) or 0) if details else 0
+    completion = int(getattr(usage_obj, "completion_tokens", 0) or 0)
+    if reasoning > completion:
+        completion = reasoning
+
+    raw: dict[str, int] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
+        "prompt_tokens_details.cached_tokens",
+    ):
+        if "." in key:
+            head, _, tail = key.partition(".")
+            obj = getattr(usage_obj, head, None)
+            val = getattr(obj, tail, None) if obj is not None else None
+        else:
+            val = getattr(usage_obj, key, None)
+        if isinstance(val, int):
+            raw[key.split(".")[-1]] = val
+    if details is not None and getattr(details, "reasoning_tokens", None) is not None:
+        raw["reasoning_tokens"] = reasoning
+
+    return Usage(
+        input_tokens=int(getattr(usage_obj, "prompt_tokens", 0) or 0),
+        output_tokens=completion,
+        cache_read_tokens=int(cached or 0),
+        cache_creation_tokens=int(created or 0),
+        reasoning_tokens=reasoning,
+        raw_usage=raw or None,
+    )
+
+
 class OpenAIProvider(LLMProvider):
     """OpenAI 兼容 provider。"""
 
@@ -453,12 +503,7 @@ class OpenAIProvider(LLMProvider):
                     cached, created = (0, 0)
                     if cache_cfg:
                         cached, created = parse_cache_usage(chunk.usage, cache_cfg)
-                    final_usage = Usage(
-                        input_tokens=chunk.usage.prompt_tokens,
-                        output_tokens=chunk.usage.completion_tokens,
-                        cache_read_tokens=cached,
-                        cache_creation_tokens=created,
-                    )
+                    final_usage = normalize_usage(chunk.usage, cached, created)
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]

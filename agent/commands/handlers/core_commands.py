@@ -250,7 +250,7 @@ async def handle_compact(ctx: "CommandContext", stripped: str) -> bool:
     return True
 
 
-def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: str, provider_name: str, ctx: "CommandContext") -> None:
+def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: str, provider_name: str, ctx: "CommandContext", show_raw: bool = False) -> None:
     """/cost: 显示本会话累计 token 用量与估算成本。
 
     token 估算拆分为三部分，让用户清晰看到各组成占比：
@@ -260,12 +260,18 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
 
     @author aceFelix
     """
-    from agent.core.memory.compactor import estimate_tokens, estimate_text_tokens
+    from agent.core.memory.compactor import (
+        estimate_text_tokens_weighted,
+        estimate_tokens,
+    )
     from agent.llm.base import Usage
     from agent.llm.pricing import VERIFIED_AT as PRICING_VERIFIED_AT
 
-    # System Prompt token 估算（独立计算，原 estimate_tokens 不含 system）
-    system_tokens = estimate_text_tokens(ctx.system_prompt) if ctx.system_prompt else 0
+    # System Prompt token 估算（独立计算，原 estimate_tokens 不含 system）。
+    # 用按语种计权的版本：官方比例中文 0.6 / 其他 0.3 每字符，一律 len/4 会误差一倍。
+    system_tokens = (
+        estimate_text_tokens_weighted(ctx.system_prompt) if ctx.system_prompt else 0
+    )
     dialog_tokens = estimate_tokens(messages)
     total_tokens = system_tokens + dialog_tokens
     rows = [
@@ -289,6 +295,10 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
         # 协议不含），口径实现见 Usage.cache_hit_rate —— 与桌面壳 cost.get 共用
         # 同一份计算，避免两处各写一套分母规则导致指标对不上。@author aceFelix
         rows.append(["缓存命中率", f"{session.cache_hit_rate:.1f}%"])
+        # 思考 token 已包含在输出 token 内（OpenAI/DeepSeek 口径下是子集），
+        # 这里只作展示，不参与计价——相加会重复计费。@author aceFelix
+        if session.reasoning_tokens:
+            rows.append(["其中思考 token（含在输出内）", f"{session.reasoning_tokens:,}"])
 
         # 金额：每笔请求返回时按「该笔实际时段」结算后累加，不是用折扣系数从
         # 总 token 反推——DeepSeek 命中价是未命中的 1/50，系数近似会差几十倍。
@@ -305,6 +315,19 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
     render_table(rows, headers=["指标", "值"])
     ui.info("提示: 高峰/空闲按北京时间周一至周五 9-12、14-18 点判定，空闲价 = 高峰价一半；"
             "最终以厂商账单为准")
+    if show_raw:
+        # 只读核对用：把厂商返回的原始 usage 键值照原样打出来，便于确认
+        # 「completion_tokens 是否含思考」「缓存字段用的是哪个名字」这类口径问题。
+        # 不参与任何计算，也不改写任何数据。@author aceFelix
+        import json as _json
+
+        raw = getattr(session, "raw_usage", None)
+        ui.info("最近一次请求的原始 usage（厂商原样返回，未做任何加工）：")
+        ui.info(
+            _json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True)
+            if raw
+            else "（本会话还没收到过 usage，先发一句话再试）"
+        )
 
 
 def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
@@ -314,7 +337,8 @@ def handle_cost(ctx: "CommandContext", stripped: str) -> bool:
     deepseek），而非 settings.provider 静态配置。
     """
     provider_name = getattr(ctx.provider, "name", None) or ctx.settings.provider
-    _print_cost(ctx.ui, ctx.messages, ctx.dialog_count, ctx.model, provider_name, ctx)
+    show_raw = "--raw" in (stripped or "")
+    _print_cost(ctx.ui, ctx.messages, ctx.dialog_count, ctx.model, provider_name, ctx, show_raw)
     return True
 
 

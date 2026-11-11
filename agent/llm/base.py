@@ -55,6 +55,12 @@ class Usage:
     # 未收录价目的模型所占输入 token。>0 时 /cost 必须显示「部分未计价」，
     # 不能把不完整的合计当成整账单。
     unpriced_input_tokens: int = 0
+    # 其中属于思考（reasoning）的 token。**已包含在 output_tokens 里**，仅作展示，
+    # 不参与计价——OpenAI/DeepSeek 口径下 reasoning 是 completion_tokens 的子集，
+    # 相加会重复计费。@author aceFelix
+    reasoning_tokens: int = 0
+    # 最近一次请求的原始 usage 键值（供 /cost --raw 核对口径，不参与任何计算）
+    raw_usage: dict[str, int] | None = None
 
     @property
     def total_tokens(self) -> int:
