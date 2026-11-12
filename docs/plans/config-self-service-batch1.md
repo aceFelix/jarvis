@@ -102,19 +102,34 @@ jarvis 会合理地请求放宽自己——一轮点头就形成了自我授权�
 
 ## 4. 第一批字段清单（12 项）
 
-| # | 协议键 | section.field | attr | kind | apply_mode | 校验 | label |
+### 4.0 先纠正一个事实：模型域**不在** `settings.toml` 里
+
+`agent/config/models_config.py` 把模型域拆到了**同层的 `models.toml`**（`MODELS_FILE_NAME`），
+`MODEL_TOP_KEYS` 已声明归它管的顶层键：`provider`、`api_format`、`model`、`last_model`、
+`api_key`、`base_url`、`dashscope_api_key`、`max_tokens`、`temperature`、`enable_thinking`、
+`thinking_budget`、`vendor_fallback`；section 前缀 `llm`（`[llm]` / `[llm.models]` /
+`[llm.custom_models."名"]`）。**用户 `settings.toml` 里没有 `[llm]` 段**（实测为空）。
+
+而 `ConfigSpec` 目前只有 `section`/`field`，隐含"都在 `settings.toml`"，落盘走 `save_section`。
+所以本批必须先给它一个**存储维度**（S0，见 §12），否则写入会落到错误的文件里。
+
+### 4.1 字段表
+
+| # | 协议键 | **store** | section.field | kind | apply_mode | 校验 | label |
 |---|---|---|---|---|---|---|---|
-| 1 | `provider` | `[llm] provider` | `provider` | enum | `llm` | 必须在 provider 注册表内 | 当前模型提供商 |
-| 2 | `model` | `[llm] model` | `model` | str | `llm` | 非空；不得与 provider 明显错配（见 §6.2） | 当前模型 |
-| 3 | `default_provider` | `[llm] default_provider` | `default_provider` | enum | `llm` | 同 #1 | 默认提供商 |
-| 4 | `max_tokens` | `[llm] max_tokens` | `max_tokens` | int | `llm` | 256 ≤ n ≤ 384000 | 单次回复上限 |
-| 5 | `temperature` | `[llm] temperature` | `temperature` | float | `live` | 0 ≤ n ≤ 2 | 采样温度 |
-| 6 | `enable_thinking` | `[llm] enable_thinking` | `enable_thinking` | bool | `llm` | — | 是否启用思考 |
-| 7 | `thinking_budget` | `[llm] thinking_budget` | `thinking_budget` | int | `llm` | 0 ≤ n ≤ 64000 | 思考 token 预算 |
-| 8 | `thinking_effort` | `[llm] thinking_effort` | `thinking_effort` | enum | `llm` | low/medium/high | 思考强度 |
-| 9 | `max_iterations` | top-level | `max_iterations` | int | `live` | 1 ≤ n ≤ 200 | 单轮最多几步工具 |
-| 10 | `models` | `[llm.models]` | `models` | alias_map | `llm` | 见 §6.3 | 模型别名表 |
-| 11 | `custom_models` | `[llm.custom_models.*]` | `custom_models` | model_table | `llm` | 见 §6.4 | 自定义模型 |
+| 1 | `provider` | **models** | `[llm] provider` | enum | `llm` | 必须在 provider 注册表内 | 当前模型提供商 |
+| 2 | `model` | **models** | `[llm] model` | str | `llm` | 非空；不得与 provider 明显错配（§6.2） | 当前模型 |
+| 3 | `max_tokens` | **models** | `[llm] max_tokens` | int | `llm` | 256 ≤ n ≤ 384000 | 单次回复上限 |
+| 4 | `temperature` | **models** | `[llm] temperature` | float | `live` | 0 ≤ n ≤ 2 | 采样温度 |
+| 5 | `enable_thinking` | **models** | `[llm] enable_thinking` | bool | `llm` | — | 是否启用思考 |
+| 6 | `thinking_budget` | **models** | `[llm] thinking_budget` | int | `llm` | 0 ≤ n ≤ 64000 | 思考 token 预算 |
+| 7 | `models` | **models** | `[llm.models]` | alias_map | `llm` | 见 §6.3 | 模型别名表 |
+| 8 | `custom_models` | **models** | `[llm.custom_models."名"]` | model_table | `llm` | 见 §6.4 | 自定义模型 |
+| 9 | `thinking_effort` | settings | `[llm] thinking_effort` | enum | `llm` | low/medium/high | 思考强度 |
+| 10 | `default_provider` | settings | top-level | enum | `llm` | 同 #1 | 默认提供商 |
+| 11 | `max_iterations` | settings | top-level | int | `live` | 1 ≤ n ≤ 200 | 单轮最多几步工具 |
+| 12 | `profile_refine_model` + `profile_refine_provider` | settings | `[profile] …` | str / enum | `llm` | 成对约束（§14） | 画像提炼用的模型 |
+
 | 12 | `profile_refine_model` + `profile_refine_provider` | `[profile] …` | 同名 | str/enum | `llm` | 空串=随主模型 | 画像提炼用的模型 |
 
 > #12 是一次"成对字段"的试验：两个键必须同时改才自洽（只改 model 不改 provider 会出现
@@ -258,5 +273,174 @@ model/provider 绑定、清 `_PROFILE_CACHE`/能力段落缓存（模型能力�
 | `sandbox_timeout` | 沙箱，进 DENY |
 | `checkpoint_timeout_seconds` | 检查点域，属第 3 批 |
 | `profile_inject_token_limit` / `profile_bridge_token_limit` | 画像注入预算，属第 4 批 |
+
+---
+
+# 第二部分：分阶段实施计划
+
+> 用户 2026-11 定的规矩：**每个阶段都先把文档写到能照着敲，再写代码。**
+> 本节把「阶段 → 改动点 → 出口条件」摊开，每阶段结束回填实测结果（含偏离说明）。
+
+## 11. 阶段总览与出口条件
+
+| 阶段 | 产出 | 出口条件（可判定） |
+|---|---|---|
+| **S0** | `ConfigSpec.choices` 字段 + 三种新 kind 的零值登记 | 现有 63 项构造不变；`tests/config` 全绿 |
+| **S1** | 三种新 kind 的解析与校验 | 每 kind 三个用例：合法 / 非法 / 空值；非法时**不改动任何字节** |
+| **S2** | `config_specs_llm.py` + 12 项进表 + 接线 | `ConfigList` 能看到 12 项；`config_specs.py` ≤ 900 行 |
+| **S3** | `apply_mode = llm` 与宿主挂钩 | 改完模型后 `/cost` 的「模型」行立刻变；无钩子时回执写"重启后生效" |
+| **S4** | `settings.example.toml` 行尾注释 + catalog 文档 | `test_every_entry_has_doc` / `test_catalog_covers_every_settings_field` 全绿 |
+| **S5** | 索引同步 + CHANGELOG | `aoci check` 不再因本批文件亮红 |
+
+**阶段间不可并行的点**：S2 依赖 S1（新 kind 不能进表却解析不了）；S3 依赖 S2（没有 llm 段字段
+就没有要生效的东西）；S4 必须与 S2 同一次提交（示例注释缺了会让 doc 门禁在同一笔里红）。
+
+---
+
+## 12. S0 前置：`ConfigSpec` 加 `choices`，登记新 kind
+
+```python
+# config_specs.py
+choices: tuple[str, ...] = ()   # kind == "enum" 时的可选值；其它 kind 忽略
+store: str = "settings"         # "settings" | "models"；决定落盘去哪个文件（§4.0）
+```
+
+- `store` 默认 `"settings"`，**现有 63 项零改动**；只有模型域那 8 项显式写 `"models"`。
+- 落盘分派（S2 实现）：`store == "settings"` → 现有 `save_section(...)`；
+  `store == "models"` → `models_config` 的 `read_toml_text` / `upsert_top_scalar` /
+  `upsert_table_block` / `write_toml_text`，路径用 `models_path_for(settings_path)`。
+  **不新建写入器**——`models_config` 已经有外科式 upsert，并且处理了"与 settings.toml 同层"
+  的项目级/用户级推导；另写一套必然漂移。
+- 两个 store 的"读"不同：models 域要读 `models.toml` 再回落 `settings.toml`（现有分层口径），
+  所以 `_current_value()` 也要按 store 分派，不能只 getattr。
+
+- 校验处（S1）要求：`kind == "enum"` ⇒ `choices` 非空，否则视为表写错（启动即报，不留到运行时）。
+- `_KIND_ZERO` 增加三项：`"enum": ""`、`"alias_map": {}`、`"model_table": {}`。
+  这三项决定"读侧属性缺失时回退什么值"，缺了会在 `_current_value()` 抛 KeyError。
+- **影响面**：现有 63 项全部靠默认值构造，零改动；新加一条测试
+  `test_enum_specs_declare_choices` 防止将来有人写 `kind="enum"` 却忘了给可选值。
+- **不预先注册进 `parse_cli_value`**：解析在 S1 做，S0 只改数据类与常量，保证 S0 单独提交也是绿的。
+
+---
+
+## 13. S1 值解析：三种 kind 的语法与失败语义
+
+统一入口仍是 `parse_cli_value(spec, raw)`；**先 normalize → 再 validate → 全部通过才落盘**，
+任一失败整批不动（沿用 `apply_config_patch` 第 ① 步的"整批校验"口径）。
+
+### 13.1 `enum`
+
+- 输入大小写不敏感（`HIGH` → `high`）；两侧空白裁掉。
+- 允许别名表（`ALIAS = {"最高": "high", "最高档": "high", "lowest": "low"}`），别名只写在
+  该字段的 spec 旁，不做一个全局大表——不同字段的取值集互不相同。
+- 非法值：`ValidationError(f"{label} 只能是 {'/'.join(choices)}")`，**列出全部可选项**。
+
+### 13.2 `alias_map`（`models`：别名 → 展示名）
+
+- 语法：`名=展示名;名=展示名`（分号分隔，等号连接，允许中文）。
+- 空串 = **清空整表**（`{}`）。
+- 重复键：后者覆盖，但要在回执里写明"覆盖了 X"——静默覆盖会让人以为两份都生效了。
+- 上限 `LIST_MAX_ITEMS`（50），超出拒绝并说明。
+- 落盘：整段替换 `[llm.models]`（TOML 无删除语义，增量合并会留下删不掉的旧键）。
+
+### 13.3 `model_table`（`custom_models`：单模型增删改）
+
+- 语法：`add 名字 键=值 键=值` / `remove 名字`。**不支持整表替换**——那是手改 TOML 的领域。
+- 字段白名单：`name`、`provider_type`、`model_type`、`base_url`、`api_key_env`、`max_tokens`；
+  未知键直接拒绝并列出合法键（防拼错写出半残配置）。
+- `remove` 不存在的名字：视为成功但回执写明"本就没有"（幂等），**不报错**——报错会诱导模型
+  去改别的字段凑数。
+- 落盘：读现有 `[llm.custom_models.*]` → 改目标条目 → 写回；不做全表重排。
+
+### 13.4 失败语义（三种 kind 共用）
+
+| 情形 | 行为 |
+|---|---|
+| 语法错 | 拒绝，回执给出**正确写法示例**（不是只说"格式错误"） |
+| 值非法 | 拒绝，列出合法集 |
+| 部分成功 | **不存在**：整批校验通过才写，一批里错一项就都不写 |
+
+---
+
+## 14. S2 12 项进表
+
+- 新文件 `agent/config/config_specs_llm.py`，只放数据（`LLM_SPECS: tuple[ConfigSpec, ...]`）；
+  `config_specs.py` 末尾 `CONFIG_SPECS = _BASE_SPECS + LLM_SPECS`，**导出名不变**。
+- **两个 store 分派**：8 项 `store="models"`（§4.1），4 项 `store="settings"`。写入路径按
+  `store` 分流到 `save_section` 或 `models_config` 的 upsert；**同一批 patch 允许跨文件**，
+  但要么全成功要么全不写——跨文件的"半批"比全失败更糟（用户会以为只改了一半）。
+- 顺序：`LLM_SPECS` 接在表达层之后、`ConfigList` 现有展示顺序不受影响（先 auto 后 confirm）。
+- 表里已有的 `context_window`（confirm）**不重复加**——那是第一批之外的历史项。
+- 成对字段 `profile_refine_model` × `profile_refine_provider`：校验里做成对约束，
+  只给一个时按"另一半沿用主模型"处理并在回执说明，不报错（常见用法是只改 model）。
+- 每项必须同时给：`label`、`hint`（一句"改它会发生什么"）、`kind`、范围/enum 校验、`apply_mode`、
+  `store`。**hint 不许写"用于配置 XX"这类废话**——它的读者是模型，要用它向用户解释。
+
+---
+
+## 15. S3 `apply_mode = llm` 的契约
+
+现有五模式都不适用（`live` 不重建装配快照、`policy`/`percept`/`reschedule` 各自专用于
+打扰预算/感知总线/调度、`restart` 要求重启）。新增：
+
+```python
+APPLY_LLM = "llm"
+
+# 宿主登记（CLI: agent/main.py；serve: agent/serve/engine/*）
+register_apply_hook(APPLY_LLM, rebuild_llm_stack)
+```
+
+`rebuild_llm_stack()` 的**顺序与失败处理**（顺序错了会出现"配置成功但会话坏掉"）：
+
+1. 用新 `settings` 构造 provider（key 缺失/网络不可用会在这里失败）；
+2. 成功后才替换 `QueryLoop` 的 `_provider` / `_model`；
+3. 清 `_PROFILE_CACHE` 与能力段缓存（模型能力变了，视觉/思考段必须重拼，否则提示词还写着旧能力）；
+4. 返回 `(True, "已切换到 X / provider Y，下一轮请求生效")`。
+
+**失败必须保留旧栈**：第 1 步失败就 return `(False, 原因)`，绝不先换再试——
+这跟 yolo 重建那次同一个道理（先构造新的，成功才替换）。
+
+**没有钩子的场景**（纯库调用、单元测试、以及还没接线的入口）：`run_apply_hooks` 天然返回
+`(False, [])`，回执改写成「已保存，重启后生效」——**不许假装生效**，那是本层最招人恨的失误
+（`policy` 模式诞生的原因）。
+
+---
+
+## 16. S4 示例与文档同步（必须与 S2 同一次提交）
+
+- `agent/configs/settings.example.toml`：补 `store="settings"` 那 4 项的行 + 行尾注释。
+- **`agent/configs/models.example.toml`**（`MODELS_EXAMPLE_FILE_NAME` 已存在）：补
+  `store="models"` 那 8 项的行 + 行尾注释。**两个示例文件都要补**——`_example_docs()` 是
+  `test_every_entry_has_doc` 的说明来源，只补一个会让另一半字段红。
+- `agent/config/catalog.py`：段内字段说明（`[llm]` / `[profile]`）。
+- `agent/config/settings_domains.py`：`[llm]` 段的子键映射（`FLAT_DOMAINS` / `SUB_TABLES`），
+  以及 `LIST_FIELDS`（若新 kind 走数组语义）。
+- 文档回填：把本文件 §4.1 表里"待开发"改成实测行数与偏离说明。
+
+## 17. S5 收尾
+
+- `aoci maintain` → 为新增文件 `config_specs_llm.py` 与改动条目写语义（不可套模板）。
+- CHANGELOG 记入下一版（2.5.5 或并入 2.6.0，看是否还带别的特性）。
+- 发布前跑：全量 `pytest`、`jarvis --doctor`、手工一条真实改模型流程（`/config set model …` → `/cost` 看模型行）。
+
+---
+
+## 18. 每阶段测试清单
+
+| 阶段 | 必测用例 | 通过标准 |
+|---|---|---|
+| S0 | `test_enum_specs_declare_choices`；现有 config 全量 | 63 项构造不变，全绿 |
+| S1 | 每 kind：合法 / 非法 / 空值；非法后文件字节不变 | 15 例左右 |
+| S2 | 12 项逐项：能列、能写、能读回；`ConfigList` 计数 +12 | 表内 key 唯一、行数 ≤900 |
+| S3 | 有钩子时改完立刻生效；无钩子时回执写"重启后生效"；构造失败保留旧栈 | 3 例，含"失败不换栈"的反证 |
+| S4 | doc 门禁两条（`test_every_entry_has_doc`、catalog 覆盖） | 全绿 |
+| S5 | `aoci check` 本批文件不亮红 | 欠账不增加 |
+
+---
+
+## 19. 后续四批的统一模板
+
+第二批起直接套本文件 §11–§18 的骨架，只需替换：字段清单（§4）、新增 kind（若有）、
+apply_mode（若有新装配点）、验收数。**不为每批新写一套结构**——模板漂移比遗漏更难发现。
 
 @author aceFelix
