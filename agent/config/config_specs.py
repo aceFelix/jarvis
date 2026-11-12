@@ -56,6 +56,16 @@ APPLY_POLICY = "policy"        # 打扰预算单例是懒建的进程内快照 �
 APPLY_PERCEPT = "percept"      # 逐源开关是装配快照 → 需重装配感知总线
 APPLY_RESCHEDULE = "reschedule"  # 调度任务是启动快照 → 需重注册
 APPLY_RESTART = "restart"      # 只落盘，下次启动生效（不假装已生效）
+APPLY_LLM = "llm"              # provider/QueryLoop 是装配快照 → 需重建 LLM 栈（2026-11）
+
+# ---- 落盘目标：两个文件，不是一处 ----
+# 模型域（provider/model/max_tokens/temperature/thinking 等）由 models_config 拆到了
+# **同层的 models.toml**，不在 settings.toml 里；用户 settings.toml 根本没有 [llm] 段。
+# 所以 spec 必须声明自己写哪个文件，否则模型类字段会被写进错的地方。
+# @author aceFelix
+STORE_SETTINGS = "settings"    # 默认：settings.toml，走 save_section
+STORE_MODELS = "models"        # models.toml，走 models_config 的外科式 upsert
+STORES: frozenset[str] = frozenset({STORE_SETTINGS, STORE_MODELS})
 
 #: HH:MM 24 小时制（与 desktop_settings.TIME_RE 同口径）
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -97,6 +107,11 @@ class ConfigSpec:
     lo: float | None = None
     hi: float | None = None
     default: Any = None
+    #: 落盘目标（``STORE_SETTINGS`` / ``STORE_MODELS``）。默认 settings，现有项零改动。
+    store: str = STORE_SETTINGS
+    #: ``kind == "enum"`` 时的可选值；其它 kind 忽略。
+    #: 声明成 enum 却没给可选值视为**表写错**，由 test_enum_specs_declare_choices 把关。
+    choices: tuple[str, ...] = ()
 
 
 #: 两个面板的可改集（表里每项直接引用，不要另写一份键名列表——那就是第四份漂移）
@@ -647,6 +662,9 @@ def forbidden_reason(key: str) -> str:
 
 _KIND_ZERO: dict[str, Any] = {
     "bool": False, "int": 0, "float": 0.0, "time": "", "quiet": "", "list": [],
+    # 2026-11 第一批新增的三种 kind 的"读侧缺失回退值"。
+    # 缺了会在 _current_value() 里 KeyError——那不是运行时该出现的事。
+    "enum": "", "alias_map": {}, "model_table": {},
 }
 
 # ---- 列表项护栏（模型与面板共用一份）----

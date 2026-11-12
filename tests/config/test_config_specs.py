@@ -29,6 +29,8 @@ from agent.config.config_specs import (
     CONFIG_SPECS,
     FORBIDDEN_SPECS,
     SPEC_BY_KEY,
+    STORE_SETTINGS,
+    STORES,
     TIER_AUTO,
     TIER_CONFIRM,
     TIER_FORBIDDEN,
@@ -47,6 +49,40 @@ from agent.config.config_specs import (
     validate_value,
 )
 from agent.config.settings import Settings
+
+
+def test_enum_specs_declare_choices():
+    """声明 kind="enum" 就必须给 choices。
+
+    没有可选值列表，校验只能放行任意字符串——那不是"宽松"，是这条校验压根不存在，
+    而 label/hint 又会告诉用户"这是个选项字段"，比不做更误导。
+    """
+    for spec in CONFIG_SPECS:
+        if spec.kind == "enum":
+            assert spec.choices, f"{spec.key} 是 enum 却没有 choices"
+
+
+def test_every_declared_kind_has_a_zero_value():
+    """每种 kind 都要在 _KIND_ZERO 里有回退值，否则读侧缺失时会 KeyError。"""
+    from agent.config.config_specs import _KIND_ZERO
+
+    for spec in CONFIG_SPECS:
+        assert spec.kind in _KIND_ZERO, f"{spec.key} 的 kind={spec.kind} 没有零值"
+
+
+def test_store_is_declared_for_every_spec():
+    """store 决定落盘去 settings.toml 还是 models.toml；默认必须落在 STORES 里。"""
+    for spec in CONFIG_SPECS:
+        assert spec.store in STORES, f"{spec.key} 的 store={spec.store} 不合法"
+
+
+def test_current_specs_all_live_in_settings_toml():
+    """本批之前进表的项全在 settings.toml。
+
+    模型域那 8 项（provider/model/max_tokens/...）属于 models.toml，是第一批才加的；
+    这条钉住"现有项一个都没被误标成 models"，避免 store 默认值被改坏。
+    """
+    assert all(s.store == STORE_SETTINGS for s in CONFIG_SPECS)
 
 _SETTINGS_FIELDS = {f.name for f in dataclasses.fields(Settings)}
 
