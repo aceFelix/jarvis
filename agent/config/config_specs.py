@@ -36,6 +36,18 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from agent.config.toml_writer import bool_literal, list_literal, save_section, str_literal
+# 三种结构化类型的解析与校验拆在 config_kinds（2026-11）：主表是"加一项"的节奏，那边是
+# "改语义"的节奏，混在一起 diff 读不出谁动了口径；且拆开后才守得住 900 行门禁。
+# 这里 re-export，调用方仍从 config_specs 取，不必知道内部拆过。
+from agent.config.config_kinds import (  # noqa: F401 - re-export 给既有调用方
+    ALIAS_MAP_MAX_ITEMS,
+    CUSTOM_MODEL_FIELDS,
+    MODEL_TABLE_OPS,
+    parse_text_value,
+    validate_alias_map,
+    validate_enum,
+    validate_model_table,
+)
 
 # ---- 三类分级 ----
 TIER_AUTO = "auto"            # 模型可直接改（纯表达层）
@@ -762,7 +774,15 @@ def validate_value(spec: ConfigSpec, value: Any) -> Any:
         return value
     if spec.kind == "list":
         return clean_list(value, name=spec.key)
+    if spec.kind == "enum":
+        return validate_enum(spec, value)
+    if spec.kind == "alias_map":
+        return validate_alias_map(spec, value)
+    if spec.kind == "model_table":
+        return validate_model_table(spec, value)
     raise ValueError(f"{spec.key} 的类型 {spec.kind} 尚未支持")
+
+
 
 
 def _check_range(spec: ConfigSpec, value: float) -> float:
@@ -784,6 +804,11 @@ def toml_literal(spec: ConfigSpec, value: Any) -> str:
         return repr(float(value))
     if spec.kind == "list":
         return list_literal(value)
+    if spec.kind in ("alias_map", "model_table"):
+        # 这两种不是"一行标量"，要写成表块，由 store 分派的写入器处理
+        # （models.toml 走 upsert_table_block / upsert_custom_model）。
+        # 走到这里说明调用方漏了分派——直接报错，绝不能 str(dict) 写进 TOML。
+        raise ValueError(f"{spec.key} 是表结构，必须由 store 分派的写入器落盘")
     return str_literal(str(value))
 
 
@@ -815,6 +840,16 @@ def human_value(spec: ConfigSpec, value: Any) -> str:
     if spec.kind == "list":
         items = [str(v) for v in (value or ())]
         return "、".join(items) if items else "（空）"
+    if spec.kind == "enum":
+        return str(value) or "（未设）"
+    if spec.kind == "alias_map":
+        items = value or {}
+        if not items:
+            return "（空）"
+        return f"{len(items)} 个别名：" + "、".join(str(k) for k in items)
+    if spec.kind == "model_table":
+        data = value or {}
+        return f"{data.get('op', '')} {data.get('name', '')}".strip() or "（空）"
     return str(value)
 
 
