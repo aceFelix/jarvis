@@ -138,6 +138,19 @@
 - `HUD v1` 角标从 `CYAN_DIM` 改 `DIM`。
 - 字号仍未动：各舱按字符数 `clip()`，需统一重算；本轮纯靠亮度层次解决。
 
+### 修复（任务驾驶舱只剩背景和标题，2026-11-12）
+
+- **现象**：先生截图显示任务驾驶舱只剩背景网格与标题，正文全无。
+- **根因**：上一轮把 `CYAN_DIM` 换成 `RULE` 时**漏了 import**，`_draw_header` 画完
+  标题后抛 `NameError`，被 `_pump` 的 `except` 记进 diag 吞掉——于是只画到标题为止。
+- **为什么三道检查全绿**：`py_compile` 只查语法（`NameError` 是运行时）；`tests/ui`
+  257 条用假窗口替换 `CockpitWindow`，从未执行 `_Hud.draw()`；人工冒烟只验「不崩」，
+  异常被吞后进程照样活着。
+- **修法**：补 import；新增 `tests/ui/test_hud_render_guard.py` 两道闸——
+  ① ruff `F821` 扫 `agent/`（漏 import 即红，CI 有效）；② 真 Tk 渲染守卫（有显示
+  环境才跑），断言 `draw()` 后 canvas item > 200 且文字 ≥ 10 段，"只剩背景"立刻红。
+- 真机复核：任务驾驶舱 **309 items / 31 段文字**；全量 **5009 passed / 2 skipped**。
+
 ## [2.5.4] — 2026-11-11
 
 ### 新增（`/cost` 真的开始算钱了，2026-11-11）

@@ -58,6 +58,7 @@ from agent.ui.hud_theme import (
     GREEN,
     GRID,
     RED,
+    RULE,
     TEXT,
     clip,
     display_width,
