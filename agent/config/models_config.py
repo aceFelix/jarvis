@@ -261,7 +261,9 @@ def _read_or_seed(path: Path) -> tuple[str, str]:
     return "\n".join(HEADER_LINES) + "\n", "\n"
 
 
-def upsert_custom_model(name: str, config: dict[str, str]) -> bool:
+def upsert_custom_model(
+    name: str, config: dict[str, str], *, path: Path | None = None
+) -> bool:
     """写入自定义模型到用户级 models.toml 的 ``[llm.custom_models."<name>"]`` 节。
 
     已存在则整段替换，否则追加；注释与其他内容原样保留。api_key 非空时同步
@@ -269,7 +271,7 @@ def upsert_custom_model(name: str, config: dict[str, str]) -> bool:
 
     @author aceFelix
     """
-    path = user_models_path()
+    path = path or user_models_path()   # 可注入：自配置层要把落点做成可测的
     # 局部导入：config 层不反向依赖 llm 层（这个模块只取常量与纯函数，本身零
     # SDK 依赖，import 成本约等于查一次 sys.modules）。
     # @author aceFelix
@@ -320,7 +322,7 @@ def upsert_last_model(model_name: str) -> bool:
         return False
 
 
-def remove_custom_model(name: str) -> bool:
+def remove_custom_model(name: str, *, path: Path | None = None) -> bool:
     """从用户级 models.toml 删除 ``[llm.custom_models."<name>"]`` 段（/models 删除）。
 
     段不存在或文件不存在返回 False；其余内容与注释原样保留，顺带清掉旧版
@@ -328,7 +330,7 @@ def remove_custom_model(name: str) -> bool:
 
     @author aceFelix
     """
-    path = user_models_path()
+    path = path or user_models_path()   # 可注入：自配置层要把落点做成可测的
     if not path.is_file():
         return False
     try:

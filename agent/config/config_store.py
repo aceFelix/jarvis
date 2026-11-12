@@ -7,11 +7,11 @@
 声明了归属，落盘必须照它分派——否则模型字段会被写进 settings.toml 的某处，
 读的人却在 models.toml，表现为"改了没反应"。
 
-## 已知边界（2026-11）
+## 边界
 
-`custom_models`（表结构）暂未接线：`models_config.upsert_custom_model/remove_custom_model`
-没有 path 参数，只会写用户级文件，测试无法注入临时路径。要接这一路，先给那两个函数
-加 `path` 形参（S2c）。在那之前，写入会明确失败并说明，不静默写错地方。
+`custom_models`（表结构）走 `models_config.upsert_custom_model` / `remove_custom_model`。
+这两个函数原先只会写用户级文件，2026-11（S2c）给它们加了 `path` 形参——不注入路径
+就测不了自定义模型，测一次就会动到用户真实的 models.toml。
 
 @author aceFelix
 """
@@ -46,7 +46,17 @@ def write_spec_value(
         return save_value(spec, value, path=settings_path)
 
     if spec.kind == "model_table":
-        return False  # 见模块文档：upsert_custom_model 还没有 path 形参
+        data = value or {}
+        op = str(data.get("op") or "")
+        name = str(data.get("name") or "")
+        target = _models_path(settings_path)
+        if op == "add":
+            return models_config.upsert_custom_model(
+                name, dict(data.get("fields") or {}), path=target
+            )
+        if op == "remove":
+            return models_config.remove_custom_model(name, path=target)
+        return False
 
     path = _models_path(settings_path)
     try:

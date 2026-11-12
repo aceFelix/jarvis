@@ -52,19 +52,28 @@ def test_alias_map_writes_table_block(cfg: Path):
     assert "通义千问" in text
 
 
-def test_model_table_reports_unsupported_instead_of_miswriting(cfg: Path):
-    """custom_models 的表结构写入还没接线（upsert_custom_model 无 path 形参）。
-
-    这里要求它**明确失败**，而不是退回 settings.toml 写一行谁都读不到的配置。
-    """
+def test_model_table_add_writes_custom_model_section(cfg: Path):
+    """add 写进 models.toml 的 [llm.custom_models."x"] 段（S2c 接线后）。"""
     models = cfg.parent / "models.toml"
     ok = write_spec_value(
         get_spec("custom_models"),
-        {"op": "add", "name": "x", "fields": {"provider_type": "openai"}},
+        {"op": "add", "name": "glm-x",
+         "fields": {"provider_type": "openai", "model_type": "text"}},
         settings_path=cfg,
     )
-    assert ok is False
-    assert not models.exists() or "custom_models" not in models.read_text(encoding="utf-8")
+    assert ok is True
+    text = models.read_text(encoding="utf-8")
+    assert '[llm.custom_models."glm-x"]' in text
+    assert "openai" in text
+
+
+def test_model_table_remove_deletes_section(cfg: Path):
+    models = cfg.parent / "models.toml"
+    spec = get_spec("custom_models")
+    write_spec_value(spec, {"op": "add", "name": "glm-x", "fields": {}}, settings_path=cfg)
+    assert write_spec_value(spec, {"op": "remove", "name": "glm-x", "fields": {}},
+                            settings_path=cfg) is True
+    assert "glm-x" not in models.read_text(encoding="utf-8")
 
 
 class TestInverseValue:

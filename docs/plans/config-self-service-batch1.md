@@ -322,7 +322,7 @@ model/provider 绑定、清 `_PROFILE_CACHE`/能力段落缓存（模型能力�
 | S0 | ✅ 完成 | `a16a839` | `ConfigSpec` + `store`/`choices`；`_KIND_ZERO` 补 3 项；`tests/config` 484 |
 | S1 | ✅ 完成 | 见本笔 | 三种 kind 解析+校验；**门禁提前触发**（见下），拆出 `config_kinds.py` |
 | S2 | ✅ 完成（10/13 协议键） | 见本笔 | `config_specs_llm.py` 10 项 + `config_store.py` 分派；3 项延期见 §4.2 |
-| S2c | ⬜ 待做 | — | `custom_models` 落盘：需给 `upsert_custom_model/remove_custom_model` 加 path 形参 |
+| S2c | ✅ 完成 | 见本笔 | `custom_models` 已接线：给 `upsert/remove_custom_model` 加了 `path` 形参 |
 | S3 | ⬜ | — | — |
 | S4 | ⬜ | — | — |
 | S5 | ⬜ | — | — |
