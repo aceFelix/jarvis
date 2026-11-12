@@ -130,6 +130,26 @@ jarvis 会合理地请求放宽自己——一轮点头就形成了自我授权�
 | 11 | `max_iterations` | settings | top-level | int | `live` | 1 ≤ n ≤ 200 | 单轮最多几步工具 |
 | 12 | `profile_refine_model` + `profile_refine_provider` | settings | `[profile] …` | str / enum | `llm` | 成对约束（§14） | 画像提炼用的模型 |
 
+### 4.2 实施时收窄的范围（S2 实测结论）
+
+S2 开工后按"写入落点必须真实存在"逐项核对，三项被移出本批：
+
+| 字段 | 为什么移出 |
+|---|---|
+| `thinking_effort` | 既不在 `settings_domains` 的映射里，也不在 `settings.example.toml` 里——**没有持久化落点**，写进去没人读，属"改完以为生效" |
+| `default_provider` | 同上：没有映射、没有示例、没有读取点 |
+| `max_iterations` | 它是 settings.toml 的**顶层键**，而 `save_section("")` 会写出 `[]` 这种假 section（实测），顶层需要一个"写首个表之前"的写入器 |
+
+另有两项落点已纠正：
+
+- `profile_refine_model` / `profile_refine_provider` 实际住在 **`[memory]`** 表
+  （`settings_domains` 的 `("memory", (("profile_refine_model", ...)))`），不是 `[profile]`；
+  早期草稿写的 `[profile] refine_model` 是错的。
+
+**S2 实际进表 10 项**（8 项 models + 2 项 memory）。三项延期的共同前提是"先给它们一个真源"，
+不是权限或性能问题——这是本批最该记住的一条：**没有落点的配置项，开了就是骗人**。
+
+
 | 12 | `profile_refine_model` + `profile_refine_provider` | `[profile] …` | 同名 | str/enum | `llm` | 空串=随主模型 | 画像提炼用的模型 |
 
 > #12 是一次"成对字段"的试验：两个键必须同时改才自洽（只改 model 不改 provider 会出现
@@ -301,7 +321,8 @@ model/provider 绑定、清 `_PROFILE_CACHE`/能力段落缓存（模型能力�
 |---|---|---|---|
 | S0 | ✅ 完成 | `a16a839` | `ConfigSpec` + `store`/`choices`；`_KIND_ZERO` 补 3 项；`tests/config` 484 |
 | S1 | ✅ 完成 | 见本笔 | 三种 kind 解析+校验；**门禁提前触发**（见下），拆出 `config_kinds.py` |
-| S2 | ⬜ 待开工 | — | — |
+| S2 | ✅ 完成（10/13 协议键） | 见本笔 | `config_specs_llm.py` 10 项 + `config_store.py` 分派；3 项延期见 §4.2 |
+| S2c | ⬜ 待做 | — | `custom_models` 落盘：需给 `upsert_custom_model/remove_custom_model` 加 path 形参 |
 | S3 | ⬜ | — | — |
 | S4 | ⬜ | — | — |
 | S5 | ⬜ | — | — |

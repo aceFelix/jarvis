@@ -21,6 +21,7 @@ import re
 import pytest
 
 from agent.config.config_specs import (
+    APPLY_LLM,
     APPLY_LIVE,
     APPLY_PERCEPT,
     APPLY_POLICY,
@@ -29,6 +30,7 @@ from agent.config.config_specs import (
     CONFIG_SPECS,
     FORBIDDEN_SPECS,
     SPEC_BY_KEY,
+    STORE_MODELS,
     STORE_SETTINGS,
     STORES,
     TIER_AUTO,
@@ -76,13 +78,19 @@ def test_store_is_declared_for_every_spec():
         assert spec.store in STORES, f"{spec.key} 的 store={spec.store} 不合法"
 
 
-def test_current_specs_all_live_in_settings_toml():
-    """本批之前进表的项全在 settings.toml。
+def test_models_store_covers_exactly_the_model_domain():
+    """落在 models.toml 的就是那 8 项，一个不多一个不少。
 
-    模型域那 8 项（provider/model/max_tokens/...）属于 models.toml，是第一批才加的；
-    这条钉住"现有项一个都没被误标成 models"，避免 store 默认值被改坏。
+    钉住集合而不是数量：将来往任一边加字段，这条会提醒"先确认它归哪个文件"，
+    而 `store` 默认值是 settings——漏改就会把模型字段写进 settings.toml。
     """
-    assert all(s.store == STORE_SETTINGS for s in CONFIG_SPECS)
+    from agent.config.config_specs import STORE_MODELS
+
+    models_keys = {s.key for s in CONFIG_SPECS if s.store == STORE_MODELS}
+    assert models_keys == {
+        "provider", "model", "max_tokens", "temperature",
+        "enable_thinking", "thinking_budget", "models", "custom_models",
+    }
 
 _SETTINGS_FIELDS = {f.name for f in dataclasses.fields(Settings)}
 
@@ -126,9 +134,29 @@ def test_section_field_matches_the_real_toml_mapping():
             f"spec={s.attr} 实际={real.get((s.section, s.field))}",
         )
         for s in CONFIG_SPECS
-        if real.get((s.section, s.field)) != s.attr
+        # 只校验 settings.toml 那一族；models 族的形状由下面那条单独校验
+        # （它们的键在 MODEL_TOP_KEYS 里，不在 settings_domains 的映射表里）。
+        if s.store == STORE_SETTINGS and real.get((s.section, s.field)) != s.attr
     ]
     assert bad == [], f"段落/字段名与真实映射对不上（值会被写进没人读的地方）: {bad}"
+
+
+def test_model_store_specs_match_models_toml_keys():
+    """落在 models.toml 的项，键名必须真的归 models_config 管。
+
+    两条都要成立：section 是 `llm` 族、field 出现在 MODEL_TOP_KEYS 里
+    （`[llm.models]` / `[llm.custom_models.*]` 这类表结构除外，它们由表块写入）。
+    """
+    from agent.config.models_config import MODEL_TOP_KEYS
+
+    table_like = {"models", "custom_models"}   # 表结构，不做顶层标量键校验
+    for spec in CONFIG_SPECS:
+        if spec.store != STORE_MODELS:
+            continue
+        assert spec.section.startswith("llm"), f"{spec.key} 的 section={spec.section}"
+        if spec.field in table_like:
+            continue
+        assert spec.field in MODEL_TOP_KEYS, f"{spec.key} 的 {spec.field} 不在 MODEL_TOP_KEYS"
 
 
 def test_repair_domain_is_fully_registered():
@@ -181,9 +209,14 @@ def test_tiers_stay_within_the_three_declared_levels():
 def test_spec_shape_is_complete(spec):
     """每一项都要能解释清自己：有中文名、有人话说明、kind 在支持集里。"""
     assert spec.label and spec.hint
-    assert spec.kind in {"bool", "int", "float", "time", "quiet", "list"}
+    assert spec.kind in {
+        "bool", "int", "str", "float", "time", "quiet", "list",
+        # 2026-11 第一批新增：结构化取值（解析在 config_kinds.py）
+        "enum", "alias_map", "model_table",
+    }
     assert spec.apply_mode in {
         APPLY_LIVE, APPLY_POLICY, APPLY_PERCEPT, APPLY_RESCHEDULE, APPLY_RESTART,
+        APPLY_LLM,   # provider/QueryLoop 是装配快照，换模型必须重建
     }
     assert spec.section and spec.field
 

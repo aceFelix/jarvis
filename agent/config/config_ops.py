@@ -36,6 +36,7 @@ from agent.config.config_specs import (
     save_value,
     validate_value,
 )
+from agent.config.config_store import inverse_value, write_spec_value
 from agent.core.actions.journal import (
     STATE_APPLIED,
     UNDO_CONFIG,
@@ -271,14 +272,22 @@ def _list_hint(entry: str) -> str:
 
 
 def _save_batch(pairs: list[tuple[ConfigSpec, Any, Any]]) -> str | None:
-    """逐项落盘；任一项失败则把已写的按原值回写，返回失败项标签（成功返回 None）。"""
-    written: list[tuple[ConfigSpec, Any]] = []
+    """逐项落盘；任一项失败则把已写的按原值回写，返回失败项标签（成功返回 None）。
+
+    2026-11：写入按 ``spec.store`` 分派（settings.toml / models.toml）。回写不再直接
+    写旧值——`model_table` 的"旧值"是整表快照，写回去会把别人的改动一起覆盖，故用
+    :func:`inverse_value` 换算成"能撤销这次操作的那次操作"。
+    """
+    written: list[tuple[ConfigSpec, Any, Any]] = []  # (spec, 原值, 已写的新值)
     for spec, value, old in pairs:
-        if not save_value(spec, value):
-            for done, before in written:
-                save_value(done, before)
+        if not write_spec_value(spec, value):
+            for done, before, applied in written:
+                try:
+                    write_spec_value(done, inverse_value(done, before, applied))
+                except Exception:  # noqa: BLE001 - 回写失败不该掩盖原始失败
+                    continue
             return spec.label or spec.key
-        written.append((spec, old))
+        written.append((spec, old, value))
     return None
 
 

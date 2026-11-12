@@ -131,7 +131,7 @@ _DESKTOP = frozenset({PANEL_DESKTOP})
 _PERCEPT = frozenset({PANEL_PERCEPT})
 
 #: 可改配置项（顺序即 ``ConfigList`` 的展示顺序：先表达层，再确认层）
-CONFIG_SPECS: tuple[ConfigSpec, ...] = (
+_BASE_SPECS: tuple[ConfigSpec, ...] = (
     # ---- 声音表达层（auto，live）----
     ConfigSpec(
         "tts_volume", "tts", "volume", "tts_volume", "int",
@@ -537,6 +537,13 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     # 属于“生效但无处可配”，只能代码里改默认值。混进来只会让回执说假话。
 )
 
+# 第一批「模型与上下文」的 12 项放在独立模块（主表已逼近 900 行门禁）。
+# 延迟导入：config_specs_llm 需要本模块的 ConfigSpec / TIER_* / STORE_* / APPLY_*，
+# 那些到这里都已定义完，故在模块末尾再做这次导入不会形成循环。
+from agent.config.config_specs_llm import LLM_SPECS  # noqa: E402
+
+CONFIG_SPECS: tuple[ConfigSpec, ...] = _BASE_SPECS + LLM_SPECS
+
 SPEC_BY_KEY: dict[str, ConfigSpec] = {s.key: s for s in CONFIG_SPECS}
 
 #: 明确禁止模型改动的（键 → 一句话理由）。只登记"名字 + 为什么"，
@@ -677,6 +684,9 @@ _KIND_ZERO: dict[str, Any] = {
     # 2026-11 第一批新增的三种 kind 的"读侧缺失回退值"。
     # 缺了会在 _current_value() 里 KeyError——那不是运行时该出现的事。
     "enum": "", "alias_map": {}, "model_table": {},
+    # 自由字符串（模型名等）：历史表里没有这一档，字符串靠 time/quiet 兜着；
+    # 加它是为了让"就是个名字"的项不必假装成时间格式。
+    "str": "",
 }
 
 # ---- 列表项护栏（模型与面板共用一份）----
@@ -774,6 +784,10 @@ def validate_value(spec: ConfigSpec, value: Any) -> Any:
         return value
     if spec.kind == "list":
         return clean_list(value, name=spec.key)
+    if spec.kind == "str":
+        if not isinstance(value, str):
+            raise ValueError(f"{spec.key} 必须是字符串")
+        return value.strip()
     if spec.kind == "enum":
         return validate_enum(spec, value)
     if spec.kind == "alias_map":
@@ -843,13 +857,17 @@ def human_value(spec: ConfigSpec, value: Any) -> str:
     if spec.kind == "enum":
         return str(value) or "（未设）"
     if spec.kind == "alias_map":
-        items = value or {}
+        if not isinstance(value, dict):
+            return str(value) or "（空）"
+        items = value
         if not items:
             return "（空）"
         return f"{len(items)} 个别名：" + "、".join(str(k) for k in items)
     if spec.kind == "model_table":
-        data = value or {}
-        return f"{data.get('op', '')} {data.get('name', '')}".strip() or "（空）"
+        # 渲染层不该假设类型：读侧可能拿到历史字符串、None 或整表快照。
+        if not isinstance(value, dict):
+            return str(value) or "（空）"
+        return f"{value.get('op', '')} {value.get('name', '')}".strip() or "（空）"
     return str(value)
 
 
