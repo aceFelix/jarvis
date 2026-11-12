@@ -32,7 +32,7 @@ from agent.permissions.path_guard import is_dangerous_write_path, is_symlink_esc
 from agent.permissions.path_match import path_matches
 from agent.permissions.rules import PermissionRule, RuleSet, RuleValue
 from agent.permissions.shell_classifier import classify as classify_shell
-from agent.permissions import yolo_gate
+from agent.permissions import config_write_guard, yolo_gate
 
 #: yolo 下仍然"必须点头"的目标根（可被 settings.permissions_yolo_guard_roots 覆盖）
 DEFAULT_YOLO_GUARD_ROOTS = ["c:\\"]
@@ -248,6 +248,13 @@ class PermissionChecker:
             yolo_result = self._apply_mode(tool, args, ctx, effective)
             if yolo_result is not None:
                 result = _relax_by_yolo(result, yolo_result)
+
+        # 6. 配置文件写入护栏（终局，任何模式都不放，含 yolo）
+        # 禁改清单原本只挂在 ConfigSet 上；模型改用 FileEdit 直接改 models.toml 就能
+        # 绕过整套清单。这条把缝补上，放在最后是因为它不可被模式覆写。@author aceFelix
+        guard = config_write_guard.check(tool, args, ctx)
+        if guard is not None:
+            return guard
 
         # 5. 默认 ASK（fail-closed）
         if result.behavior == PermissionBehavior.ASK and result.reason == _DEFAULT_ASK_REASON:

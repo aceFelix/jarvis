@@ -21,6 +21,7 @@ from typing import Any
 
 from agent.core.context import ToolContext
 from agent.core.gui_launch import GUI_LAUNCH_PATTERN, is_gui_launch
+from agent.core.redaction import redact_secrets
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.sandbox.audit import SandboxAuditor
 from agent.core.sandbox.executor import SandboxConfig, SandboxExecutor
@@ -439,7 +440,7 @@ class BashTool(Tool):
         # 把它误分类为「未知错误」后重试 + 弹「是否重试」阻塞问句导致整轮卡死。
         # 真正的工具级失败（找不到 shell/超时/沙箱错误）仍走上面的 error 分支。
         # @author aceFelix
-        return ToolResult.ok(data=header + body)
+        return ToolResult.ok(data=redact_secrets(header + body))
 
     async def _call_normal(
         self, command: str, work_dir: str, timeout: int, ctx: ToolContext
@@ -590,7 +591,7 @@ class BashTool(Tool):
             )
         # 同上：非零退出属正常命令结果，原样回传交模型判断，不进自愈/交互阻塞链路。
         # @author aceFelix
-        return ToolResult.ok(data=header + body)
+        return ToolResult.ok(data=redact_secrets(header + body))
 
     @staticmethod
     def _find_bash() -> str | None:

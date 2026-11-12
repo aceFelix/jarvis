@@ -13,6 +13,7 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, PermissionMatcher, Tool
+from agent.core.redaction import redact_secrets
 from agent.tools.base import resolve_path, truncate_for_llm
 
 
@@ -98,7 +99,8 @@ class FileReadTool(Tool):
         from agent.core.memory.file_state import record_file_read
         record_file_read(ctx, str(path))
 
-        return ToolResult.ok(data=header + body)
+        # 读到什么就回什么，但凭据值先糊掉（2026-11：密钥曾被原样贴进上下文）
+        return ToolResult.ok(data=redact_secrets(header + body))
 
     def activity_description(self, args: dict[str, Any] | None = None) -> str | None:
         if args and args.get("file_path"):

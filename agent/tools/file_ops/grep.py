@@ -13,6 +13,7 @@ from typing import Any
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
+from agent.core.redaction import redact_secrets
 from agent.tools.base import resolve_path
 
 
@@ -100,8 +101,9 @@ class GrepTool(Tool):
         if not results:
             return ToolResult.ok(data=f"未找到匹配 /{pattern}/ 的内容")
 
-        body = "\n".join(results)
+        body = redact_secrets("\n".join(results))
         return ToolResult.ok(
+            # 同上：grep 最容易把凭据整行带出来
             data=f"找到 {total_matches} 处匹配（pattern=/{pattern}/）:\n\n{body}"
         )
 
