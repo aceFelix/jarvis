@@ -42,6 +42,7 @@ from agent.config.config_ops import (
 )
 from agent.config.config_specs import (
     TIER_CONFIRM,
+    forbidden_fix,
     forbidden_reason,
     get_spec,
     human_value,
@@ -367,9 +368,10 @@ def _handle_set(ctx: "CommandContext", body: str) -> None:
 
     why = forbidden_reason(key)
     if why:
-        # 护栏是配置本身的属性：人能改的边界与模型一样（改这里等于改护栏的实现）
+        # 拒绝时一并给"正确改法"（2026-11）：只说不让，用户和模型都得自己猜替代路径。
         ctx.ui.warn(f"{key} 是禁改项：{why}")
-        ctx.ui.info("请直接编辑 ~/.jarvis/settings.toml。")
+        fix = forbidden_fix(key)
+        ctx.ui.info(f"正确改法：{fix}" if fix else "请直接编辑 ~/.jarvis/settings.toml。")
         return
 
     spec = get_spec(key)

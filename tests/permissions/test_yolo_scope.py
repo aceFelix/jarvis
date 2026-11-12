@@ -128,6 +128,25 @@ class TestYoloScope:
         r = self._check(_Tool(irreversible=True), {"file_path": r"C:\Temp\a.txt"}, ctx)
         assert r.behavior == PermissionBehavior.ASK
 
+    def test_explicit_empty_roots_means_no_guard(self):
+        """显式 `[]` ≠ 键缺失：用户写空数组是真的要关掉保护域。
+
+        2026-11 之前这里是 `getattr(...) or DEFAULT`，空列表被静默折回默认 C 盘——
+        改了等于没改且不报错，那类失败最难查，所以钉一条。
+        """
+        ctx = _ctx(roots=())
+        r = self._check(_Tool(irreversible=True), {"file_path": r"C:\Temp\a.txt"}, ctx)
+        assert r.behavior == PermissionBehavior.ALLOW
+
+    def test_explicit_empty_hard_deny_disables_only_that_list(self):
+        """硬禁止清单写空 → 不再 DENY；但 C 盘保护仍在（两条清单互不顶替）。"""
+        ctx = _ctx(hard=())
+        home = __import__("pathlib").Path.home()
+        target = str(home / ".ssh" / "id_rsa")
+        r = self._check(_Tool(irreversible=True), {"file_path": target}, ctx)
+        assert r.behavior != PermissionBehavior.DENY   # 不再是硬禁止
+        assert r.behavior == PermissionBehavior.ASK    # 但仍在 C 盘保护域内
+
 
 class TestHoldSkip:
     def test_hold_in_yolo_defaults_off(self):

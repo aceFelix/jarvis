@@ -40,6 +40,7 @@ from agent.config.config_specs import (
     TIER_AUTO,
     TIER_CONFIRM,
     TIER_FORBIDDEN,
+    forbidden_fix,
     forbidden_reason,
     get_spec,
 )
@@ -247,9 +248,9 @@ class ConfigSetTool(Tool):
                 blocked.append((key, reason))
         if blocked:
             key, reason = blocked[0]
-            return PermissionResult.deny(
-                f"{key} 不能由模型改：{reason}。请让用户自己用 /init 或直接改 settings.toml。"
-            )
+            fix = forbidden_fix(key)
+            tail = f"正确改法：{fix}" if fix else "请让用户自己用 /init 或直接改 settings.toml。"
+            return PermissionResult.deny(f"{key} 不能由模型改：{reason}。{tail}")
 
         mode = str(getattr(ctx, "permission_mode", "") or "default").lower()
         if mode == "yolo":

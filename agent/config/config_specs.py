@@ -36,6 +36,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from agent.config.toml_writer import bool_literal, list_literal, save_section, str_literal
+# 护栏清单与其查询函数独立成模块（2026-11），这里 re-export 给既有调用方。
+from agent.config.config_forbidden import (  # noqa: F401 - re-export
+    FORBIDDEN_PREFIXES,
+    FORBIDDEN_SPECS,
+    forbidden_fix,
+    forbidden_reason,
+)
 # 三种结构化类型的解析与校验拆在 config_kinds（2026-11）：主表是"加一项"的节奏，那边是
 # "改语义"的节奏，混在一起 diff 读不出谁动了口径；且拆开后才守得住 900 行门禁。
 # 这里 re-export，调用方仍从 config_specs 取，不必知道内部拆过。
@@ -552,39 +559,6 @@ SPEC_BY_KEY: dict[str, ConfigSpec] = {s.key: s for s in CONFIG_SPECS}
 #: 每条理由都必须**自己站得住**：``forbidden_reason()`` 一次只返回一条，模型与用户
 #: 也是分开看的，写成"同上：…"到了那种上下文就是一句废话——这是写这张表时先踩过
 #: 一次的坑（测试里有一条用例专门钉住这一点）。
-FORBIDDEN_SPECS: dict[str, str] = {
-    "sandbox_enabled": "沙箱是权限护栏本身，模型改它等于给自己提权",
-    "sandbox_auto_allow_medium": "决定中等风险命令能否不经人确认就执行，模型改它等于给自己提权",
-    "sandbox_excluded_commands": "豁免名单能让指定命令绕过沙箱，模型改它等于给自己开后门",
-    "log_events": "本地留痕是感知行为的唯一审计线，模型关它等于让自己的采集不留证据",
-    "api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
-    "email_smtp_password": "邮箱密码是凭据，只能由人填，模型不碰",
-    "email_imap_password": "邮箱密码是凭据，只能由人填，模型不碰",
-    # 维护层的两道许可线：它们定义“自动清理能碰到什么”，等价于沙箱的豁免名单
-    "auto_clean_max_risk": "这决定自动清理能自动到多高的风险档，是许可边界本身；模型改它等于给自己放宽删文件的范围",
-    "rules_file": "规则文件决定“清理哪些目录”，换一个文件就等于换一套靶子；模型改它等于给自己扩容",
-    # 2026-11「yolo 全放开」的锁死清单：这些不是"某个配置值"，而是**护栏本身**。
-    # 用户点头能授权"做什么"，但不该授权"拆掉监督机制"——当任务卡住时，模型会合理
-    # 地请求放宽自己，一轮点头就形成自我授权闭环。故这些项连确认都不收。
-    "permissions_file": "换一个权限规则文件就等于换掉整套护栏；模型改它等于给自己重写监督规则",
-    "permission_mode": "模式本身就是授权来源，模型改它等于给自己发授权（含把自己锁死在 yolo）",
-    "permissions_yolo_guard_roots": "yolo 的受保护根；模型改它等于拆掉自己的边界",
-    "permissions_yolo_hard_deny": "yolo 的硬禁止清单；模型改它等于删掉仅存的不可协商项",
-    "bridge_token": "跨设备桥接令牌是凭据，模型不碰",
-    "dashscope_api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
-    "default_api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
-    # 真源表里 tier=forbidden 的项也必须在字典里有理由（测试 test_every_forbidden_spec_carries_a_reason）。
-    # 两处都写不是冗余：tier 决定"不进模型可改清单"，字典决定"给得出为什么".
-    "repair_disabled_actions": "它记录哪些修复动作被用户关掉；模型改它等于把自己被禁掉的能力重新打开",
-}
-
-#: 键前缀 → 理由（覆盖 api_key_* / sandbox_* 这类成族字段）
-FORBIDDEN_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("api_key", "凭据只能由人填（/init 或环境变量），模型不碰"),
-    ("sandbox_", "沙箱是权限护栏本身，模型改它等于给自己提权"),
-    # 成族覆盖：permissions_* 全是护栏本身（2026-11 锁死清单）
-    ("permissions_", "权限护栏本身，模型改它等于给自己重写监督规则"),
-)
 
 # ---- 生效钩子：宿主注册，工具按 apply_mode 分派 ----
 #: ``{apply_mode: [回调, ...]}``，回调返回 ``(是否成功, 一句说明)``。
@@ -668,15 +642,6 @@ def get_spec(key: str) -> ConfigSpec | None:
     return SPEC_BY_KEY.get(str(key or "").strip())
 
 
-def forbidden_reason(key: str) -> str:
-    """该键是否被禁止改：返回拒绝理由（空串 = 不是禁止项）。"""
-    k = str(key or "").strip()
-    if k in FORBIDDEN_SPECS:
-        return FORBIDDEN_SPECS[k]
-    for prefix, reason in FORBIDDEN_PREFIXES:
-        if k.startswith(prefix):
-            return reason
-    return ""
 
 
 _KIND_ZERO: dict[str, Any] = {

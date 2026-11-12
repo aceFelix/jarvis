@@ -324,13 +324,20 @@ class PermissionChecker:
         # 动作降为"点头一次"（见 yolo_gate 模块说明与已知局限）。@author aceFelix
         if effective == PermissionMode.YOLO:
             settings = getattr(ctx, "settings", None)
-            roots = list(
-                getattr(settings, "permissions_yolo_guard_roots", DEFAULT_YOLO_GUARD_ROOTS)
-                or DEFAULT_YOLO_GUARD_ROOTS
+            # "键缺失" ≠ "显式空值"：用户把 guard_roots 写成 [] 是**真的想关掉**保护域，
+            # 而 `x or DEFAULT` 会把空列表折回默认 C 盘——改了等于没改且不报错。
+            # 这类"显式空值被静默吞掉"的失败最难查，故用 None 哨兵区分。@author aceFelix
+            raw_roots = getattr(settings, "permissions_yolo_guard_roots", None)
+            roots = (
+                list(DEFAULT_YOLO_GUARD_ROOTS)
+                if raw_roots is None
+                else [str(r) for r in raw_roots]
             )
-            hard = list(
-                getattr(settings, "permissions_yolo_hard_deny", DEFAULT_YOLO_HARD_DENY)
-                or DEFAULT_YOLO_HARD_DENY
+            raw_hard = getattr(settings, "permissions_yolo_hard_deny", None)
+            hard = (
+                list(DEFAULT_YOLO_HARD_DENY)
+                if raw_hard is None
+                else [str(r) for r in raw_hard]
             )
             targets = yolo_gate.extract_targets(tool, args)
 

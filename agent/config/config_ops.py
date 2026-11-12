@@ -26,6 +26,7 @@ from agent.config.config_specs import (
     TIER_AUTO,
     TIER_CONFIRM,
     ConfigSpec,
+    forbidden_fix,
     forbidden_reason,
     get_spec,
     human_value,
@@ -120,7 +121,7 @@ def apply_config_patch(
         k = str(key)
         why = forbidden_reason(k)
         if why:
-            return ApplyOutcome(False, _forbidden_text(k, why, entry))
+            return ApplyOutcome(False, _forbidden_text(k, why, entry, forbidden_fix(k)))
         spec = get_spec(k)
         if spec is None:
             return ApplyOutcome(False, f"不认识的配置项 {k}；{_list_hint(entry)}")
@@ -259,11 +260,16 @@ def _snapshot_context() -> dict[str, Any]:
         return {}
 
 
-def _forbidden_text(key: str, why: str, entry: str) -> str:
-    """禁改项的拒绝文案：对模型与人说两句不同的话。"""
+def _forbidden_text(key: str, why: str, entry: str, fix: str = "") -> str:
+    """禁改项的拒绝文案：对模型与人说两句不同的话。
+
+    都必须带**正确改法**（2026-11）：只说不让，模型会去猜替代路径——实测它猜出过
+    不存在的 Shift+Tab 快捷键，绕了 6 步才回来。改法与理由同源，见 FORBIDDEN_SPECS。
+    """
+    tail = f"正确改法：{fix}" if fix else "请直接编辑 ~/.jarvis/settings.toml"
     if entry == ENTRY_MODEL:
-        return f"{key} 不能由模型改：{why}。请让用户自己用 /init 或直接改 settings.toml。"
-    return f"{key} 是禁改项：{why}。请直接编辑 ~/.jarvis/settings.toml。"
+        return f"{key} 不能由模型改：{why}。{tail}"
+    return f"{key} 是禁改项：{why}。{tail}"
 
 
 def _list_hint(entry: str) -> str:

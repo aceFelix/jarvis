@@ -38,6 +38,7 @@ from agent.config.config_specs import (
     TIER_FORBIDDEN,
     clear_apply_hooks,
     clear_change_listeners,
+    forbidden_fix,
     forbidden_reason,
     get_spec,
     human_value,
@@ -359,14 +360,27 @@ def test_forbidden_reason_covers_credentials_and_sandbox(key):
 
 
 def test_every_forbidden_reason_stands_on_its_own():
-    """理由里不许出现"同上/见上"这类指代。
+    """理由与改法都不许出现"同上/见上"这类指代，且都得说清。
 
-    ``forbidden_reason()`` 一次只返回一条，模型与用户也是分开看的——写成"同上：…"
-    到了那种上下文就是一句废话，用户得不到"为什么不行"。（写这张表时真踩过。）
+    ``forbidden_reason()`` / ``forbidden_fix()`` 一次只返回一条，模型与用户也是分开看的
+    ——写成"同上：…"到了那种上下文就是一句废话，用户得不到"为什么不行"或"那该怎么改"，
+    只能自己猜替代路径（2026-11 实测：它猜出过不存在的 Shift+Tab 快捷键）。
     """
-    for key, reason in FORBIDDEN_SPECS.items():
+    for key, (reason, fix) in FORBIDDEN_SPECS.items():
         assert not reason.startswith(("同上", "见上", "同前")), f"{key} 的理由不自洽：{reason}"
         assert len(reason) >= 10, f"{key} 的理由太短，说不清为什么：{reason}"
+        assert fix, f"{key} 没有给正确改法"
+        assert not fix.startswith(("同上", "见上", "同前")), f"{key} 的改法不自洽：{fix}"
+        assert len(fix) >= 6, f"{key} 的改法太短，照着做不了：{fix}"
+
+
+def test_forbidden_fix_matches_reason_source():
+    """理由与改法同源：能拿到理由的键，就必须拿得到改法（反之亦然）。"""
+    for key in FORBIDDEN_SPECS:
+        assert forbidden_reason(key) and forbidden_fix(key), key
+    # 前缀族：还没进表的键也要能给出两条
+    assert forbidden_reason("sandbox_whatever") and forbidden_fix("sandbox_whatever")
+    assert forbidden_fix("tts_volume") == ""
 
 
 def test_forbidden_reason_is_empty_for_writable_keys():
