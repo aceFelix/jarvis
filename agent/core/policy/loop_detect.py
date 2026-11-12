@@ -29,6 +29,35 @@ _THRESHOLD = 3
 # 单轮任务内最多强制 ASK 次数（超过则静默，不再骚扰）
 _MAX_FIRES = 2
 
+# 只读工具的重复调用：只浪费 token，不构成风险。
+#
+# 为什么单列一张表：2026-11 实测一次"改贪吃蛇尺寸"的会话里，空转检测把 FileRead
+# 判成空转，**逼用户连按了三次 y 才让模型继续读文件**——读文件重复没有任何风险，
+# 打断却要人停下手上的事。护栏该拦的是"反复改同一处""反复执行同一条命令"，
+# 不是"反复看"。
+#
+# 这些工具重复命中时不再升级成 ASK，而是把提示并进结果交给模型自己换策略。
+READ_ONLY_TOOLS = frozenset(
+    {
+        "FileRead",
+        "Grep",
+        "Glob",
+        "ScreenShot",
+        "ToolSearch",
+        "ConfigList",
+        "ConfigExplain",
+        "WindowList",
+        "WindowRect",
+        "WebSearch",
+        "WebFetch",
+    }
+)
+
+
+def is_read_only(tool_name: str) -> bool:
+    """该工具的重复调用是否只浪费 token（不升级为 ASK）。"""
+    return tool_name in READ_ONLY_TOOLS
+
 
 def call_signature(tool_name: str, args: dict[str, Any]) -> str:
     """工具调用签名：工具名 + 最像一个动作的入参归一化。

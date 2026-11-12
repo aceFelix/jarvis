@@ -28,7 +28,18 @@ from agent.core.actions.effect_policy import (
 from agent.core.error_recovery import ToolRecoveryExecutor
 from agent.core.message import ToolResultContent, ToolUseContent
 from agent.core.policy import policy_gate
-from agent.core.policy.loop_detect import check_tool_loop
+from agent.core.policy.loop_detect import check_tool_loop, is_read_only
+
+# 模型常见的工具名简写 → 注册表中的真名。
+#
+# 为什么不是"让模型学会"：这些缩写是通用生态的叫法（Edit/Write/Read），每次撞上
+# 都要白跑一轮（调用→未知工具→重发）。别名表是确定性的，一次映射省一次往返。
+_TOOL_ALIASES = {
+    "Edit": "FileEdit",
+    "MultiEdit": "FileEdit",
+    "Write": "FileWrite",
+    "Read": "FileRead",
+}
 from agent.core.result import PermissionBehavior, PermissionResult, ToolResult
 from agent.core.tool import Tool, ToolRegistry
 from agent.core.tool_pairing import REASON_ORPHAN, make_placeholder_result
@@ -96,6 +107,8 @@ class _PendingCall:
 
     tool_use: ToolUseContent
     tool: Tool
+    # 只读工具空转时的软提示：不打断用户，执行完并进结果给模型看。
+    note: str | None = None
 
 
 class ToolOrchestrator:
@@ -139,6 +152,13 @@ class ToolOrchestrator:
         for tu in tool_uses:
             tool = self._registry.get(tu.name)
             if tool is None:
+                # 工具名别名：模型常把 FileEdit 写成 Edit、FileRead 写成 Read。
+                # 2026-11 一次会话里这类"未知工具"空转 3 次（每次都要重发一轮），
+                # 而这些别名没有歧义——直接纠正比让模型自己撞一次更省。
+                alias = _TOOL_ALIASES.get(tu.name)
+                if alias:
+                    tool = self._registry.get(alias)
+            if tool is None:
                 results_by_id[tu.id] = ToolResultContent(
                     tool_use_id=tu.id,
                     content=f"错误: 未知工具 '{tu.name}'",
@@ -176,10 +196,18 @@ class ToolOrchestrator:
             perm = policy_gate(tool, tu.input, ctx, perm)
             # 空转循环检测：每次调用都记录签名（ASK/DENY 也记，保持窗口连续），
             # 但只把 ALLOW 强制升级 ASK 拦刹车（ASK 自有人工环节，DENY 不动）。
+            #
+            # 只读工具例外：重复"看"不构成风险，升级 ASK 只会把人从手上的事里拽出来
+            # （2026-11：一次改尺寸的会话里被逼按了三次 y）。改为把提示并进结果，
+            # 让模型自己换策略——刹车留给"反复改""反复执行"。
             # @author aceFelix
             loop_msg = check_tool_loop(tool.name, tu.input)
-            if loop_msg and perm.behavior == PermissionBehavior.ALLOW:
-                perm = PermissionResult.ask(loop_msg)
+            soft_note: str | None = None
+            if loop_msg:
+                if is_read_only(tool.name):
+                    soft_note = loop_msg
+                elif perm.behavior == PermissionBehavior.ALLOW:
+                    perm = PermissionResult.ask(loop_msg)
             decision = await self._resolve_permission(perm, tool, tu, ctx)
             if decision.behavior == PermissionBehavior.DENY:
                 reason = decision.reason or "权限拒绝"
@@ -195,13 +223,20 @@ class ToolOrchestrator:
                     ctx.ui.warn(f"拒绝执行 {tu.name}: {reason}")
                 continue
 
-            pending.append(_PendingCall(tool_use=tu, tool=tool))
+            pending.append(_PendingCall(tool_use=tu, tool=tool, note=soft_note))
 
         # 2. 执行待执行项
         if pending:
             executed = await self._execute_pending(pending, ctx)
             for tu_id, content in executed.items():
                 results_by_id[tu_id] = content
+        # 只读空转的软提示：并进结果尾部交给模型，用户不被打断、也不额外发一条消息。
+        for call in pending:
+            if not call.note:
+                continue
+            got = results_by_id.get(call.tool_use.id)
+            if got is not None and not got.is_error:
+                got.content = f"{got.content}\n\n[提示] {call.note}"
 
         # 3. 按输入顺序对齐输出（缺失项补占位结果，保证与输入等长）
         # 调度异常/中断可能让个别调用拿不到结果；若直接过滤掉，历史里就会留下

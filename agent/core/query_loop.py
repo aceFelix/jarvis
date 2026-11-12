@@ -594,8 +594,12 @@ class QueryLoop:
             # for-else: 达到 max_iterations 仍未结束
             stats.stopped_reason = "max_iterations"
             if ctx.ui:
+                # 必须明确"可能停在中间态"：2026-11 一次改贪吃蛇尺寸的会话在第 47 步
+                # 被熔断，CSS 已改成新布局而 HTML 还没跟上——文件是坏的，收尾那句话
+                # 却说"完成"。用户拿到半成品却毫不知情，比慢更糟。@author aceFelix
                 ctx.ui.warn(
                     f"达到最大迭代次数 {self._max_iterations}，强制停止"
+                    f"（改动可能停在中间态：继续之前先确认产物还能跑，别当成已完成）"
                 )
 
         # ---- Hook: assistant_response ----
