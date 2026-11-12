@@ -323,9 +323,10 @@ model/provider 绑定、清 `_PROFILE_CACHE`/能力段落缓存（模型能力�
 | S1 | ✅ 完成 | 见本笔 | 三种 kind 解析+校验；**门禁提前触发**（见下），拆出 `config_kinds.py` |
 | S2 | ✅ 完成（10/13 协议键） | 见本笔 | `config_specs_llm.py` 10 项 + `config_store.py` 分派；3 项延期见 §4.2 |
 | S2c | ✅ 完成 | 见本笔 | `custom_models` 已接线：给 `upsert/remove_custom_model` 加了 `path` 形参 |
-| S3 | ✅ 完成（仅 CLI 入口） | 见本笔 | `agent/llm/hotswap.py` + main.py 接线；serve 入口待接（同一形状） |
-| S4 | ⬜ | — | — |
-| S5 | ⬜ | — | — |
+| S3 | ✅ 完成 | `9d32f87` | `agent/llm/hotswap.py` + CLI 接线 |
+| S3b | ✅ 完成 | 见本笔 | serve 侧同形接线（engine_session），`tests/serve` 412 通过 |
+| S4 | ✅ 完成 | 见本笔 | 示例文件本已含这 10 个键的注释，`tests/config/test_catalog.py` 39 通过 |
+| S5 | ⬜ 待做 | — | 索引同步 + CHANGELOG |
 
 **S1 的偏离说明（原计划放 S2 才拆）**：S1 的解析代码直接进了 `config_specs.py`，
 行数从 832 冲到 **1008**，越过 900 门禁、`test_no_agent_file_exceeds_limit` 当场红。

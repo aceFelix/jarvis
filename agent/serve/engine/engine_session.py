@@ -132,6 +132,27 @@ class EngineSessionMixin:
         self._provider = provider
         self._provider_settings = s
         self._query_loop = loop
+
+        # `apply_mode=llm` 的 serve 侧接线（2026-11）：与 CLI 同形——先构造新 provider，
+        # 成功才 switch_model，失败保留旧栈。引擎指令与配置写入同在引擎线程，
+        # 不存在与 switch_model 指令并发改 _provider 的交错。@author aceFelix
+        from agent.config.config_specs import APPLY_LLM, register_apply_hook
+        from agent.llm.hotswap import rebuild_llm_stack, set_llm_rebinder
+        from agent.prompts.system import reload_profile_cache
+
+        def _rebind_llm() -> tuple[bool, str]:
+            reload_profile_cache()
+            try:
+                new_provider = _build_provider(s, model_type=_model_type_for(s))
+            except Exception as e:  # noqa: BLE001 - 见 hotswap 的失败语义
+                return False, f"未能重建 provider（{type(e).__name__}: {e}），旧模型继续可用"
+            target = s.model or getattr(new_provider, "default_model", "") or ""
+            loop.switch_model(new_provider, target)
+            self._provider = new_provider
+            return True, f"已切到 {target}（{s.provider}），下一轮请求生效"
+
+        set_llm_rebinder(_rebind_llm)
+        register_apply_hook(APPLY_LLM, rebuild_llm_stack)
         # 装配后的活跃 registry 快照：权限模式热切换重建 orchestrator 需复用
         # 同一份工具表（含已连 MCP/harness/ToolSearch），不能另 build 一份。@author aceFelix
         self._active_registry = registry
