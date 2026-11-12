@@ -286,6 +286,28 @@ async def repl(settings: Settings) -> int:
         chat_detection=settings.tools_chat_detection,
     )
 
+    # `apply_mode=llm` 的接线（2026-11）：配置层只发信号，这里才是知道
+    # "provider 怎么造、QueryLoop 在哪"的地方。先构造新 provider，成功才切换——
+    # 失败保留旧栈，把"配置写错"挡在"会话坏掉"之前。@author aceFelix
+    from agent.config.config_specs import APPLY_LLM, register_apply_hook
+    from agent.llm.hotswap import rebuild_llm_stack, set_llm_rebinder
+    from agent.prompts.system import reload_profile_cache
+
+    def _rebind_llm() -> tuple[bool, str]:
+        # 换模型会改变能力段（视觉/思考），提示词里的画像段也要重拼，
+        # 否则新模型看到的是上一台模型的能力描述。
+        reload_profile_cache()
+        try:
+            new_provider = _build_provider(settings, model_type=_model_type_for(settings))
+        except Exception as e:  # noqa: BLE001 - 见下
+            return False, f"未能重建 provider（{type(e).__name__}: {e}），旧模型继续可用"
+        model = settings.model or getattr(new_provider, "default_model", "") or ""
+        loop.switch_model(new_provider, model)
+        return True, f"已切到 {model}（{settings.provider}），下一轮请求生效"
+
+    set_llm_rebinder(_rebind_llm)
+    register_apply_hook(APPLY_LLM, rebuild_llm_stack)
+
     messages: list[Message] = []
     # 启动即全新会话：历史会话由 /load（桌面左栏点选）手动恢复。
     # 曾有 auto_resume_session 启动自动恢复，但恢复指针 auto-latest 是
