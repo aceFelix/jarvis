@@ -140,7 +140,7 @@ def draw_section(canvas: Any, title: str, y: float, *, window_w: int, pad: int) 
 
     @author aceFelix
     """
-    canvas.create_text(pad, y, text=title, fill=CYAN_DIM, font=FONT_LABEL, anchor="w")
+    canvas.create_text(pad, y, text=title, fill=RULE, font=FONT_LABEL, anchor="w")
     canvas.create_line(pad + 108, y, window_w - pad, y, fill=RULE)
 
 

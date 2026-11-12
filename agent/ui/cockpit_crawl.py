@@ -49,8 +49,8 @@ from agent.ui.hud_theme import (
     clip,
 )
 
-# 左侧窗口尺寸：560×640 容纳 URL 清单 / 抽取表 / 分层拓扑
-CRAWL_W = 560
+# 左侧窗口尺寸：500×640 容纳 URL 清单 / 抽取表 / 分层拓扑
+CRAWL_W = 500
 CRAWL_H = 640
 CRAWL_PAD = 18
 
@@ -66,7 +66,7 @@ _LEFT_MARGIN = 24
 class CrawlWindow:
     """左侧抓取窗口（只在 Tk 线程使用）。
 
-    形态：560×640、无边框、置顶、整面可拖；内容：四格汇总 + 可滚动 URL
+    形态：500×640、无边框、置顶、整面可拖；内容：四格汇总 + 可滚动 URL
     清单 + 可滚动抽取表 + 可缩放/平移拓扑。
 
     @author aceFelix
@@ -382,7 +382,7 @@ class CrawlWindow:
 
     def _section(self, title: str, y: int) -> None:
         """小节标题 + 右侧延长线。"""
-        self._text(CRAWL_PAD, y, title, fill=_C.accent_dim, font=FONT_LABEL)
+        self._text(CRAWL_PAD, y, title, fill=_C.rule, font=FONT_LABEL)
         self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, _C.rule)
 
     def _draw_scrollbar(self, total: int, visible: int, offset: int, top: float, bottom: float) -> None:
@@ -425,7 +425,7 @@ class CrawlWindow:
             CRAWL_W - 27, 25, "✕", fill=_C.dim, font=("Microsoft YaHei UI", 10),
             anchor="center", tag="crawl_close",
         )
-        self._line(CRAWL_PAD, 60, CRAWL_W - CRAWL_PAD, 60, _C.accent_dim)
+        self._line(CRAWL_PAD, 60, CRAWL_W - CRAWL_PAD, 60, _C.rule)
 
     def _draw_metrics(self, state: CockpitState) -> None:
         """四格汇总：抓取 / 成功 / 失败 / 去重，外加字节与域名分布。"""
@@ -455,7 +455,7 @@ class CrawlWindow:
             parts.append(f"域名 {len(info['domains'])} 个{(' · ' + top) if top else ''}")
         self._text(
             CRAWL_PAD, 140,
-            clip("  |  ".join(parts) if parts else "— 等待抓取", 84),
+            clip("  |  ".join(parts) if parts else "— 等待抓取", 70),
             fill=_C.dim, font=FONT_SMALL,
         )
 
@@ -599,7 +599,7 @@ class CrawlWindow:
         """拓扑区底部统计行：剩余队列/完成/失败/去重/实达深度/上限/字节/耗时。"""
         parts = stats_parts(state)
         self._text(
-            CRAWL_PAD, _STATS_Y, clip(" · ".join(parts) or "—", 88),
+            CRAWL_PAD, _STATS_Y, clip(" · ".join(parts) or "—", 72),
             fill=_C.accent_dim, font=FONT_MONO,
         )
 

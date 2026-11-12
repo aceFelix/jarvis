@@ -692,11 +692,11 @@ class _Hud:
         # 关闭按钮（点击后本会话不再弹出）
         self.canvas.create_oval(
             WINDOW_W - 40, 12, WINDOW_W - 14, 38,
-            outline=CYAN_DIM, width=1, tags=("close",),
+            outline=RULE, width=1, tags=("close",),
         )
         self._text(WINDOW_W - 27, 25, "✕", fill=DIM, font=("Microsoft YaHei UI", 10), anchor="center", tag="close")
 
-        self._line(PAD, 60, WINDOW_W - PAD, 60, CYAN_DIM)
+        self._line(PAD, 60, WINDOW_W - PAD, 60, RULE)
 
     def _draw_metrics(self, state: CockpitState) -> None:
         """三格大数字：步骤 / 失败 / 总耗时。"""
@@ -834,12 +834,12 @@ class _Hud:
 
     def _draw_footer(self, agents: str = "") -> None:
         """底部提示；有代理卡时在右侧显示代理总数与溢出数。"""
-        self._line(PAD, WINDOW_H - 36, WINDOW_W - PAD, WINDOW_H - 36, CYAN_DIM)
+        self._line(PAD, WINDOW_H - 36, WINDOW_W - PAD, WINDOW_H - 36, RULE)
         self._text(PAD, WINDOW_H - 20, "点 ✕ 隐藏 · 下轮首个工具自动重现", fill=DIM, font=FONT_SMALL)
         if agents:
             self._text(WINDOW_W - PAD, WINDOW_H - 20, agents, fill=AMBER, font=FONT_LABEL, anchor="e")
         else:
-            self._text(WINDOW_W - PAD, WINDOW_H - 20, "HUD v1", fill=CYAN_DIM, font=FONT_SMALL, anchor="e")
+            self._text(WINDOW_W - PAD, WINDOW_H - 20, "HUD v1", fill=DIM, font=FONT_SMALL, anchor="e")
 
     def _section(self, title: str, y: int) -> None:
         """小节标题 + 右侧延长线（坐标与绘制统一在 ``cockpit_detail``）。"""

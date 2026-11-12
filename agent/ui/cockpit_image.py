@@ -325,7 +325,7 @@ class ImageCockpit:
         """底部操作提示与序号。"""
         self.canvas.create_line(
             geo.PAD, geo.WINDOW_H - 36, geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 36,
-            fill=_C.accent_dim,
+            fill=_C.rule,
         )
         self._text(
             geo.PAD, geo.WINDOW_H - 20,
@@ -335,12 +335,12 @@ class ImageCockpit:
             self._text(
                 geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 20,
                 f"{self._index + 1}/{len(self._items)}",
-                fill=_C.accent_dim, font=FONT_LABEL, anchor="e",
+                fill=_C.dim, font=FONT_LABEL, anchor="e",
             )
         else:
             self._text(
                 geo.WINDOW_W - geo.PAD, geo.WINDOW_H - 20, "IMAGE",
-                fill=_C.accent_dim, font=FONT_SMALL, anchor="e",
+                fill=_C.dim, font=FONT_SMALL, anchor="e",
             )
 
     # ---- 缩略图缓存 ----
