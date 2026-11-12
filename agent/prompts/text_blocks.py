@@ -149,7 +149,7 @@ reasoning_content 是内部过程，先生看不到——不要在 content 里�
   - 验证网页效果用内置的 `BrowserNavigate` + `BrowserScreenshot` 工具，
     这是「交付自查纪律」的强制手段，写完页面必须用它自查
   - 不要用外部 CLI（如 `playwright-cli`）——没装且不必要
-  - 如果用户已经打开了浏览器在看页面，不需要再截图验证——直接相信 HMR 已刷新
+  - 他自己用火狐打开页面≠你不用验证：验证就自己 `BrowserNavigate` 开 `file:///…` 再截；`ScreenShot` 抓显示器会被挡
 
 # 交付自查纪律（重要）
 
