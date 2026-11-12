@@ -39,6 +39,7 @@ from agent.config.config_ops import (
 from agent.config.config_specs import (
     TIER_AUTO,
     TIER_CONFIRM,
+    TIER_FORBIDDEN,
     forbidden_reason,
     get_spec,
 )
@@ -220,21 +221,44 @@ class ConfigSetTool(Tool):
         return ValidationResult.pass_()
 
     def check_permissions(self, args: dict[str, Any], ctx: ToolContext) -> PermissionResult:
-        """分级直通权限管线：禁止→DENY，需确认→ASK，其余 ALLOW。"""
+        """分级 × 模式（2026-11 口径）：
+
+        | 模式 | auto / confirm | forbidden |
+        |---|---|---|
+        | yolo | **ALLOW** | DENY |
+        | default / accept_edits | **ASK** | DENY |
+        | plan | DENY（只读规划不写配置） | DENY |
+
+        为什么 yolo 下不再看 tier：用户明确要求「yolo 下啥都能改」，只是仍有
+        **锁死清单**。护栏本身（权限规则/凭据/沙箱/审计线）在 forbidden 那一步
+        已经拦死，连确认都不收——那一层不属于"配置值"，而属于监督机制。
+        @author aceFelix
+        """
         patch = args.get("patch") or {}
-        forbidden = [(k, forbidden_reason(str(k))) for k in patch if forbidden_reason(str(k))]
-        if forbidden:
-            key, reason = forbidden[0]
+        # 两道禁止来源都要查：名字字典（表外键靠它）+ 真源表里 tier=forbidden 的项。
+        # 只查一道，扩表时就可能出现"写进了表、却是禁止项"的漏洞（2026-11 首刷）。
+        blocked: list[tuple[str, str]] = []
+        for k in patch:
+            key = str(k)
+            reason = forbidden_reason(key)
+            if not reason and _tier_of(key) == TIER_FORBIDDEN:
+                reason = "该配置项已标记为禁止模型修改（护栏本身）"
+            if reason:
+                blocked.append((key, reason))
+        if blocked:
+            key, reason = blocked[0]
             return PermissionResult.deny(
                 f"{key} 不能由模型改：{reason}。请让用户自己用 /init 或直接改 settings.toml。"
             )
-        confirm = [k for k in patch if _tier_of(str(k)) == TIER_CONFIRM]
-        if confirm:
-            labels = "、".join(_label_of(str(k)) for k in confirm)
-            return PermissionResult.ask(
-                f"要改 {labels}——这类设置会影响何时能打断你或能干什么活，确认？"
-            )
-        return PermissionResult.allow("表达层配置，可直接调整")
+
+        mode = str(getattr(ctx, "permission_mode", "") or "default").lower()
+        if mode == "yolo":
+            return PermissionResult.allow("yolo 模式：配置写入不设限（锁死清单除外）")
+        if mode == "plan":
+            return PermissionResult.deny("plan 模式只读，不写配置")
+
+        labels = "、".join(_label_of(str(k)) for k in patch) or "配置"
+        return PermissionResult.ask(f"要改 {labels}，确认？")
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         outcome = apply_config_patch(

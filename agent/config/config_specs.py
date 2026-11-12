@@ -365,7 +365,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "list", "单独关掉哪几类修复动作",
         "只认四个白名单 ID：fetch-browser / fetch-model / pip-extras / config-fix。"
         "写错不报错也不生效，改完用 /repair status 确认它真的被关上了",
-        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=[],
+        tier=TIER_FORBIDDEN, apply_mode=APPLY_LIVE, default=[],
     ),
     ConfigSpec(
         "repair_announce_voice", "repair", "announce_voice", "repair_announce_voice",
@@ -529,12 +529,27 @@ FORBIDDEN_SPECS: dict[str, str] = {
     # 维护层的两道许可线：它们定义“自动清理能碰到什么”，等价于沙箱的豁免名单
     "auto_clean_max_risk": "这决定自动清理能自动到多高的风险档，是许可边界本身；模型改它等于给自己放宽删文件的范围",
     "rules_file": "规则文件决定“清理哪些目录”，换一个文件就等于换一套靶子；模型改它等于给自己扩容",
+    # 2026-11「yolo 全放开」的锁死清单：这些不是"某个配置值"，而是**护栏本身**。
+    # 用户点头能授权"做什么"，但不该授权"拆掉监督机制"——当任务卡住时，模型会合理
+    # 地请求放宽自己，一轮点头就形成自我授权闭环。故这些项连确认都不收。
+    "permissions_file": "换一个权限规则文件就等于换掉整套护栏；模型改它等于给自己重写监督规则",
+    "permission_mode": "模式本身就是授权来源，模型改它等于给自己发授权（含把自己锁死在 yolo）",
+    "permissions_yolo_guard_roots": "yolo 的受保护根；模型改它等于拆掉自己的边界",
+    "permissions_yolo_hard_deny": "yolo 的硬禁止清单；模型改它等于删掉仅存的不可协商项",
+    "bridge_token": "跨设备桥接令牌是凭据，模型不碰",
+    "dashscope_api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
+    "default_api_key": "凭据只能由人填（/init 或环境变量），写进配置文件会随备份外洩",
+    # 真源表里 tier=forbidden 的项也必须在字典里有理由（测试 test_every_forbidden_spec_carries_a_reason）。
+    # 两处都写不是冗余：tier 决定"不进模型可改清单"，字典决定"给得出为什么".
+    "repair_disabled_actions": "它记录哪些修复动作被用户关掉；模型改它等于把自己被禁掉的能力重新打开",
 }
 
 #: 键前缀 → 理由（覆盖 api_key_* / sandbox_* 这类成族字段）
 FORBIDDEN_PREFIXES: tuple[tuple[str, str], ...] = (
     ("api_key", "凭据只能由人填（/init 或环境变量），模型不碰"),
     ("sandbox_", "沙箱是权限护栏本身，模型改它等于给自己提权"),
+    # 成族覆盖：permissions_* 全是护栏本身（2026-11 锁死清单）
+    ("permissions_", "权限护栏本身，模型改它等于给自己重写监督规则"),
 )
 
 # ---- 生效钩子：宿主注册，工具按 apply_mode 分派 ----

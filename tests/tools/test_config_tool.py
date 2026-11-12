@@ -132,9 +132,52 @@ def test_confirm_tier_asks_instead_of_self_approving(ctx):
     assert "每日播报上限" in (res.reason or "")
 
 
-def test_auto_tier_is_allowed(ctx):
+def test_auto_tier_asks_in_non_yolo(ctx):
+    """2026-11 口径：非 yolo 模式下，连 auto 档也要问一句。
+
+    用户的原话是"其他模式下 jarvis 想改配置文件才需要询问我的意见"——
+    配置写入本身就是要他点头的事，与 tier 无关；tier 只在 yolo 下失去意义。
+    """
     res = ConfigSetTool().check_permissions({"patch": {"tts_volume": 30}}, ctx)
-    assert res.behavior == PermissionBehavior.ALLOW
+    assert res.behavior == PermissionBehavior.ASK
+
+
+def test_yolo_allows_both_tiers(ctx):
+    """yolo 下 auto / confirm 都放行——用户明确要求"啥都能改"。"""
+    ctx.permission_mode = "yolo"
+    for patch in ({"tts_volume": 30}, {"daily_max": 50},
+                  {"tts_volume": 30, "quiet_hours": "23:00-07:00"}):
+        res = ConfigSetTool().check_permissions({"patch": patch}, ctx)
+        assert res.behavior == PermissionBehavior.ALLOW, patch
+
+
+def test_plan_mode_denies_config_writes(ctx):
+    """plan 是只读规划：连问都不问，直接不写。"""
+    ctx.permission_mode = "plan"
+    res = ConfigSetTool().check_permissions({"patch": {"tts_volume": 30}}, ctx)
+    assert res.behavior == PermissionBehavior.DENY
+
+
+def test_yolo_still_denies_locked_guardrail_keys(ctx):
+    """yolo 也不能碰护栏本身：锁死清单连确认都不收。"""
+    ctx.permission_mode = "yolo"
+    locked = [
+        "permissions_file", "permission_mode",
+        "permissions_yolo_guard_roots", "permissions_yolo_hard_deny",
+        "sandbox_enabled", "log_events", "api_key", "bridge_token",
+    ]
+    for key in locked:
+        res = ConfigSetTool().check_permissions({"patch": {key: "x"}}, ctx)
+        assert res.behavior == PermissionBehavior.DENY, key
+
+
+def test_forbidden_tier_spec_is_denied_even_in_yolo(ctx):
+    """tier=forbidden 的项走的是另一条禁止路径，yolo 下同样要拦。"""
+    ctx.permission_mode = "yolo"
+    res = ConfigSetTool().check_permissions(
+        {"patch": {"repair_disabled_actions": ["fetch-model"]}}, ctx
+    )
+    assert res.behavior == PermissionBehavior.DENY
 
 
 def test_mixed_patch_asks_because_one_item_needs_confirm(ctx):
