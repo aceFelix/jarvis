@@ -227,14 +227,14 @@ class ImageCockpit:
         )
         self.canvas.create_oval(
             geo.WINDOW_W - 40, 12, geo.WINDOW_W - 14, 38,
-            outline=_C.accent_dim, width=1, tags=("img_close",),
+            outline=_C.rule, width=1, tags=("img_close",),
         )
         self._text(
             geo.WINDOW_W - 27, 25, "✕", fill=_C.dim,
             font=("Microsoft YaHei UI", 10), anchor="center", tags=("img_close",),
         )
         self.canvas.create_line(
-            geo.PAD, 60, geo.WINDOW_W - geo.PAD, 60, fill=_C.accent_dim
+            geo.PAD, 60, geo.WINDOW_W - geo.PAD, 60, fill=_C.rule
         )
 
     def _current(self) -> dict[str, Any] | None:
@@ -247,7 +247,7 @@ class ImageCockpit:
         """大图区：按窗宽适配；文件已清理时给占位，不弹错。"""
         left, top = geo.PAD, geo.MAIN_TOP
         right, bottom = geo.WINDOW_W - geo.PAD, geo.MAIN_BOTTOM
-        self.canvas.create_rectangle(left, top, right, bottom, fill=_C.bg_panel, outline=_C.grid)
+        self.canvas.create_rectangle(left, top, right, bottom, fill=_C.bg_panel, outline=_C.rule)
         center_x = (left + right) / 2
         center_y = (top + bottom) / 2
 
@@ -274,7 +274,7 @@ class ImageCockpit:
         top = geo.STRIP_TOP
         self.canvas.create_rectangle(
             geo.PAD, top, geo.WINDOW_W - geo.PAD, top + geo.STRIP_HEIGHT,
-            fill=_C.bg_panel, outline=_C.grid,
+            fill=_C.bg_panel, outline=_C.rule,
         )
         if not self._items:
             self._text(geo.PAD + 10, top + geo.STRIP_HEIGHT / 2, "— 暂无图片", fill=_C.dim, font=FONT_SMALL)
@@ -294,7 +294,7 @@ class ImageCockpit:
             if photo is not None:
                 self.canvas.create_image(x, y, image=photo, anchor="nw")
             else:
-                self.canvas.create_rectangle(x, y, x + tw, y + th, outline=_C.accent_dim)
+                self.canvas.create_rectangle(x, y, x + tw, y + th, outline=_C.rule)
                 self._text(
                     x + tw / 2, y + th / 2, "✕" if not geo.file_alive(path) else "?",
                     fill=_C.dim, font=FONT_SMALL, anchor="center",

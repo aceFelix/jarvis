@@ -26,7 +26,7 @@ from agent.ui.hud_theme import (
     FONT_SMALL,
     FONT_TEXT,
     GREEN,
-    GRID,
+    RULE,
     RED,
     TEXT,
     clip,
@@ -60,7 +60,7 @@ def draw_tool_detail(canvas: Any, entry: dict[str, Any], *, window_w: int, pad: 
 
     canvas.create_rectangle(
         pad, top, window_w - pad, bottom,
-        fill=BG_PANEL, outline=CYAN_DIM, width=1,
+        fill=BG_PANEL, outline=RULE, width=1,
     )
     _text(pad + 10, top + 18, "工具详情 // DETAIL", fill=CYAN, font=FONT_LABEL)
     _text(
@@ -141,7 +141,7 @@ def draw_section(canvas: Any, title: str, y: float, *, window_w: int, pad: int) 
     @author aceFelix
     """
     canvas.create_text(pad, y, text=title, fill=CYAN_DIM, font=FONT_LABEL, anchor="w")
-    canvas.create_line(pad + 108, y, window_w - pad, y, fill=GRID)
+    canvas.create_line(pad + 108, y, window_w - pad, y, fill=RULE)
 
 
 def draw_feed(canvas: Any, state: Any, *, window_w: int, pad: int) -> None:

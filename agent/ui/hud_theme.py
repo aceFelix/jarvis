@@ -49,6 +49,7 @@ __all__ = [
     "GRID",
     "HudTheme",
     "RED",
+    "RULE",
     "TEXT",
     "THEME_CRAWL",
     "THEME_IMAGE",
@@ -73,10 +74,13 @@ class HudTheme:
         grid: 网格与刻度线色（极暗，材质而非信息）。
         scan: 扫描线色（比 grid 更暗，细到几乎不可见）。
         accent: 主色。全屏只有它与它的辉光有权发亮。
-        accent_dim: 主色暗档（边框、次要标注）。
+        accent_dim: 主色暗档（次要标注）。
         accent_glow: 辉光层（比 accent_dim 亮一档，画在 accent 下面做外柔）。
+        rule: 结构线（外框 / 分区线 / 面板边）。必须明显可见又不能抢角标——
+            这条线是"机器切面"，读者靠它分辨区块，2026-11-12 用户反馈
+            "线条不够清晰"就是因为这里错用了 accent_dim（太暗）。
         text: 正文色（偏该舱色相的近白，不用纯白以免刺眼）。
-        dim: 次要文字（说明、单位、占位）。
+        dim: 次要文字（说明、单位、占位）。必须保证在 bg / bg_panel 上可读。
         ok: 成功语义色（跨舱统一，不被主色带跑）。
         fail: 失败语义色。
         warn: 警告语义色。
@@ -90,6 +94,7 @@ class HudTheme:
     accent: str
     accent_dim: str
     accent_glow: str
+    rule: str
     text: str
     dim: str
     ok: str
@@ -102,13 +107,14 @@ THEME_TASK = HudTheme(
     name="TASK",
     bg="#03060a",
     bg_panel="#071019",
-    grid="#0a1822",
-    scan="#050d13",
+    grid="#08141c",
+    scan="#040a11",
     accent="#00d4ff",
     accent_dim="#0b4d66",
     accent_glow="#007a99",
-    text="#cfeaf5",
-    dim="#5d7f8e",
+    rule="#1b9fc4",
+    text="#e6f7ff",
+    dim="#8fb0bf",
     ok="#33f0c0",
     fail="#ff4d6a",
     warn="#ffb347",
@@ -119,13 +125,14 @@ THEME_CRAWL = HudTheme(
     name="CRAWL",
     bg="#0a0409",
     bg_panel="#160811",
-    grid="#1e0a15",
-    scan="#0d0509",
+    grid="#170810",
+    scan="#070305",
     accent="#ff2d78",
     accent_dim="#6d1035",
     accent_glow="#a01048",
-    text="#f6d8e4",
-    dim="#8d6272",
+    rule="#c2195c",
+    text="#ffe8f1",
+    dim="#b9899a",
     # 失败色刻意偏橙红：品红主色下的纯红会与 accent 撞成一片，看不出成/败
     fail="#ff6b4a",
     ok="#33f0c0",
@@ -137,13 +144,14 @@ THEME_IMAGE = HudTheme(
     name="IMAGE",
     bg="#030a07",
     bg_panel="#07160f",
-    grid="#0b2018",
-    scan="#04110b",
+    grid="#081811",
+    scan="#030806",
     accent="#39ff88",
     accent_dim="#0f5c33",
     accent_glow="#17995a",
-    text="#d3f7e2",
-    dim="#62887a",
+    rule="#1fbf6b",
+    text="#e9fff3",
+    dim="#95c2ac",
     ok="#a9ffd0",
     fail="#ff4d6a",
     warn="#ffd24a",
@@ -151,6 +159,9 @@ THEME_IMAGE = HudTheme(
 
 
 # ---- 字体（三舱共用；不引入外部字体文件，按可用字体近似 Tektur/Silkscreen 的意图）----
+# 2026-11-12：字号刻意保持原值。试过整体 +1，但各舱的文本宽度是按字符数 clip 的
+# （clip(56) / clip(62) …），字号一涨就会顶出面板，必须同步重算所有截断宽度。
+# 本轮可读性问题靠「提亮 + 纹理退后 + 结构线提亮」解决，不动字号。
 FONT_TITLE = ("Microsoft YaHei UI", 13, "bold")
 FONT_LABEL = ("Microsoft YaHei UI", 8)
 FONT_TEXT = ("Microsoft YaHei UI", 9)
@@ -195,9 +206,10 @@ def fmt_elapsed(ms: float) -> str:
 # ---- 背景材质（三舱共用：网格 + 扫描线 + 颗粒 + 侧边刻度）----
 
 _GRID_STEP = 28
-_SCAN_STEP = 4
-#: 噪点密度分母：w*h/3000 → 480×600 约 96 粒。再多就拖慢 Tk 全量重绘。
-_GRAIN_DIVISOR = 3000
+_SCAN_STEP = 6
+#: 噪点密度分母：w*h/4500 → 480×600 约 64 粒。再多会压掉小字的可读性
+#: （2026-11-12 用户反馈「文字看不太清」，主因就是纹理压字）。
+_GRAIN_DIVISOR = 4500
 _GRAIN_SEED = 20261112
 
 
@@ -269,7 +281,7 @@ def draw_frame(
         corner: 四角括号的臂长。
     """
     canvas.create_rectangle(
-        inset, inset, width - inset, height - inset, outline=theme.accent_dim
+        inset, inset, width - inset, height - inset, outline=theme.rule
     )
     for x, y, dx, dy in (
         (inset, inset, 1, 1),
@@ -330,6 +342,7 @@ def glow_text(
 BG = THEME_TASK.bg
 BG_PANEL = THEME_TASK.bg_panel
 GRID = THEME_TASK.grid
+RULE = THEME_TASK.rule
 CYAN = THEME_TASK.accent
 CYAN_DIM = THEME_TASK.accent_dim
 TEXT = THEME_TASK.text

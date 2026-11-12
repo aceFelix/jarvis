@@ -383,7 +383,7 @@ class CrawlWindow:
     def _section(self, title: str, y: int) -> None:
         """小节标题 + 右侧延长线。"""
         self._text(CRAWL_PAD, y, title, fill=_C.accent_dim, font=FONT_LABEL)
-        self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, _C.grid)
+        self._line(CRAWL_PAD + 108, y, CRAWL_W - CRAWL_PAD, y, _C.rule)
 
     def _draw_scrollbar(self, total: int, visible: int, offset: int, top: float, bottom: float) -> None:
         """在窗口右缘画一条迷你滚动条。"""
@@ -439,7 +439,7 @@ class CrawlWindow:
         cell_w = (CRAWL_W - 2 * CRAWL_PAD - 24) // 4
         for index, (label, value, color) in enumerate(cells):
             x = CRAWL_PAD + index * (cell_w + 8)
-            self.canvas.create_rectangle(x, 70, x + cell_w, 126, outline=_C.grid)
+            self.canvas.create_rectangle(x, 70, x + cell_w, 126, outline=_C.rule)
             self._text(x + 8, 82, label, fill=_C.dim, font=FONT_LABEL)
             glow_text(
                 self.canvas, x + 8, 105, value,
