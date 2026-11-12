@@ -303,6 +303,23 @@ def _print_cost(ui: RichCLI, messages: list[Message], dialog_count: int, model: 
         # 总 token 反推——DeepSeek 命中价是未命中的 1/50，系数近似会差几十倍。
         # @author aceFelix
         rows.append(["累计金额（人民币）", f"¥{session.cost_cny:.4f}"])
+        # 按模型拆分（2026-11）：跨模型会话里只报"当前模型"会误导——实测一次 7 轮
+        # 会话显示 ¥0.2491，而按当时的 flash 算只该 ¥0.065，差的都是中途切进贵模型
+        # 那几轮烧的。金额必须能自己解释自己。@author aceFelix
+        by_model = getattr(ctx.loop, "cost_by_model", {}) if ctx.loop is not None else {}
+        if by_model:
+            for name, b in sorted(by_model.items(), key=lambda kv: -kv[1].get("cost", 0.0)):
+                rows.append([
+                    f"其中 {name}",
+                    f"输入 {int(b.get('input', 0)):,} / 命中 {int(b.get('hit', 0)):,}"
+                    f" / 输出 {int(b.get('output', 0)):,} · ¥{b.get('cost', 0.0):.4f}",
+                ])
+        # 缓存失效归因：让"命中率为什么低"自解释，不必等人去猜。
+        breaks = getattr(ctx.loop, "cache_breaks", []) if ctx.loop is not None else []
+        if breaks:
+            from agent.core.cache_attribution import summarize_breaks
+
+            rows.append(["缓存失效归因", summarize_breaks(breaks)])
         if session.unpriced_input_tokens:
             rows.append([
                 "未计价部分",

@@ -36,6 +36,7 @@ from typing import Any
 # @author aceFelix
 logger = logging.getLogger(__name__)
 
+from agent.core.cache_attribution import CacheAttribution
 from agent.core.context import ToolContext
 from agent.core.message import (
     ContentBlock,
@@ -177,6 +178,8 @@ class QueryLoop:
         self._network_retried: bool = False
         # 会话级 token 累计（跨多轮 run() 累加，供 /cost 展示缓存命中率）
         self._session_usage = Usage()
+        # 成本与缓存失效归因（换模型/工具块变化 → 结构性未命中）
+        self._attrib = CacheAttribution()
 
     def set_thinking_enabled(self, enabled: bool | None) -> None:
         """统一开关思考模式，同时同步到当前 provider。
@@ -224,6 +227,17 @@ class QueryLoop:
         self._orchestrator = orchestrator
 
     def switch_model(self, provider: LLMProvider, model: str) -> LLMProvider | None:
+        # 换模型 = 换一个缓存空间（DeepSeek 按模型隔离），攒的缓存全废。
+        # 记下"当时上下文多大"，才能算出这一次切换烧掉多少 token。@author aceFelix
+        if model and model != self._model and self._session_usage.input_tokens:
+            self._cache_breaks.append(
+                {
+                    "reason": "model_switch",
+                    "from": self._model,
+                    "to": model,
+                    "context": self._session_usage.last_input_tokens,
+                }
+            )
         """就地热切换 provider / 模型（工作台与桌面壳的 models.select 链路）。
 
         与 _try_failover 同构：只替换 _provider / _model，不重建 QueryLoop ——
@@ -642,12 +656,28 @@ class QueryLoop:
             cache_miss_tokens=prev.cache_miss_tokens + turn.cache_miss_tokens,
         )
 
+        self._attrib.add_turn(self._model, turn, settled)
+
         return stats
 
     @property
     def session_usage(self) -> Usage:
         """会话级累计 token 用量（跨多轮对话）。"""
         return self._session_usage
+
+    @property
+    def cost_by_model(self) -> dict[str, dict[str, float]]:
+        """按模型拆分的累计用量与金额（/cost 用来解释"钱花在哪家模型上"）。"""
+        return self._attrib.by_model
+
+    @property
+    def cache_breaks(self) -> list[dict[str, Any]]:
+        """本会话的缓存失效事件（换模型 / 工具块变化），带当时的上下文规模。"""
+        return self._attrib.breaks
+
+    def _note_tool_block(self, tool_defs: Any) -> None:
+        """兼容入口：实际逻辑在 cache_attribution（纯记账，单独可测）。"""
+        self._attrib.note_tool_block(tool_defs)
 
     @property
     def keep_recent_messages(self) -> int:
@@ -700,6 +730,7 @@ class QueryLoop:
                 content_blocks.append(ThinkingContent(text=thinking_buf))
 
         tool_defs = self._build_tool_defs(ctx)
+        self._attrib.note_tool_block(tool_defs)
 
         # Ctrl+C 打断检查点（2026-10-14）：语音模式的 SIGINT 处理器刻意**只置标志不抛
         # 异常**（在主线程 raise 会撕裂 asyncio.run，导致整个进程退出），由

@@ -89,6 +89,12 @@ class TestQueryLoopSwitch:
         loop._failover_tried = False
         loop._thinking_override = None
         loop._thinking_effort_override = None
+        # switch_model 现在会记一次缓存失效归因（换模型 = 换缓存空间）
+        from agent.core.cache_attribution import CacheAttribution
+        from agent.llm.base import Usage
+
+        loop._attrib = CacheAttribution()
+        loop._session_usage = Usage()
 
         new = _FakeProvider("new-model")
         returned = loop.switch_model(new, "new-model")
