@@ -28,12 +28,34 @@ class MCPToolWrapper(Tool):
         self._client = client
         self._tool_def = tool_def
         self.name = f"mcp__{tool_def.server_name}__{tool_def.name}"
-        self.description = (
+        # description 是动态 property（见下），这里只存不被污染的基础文案
+        self._base_description = (
             f"[MCP/{tool_def.server_name}] {tool_def.description}".strip()
         )
         self.input_schema = tool_def.input_schema
         # MCP 工具结果通常不大，但保险起见给个上限
         self.max_result_chars = 20_000
+
+    @property
+    def description(self) -> str:
+        """工具描述；熔断期间追加「当前不可用」警告。
+
+        为什么必须是动态的（2026-11-12 实机）：模型在**选择工具**时只看 description。
+        熔断后描述若和正常一样，它只能靠上一轮的错误结果"记住"，而长任务里这点经常
+        失效——实测 `tyc-mcp` 熔断后被连调 4 次，每次都在 1 秒内失败，纯浪费步数。
+
+        未熔断时逐字节返回 ``_base_description``，保证请求前缀稳定（不破缓存）。
+        """
+        state = self._client.breaker_remaining(self._tool_def.server_name)
+        if state is None:
+            return self._base_description
+        fail_count, remaining = state
+        return (
+            f"{self._base_description}\n"
+            f"[不可用] 该 server 已熔断（连续失败 {fail_count} 次），"
+            f"约 {remaining} 秒后自动恢复。期间调用必然失败，"
+            "请改用其他工具或直接向用户说明该数据暂不可得。"
+        )
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """转发调用到 MCP server。"""
@@ -45,7 +67,15 @@ class MCPToolWrapper(Tool):
             )
             return ToolResult.ok(result_text)
         except KeyError as e:
-            return ToolResult.error(f"MCP server 未连接: {e}")
+            # KeyError 的 str() 带引号，取 args[0] 才是原始文案
+            reason = str(e.args[0]) if e.args else str(e)
+            # 熔断/未连接期间调用必然失败：把「别再试」写进结果，并标不可重试
+            return ToolResult.error(
+                f"MCP server 未连接: {reason}\n"
+                "不要再调用本工具：熔断解除前每次调用都会立即失败。"
+                "请改用其他来源，或直接向用户说明该数据暂不可得。",
+                retryable=False,
+            )
         except RuntimeError as e:
             return ToolResult.error(str(e))
         except Exception as e:

@@ -402,6 +402,29 @@ class MCPClient:
         """列出所有连接。"""
         return list(self._connections.values())
 
+    def breaker_remaining(self, server_name: str) -> tuple[int, int] | None:
+        """熔断状态：``(连续失败次数, 剩余秒数)``；未熔断或已到期返回 ``None``。
+
+        供工具描述使用（2026-11-12 实机）：熔断期间模型仍会反复调用同一个 MCP
+        工具——因为它只在**调用之后**才从错误结果里得知不可用，而工具列表里那个
+        工具看起来完全正常。实测一个已熔断的 server 被连调 4 次。
+        把状态写进 ``description``，让它在"选工具"那一刻就能看见。
+
+        @author aceFelix
+        """
+        import time as _time
+
+        state = self._breaker.get(server_name)
+        if not state:
+            return None
+        fail_count, first_fail = state
+        if fail_count < self._BREAKER_MAX_FAILS:
+            return None
+        remaining = self._BREAKER_COOLDOWN - (_time.time() - first_fail)
+        if remaining <= 0:
+            return None
+        return fail_count, int(remaining) + 1
+
     async def call_tool(self, server_name: str, tool_name: str, args: dict[str, Any]) -> str:
         """调用某个 server 的某个工具。返回结果文本。
 
