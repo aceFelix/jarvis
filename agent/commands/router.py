@@ -34,6 +34,9 @@ from agent.commands.handlers.core_commands import (
     handle_rewind,
     handle_think,
 )
+from agent.commands.handlers.net_commands import (
+    handle_net,
+)
 from agent.commands.handlers.media_commands import (
     handle_image,
     handle_paste,
@@ -210,6 +213,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "/repair": handle_repair,
     # 操作可见性（2026-11）：回看最近一轮操作轨迹 @author aceFelix
     "/trace": handle_trace,
+    # 网络诊断（2026-11）：出口、引擎可达性、关键站点可达性
+    "/net": handle_net,
 }
 
 # 前缀匹配命令表（按注册顺序优先匹配）

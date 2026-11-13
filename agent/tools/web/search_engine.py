@@ -347,24 +347,8 @@ _PROBE_TIMEOUT = 1.5
 
 
 def _probe_one(url: str) -> tuple[bool, float]:
-    """探测单个地址是否可达，返回 (可达, 延迟毫秒)。同步函数，进 executor 调。"""
-    t0 = time.perf_counter()
-    try:
-        import requests  # type: ignore
-
-        resp = requests.get(
-            url,
-            headers={"User-Agent": _UA},
-            timeout=_PROBE_TIMEOUT,
-            proxies=net.proxies_for(url),
-            stream=True,
-        )
-        resp.close()
-        # 只要不是连接层失败就算可达：4xx/5xx 说明网络通、只是路径不对，
-        # 这种时候真实搜索可能仍然可用，不该把整个引擎判死。
-        return True, (time.perf_counter() - t0) * 1000
-    except Exception:
-        return False, 0.0
+    """探测单个地址是否可达。实现统一在 net.probe，这里只固定超时。"""
+    return net.probe(url, timeout=_PROBE_TIMEOUT)
 
 
 async def _ensure_reach(names: list[str]) -> None:

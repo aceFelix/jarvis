@@ -38,6 +38,40 @@ _DEAD_TTL_S = 300.0
 _DEAD: dict[str, float] = {}
 
 
+# 探测用 UA：与搜索/抓取侧保持一致，避免有的站按 UA 直接 403
+_PROBE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def probe(url: str, *, timeout: float = 1.5) -> tuple[bool, float]:
+    """探测 URL 是否可达，返回 (可达, 延迟毫秒)。
+
+    只读首块就断开（stream=True + close），不下载整页——这是给"排序"和"体检"
+    用的，不是抓内容。连接层异常才算不可达；4xx/5xx 说明网络通、只是路径不对，
+    不该据此把整个引擎判死。
+
+    探测与真实调用**共用同一条出口策略**（proxies_for），否则结论与实际行为
+    会不一致——这正是"Crawl 能抓、WebFetch 超时"那类问题的根源。
+    """
+    t0 = time.perf_counter()
+    try:
+        import requests  # type: ignore
+
+        resp = requests.get(
+            url,
+            headers={"User-Agent": _PROBE_UA},
+            timeout=timeout,
+            proxies=proxies_for(url),
+            stream=True,
+        )
+        resp.close()
+        return True, (time.perf_counter() - t0) * 1000
+    except Exception:
+        return False, 0.0
+
+
 def host_of(url: str) -> str:
     """取 URL 的主机名（小写）。解析失败返回空串。"""
     try:
