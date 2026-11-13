@@ -133,3 +133,93 @@ class TestCircuitBreaker:
     def test_unparsable_hosts_are_harmless(self, bad):
         net.note_unreachable(bad)
         assert net.is_unreachable(bad) is False
+
+
+class TestReachabilityRanking:
+    """引擎顺序来自**本机实测可达性**，而不是写死的语种表。
+
+    这一层是"治本"的关键：同一份代码在国内、国外、带代理、不带代理下都要选对。
+    静态语种表只能覆盖作者当时所在的那种网络。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_reach(self, monkeypatch):
+        from agent.tools.web import search_engine as se
+
+        monkeypatch.setattr(se, "_REACH", {})
+        yield
+
+    def _stub(self, monkeypatch, table):
+        """把探测结果直接写进缓存，不触网。"""
+        from agent.tools.web import search_engine as se
+
+        for name, ok in table.items():
+            se._REACH[name] = (ok, 100.0, time.monotonic() + 600)
+
+    def test_unreachable_group_moves_to_back(self, monkeypatch):
+        """国内网络：DDG 不可达 → 整组后移，但组内语种序不变。"""
+        from agent.tools.web import search_engine as se
+
+        self._stub(monkeypatch, {"360搜索": True, "Bing": True,
+                                 "DuckDuckGo": False, "DuckDuckGo-lite": False})
+        names = [n for n, _ in asyncio_run(se.ordered_engines("梁文锋"))]
+        assert names == ["360搜索", "Bing", "DuckDuckGo", "DuckDuckGo-lite"]
+
+    def test_foreign_network_flips_360_to_last(self, monkeypatch):
+        """国外网络：360 不通、DDG 通 → 360 垫底，Bing 顶上。"""
+        from agent.tools.web import search_engine as se
+
+        self._stub(monkeypatch, {"360搜索": False, "Bing": True,
+                                 "DuckDuckGo": True, "DuckDuckGo-lite": True})
+        zh = [n for n, _ in asyncio_run(se.ordered_engines("梁文锋"))]
+        en = [n for n, _ in asyncio_run(se.ordered_engines("Liang Wenfeng"))]
+        assert zh[-1] == "360搜索"
+        assert zh[0] == "Bing"
+        assert en[0] == "Bing"
+
+    def test_latin_query_does_not_prefer_faster_chinese_engine(self, monkeypatch):
+        """可达性只证明"能连上"，不能证明"适合这种 query"。
+
+        最初实现按纯延迟排，于是 360 最快就永远第一，英文查询也交给它——
+        360 是中文索引，英文质量差。组内必须保持语种序。
+        """
+        from agent.tools.web import search_engine as se
+
+        se._REACH["360搜索"] = (True, 10.0, time.monotonic() + 600)   # 最快
+        se._REACH["Bing"] = (True, 900.0, time.monotonic() + 600)     # 慢但英文好
+        se._REACH["DuckDuckGo"] = (False, 0.0, time.monotonic() + 600)
+        se._REACH["DuckDuckGo-lite"] = (False, 0.0, time.monotonic() + 600)
+        en = [n for n, _ in asyncio_run(se.ordered_engines("DeepSeek V3 architecture"))]
+        assert en[0] == "Bing"
+
+    def test_all_probes_failed_falls_back_to_language_order(self, monkeypatch):
+        """一个都没探通时不能据此判引擎死刑——退回语种静态序。"""
+        from agent.tools.web import search_engine as se
+
+        self._stub(monkeypatch, {"360搜索": False, "Bing": False,
+                                 "DuckDuckGo": False, "DuckDuckGo-lite": False})
+        names = [n for n, _ in asyncio_run(se.ordered_engines("梁文锋"))]
+        assert names == [n for n, _ in se.engines_for("梁文锋")]
+
+    def test_probe_cache_is_reused(self, monkeypatch):
+        """探测有 600s 缓存，不能每次搜索都付一遍成本。"""
+        from agent.tools.web import search_engine as se
+
+        self._stub(monkeypatch, {"360搜索": True})
+        calls = []
+
+        def fake_probe(url):
+            calls.append(url)
+            return True, 50.0
+
+        monkeypatch.setattr(se, "_probe_one", fake_probe)
+        asyncio_run(se._ensure_reach(["360搜索", "Bing"]))
+        asyncio_run(se._ensure_reach(["360搜索", "Bing"]))
+        # 缓存未过期，第二次不应再探
+        assert len(calls) <= 2
+
+
+def asyncio_run(coro):
+    import asyncio
+
+    return asyncio.new_event_loop().run_until_complete(coro)

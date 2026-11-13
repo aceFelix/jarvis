@@ -24,7 +24,11 @@ from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
 from agent.tools.web import net
-from agent.tools.web.search_engine import _SEARCH_ENGINES, engines_for
+from agent.tools.web.search_engine import (
+    _SEARCH_ENGINES,
+    engines_for,
+    ordered_engines,
+)
 
 
 # ---- 通用工具 ----
@@ -356,11 +360,16 @@ class WebSearchTool(Tool):
 _ENGINES_DEFAULT = _SEARCH_ENGINES
 
 
-def _engine_chain(query: str) -> list[tuple[str, Any]]:
-    """当前该用哪条引擎链：被打桩过就用打桩的，否则按语种排。"""
+async def _engine_chain(query: str) -> list[tuple[str, Any]]:
+    """当前该用哪条引擎链。
+
+    - 打桩过（测试/插件替换了 `_SEARCH_ENGINES`）→ 照用，不做任何改写；
+    - 否则按**本机实测可达性**排：可达的按延迟升序，语种只作平手次序。
+      这样同一份代码在国内、国外、带代理、不带代理下都能选对。
+    """
     if _SEARCH_ENGINES is not _ENGINES_DEFAULT:
         return list(_SEARCH_ENGINES)
-    return engines_for(query)
+    return await ordered_engines(query)
 
 
 async def _run_search_engines(
@@ -373,7 +382,7 @@ async def _run_search_engines(
         (名称, 错误摘要) 列表（异常与「0 结果」都记为失效）。
     """
     failures: list[tuple[str, str]] = []
-    for name, engine in _engine_chain(query):
+    for name, engine in await _engine_chain(query):
         try:
             results = await engine(query, max_results)
         except Exception as e:

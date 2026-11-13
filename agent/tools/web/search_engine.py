@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any
 from urllib.parse import quote_plus, unquote
 
@@ -318,6 +319,113 @@ _SEARCH_ENGINES_EN: list[tuple[str, Any]] = [
     ("DuckDuckGo-lite", search_duckduckgo_lite),
     ("360搜索", search_360),
 ]
+
+# ---------------------------------------------------------------------------
+# 可达性探测：按本机网络排引擎，而不是按语种猜
+# ---------------------------------------------------------------------------
+#
+# 为什么需要（2026-11）：`engines_for()` 只看 query 有没有汉字，这在境内网络
+# 碰巧对，但换环境必错——外国用户机器上 360 可能不可达却排第一；用户人在国外
+# 时同一份静态表仍然先试境内源；Bing 某天被污染，静态表毫无察觉。
+#
+# 排序规则：**可达优先，按实测延迟升序；语种只作平手时的次序**。
+# 探测与真实调用走同一条出口策略（含代理），否则结论与实际行为不一致。
+
+# 探测缓存：引擎名 -> (可达, 延迟毫秒, 过期时间戳)
+_REACH_TTL_S = 600.0
+_REACH: dict[str, tuple[bool, float, float]] = {}
+
+# 每个引擎的轻量探测地址：只读首块就断开，不下载整页。
+_PROBE_URLS: dict[str, str] = {
+    "360搜索": "https://www.so.com/",
+    "Bing": "https://www.bing.com/",
+    "DuckDuckGo": "https://html.duckduckgo.com/html/",
+    "DuckDuckGo-lite": "https://lite.duckduckgo.com/lite/",
+}
+
+_PROBE_TIMEOUT = 1.5
+
+
+def _probe_one(url: str) -> tuple[bool, float]:
+    """探测单个地址是否可达，返回 (可达, 延迟毫秒)。同步函数，进 executor 调。"""
+    t0 = time.perf_counter()
+    try:
+        import requests  # type: ignore
+
+        resp = requests.get(
+            url,
+            headers={"User-Agent": _UA},
+            timeout=_PROBE_TIMEOUT,
+            proxies=net.proxies_for(url),
+            stream=True,
+        )
+        resp.close()
+        # 只要不是连接层失败就算可达：4xx/5xx 说明网络通、只是路径不对，
+        # 这种时候真实搜索可能仍然可用，不该把整个引擎判死。
+        return True, (time.perf_counter() - t0) * 1000
+    except Exception:
+        return False, 0.0
+
+
+async def _ensure_reach(names: list[str]) -> None:
+    """并发补齐这些引擎的可达性缓存（过期的重探）。"""
+    now = time.monotonic()
+    todo = [
+        n
+        for n in names
+        if n in _PROBE_URLS and (n not in _REACH or _REACH[n][2] <= now)
+    ]
+    if not todo:
+        return
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(
+        *(
+            loop.run_in_executor(None, _probe_one, _PROBE_URLS[n])
+            for n in todo
+        ),
+        return_exceptions=True,
+    )
+    stamp = time.monotonic() + _REACH_TTL_S
+    for name, res in zip(todo, results):
+        if isinstance(res, BaseException):
+            _REACH[name] = (False, 0.0, stamp)
+        else:
+            ok, ms = res
+            _REACH[name] = (ok, ms, stamp)
+
+
+async def ordered_engines(query: str) -> list[tuple[str, Any]]:
+    """按本机实测可达性给引擎顺序。
+
+    **可达性是过滤器，语种是排序器**——这一点最初写错了：按纯延迟排的话，
+    360 最快就永远排第一，连英文查询也交给它（360 是中文索引，英文质量差）。
+    正确做法是：可达的那一组保持语种序，不可达的整组移到后面。
+
+    - 国内 + 中文 → 360, Bing（语种序本来就是境内优先）
+    - 国内 + 英文 → Bing, 360（DDG 不可达被移后，Bing 本就排第一）
+    - 国外 + 中文 → Bing, DDG, 360（360 不可达被移后）
+    - 国外 + 英文 → Bing, DDG, 360
+
+    探测全失败时退回语种静态序——宁可慢，不要全空。
+    """
+    chain = engines_for(query)
+    names = [n for n, _ in chain]
+    try:
+        await _ensure_reach(names)
+    except Exception:
+        return chain
+
+    reach = {n: _REACH.get(n) for n in names}
+    if not any(v and v[0] for v in reach.values()):
+        # 一个都没探通：可能是探测地址被拦，别据此判引擎死刑
+        return chain
+
+    ok = [(n, e) for n, e in chain if reach.get(n) and reach[n][0]]
+    bad = [(n, e) for n, e in chain if not (reach.get(n) and reach[n][0])]
+    # 组内保持语种序，不按延迟重排：延迟只证明"能连上"，不能证明"这个引擎
+    # 适合这种 query"。英文查询即使 360 更快也该先走 Bing。
+    return ok + bad
+
 
 # 兼容旧引用：默认按中文排序（本项目的用户与查询以中文为主）。
 _SEARCH_ENGINES: list[tuple[str, Any]] = _SEARCH_ENGINES_ZH
