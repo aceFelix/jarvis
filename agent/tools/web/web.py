@@ -23,7 +23,8 @@ from urllib.parse import urlparse
 from agent.core.context import ToolContext
 from agent.core.result import PermissionResult, ToolResult, ValidationResult
 from agent.core.tool import JSONSchema, Tool
-from agent.tools.web.search_engine import _SEARCH_ENGINES
+from agent.tools.web import net
+from agent.tools.web.search_engine import _SEARCH_ENGINES, engines_for
 
 
 # ---- 通用工具 ----
@@ -88,19 +89,36 @@ def _fetch_url(url: str, *, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
 
+    # 出口策略（见 web/net.py）：环境变量 → Windows 系统代理 → 直连。
+    # 缺了这一步，用户开着代理软件时 Chromium（Crawl/Browser*）能通而
+    # WebFetch 必超时——同一个 URL 两套栈两种结果，最难查的那种不一致。
+    if net.is_unreachable(url):
+        raise ConnectionError(
+            f"{net.host_of(url)} 近期不可达，已跳过（{net.describe_egress(url)}）"
+        )
+    proxies = net.proxies_for(url)
+
     # 优先 requests
     try:
         import requests  # type: ignore
-        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        resp = requests.get(
+            url, headers=headers, timeout=timeout,
+            allow_redirects=True, proxies=proxies,
+        )
+        net.forget(url)
         return resp.text, resp.headers.get("Content-Type", ""), resp.status_code
     except ImportError:
         pass
 
-    # 其次 httpx
+    # 其次 httpx（proxy= 参数量不同，用 proxies= 的 requests 口径转换）
     try:
         import httpx  # type: ignore
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        proxy_url = (proxies or {}).get("https") or (proxies or {}).get("http")
+        with httpx.Client(
+            timeout=timeout, follow_redirects=True, proxy=proxy_url
+        ) as client:
             resp = client.get(url, headers=headers)
+            net.forget(url)
             return resp.text, resp.headers.get("Content-Type", ""), resp.status_code
     except ImportError:
         pass
@@ -332,6 +350,19 @@ class WebSearchTool(Tool):
         )
 
 
+# `web._SEARCH_ENGINES` 是测试与插件的历史打桩点：一旦被替换成别的对象，
+# 就以它为准，不再按语种改写。保留这个判断，比让调用方改测试更划算——
+# 打桩点失效会以"换了引擎表却不生效"的形式出现，最难查。
+_ENGINES_DEFAULT = _SEARCH_ENGINES
+
+
+def _engine_chain(query: str) -> list[tuple[str, Any]]:
+    """当前该用哪条引擎链：被打桩过就用打桩的，否则按语种排。"""
+    if _SEARCH_ENGINES is not _ENGINES_DEFAULT:
+        return list(_SEARCH_ENGINES)
+    return engines_for(query)
+
+
 async def _run_search_engines(
     query: str, max_results: int, ctx: ToolContext
 ) -> tuple[list[dict[str, str]], list[tuple[str, str]]]:
@@ -342,7 +373,7 @@ async def _run_search_engines(
         (名称, 错误摘要) 列表（异常与「0 结果」都记为失效）。
     """
     failures: list[tuple[str, str]] = []
-    for name, engine in _SEARCH_ENGINES:
+    for name, engine in _engine_chain(query):
         try:
             results = await engine(query, max_results)
         except Exception as e:

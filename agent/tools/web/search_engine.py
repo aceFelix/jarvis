@@ -17,6 +17,8 @@ import re
 from typing import Any
 from urllib.parse import quote_plus, unquote
 
+from agent.tools.web import net
+
 # 单引擎 HTTP 请求超时（秒）。比 WebFetch 的 15s 略短：
 # 后面还排着其他引擎和浏览器兜底，单引擎不要耗太久。
 _ENGINE_TIMEOUT = 10.0
@@ -35,14 +37,24 @@ _UA = (
 
 
 def _post_form(url: str, body: bytes, *, timeout: float = _ENGINE_TIMEOUT) -> str:
-    """POST 表单并返回响应文本。requests 优先、urllib 兜底。"""
+    """POST 表单并返回响应文本。requests 优先、urllib 兜底。
+
+    出口与 WebFetch 同源（见 web/net.py）：环境变量 → 系统代理 → 直连。
+    近期被判不可达的主机直接跳过，不再白等一轮超时。
+    """
+    if net.is_unreachable(url):
+        raise ConnectionError(f"{net.host_of(url)} 近期不可达，已跳过")
     headers = {
         "User-Agent": _UA,
         "Content-Type": "application/x-www-form-urlencoded",
     }
     try:
         import requests  # type: ignore
-        resp = requests.post(url, data=body, headers=headers, timeout=timeout)
+        resp = requests.post(
+            url, data=body, headers=headers, timeout=timeout,
+            proxies=net.proxies_for(url),
+        )
+        net.forget(url)
         return resp.text
     except ImportError:
         pass
@@ -53,7 +65,9 @@ def _post_form(url: str, body: bytes, *, timeout: float = _ENGINE_TIMEOUT) -> st
 
 
 def _get_url(url: str, *, timeout: float = _ENGINE_TIMEOUT) -> str:
-    """GET 并返回响应文本。requests 优先、urllib 兜底。"""
+    """GET 并返回响应文本。requests 优先、urllib 兜底。出口策略同 _post_form。"""
+    if net.is_unreachable(url):
+        raise ConnectionError(f"{net.host_of(url)} 近期不可达，已跳过")
     headers = {"User-Agent": _UA}
     try:
         import requests  # type: ignore
@@ -206,7 +220,12 @@ def parse_ddg_lite_html(html: str, max_results: int) -> list[dict[str, str]]:
 async def search_bing(query: str, max_results: int) -> list[dict[str, str]]:
     """Bing HTML 搜索。GET 请求，国内可直连（cn.bing.com），免 API key。"""
     loop = asyncio.get_event_loop()
-    url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results}"
+    # mkt/setlang 决定分词与召回语种：中文 query 不带这两个参数时，
+    # Bing 会把生僻人名拆成单字（"梁文锋"→"梁"，2026-11 实测）。
+    url = (
+        f"https://www.bing.com/search?q={quote_plus(query)}"
+        f"&count={max_results}&mkt=zh-CN&setlang=zh-CN"
+    )
     html = await loop.run_in_executor(None, _get_url, url)
     return parse_bing_html(html, max_results)
 
@@ -231,10 +250,88 @@ async def search_duckduckgo_lite(
     return parse_ddg_lite_html(html, max_results)
 
 
-# 引擎顺序表: (显示名, 实现函数)。WebSearchTool 按此顺序轮询，
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def parse_360_html(html: str, max_results: int) -> list[dict[str, str]]:
+    """解析 360 搜索（so.com）结果页。
+
+    结果块为 `<li class="res-list ...">`，标题在 `<h3 class="res-title"><a ...>`。
+    注意 `href` 是 so.com 的跳转链接，**真实地址在 `data-mdurl`**；只取 href
+    会把下游抓取引到跳转页上。
+    """
+    results: list[dict[str, str]] = []
+    for block in html.split('<li class="res-list')[1:]:
+        try:
+            m = re.search(
+                r"<h3[^>]*>\s*<a[^>]*?href=\"[^\"]*\"([^>]*)>(.*?)</a>",
+                block,
+                re.DOTALL,
+            )
+            if not m:
+                continue
+            attrs, inner = m.group(1), m.group(2)
+            title = _strip_tags(inner)
+            md = re.search(r'data-mdurl="([^"]+)"', attrs)
+            url = md.group(1).strip() if md else ""
+            if not url.startswith("http") or not title:
+                continue
+            snippet = ""
+            sm = re.search(r"<span data-result-summary>(.*?)</span>", block, re.DOTALL)
+            if not sm:
+                sm = re.search(r'<p class="res-desc"[^>]*>(.*?)</p>', block, re.DOTALL)
+            if sm:
+                snippet = _strip_tags(sm.group(1))
+            results.append({"title": title, "url": url, "snippet": snippet})
+            if len(results) >= max_results:
+                break
+        except Exception:
+            continue
+    return results
+
+
+async def search_360(query: str, max_results: int) -> list[dict[str, str]]:
+    """360 搜索 HTML 端点（境内直连，服务端渲染）。"""
+    loop = asyncio.get_event_loop()
+    url = f"https://www.so.com/s?q={quote_plus(query)}"
+    html = await loop.run_in_executor(None, _get_url, url)
+    return parse_360_html(html, max_results)
+
+
+# 引擎顺序表: (显示名, 实现函数)。WebSearchTool 按 engines_for() 的顺序轮询，
 # 抛异常或返回空结果都降级到下一个；全部失效后走浏览器/引导兜底。
-_SEARCH_ENGINES: list[tuple[str, Any]] = [
+#
+# 为什么要分语种（2026-11 修）：原来这张表只有 Bing + DuckDuckGo 两路，
+# 国内环境下 DDG 两个端点必然 ConnectTimeout（15s/10s 各一轮），而唯一能通的
+# Bing 对中文生僻人名分词很差——"梁文锋"被当成汉字"梁"检索，前五条全是字典。
+# 一次"查某人底细"就这样烧掉 5 次失败、246 秒。现在中文 query 先走境内引擎。
+_SEARCH_ENGINES_ZH: list[tuple[str, Any]] = [
+    ("360搜索", search_360),
     ("Bing", search_bing),
     ("DuckDuckGo", search_duckduckgo),
     ("DuckDuckGo-lite", search_duckduckgo_lite),
 ]
+
+_SEARCH_ENGINES_EN: list[tuple[str, Any]] = [
+    ("Bing", search_bing),
+    ("DuckDuckGo", search_duckduckgo),
+    ("DuckDuckGo-lite", search_duckduckgo_lite),
+    ("360搜索", search_360),
+]
+
+# 兼容旧引用：默认按中文排序（本项目的用户与查询以中文为主）。
+_SEARCH_ENGINES: list[tuple[str, Any]] = _SEARCH_ENGINES_ZH
+
+
+def engines_for(query: str) -> list[tuple[str, Any]]:
+    """按 query 语种给出引擎顺序。
+
+    含汉字就走境内优先（360→Bing→DDG）；纯拉丁查询走海外优先
+    （Bing→DDG→360）。顺序不是"哪个更好"，是"哪个在这台机器的网络里能通"。
+
+    `_SEARCH_ENGINES` 一旦被外部替换（测试打桩、插件注册），就以替换后的顺序
+    为准，不再按语种改写——否则“换了引擎表却不生效”会变成新的排查陷阱。
+    """
+    if _SEARCH_ENGINES is not _SEARCH_ENGINES_ZH:
+        return list(_SEARCH_ENGINES)
+    return _SEARCH_ENGINES_ZH if _CJK_RE.search(query) else _SEARCH_ENGINES_EN

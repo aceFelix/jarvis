@@ -94,12 +94,20 @@ class TestParseEngines:
 
         assert len(parse_bing_html(BING_HTML, 1)) == 1
 
-    def test_engine_order_bing_first(self):
-        """引擎顺序表按国内可达性排：Bing 在最前，DDG 两端点兜底。"""
-        from agent.tools.web.search_engine import _SEARCH_ENGINES
+    def test_engine_order_by_query_language(self):
+        """引擎顺序按 query 语种排，默认（中文）境内优先。
 
-        names = [n for n, _ in _SEARCH_ENGINES]
-        assert names == ["Bing", "DuckDuckGo", "DuckDuckGo-lite"]
+        2026-11 修：原来只有 Bing + DDG 两路，国内环境下 DDG 必超时，而唯一
+        能通的 Bing 把中文人名拆成单字（"梁文锋"→"梁"）。现在中文先走 360。
+        """
+        from agent.tools.web.search_engine import _SEARCH_ENGINES, engines_for
+
+        assert [n for n, _ in _SEARCH_ENGINES] == [n for n, _ in engines_for("测试")]
+        assert engines_for("梁文锋")[0][0] == "360搜索"
+        assert engines_for("Liang Wenfeng")[0][0] == "Bing"
+        # 两路都保留兜底：任一引擎失效都能继续降级
+        zh = [n for n, _ in engines_for("梁文锋")]
+        assert "DuckDuckGo" in zh and "Bing" in zh
 
 
 class TestToolMetadata:
