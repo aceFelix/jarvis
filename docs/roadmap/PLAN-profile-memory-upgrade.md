@@ -29,15 +29,23 @@
 4. **按生命周期分层 + profile/event 分轨**：`permanent` / `stateful` / `episodic` 三种事实用不同的
    遗忘与替换策略（身份类不淡忘、环境类"新值即失效旧值"、一次性项到期出清），并让"发生过的事"
    走带时间线的事件轨，答得了"上周我说过什么"；
-5. （可选，需拍板）**语义向量召回**收编换措辞的同一事实。
+5. （可选，需拍板）**语义向量召回**收编换措辞的同一事实；
+6. （P5，可选）**按需检索**：常驻只放少量高价值事实，其余靠 `RecallProfile` 工具按 query 捞取——
+   解决"库越大、注入覆盖率越低"（实测 51 条库只注入 35 条，相关性召回为 0）。
 
 **非目标（写进代码，不只是文档）**
 
+- **记忆数据不出本机（2026-11-14 拍板，铁律）**：`profile.json` / `events.jsonl` / 向量旁挂文件只落
+  `~/.jarvis/memory/`，不上传任何云端记忆服务；**永不引入任何数据库或需要用户部署的服务**
+  （向量数据库、Postgres、Redis、FAISS / sqlite-vec 全部排除）。向量若做，只允许**本地模型**生成，
+  云端 embedding 选项不存在；取值白名单 `"" | "ollama"`，其他值 fail-closed 关闭。
+  > 边界说明：对话与提炼本身仍经 LLM 厂商（现状不变）；若连提炼也不想出网，把 `[memory.refine]`
+  > 指向本地 Ollama 端点即可（该配置已支持任意 OpenAI 兼容地址）。
 - **绝不在对话路径同步跑提炼 LLM**（提炼铁律第一条）：任何"压缩时提炼"只能走"入队 + 后台消费"，
   不在 `query_loop` / `freeze_if_needed` 里同步调 LLM；
 - 不破坏 `profile.json` 的**纯 JSON 用户可读可编辑**原则：向量等二进制一律旁挂文件，不塞进主 JSON；
 - 不让画像提炼**每轮嗅探**（与自配置层 §非目标同律：低频 + 显式触发，不烧 token 猜意图）；
-- P3 向量**默认关闭**，未拿到明确的来源决策前不进主干代码路径。
+- P3 向量**默认关闭**，不满足"未命中率 >25% 且库 >500 条"的触发条件就不进主干代码路径。
 
 ## 二、现状架构回顾（四个环节，病灶定位）
 
@@ -71,15 +79,18 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 | memU | 14.6k | 文件式个人记忆 CLI | ❌ sqlmodel+alembic；license NOASSERTION | 文件式 + 宿主 sidecar 思路 |
 | langmem / MemOS / cognee / Memori / A-mem | 1.2k–33.3k | 各自生态 | ❌ 绑框架 / TS 主 / 停更 | 仅借鉴，不引入 |
 
-**统一结论：零新增依赖，继续自研；只抄设计，不抄包。** 四条修正分别是：
+**统一结论：零新增依赖、不引入任何包、不要求用户部署服务；只抄设计，不抄包。**
+（部署形态同样一票否决：memobase / letta 要跑服务，graphiti 要 neo4j，mem0 默认 qdrant。）
+五条修正分别是：
 ① P0 补"空闲超时"第三触发（原计划只有增量水位 + 退出终态）；
 ② P1 补"注入侧主题预算"（`prefer_topics`，原计划的召回只服务提炼裁决）；
 ③ P2 升级为 profile/event 双轨（原计划只有 lifecycle 字段）；
-④ 向量维持 P3 后置——对标项目全部依赖 embedding，但 memobase 证明低延迟靠"画像 + SQL"即可。
+④ 向量维持 P3 后置——对标项目全部依赖 embedding，但 memobase 证明低延迟靠"画像 + SQL"即可；
+⑤ 新增 **P5 常驻/按需分层**（letta 的 core / archival）——解决"库涨到 200 条时注入覆盖率只剩 ~17%"。
 
 ## 四、分阶段方案（P0 起，P4 应尽早与 P1 并行）
 
-> 落地顺序：**P4（安全网）→ P0 → P1 → P2**，P3 单列为待决策。
+> 落地顺序：**P4（安全网）→ P0 → P1 → P2**；P3 / P5 单列为可选，P5 需 P1 稳定后再评估。
 > P4 先行是因为改阈值/改提示若无回归集就是裸改，违反 `testing.md`；其余按性价比递增。
 
 ### P0 · 提炼触发改为消息水位增量 + 终态提炼
@@ -143,8 +154,10 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 
 ```json
 {"facts":[
-  {"op":"add",    "content":"...","category":"...","confidence":0.8},
-  {"op":"update", "target_id":"ent_xxx","content":"新表述","confidence":0.9},
+  {"op":"add",    "content":"...","category":"...","confidence":0.8,
+   "aliases":["熬夜","晚睡","作息晚"]},
+  {"op":"update", "target_id":"ent_xxx","content":"新表述","confidence":0.9,
+   "aliases":["..."]},
   {"op":"delete", "target_id":"ent_xxx","reason":"已被新事实取代/一次性项到期"},
   {"op":"noop",   "target_id":"ent_xxx","confidence":0.7}
 ]}
@@ -153,6 +166,19 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: content`，并明确：
 "命中已有条目 → update/noop，禁止再 add；完全新 → add；拿不准就 noop，宁可少记"。
 **NOOP 是关键新增出口**——它承接"看着像重复但不值得改写法"的全部情况，重复率会断崖下降。
+
+**别名生成（三级召回的写入侧，2026-11-14 拍板）**：
+
+`add` / `update` 必须顺带产出 `aliases`——这是把"语义理解"从查询时挪到写入时的关键，边际成本≈0：
+
+- **规则**：每条 2–5 个，每个 2–6 字；覆盖"用户可能怎么问这条事实"（同义词、口语、缩写/全称）；
+  不重复 content 原词；专有名词保留原文（GLM / 火狐 / WPS）；**禁止编造与事实矛盾的说法**。
+- **示例**：`习惯深夜工作` → `["熬夜","晚睡","作息晚","凌晨"]`；
+  `使用WPS处理文档` → `["办公软件","docx","表格"]`。
+- **存储**：`ProfileEntry.aliases: list[str]`，缺字段按 `[]`（老库向后兼容）；合并时**取并集**，
+  上限 8 个，超出按历史查询命中次数截断。
+- **成本**：每条 +~10 output token；一次提炼 5 条 ≈ +50 token，相对 P0 省下的量可忽略。
+- **关闭**：`profile_aliases_enabled=false` 时 prompt 不带该字段，召回自动降为"类别 + bigram"两级。
 
 **解析与分派**（`refine_session` 按 ①②③ 编排）：先解析抽取结果 → 逐条本地召回 → 再解析裁决结果，
 按 `op` 分派：`add`→`merge_or_add`、`update`→改目标条目、`delete`→`store.delete`、`noop`→不写。
@@ -185,6 +211,8 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
   `weighted` ＝ `estimate_text_tokens_weighted` 中英分权）。**默认保持 `pseudo` 不做静默行为变更**；
   切到 `weighted` 时必须同步下调 `profile_inject_token_limit` 保持实际注入量不变，具体值须在 P4
   回归集实测后确定，不得凭估算改。
+- **同分排序改用三级召回打分**：`prefer_topics` 之后，同分条按 `profile_recall.py` 的三级打分
+  （类别 → 别名+bigram → 向量兜底）稳定排序；只影响"谁排在前面"，不改预算裁剪本身。
 
 ### P2 · 生命周期分层 + profile/event 双轨
 
@@ -217,19 +245,29 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 > P2 是最重的一刀，且依赖 P1 的 update 语义先行。范围大，可再拆 P2a（lifecycle 字段 + decay 分流）、
 > P2b（软删除失效链）、P2c（事件轨 events.jsonl + 过期清理）三小刀，每刀独立可验收。
 
-### P3 · 语义向量召回（默认关闭，需决策）
+### P3 · 语义向量召回（默认关闭；只允许本地；永不引数据库）
 
-仅当 P1 字面召回覆盖不了"换了说法的同一事实"时才上。两个待拍板项：
+**三条铁律（2026-11-14 拍板，优先级高于本节其余内容）**：
 
-1. **向量来源**（二选一，影响本地优先与依赖）：
-   - A：DashScope `text-embedding`（复用已有百炼 key，零新 SDK，但**违反本地优先**、多一次网络调用）；
-   - B：**本地 Ollama embedding**（本地优先，用户机在用 Ollama，但要额外进程与模型体积）。
-   - 决策建议：**先 A 试验证收益**，收益不明显就止步于 P1；确需长期再迁 B。
-2. **向量存放**：旁挂 `profile.vectors.npz`（按 `entry_id` 对齐），`profile.json` 保持纯 JSON 可读。
-   召回 = cosine，`profile_recall_top_k` + `profile_vector_min_score`（默认 0.82）。
-3. 未开启时（`profile_vector_source=""`）全链路走 P1 字面召回，**不加载任何向量代码**。
+1. **不引入任何数据库 / 不要求用户部署任何服务**：不用向量数据库（Chroma / Qdrant / Milvus /
+   pgvector），也不引 FAISS / sqlite-vec / Redis。条目上限 200、单用户单查询，**旁挂文件 + 暴力余弦**
+   足够，且精确检索没有 ANN 的召回损失。
+2. **数据不出本机**：向量只由**本地模型**生成（Ollama）；云端 embedding（DashScope 等）**选项删除**，
+   配置取值白名单 `"" | "ollama"`，出现其他值一律 fail-closed 关闭并告警。
+3. **默认关闭**：`profile_vector_source=""` 时全链路走字面召回（类别过滤 + bigram 相似度），
+   不 import 任何向量代码。
 
-> 这一步破"感知源零新增依赖"的同类戒律，务必单独确认，不默认实施。
+**实现形状**（约 120 行）：
+
+- 存储：`profile.vectors.bin`（`array('f').tobytes()` 原始 float32）+ `vectors_index.json`
+  （`entry_id → 偏移/维度`）；`profile.json` 保持纯 JSON 可读，向量坏了可直接删掉重建。
+- 计算：暴力余弦。200 × 1024 维 ≈ 20 万次乘加 → 纯 Python **10–50ms**，有 numpy 走快路径 **<1ms**
+  （沿用 `aec.py` 的 `_HAS_NUMPY` 惰性导入范式，**numpy 不是硬依赖**）。
+- 更新：新增/更新只 embed 那一条并追加；删除只标记，季度压缩一次。
+- 体积：200 × 1024 × 4B ≈ **800KB**（对比 JSON 存浮点约 4–5MB）。
+
+**触发条件（三条同时满足才做）**：P5 上线后**前两级（类别 → 别名+bigram）**的检索未命中率 **>25%**；
+库规模 **>500 条**；别名已扩到上限（8/条）仍不够。未满足就永不做。
 
 ### P4 · 记忆评测集（安全网，应尽早）
 
@@ -242,9 +280,66 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 - 截断拒绝：>40 字候选 → `rejected` 计数 +1，不入库；
 - 生命周期：`stateful` 新值 update → 旧条目 `invalidated_at` 有值、`render_for_prompt` 不含旧值；
 - `permanent` 跑 decay → confidence 不变；
-- 事件轨（P2c）：写入事件后 `profile.json` 字节不变；`retention_days` 过期清理不影响 profile 条目。
+- 事件轨（P2c）：写入事件后 `profile.json` 字节不变；`retention_days` 过期清理不影响 profile 条目；
+- 按需检索（P5）：问到"我的邮箱/常用工具"而 core 注入未覆盖时，模型应发起 `RecallProfile` 并命中；
+  不发起时用例算不过（反向验证提示词那一行真的生效）；
+- 三级召回：15 组"提问 → 期望条目"，**前两级 top-3 命中 ≥12 组**；关闭别名后下降但不报错。
 
 阈值/提示的任何调整都先过这套，杜绝无测试裸改。
+
+### P5 · 按需检索（RecallProfile 工具，可选后置）
+
+现状注入是"全量或按置信度裁剪"，**不是检索**：300 伪单位只装得下约 37 条（实测 51 条库注入 35 条，
+覆盖率 69%，相关性召回为 0）；库涨到 200 上限时覆盖率跌到 **~17%**。P5 把"全塞进 system prompt"
+改成"常驻少量 + 按需捞取"，即 letta 的 core / archival 分层。
+
+**分层口径**：
+
+| 层 | 内容 | 注入方式 | 预算 |
+|---|---|---|---|
+| core（常驻） | `permanent` + 高置信（≥0.85） | 每轮 system prompt | `profile_inject_token_limit` 默认 300 不变；开 `core_only` 后可降到 ~150 |
+| archival（按需） | 其余全部条目（含 stateful / episodic） | 模型调 `RecallProfile` 时返回 | 单次 ≤ top_k 条、≤1.5KB |
+
+**工具契约**（新文件 `agent/tools/recall_profile.py`，约 140 行）：
+
+```
+RecallProfile(query: str, category: str = "", top_k: int = 8)
+```
+
+- **只读**：`is_read_only=True`，权限 ALLOW，不写 `profile.json`；
+- **召回算法（三级级联，2026-11-14 拍板）**：
+  1. **类别过滤**：`category` 命中优先，未指定不限制（免费，先砍量级）；
+  2. **别名 + bigram**：`score = 0.6×别名命中率 + 0.4×profile_content_similarity(content, query)`，
+     别名权重由 `profile_recall_alias_weight` 调；常见路径 **<1ms、零网络**；
+  3. **向量兜底**：仅当 1–2 级 **0 命中**且 `profile_vector_source="ollama"` 时调用本地余弦；
+     未开启向量就到此为止（返回"未命中"，不编造）；
+- **返回**：`- [ent_id] category (conf 0.85): content`，最多 `top_k` 条，末尾补"共 N 条候选，已显示 M 条"；
+  单条 ≤40 字、总长 ≤1.5KB（回灌对话历史的内容会占后续轮次上下文）；
+- **副作用**：命中条目 `ref_count += 1`、`last_referenced_at = now`——**被真正用到的记忆不再被 decay 误杀**
+  （现状 `decay` 看 `last_referenced_at`，但这个字段从未被写入过，等于衰减只看 updated_at）；
+- **注册**：`deferred=True`，与 MCP 工具同律，经 ToolSearch 发现，避免每轮都带 schema。
+
+**系统提示**：新增一行（**仅当工具真注册时注入**，与 ScheduleReminder 同律）：
+"当需要用户的具体细节（偏好/工具/项目/作息）而当前上下文没有时，调用 `RecallProfile(query)` 检索，
+不要凭印象编造。"
+
+**成本**：
+
+- 常驻注入从 ~538 real tokens 降到 ~270（开 `core_only` 时）；
+- 每次 `RecallProfile` ≈ 150 输入 + 200 输出 ≈ 350 token，按需触发（估 5 次/天 ≈ 1.7k/天）；
+- 净效果：**总开销下降，且覆盖率不再随库规模衰减**——覆盖率由 top-K 决定，与库大小弱相关。
+
+**验收**：
+
+- 构造 100 条库、问题只与排名第 80 的条目相关 → 默认 core 注入不含它，`RecallProfile` **top-3 必须命中**；
+- 调用后该条 `ref_count ≥ 1`、`last_referenced_at > 0`，连续 90 天不被 decay 清除；
+- 工具未注册/关闭时，行为与现状**完全一致**（回退开关）。
+
+**风险**：
+
+- 模型不主动调用 → 靠提示一行 + P4 golden 用例（"问到未注入的细节应发起检索"）；
+  仍不调用时的兜底：`profile_inject_core_only` **默认 false**，不开启就维持现状；
+- 检索质量弱于向量 → 明确写"P3 未开时为字面召回，同义改写可能漏"，不承诺语义召回。
 
 ### 成本对照（token 账，按现码常量估算）
 
@@ -270,6 +365,12 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 > 以上是按代码常量的**估算**而非实测。实测路径：`/cost` 的会话用量，或 `diag.log` 中
 > `profile-refiner` 线程的调用次数。P4 宜补一条"提炼提示词字符数不得超阈值"的断言，
 > 防止后续改 prompt 时无意识膨胀。
+>
+> 别名生成使单次裁决输出 +~50 token（5 条 × 10），相对 P0 每天省下的 ~25k 可忽略；
+> 但它把检索成本从"每次查询做语义计算"变成"写入时一次付清"，这是别名方案效率高的根本原因。
+>
+> P5 若开启，上表的"注入侧/轮"要再降一半（~270 real tokens），代价是每次检索 ~350 token；
+> 总量仍下降，但成本从"每轮固定"变成"按需波动"，预算估算方式不同，需单独建一栏观测。
 
 ## 五、配置新增键（进 `config_specs` 真源表 + `catalog` + 两份 `example.toml`）
 
@@ -284,11 +385,17 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 | `memory.profile_lifecycle_enabled` | false | auto | P2 开关，关时全按旧行为（单一 decay） |
 | `memory.profile_event_enabled` | false | auto | P2 事件轨开关，关时行为与现状一致 |
 | `memory.profile_event_retention_days` | 90 | auto | 事件轨保留天数 |
-| `memory.profile_vector_source` | "" | confirm | P3 向量来源（"" 关闭 / dashscope / ollama）：决定私人事实是否外发，故 confirm |
+| `memory.profile_vector_source` | "" | confirm | P3 向量来源，白名单仅 `""`（关闭）/ `"ollama"`（本地）；其他值 fail-closed。云端 embedding 不存在 |
 | `memory.profile_vector_min_score` | 0.82 | auto | 向量召回相似下限 |
+| `memory.profile_inject_core_only` | false | auto | P5：注入只放 permanent + 高置信（~150 伪单位），其余交给 RecallProfile |
+| `memory.profile_recall_tool_top_k` | 8 | auto | P5：RecallProfile 默认返回条数 |
+| `memory.profile_recall_min_score` | 0.0 | auto | P5：工具召回的相似度下限（0＝不设限，仅按 top-K 截断） |
+| `memory.profile_aliases_enabled` | true | auto | P1：提炼时生成检索别名（关＝降级为类别+bigram 两级） |
+| `memory.profile_alias_max` | 5 | auto | P1：每条事实生成的别名上限（合并后最多保留 8） |
+| `memory.profile_recall_alias_weight` | 0.6 | auto | P1/P5：三级召回中别名命中率的权重（其余给 bigram） |
 
-> `profile_vector_source` 归 **confirm**：它决定"要不要把关于用户的私人对话片段发到外部 embedding 服务"，
-> 属隐私边界，与 `notify_budget` 归 confirm 同理——模型不该自己给自己放宽数据外发范围。
+> `profile_vector_source` 归 **confirm** 的理由已变：不再是"隐私外发"（云端选项已删除），
+> 而是它会拉起一个**本地模型进程**（显存/内存开销），属于资源决策。
 > 现有 `profile_refine_interval` / `profile_refine_min_messages` 保留但语义降级：水位增量成为主判据，
 > 旧两键退化为成本兜底与最小门槛（`profile_refine_min_messages` 仍约束首次提炼的绝对下限）。
 
@@ -298,10 +405,14 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 |---|---|---|
 | `agent/core/memory/profile_refiner.py`（413 行） | 触发逻辑外拆，本体只留编排：瘦身为主 | 增改后仍 <500 |
 | `agent/core/memory/profile_ledger.py`（新） | P0 水位台账读写 + 空闲判定纯函数 | 约 140 |
-| `agent/core/memory/profile_resolve.py`（新） | P1 两段式编排 + 逐条召回 + 四操作解析分派 + 抽取硬闸 | 约 240 |
+| `agent/core/memory/profile_resolve.py`（新） | P1 两段式编排 + 逐条召回 + 四操作/别名解析分派 + 抽取硬闸 | 约 260 |
+| `agent/core/memory/profile_recall.py`（新） | P1/P5 三级召回打分（类别 → 别名+bigram → 向量兜底），注入与工具共用 | 约 100 |
 | `agent/core/memory/profile_inject.py`（新） | P1 注入侧：主题优先 + 两轮填充 + 预算口径切换 | 约 150 |
 | `agent/core/memory/profile_events.py`（新） | P2 事件轨读写与过期清理 | 约 120 |
-| `agent/core/memory/profile_store.py`（432 行） | 增 `recall_similar`；P2 lifecycle 字段与分流 decay、软删除 | 拆分风险高则 `profile_store_lifecycle.py` 派生 |
+| `agent/tools/recall_profile.py`（新） | P5 RecallProfile 工具：只读召回 + ref 计数 | 约 140 |
+| `agent/core/tool.py` | 注册 RecallProfile（`deferred=True`，走 ToolSearch） | +5 |
+| `agent/prompts/system.py` | 工具注册时注入"按需检索"一行指令 | +8 |
+| `agent/core/memory/profile_store.py`（432 行） | 增 `recall_similar`、`aliases` 字段与并集合并；P2 lifecycle 字段与分流 decay、软删除 | 拆分风险高则 `profile_store_lifecycle.py` 派生 |
 | `agent/commands/handlers/session_commands.py`（365 行） | `/memory` 展示补 lifecycle 标签与失效标记 | <450 |
 | `agent/main.py` / `serve/engine/engine.py` | 终态 `force=True` 提炼与空闲检查挂钩 | — |
 | `scripts/migrate_profile_lifecycle.py`（新） | P2 一次性幂等迁移 | 约 80 |
@@ -319,28 +430,35 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
   同一事实在增量里出现一次即不再被后续提炼重复"发现"；退出会话时最后增量被终态提炼收干；
   **模拟"聊 3 轮后静置超过 `profile_refine_idle_minutes`"→ 空闲触发必须补提炼一次，且只补一次（幂等）。**
 - **P1**：golden 集"措辞不同但同义"用例走 `noop`/`update`，新库不再产同义重复条目；>40 字候选 100% 被拒并计数；
+  **别名**：`add`/`update` 必须产出 2–5 个；老库缺字段按 `[]` 加载；合并取并集且 ≤8；
+  `profile_aliases_enabled=false` 时降为两级且不报错；
   **两段式**：断言抽取段 prompt **不含**旧画像清单（防实现时退化成单段式），裁决段只带「候选 + top-K」；
   **注入侧**：给定 `prefer_topics=["identity"]` 时 identity 条目必须置顶；两轮填充下短条目不再被单条长条目清空；
   `budget_mode=weighted` 与 `pseudo` 在同一库上的实际注入条数差异可量化（作为调参依据）。
 - **P2**：`permanent` 跑 90 天 decay 不变；`stateful` 换所在地后旧值在 `render_for_prompt` 消失但仍在盘上可追溯；
   `episodic` 闹铃过 `expiry_at` 自动出清；**事件轨**：写入 3 条事件后，`profile.json` 字节不变；
   超过 `retention_days` 的事件被清理且不影响 profile 条目。
-- **P3**（若做）：一句"我习惯晚上写码"能召回并合到"习惯深夜工作"，`added==0`。
+- **P3**（若做）：一句"我习惯晚上写码"能召回并合到"习惯深夜工作"，`added==0`；
+  配置 `profile_vector_source="dashscope"` 必须被拒并回退关闭（fail-closed），启动无任何网络请求。
 - **P4**：阈值/提示改动后本地回归集全绿才算交付。
+- **P5**（若做）：100 条库仅第 80 条相关 → 默认注入不含它，`RecallProfile` top-3 命中；调用后
+  `ref_count` 增加且 90 天不衰减；不开启 `profile_inject_core_only` 时行为与现状一致。
 
 ## 八、风险与回退
 
 - **水位算错导致漏提炼**：以 `session_id` 为键、只增不减；台账损坏退化为"全量提炼一次"再重建水位（安全侧漏提炼优于漏记忆）。
 - **四操作 JSON 更复杂、小模型解析失败率升高**：`_parse_profile_json` 已有容错；解析不出 `op` 时**默认按 add 走存储层查重闸**（退回已验证的兜底），不丢内容。
 - **P2 schema 迁移写坏用户库**：迁移前自动备份 `profile.json.bak`（对齐图谱"写入前自动备份"）；加载兼容缺字段，老库照常可读。
-- **每档都有开关**：`profile_refine_on_exit` / `profile_lifecycle_enabled` / `profile_vector_source` 关掉即回旧行为，
-  P0 水位是唯一"默认生效且无回退开关"的改动（它就是治本本体），但逻辑局部、可单测钉死。
+- **每档都有开关**：`profile_refine_on_exit` / `profile_lifecycle_enabled` / `profile_inject_core_only` /
+  `profile_vector_source` 关掉即回旧行为，P0 水位是唯一"默认生效且无回退开关"的改动（它就是治本本体），
+  但逻辑局部、可单测钉死。
 
 ## 九、建议的最小可行首刀
 
 若要立刻见效、又不一次铺太大：**P4（评测集）+ P0（水位增量/三触发）** 一起做——
 P0 单独就能把"白花 N 次 token"和"雪球式重复"从源头压掉，改动局部、有 P4 兜底、无新依赖；
-P1（四操作 + 注入侧）作为紧随其后的第二刀。P2/P3 各自独立评估后再上。
+P1（四操作 + 注入侧）作为紧随其后的第二刀。P2/P3/P5 各自独立评估后再上：
+P2 依赖 P1 的 update 语义；P5（按需检索）依赖 P1 注入侧稳定，**不先做**。
 
 > 调研补充（2026-11-13）：对标项目里无一可直接引入（详见
 > [docs/research/memory-systems-survey.md](../research/memory-systems-survey.md)），
