@@ -680,6 +680,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 画像记忆落地 | [plans/memory-profile-phase1a.md](../plans/memory-profile-phase1a.md) |
 | 画像记忆提炼源头治理（阶段 13·升级计划） | [roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) |
 | 画像记忆重复入库修复 | [fixlogs/profile-duplicate-memory-fix.md](../fixlogs/profile-duplicate-memory-fix.md) |
+| **修复复盘索引（按主题分类，120 篇）** | [fixlogs/README.md](../fixlogs/README.md) |
 | 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md) |
 | 语音能力厂商解耦（阶段一计划） | [plans/voice-provider-decoupling.md](../plans/voice-provider-decoupling.md) |
 | 能力自检与自我修复（升级计划） | [plans/capability-selfcheck.md](../plans/capability-selfcheck.md) |
