@@ -139,13 +139,19 @@ class TestYoloScope:
         assert r.behavior == PermissionBehavior.ALLOW
 
     def test_explicit_empty_hard_deny_disables_only_that_list(self):
-        """硬禁止清单写空 → 不再 DENY；但 C 盘保护仍在（两条清单互不顶替）。"""
-        ctx = _ctx(hard=())
+        """硬禁止清单写空 → 不再 DENY；但保护域仍在（两条清单互不顶替）。
+
+        保护根显式取当前用户 home：默认根是 `c:\\`，而 Linux CI 的 home 是
+        `/home/runner`，不在 C 盘——吃默认值会落到“非受保护即放行”，测的就不是
+        本条不变量了（2026-11-14 CI 在 Python 3.14 上因此变红）。
+        默认 C 盘根由 ``test_guard_roots_default_is_c_drive`` 单独钉，不丢覆盖。
+        """
         home = __import__("pathlib").Path.home()
+        ctx = _ctx(roots=(str(home),), hard=())
         target = str(home / ".ssh" / "id_rsa")
         r = self._check(_Tool(irreversible=True), {"file_path": target}, ctx)
         assert r.behavior != PermissionBehavior.DENY   # 不再是硬禁止
-        assert r.behavior == PermissionBehavior.ASK    # 但仍在 C 盘保护域内
+        assert r.behavior == PermissionBehavior.ASK    # 但仍在受保护根内
 
 
 class TestHoldSkip:

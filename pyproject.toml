@@ -98,6 +98,11 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.5.0",
+    # 截图/图片窗口用例会真的编码并落盘一张 PNG（假 pyautogui 仍用真 PIL）。
+    # CI 只装 [dev]，缺 Pillow 会把 4 条用例打成“pyautogui 未安装: No module
+    # named 'PIL'”（2026-11-14 Linux CI 实发）。故意不装 [gui]：pyautogui 在
+    # 无头 Linux 还要 X11/scrot，不值得为测试引入。@author aceFelix
+    "pillow>=10.0.0",
 ]
 # 一键安装全功能（不含 dev 测试工具）
 # 用法: pip install "jarvis-agent[all]"

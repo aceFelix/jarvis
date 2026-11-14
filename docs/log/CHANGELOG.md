@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 修复（CI 环境：Linux / Python 3.14，2026-11-14）
+
+- **5 条用例在 ubuntu CI 变红，本地 Windows 全绿**，均为测试环境假设，不涉及运行时改动：
+  - `tests/tools/test_screenshot_image_ref.py` 4 条：用例的假 pyautogui 里真的 `from PIL import Image`，
+    而 `pillow` 只声明在 `[gui]` / `[camera]`，CI 只装 `.[dev]` → `No module named 'PIL'` 被工具侧的
+    `except ImportError` 兜成“pyautogui 未安装”。修法：`[dev]` 补 `pillow>=10.0.0`
+    （刻意不装 `[gui]`：无头 Linux 的 pyautogui 还要 X11/scrot，不值得为测试引入完整 GUI 栈）。
+  - `tests/permissions/test_yolo_scope.py::test_explicit_empty_hard_deny_disables_only_that_list` 1 条：
+    目标取 `Path.home()/.ssh/id_rsa`，而保护根默认是 `c:\\`；POSIX 上 home 不在 C 盘，于是从 ASK 落成 ALLOW。
+    修法：保护根显式传当前用户 home，让“两条清单互不顶替”这条不变量平台无关；默认 C 盘根由
+    `test_guard_roots_default_is_c_drive` 单独钉住，覆盖不丢。
+  - 复盘：新增 `docs/fixlogs/ci-linux-screenshot-and-yolo-fix.md`。
+
 ### 新增（图片驾驶舱 P0：终端终于能看见图，2026-11-11）
 
 - **背景**：终端此前只有图片**入站**通道——`ScreenShot` / `CameraShot` / `BrowserScreenshot`
