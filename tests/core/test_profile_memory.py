@@ -532,51 +532,88 @@ class TestMemoryCommand:
 # M3: 衰减维护
 # ─────────────────────────────────────────────────────────────
 
-class TestDecay:
-    def test_old_entry_decays_and_removed(self, tmp_path):
+class TestFreshnessWeight:
+    """衰减改为降权：weight = confidence × 新鲜度；不删条目、不改 confidence。"""
+
+    def test_weight_decays_but_data_untouched(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("过时的习惯", "work_habit", 0.8)
-        # 伪造 90 天前创建（3 个半衰期 → 0.8 * 0.125 = 0.1 < floor 0.15 → 删除）
-        e.created_at -= 90 * 86400
-        e.updated_at = e.created_at
+        e.created_at = e.updated_at = 1000.0
         store.upsert(e)
 
-        removed = store.decay()
-        assert removed == 1
-        assert len(store) == 0
+        # 120 天 = 4 个半衰期 → 0.8 × 0.0625 = 0.05 < 0.10 → 休眠
+        now = 1000.0 + 120 * 86400
+        assert store.audit_freshness(now=now) == 1
+        weight, entry = store.weighted_entries(now=now)[0]
+        assert weight == pytest.approx(0.05, abs=0.01)
+        assert entry.confidence == pytest.approx(0.8)   # 数据没被改写
+        assert len(store) == 1                          # 没被删除
 
-    def test_recent_entry_kept_with_decayed_confidence(self, tmp_path):
+    def test_recent_entry_weight_lower_but_active(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("近期习惯", "work_habit", 0.8)
-        # 30 天前 = 1 个半衰期 → 0.8 * 0.5 = 0.4 > floor → 保留但衰减
-        e.created_at -= 30 * 86400
-        e.updated_at = e.created_at
+        e.created_at = e.updated_at = 1000.0
         store.upsert(e)
 
-        removed = store.decay()
-        assert removed == 0
+        now = 1000.0 + 30 * 86400                       # 1 个半衰期
+        assert store.audit_freshness(now=now) == 0
+        weight, _ = store.weighted_entries(now=now)[0]
+        assert weight == pytest.approx(0.4, abs=0.01)
+
+    def test_manual_and_permanent_never_lose_weight(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        manual = ProfileEntry.new("用户亲写", "other", 0.99, source_session="manual")
+        manual.created_at = manual.updated_at = 1000.0
+        identity = ProfileEntry.new("姓名是艾斯", "identity", 0.9)
+        identity.created_at = identity.updated_at = 1000.0
+        store.upsert(manual)
+        store.upsert(identity)
+
+        now = 1000.0 + 365 * 86400
+        weights = {e.content: w for w, e in store.weighted_entries(now=now)}
+        assert weights["用户亲写"] == pytest.approx(0.99)
+        assert weights["姓名是艾斯"] == pytest.approx(0.9)
+        assert store.audit_freshness(now=now) == 0
+
+    def test_injection_skips_dormant(self, tmp_path):
+        """休眠条目不注入，但仍留在库里。"""
+        store = ProfileStore(tmp_path / "p.json")
+        old = ProfileEntry.new("很久前提过的习惯", "work_habit", 0.5)
+        old.created_at = old.updated_at = time.time() - 400 * 86400
+        fresh = ProfileEntry.new("刚说的偏好", "preference", 0.5)
+        store.upsert(old)
+        store.upsert(fresh)
+
+        text = store.render_for_prompt()
+        assert "刚说的偏好" in text
+        assert "很久前提过的习惯" not in text
+        assert len(store) == 2
+
+    def test_prune_drops_lowest_weight_first(self, tmp_path):
+        """容量急时才删：先淘汰权重最低（老且不高置信）的。"""
+        store = ProfileStore(tmp_path / "p.json")
+        stale = ProfileEntry.new("老的高置信", "other", 0.9)
+        stale.created_at = stale.updated_at = time.time() - 120 * 86400
+        fresh = ProfileEntry.new("新的低置信", "other", 0.4)
+        store.upsert(stale)
+        store.upsert(fresh)
+
+        assert store.prune_over_limit(1) == 1
+        assert [e.content for e in store.entries()] == ["新的低置信"]
+
+    def test_audit_never_deletes(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("一年没提的习惯", "work_habit", 0.6)
+        e.created_at = e.updated_at = 1000.0
+        store.upsert(e)
+
+        assert store.audit_freshness(now=1000.0 + 365 * 86400) == 1
         assert len(store) == 1
-        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
-
-    def test_manual_entry_never_decays(self, tmp_path):
-        store = ProfileStore(tmp_path / "p.json")
-        e = ProfileEntry.new("用户亲写", "other", 0.99, source_session="manual")
-        e.created_at -= 365 * 86400  # 一年前
-        e.updated_at = e.created_at
-        store.upsert(e)
-
-        assert store.decay() == 0
-        assert store.entries()[0].confidence == pytest.approx(0.99)
-
-    def test_fresh_entry_untouched(self, tmp_path):
-        store = ProfileStore(tmp_path / "p.json")
-        store.upsert(ProfileEntry.new("刚记的", "other", 0.9))
-        assert store.decay() == 0
-        assert store.entries()[0].confidence == pytest.approx(0.9)
+        assert store.entries()[0].confidence == pytest.approx(0.6)
 
 
 class TestLifecycle:
-    """P2a：生命周期分层（permanent 不衰减 / stateful 半衰期 / episodic 到期出清）。"""
+    """P2a：生命周期分层（permanent 不降权 / stateful 半衰降权 / episodic 到期出清）。"""
 
     def test_default_lifecycle_by_category(self):
         from agent.core.memory.profile_store import default_lifecycle_for_category
@@ -610,24 +647,26 @@ class TestLifecycle:
         assert by_id["ent_a"].lifecycle == "permanent"
         assert by_id["ent_b"].lifecycle == "stateful"
 
-    def test_permanent_never_decays(self, tmp_path):
+    def test_permanent_never_loses_weight(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("姓名是艾斯", "identity", 0.9)
         e.created_at = e.updated_at = 1000.0
         store.upsert(e)
 
-        # 一年后跑 decay：permanent 不动（stateful 同条件早就被磨没了）
-        assert store.decay(now=1000.0 + 365 * 86400) == 0
-        assert store.entries()[0].confidence == pytest.approx(0.9)
+        # 一年后：permanent 权重不变（stateful 同条件已休眠）
+        now = 1000.0 + 365 * 86400
+        assert store.audit_freshness(now=now) == 0
+        assert store.weighted_entries(now=now)[0][0] == pytest.approx(0.9)
 
-    def test_stateful_decays_by_half_life(self, tmp_path):
+    def test_stateful_weight_decays_by_half_life(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("喜欢复古像素风", "preference", 0.8)
         e.created_at = e.updated_at = 1000.0
         store.upsert(e)
 
-        assert store.decay(now=1000.0 + 30 * 86400) == 0
-        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
+        now = 1000.0 + 30 * 86400
+        assert store.audit_freshness(now=now) == 0
+        assert store.weighted_entries(now=now)[0][0] == pytest.approx(0.4, abs=0.01)
 
     def test_episodic_expires_at(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
@@ -638,19 +677,22 @@ class TestLifecycle:
         store.upsert(expired)
         store.upsert(alive)
 
-        assert store.decay(now=3000.0) == 1
+        # 到期出清是显式语义（不是衰减），仍物理删除
+        assert store.expire_episodic(now=3000.0) == 1
         left = store.entries()
         assert len(left) == 1 and left[0].content == "下周体检"
 
-    def test_episodic_without_expire_falls_back_to_half_life(self, tmp_path):
-        """没给到期时间就不是“临时事项”：按 stateful 走衰减，不凭空删除。"""
+    def test_episodic_without_expire_just_loses_weight(self, tmp_path):
+        """没给到期时间就不是“临时事项”：只降权，不删除。"""
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("临时任务", "other", 0.8, lifecycle="episodic")
         e.created_at = e.updated_at = 1000.0
         store.upsert(e)
 
-        assert store.decay(now=1000.0 + 30 * 86400) == 0
-        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
+        now = 1000.0 + 30 * 86400
+        assert store.audit_freshness(now=now) == 0
+        assert store.weighted_entries(now=now)[0][0] == pytest.approx(0.4, abs=0.01)
+        assert len(store) == 1
 
     def test_merge_keeps_more_stable_lifecycle(self, tmp_path):
         """permanent 不能被同事实的 stateful 再报降级；expire_at 取大。"""
@@ -730,14 +772,16 @@ class TestSoftDelete:
         assert len(store.entries()) == 1
         assert len(store.entries(include_invalidated=True)) == 2
 
-    def test_decay_skips_invalidated(self, tmp_path):
+    def test_audit_skips_invalidated(self, tmp_path):
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("早就过时的", "other", 0.9)
         e.created_at = e.updated_at = 1000.0
         store.upsert(e)
         store.invalidate(e.id, now=1000.0)
 
-        assert store.decay(now=1000.0 + 365 * 86400) == 0
+        # 失效条目权重为 0、不计休眠；历史仍在
+        assert store.audit_freshness(now=1000.0 + 365 * 86400) == 0
+        assert store.weighted_entries(now=1000.0 + 365 * 86400) == []
         assert len(store.entries(include_invalidated=True)) == 1
 
     def test_prune_drops_invalidated_first(self, tmp_path):
@@ -799,8 +843,8 @@ class TestReferenceWiring:
         assert kept.last_referenced_at > 0
         assert kept.confidence == pytest.approx(0.9)
 
-    def test_decay_basis_uses_last_reference(self, tmp_path):
-        """老条目但最近被提及过 → 按“最近提及”算年龄，不该被磨掉。"""
+    def test_weight_basis_uses_last_reference(self, tmp_path):
+        """老条目但最近被提及过 → 按“最近提及”算新鲜度，不该被打入休眠。"""
         store = ProfileStore(tmp_path / "p.json")
         e = ProfileEntry.new("喜欢复古像素风", "preference", 0.8)
         e.created_at = e.updated_at = 1000.0        # 两年前创建
@@ -808,8 +852,8 @@ class TestReferenceWiring:
         store.touch_reference(e.id, now=1000.0 + 700 * 86400)  # 最近刚被提及
 
         now = 1000.0 + 730 * 86400                   # 距最近提及 30 天 = 一个半衰期
-        assert store.decay(now=now) == 0
-        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
+        assert store.audit_freshness(now=now) == 0
+        assert store.weighted_entries(now=now)[0][0] == pytest.approx(0.4, abs=0.01)
 
 
 class TestProfileMaintenanceTask:

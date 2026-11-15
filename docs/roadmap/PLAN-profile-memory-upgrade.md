@@ -223,7 +223,7 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 
 ### P2 · 生命周期分层 + profile/event 双轨
 
-> ✅ 2026-11-15 **P2a/P2b 已落地**（lifecycle 字段 + 类别派生 + decay 分流 + 合并防护；
+> ✅ 2026-11-15 **P2a/P2b 已落地**（lifecycle 字段 + 类别派生 + 合并防护；衰减改为**降权休眠、不删条目**；
 > 软删除失效链 `invalidated_at`/`superseded_by`）；P2c（events.jsonl 事件轨）待做。实现见
 > [plans/profile-memory-p2-impl.md](../plans/profile-memory-p2-impl.md)。
 
@@ -236,6 +236,7 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 | `episodic` | 一次性闹铃、临时任务 | 带 `expiry_at`，到期直接出清 | — |
 
 - `decay()` 改为按 lifecycle 分流：`permanent` 跳过、`episodic` 看过期、仅 `stateful/其它` 走半衰期。
+  （2026-11-15 修订：已改为“降权不删”——stateful 低于权重阈值只进休眠，见 p2-impl §十三）
 - `stateful` 的"新值即失效"由 P1 的 `op=update` 落地：update 同 slot（同 category 同主体）旧条目时，
   保留旧条目打失效标记而非物理删（轻量对齐 Zep temporal 思路），`render_for_prompt` 只渲染未失效的。
 - **schema 迁移** version 1 → 2：`profile_store._load` 对缺字段给默认 `lifecycle="stateful"`（最保守：可衰减可失效），

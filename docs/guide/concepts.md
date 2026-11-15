@@ -98,7 +98,7 @@ Jarvis 支持多层记忆持久化：
 - **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
 - **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
-  后台异步提炼（只喂**增量**：水位台账记“已提炼到第几条”，默认节流 600 秒，可用 `profile_refine_interval` 配置，不影响响应速度）+ 退出/切会话时无视节流把最后一段收干（`profile_refine_on_exit`）+ 空闲 60 分钟无新消息也补一次（`profile_refine_idle_minutes`）+ 每日凌晨维护（过时记忆自动衰减淡忘）。
+  后台异步提炼（只喂**增量**：水位台账记“已提炼到第几条”，默认节流 600 秒，可用 `profile_refine_interval` 配置，不影响响应速度）+ 退出/切会话时无视节流把最后一段收干（`profile_refine_on_exit`）+ 空闲 60 分钟无新消息也补一次（`profile_refine_idle_minutes`）+ 每日凌晨维护（过时记忆**只降权不删除**：权重低的进休眠、不再注入，再提一次即复活）。
   写入带确定性查重：同一条事实反复提炼会被归并到已有条目（置信取大），不会记很多遍；历史积压的重复可用 `/memory dedup yes` 一次性整理。
   `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory dedup` 归并重复 / `/memory refine` 立即提炼。
   画像**只记关于你的稳定信息**（身份、性格、爱好、作息、愿望、心思），不记助手的工作流程、

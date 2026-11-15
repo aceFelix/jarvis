@@ -130,12 +130,17 @@ def _format_last_refine(state) -> str:
 
 
 def _show_profile(ui, settings, session_name: str = "") -> None:
-    """/memory — 画像记忆列表（Phase 1a）+ 上轮提炼遥测（P1d）。"""
+    """/memory — 画像记忆列表（Phase 1a）+ 上轮提炼遥测（P1d）+ 权重展示。"""
     from agent.core.memory import profile_ledger
-    from agent.core.memory.profile_store import ProfileStore, CATEGORY_LABELS
+    from agent.core.memory.profile_store import (
+        CATEGORY_LABELS,
+        DORMANT_WEIGHT_FLOOR,
+        ProfileStore,
+    )
 
     store = ProfileStore()
-    entries = store.entries()
+    weighted = store.weighted_entries()
+    entries = [e for _, e in weighted]
     # 遥测先展示：库为空时也能看出"最近一次提炼是否跑过、拒了多少"
     telemetry = _format_last_refine(profile_ledger.load_state(session_name))
     if not entries:
@@ -147,21 +152,26 @@ def _show_profile(ui, settings, session_name: str = "") -> None:
             ui.info(f"  {telemetry}")
         return
 
+    dormant = sum(1 for w, _ in weighted if w < DORMANT_WEIGHT_FLOOR)
     limit = getattr(settings, "profile_inject_token_limit", 300)
     mode = getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo"
+    extra = f"，其中休眠 {dormant} 条" if dormant else ""
     ui.info(
-        f"画像记忆（{len(entries)} 条，按置信度排序；注入限额 {limit} token，口径 {mode}）:"
+        f"画像记忆（{len(entries)} 条{extra}，按权重排序；"
+        f"注入限额 {limit} token，口径 {mode}）:"
     )
     if telemetry:
         ui.info(f"  {telemetry}")
-    for e in entries:
+    for weight, e in weighted:
         label = CATEGORY_LABELS.get(e.category, e.category)
         src = e.source_session or "-"
         # 提及次数 > 0 时才展示：这是“被反复确认”的事实，比单纯置信度更能说明分量
         seen = f" | 提及 {e.ref_count} 次" if e.ref_count else ""
+        # 权重 = 置信度 × 新鲜度；低于阈值标“休眠”（不注入但仍在库里）
+        state = " | 休眠" if weight < DORMANT_WEIGHT_FLOOR else ""
         ui.info(
             f"  [{e.id}] {label} | {e.content}\n"
-            f"      置信度 {e.confidence:.2f} | 来源 {src}{seen}"
+            f"      置信度 {e.confidence:.2f} | 权重 {weight:.2f}{state} | 来源 {src}{seen}"
         )
     # P2b：被新事实取代的旧条目不再展示，但告诉用户它们还在（历史可追）
     history_n = len(store.entries(include_invalidated=True)) - len(entries)

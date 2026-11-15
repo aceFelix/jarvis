@@ -78,3 +78,11 @@ python -m pytest tests/core/test_profile_memory.py tests/core/test_profile_resol
 - 注释与文档里的机制描述要能被 grep 验证：写“被引用不衰”时，就该有 `last_referenced_at` 的写入点；
 - 召回/注入**不能**当作“再确认”信号：它们每次都会发生，接了等于所有条目永不衰减；
 - 半衰期 30 天仍是经验值，真正的依据要靠真实“提及间隔”分布 + 评测集来校准（P4）。
+
+## 八、后续变更（2026-11-15，同日）
+
+本篇修复完成后，用户进一步拍板“衰减不能是删除，改为降权”，因此 `decay()` 已拆为
+`expire_episodic()`（只出清到期 episodic）与 `audit_freshness()`（只统计休眠，不改数据）：
+- `confidence` 不再被时间乘；权重改为读时派生 `weight = confidence × 新鲜度`；
+- 低于 0.10 进休眠（不注入、保留、可被再次提及复活）；
+- 本篇“90 天必被删”的描述已成为历史，当前口径见 `09-记忆与压缩.md`「权重与休眠」。

@@ -447,7 +447,12 @@ class ProactiveEngine:
         )
 
     def _fire_profile_maintenance(self) -> None:
-        """执行画像维护：decay + prune。静默（写日志，不打扰用户）。"""
+        """执行画像维护：episodic 到期出清 + 新鲜度巡检 + 超容量淘汰。静默（写日志）。
+
+        2026-11-15 起衰减改为**降权**：不再按半衰期删条目，只统计休眠数；
+        真正会删的只剩到期 episodic、超 200 条容量兜底、用户显式 delete。
+        @author aceFelix
+        """
         import logging
 
         logger = logging.getLogger("jarvis.memory.profile")
@@ -455,12 +460,13 @@ class ProactiveEngine:
             from agent.core.memory.profile_store import ProfileStore
 
             store = ProfileStore()
-            removed = store.decay()
+            expired = store.expire_episodic()
+            dormant = store.audit_freshness()
             pruned = store.prune_over_limit(200)
-            if removed or pruned:
+            if expired or dormant or pruned:
                 logger.info(
-                    "画像维护完成: 衰减清除 %d 条, 超限淘汰 %d 条, 剩余 %d 条",
-                    removed, pruned, len(store),
+                    "画像维护完成: 到期出清 %d 条, 休眠 %d 条, 超限淘汰 %d 条, 剩余 %d 条",
+                    expired, dormant, pruned, len(store),
                 )
         except Exception as e:
             logger.warning("画像维护失败: %s", e)

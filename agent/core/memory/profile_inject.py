@@ -29,6 +29,7 @@ from agent.core.memory.compactor import (
     estimate_text_tokens,
     estimate_text_tokens_weighted,
 )
+from agent.core.memory.profile_store import entry_weight
 
 if TYPE_CHECKING:  # 仅类型标注：运行时导入会与 profile_store 形成循环依赖
     from agent.core.memory.profile_store import ProfileEntry
@@ -64,6 +65,7 @@ def render_for_prompt(
     token_limit: int = 300,
     prefer_topics: Sequence[str] = (),
     mode: str = "pseudo",
+    now: float | None = None,
 ) -> str:
     """把条目渲染成注入块。
 
@@ -72,6 +74,7 @@ def render_for_prompt(
         token_limit: 预算上限（按 `mode` 口径计量）。
         prefer_topics: 优先注入的类别列表；空列表＝不设主题偏好。
         mode: `pseudo`（默认，兼容现状）或 `weighted`。
+        now: 权重计算时间基准（仅测试注入）。
 
     Returns:
         注入文本；无条目或预算装不下任何一条时返回空字符串。
@@ -87,8 +90,9 @@ def render_for_prompt(
     budget = int(token_limit)
     prefer = {str(t) for t in (prefer_topics or []) if str(t)}
 
-    def _key(e: ProfileEntry) -> tuple[float, float]:
-        return (e.confidence, e.updated_at)
+    def _key(e: ProfileEntry) -> tuple[float, float, float]:
+        # 权重（置信度×新鲜度）优先：新近确认过的事实先占预算
+        return (entry_weight(e, now=now), e.confidence, e.updated_at)
 
     # 主题命中单独排一队置顶；其余条目按长度中位数分两轮（短→长）
     preferred = sorted([e for e in items if e.category in prefer], key=_key, reverse=True)

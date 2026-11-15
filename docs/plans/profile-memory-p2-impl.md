@@ -53,6 +53,10 @@ expire_at: float = 0.0          # 仅 episodic 用：到期直接出清（0 = �
 
 ## 四、decay 分流（P2a 核心）
 
+> **2026-11-15 修订**：衰减已改为**只降权不删**（用户拍板）。本节原稿的“删除”现在
+> 只保留给 `episodic` 显式到期；stateful 不再被删，只进休眠。当前口径见
+> `09-记忆与压缩.md` 的「权重与休眠」一节与 CHANGELOG。
+
 ```
 对每条条目：
   manual 来源 → 跳过（现状不变，最高信任）
@@ -68,9 +72,10 @@ expire_at: float = 0.0          # 仅 episodic 用：到期直接出清（0 = �
 ## 五、接口契约
 
 ```python
-# profile_store.py
+# profile_store.py（2026-11-15 修订后的实际接口）
 LIFECYCLES: tuple[str, ...]
 def default_lifecycle_for_category(category: str) -> str
+def entry_weight(entry, *, now=None, half_life_days=30.0) -> float
 
 class ProfileEntry:
     lifecycle: str = "stateful"
@@ -78,11 +83,13 @@ class ProfileEntry:
     @staticmethod
     def new(content, category="other", confidence=0.5, source_session="",
              aliases=None, lifecycle="", expire_at=0.0) -> ProfileEntry
-    # lifecycle 为空 → 按类别派生；非法 → stateful
 
 class ProfileStore:
-    def decay(self, *, half_life_days=30.0, floor=0.15, now: float | None = None) -> int
-    # now 仅测试注入；生产不传
+    def weighted_entries(self, *, now=None) -> list[tuple[float, ProfileEntry]]
+    def active_entries(self, *, now=None, floor=0.10) -> list[ProfileEntry]
+    def dormant_count(self, *, now=None, floor=0.10) -> int
+    def expire_episodic(self, *, now=None) -> int   # 唯一仍会删的衰减邻近路径
+    def audit_freshness(self, *, now=None, floor=0.10) -> int  # 只统计，不改数据
 ```
 
 `merge_or_add` / `dedup_all`：合并时取更稳的 lifecycle；`expire_at` 取两者较大
@@ -168,3 +175,18 @@ python scripts/check_md_links.py
 `profile_resolve.apply_decisions`（update 改软删除）、`session_commands._show_profile`（历史计数提示）、
 `tests/core/test_profile_memory.py`（`TestSoftDelete` 8 例）、`tests/core/test_profile_resolve.py`
 （`TestSoftDeleteOnUpdate` 3 例）。
+
+## 十三、实施记录（2026-11-15，衰减改降权）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | 权重不落盘，读时派生 | 不写盘 → 调参不改数据、可回滚；`confidence` 保持“可信度”语义不被时间污染 |
+| 2 | 休眠阈值 0.10 | weight 已是双因子（置信×新鲜），比原单因子 floor 0.15 略低；不同置信的休眠时点约 48–95 天 |
+| 3 | 召回不排除休眠 | 休眠条目仍是 update 的合法目标（被新值替换时自然退出历史），排除反而会让旧值无法被正确替换 |
+| 4 | 超容量仍物理淘汰 | 200 条是磁盘/预算的硬上限；按权重最低先淘汰，属于“容量兜底”而非衰减 |
+| 5 | `decay()` 不保留为别名 | 语义已变（不再删），保留旧名会让后人误以为还在衰减删除；拆为 `expire_episodic` + `audit_freshness` |
+
+已落地：`profile_store.entry_weight` / `weighted_entries` / `active_entries` / `dormant_count` /
+`audit_freshness` / `expire_episodic` / `prune_over_limit(按权重)` / `render_for_prompt(只喂活跃条目)`；
+`profile_inject`（权重参与排序）；`proactive` 维护任务改口径；`/memory` 展示权重与休眠；
+测试 `TestFreshnessWeight` 6 例，全量 1693（core+daemon+commands）通过。

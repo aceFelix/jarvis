@@ -95,6 +95,53 @@ def _most_stable_lifecycle(*lifecycles: str) -> str:
     return max(lifecycles, key=lambda v: _LIFECYCLE_RANK.get(v, 0))
 
 
+# ─────────────────────────────────────────────────────────────
+# 新鲜度权重（衰减只降权，不删除）
+#
+# confidence 是“这条事实有多可信”（LLM 给的），不该被时间反复乘；时间只影响
+# “现在还该不该把它顶到前面”。因此新增**派生权重**（不落盘、不改条目）：
+#
+#   freshness = 0.5 ** (距最近确认天数 / 半衰期)
+#   weight    = confidence × freshness
+#
+# 低于 DORMANT_WEIGHT_FLOOR 视为“休眠”：不再注入、不占预算，但**保留在库里**；
+# 再被提及（noop / 合并）会刷新 last_referenced_at，权重自动回到 confidence。
+# 半衰期与阈值仍为经验值，待 P4 评测集校准。@author aceFelix
+# ─────────────────────────────────────────────────────────────
+
+#: 新鲜度半衰期（天）
+FRESHNESS_HALF_LIFE_DAYS = 30.0
+
+#: 权重低于此值 → 休眠（不注入，不删除）
+DORMANT_WEIGHT_FLOOR = 0.10
+
+
+def entry_weight(
+    entry: ProfileEntry,
+    *,
+    now: float | None = None,
+    half_life_days: float = FRESHNESS_HALF_LIFE_DAYS,
+) -> float:
+    """条目权重 = 置信度 × 新鲜度（0~1，只用于排序/裁剪，不改写数据）。
+
+    - 失效条目权重为 0（它们已不参与任何选择）；
+    - `permanent` 与 manual 条目视为不衰减，权重 = confidence；
+    - 其余按“距最近确认（updated_at / last_referenced_at / created_at 取最大）”
+      的半衰曲线折算。
+    @author aceFelix
+    """
+    if entry.invalidated_at:
+        return 0.0
+    conf = max(0.0, min(1.0, float(entry.confidence or 0.0)))
+    if entry.lifecycle == "permanent" or entry.source_session == "manual":
+        return conf
+    now_ts = time.time() if now is None else float(now)
+    basis = max(entry.updated_at, entry.last_referenced_at, entry.created_at)
+    age_days = max(0.0, (now_ts - basis) / 86400.0)
+    freshness = 0.5 ** (age_days / max(1e-6, float(half_life_days)))
+    return max(0.0, min(1.0, conf * freshness))
+
+
 # 类别中文说明（/memory 展示用）
 CATEGORY_LABELS = {
     "identity": "身份背景",
@@ -287,6 +334,33 @@ class ProfileStore:
                     return e
         return None
 
+    def weighted_entries(
+        self, *, now: float | None = None
+    ) -> list[tuple[float, ProfileEntry]]:
+        """有效条目及其权重（按权重降序；休眠条目也在内，权重低于阈值）。
+
+        供 `/memory` 展示与超限淘汰使用；注入侧用 `active_entries()`。
+        @author aceFelix
+        """
+        ts = time.time() if now is None else float(now)
+        with self._lock:
+            items = [e for e in self._entries if not e.invalidated_at]
+        pairs = [(entry_weight(e, now=ts), e) for e in items]
+        pairs.sort(key=lambda kv: (kv[0], kv[1].updated_at), reverse=True)
+        return pairs
+
+    def active_entries(
+        self, *, now: float | None = None, floor: float = DORMANT_WEIGHT_FLOOR
+    ) -> list[ProfileEntry]:
+        """可注入条目（权重 ≥ floor）；休眠条目被排除但**仍在库里**。"""
+        return [e for w, e in self.weighted_entries(now=now) if w >= floor]
+
+    def dormant_count(
+        self, *, now: float | None = None, floor: float = DORMANT_WEIGHT_FLOOR
+    ) -> int:
+        """休眠条目数（权重 < floor），只读。"""
+        return sum(1 for w, _ in self.weighted_entries(now=now) if w < floor)
+
     def recall_similar(
         self, content: str, category: str = "", top_k: int = 5
     ) -> list[ProfileEntry]:
@@ -296,13 +370,15 @@ class ProfileStore:
         - 与 content 的字符二元组相似度；
         - 别名命中（候选包含别名或反之）+0.30；别名与候选的相似度按 0.8 折算；
         - 同类别 +0.15（粗粒度语义通道）。
-        只返回 score > 0 的条目，按 (score, confidence, updated_at) 降序。
+        只返回 score > 0 的条目，按 (score, 权重, confidence, updated_at) 降序。
+        休眠条目不排除：它们仍是 update 的合法目标（被新值替换时自然复活口径）。
         @author aceFelix
         """
         query = (content or "").strip()
         if not query or top_k <= 0:
             return []
-        scored: list[tuple[float, ProfileEntry]] = []
+        now = time.time()
+        scored: list[tuple[float, float, ProfileEntry]] = []
         for e in self.entries():
             if not e.content:
                 continue
@@ -317,11 +393,11 @@ class ProfileStore:
             if category and e.category == category:
                 score += 0.15
             if score > 0:
-                scored.append((score, e))
+                scored.append((score, entry_weight(e, now=now), e))
         scored.sort(
-            key=lambda kv: (kv[0], kv[1].confidence, kv[1].updated_at), reverse=True
+            key=lambda kv: (kv[0], kv[1], kv[2].confidence, kv[2].updated_at), reverse=True
         )
-        return [e for _, e in scored[:top_k]]
+        return [e for _, _, e in scored[:top_k]]
 
     def __len__(self) -> int:
         """有效条目数（P2b：失效条目只算历史，不计入）。"""
@@ -527,19 +603,22 @@ class ProfileStore:
             self._save_locked()
             return n
 
-    def prune_over_limit(self, max_entries: int) -> int:
-        """超出上限时淘汰低价值条目。返回淘汰数量。
+    def prune_over_limit(self, max_entries: int, *, now: float | None = None) -> int:
+        """超出容量上限时淘汰**权重最低**的条目，返回淘汰数量。
 
-        价值 = confidence 优先，同分看新近度（updated_at）。
-        P2b：失效条目最先淘汰（它们是历史，保留价值低于有效条目）。
+        权重 = 置信度 × 新鲜度（见 `entry_weight`）：衰减不再删条，这里才是
+        唯一的“容量兜底才删”；失效条目仍最先被淘汰。
         """
+        ts = time.time() if now is None else float(now)
         with self._lock:
             if len(self._entries) <= max_entries:
                 return 0
             ranked = sorted(
                 self._entries,
                 # not invalidated_at：有效条目 True 排前面，失效条目先被淘汰
-                key=lambda e: (not e.invalidated_at, e.confidence, e.updated_at),
+                key=lambda e: (
+                    not e.invalidated_at, entry_weight(e, now=ts), e.updated_at
+                ),
                 reverse=True,
             )
             keep, drop = ranked[:max_entries], ranked[max_entries:]
@@ -547,61 +626,38 @@ class ProfileStore:
             self._save_locked()
             return len(drop)
 
-    def decay(
-        self,
-        *,
-        half_life_days: float = 30.0,
-        floor: float = 0.15,
-        now: float | None = None,
-    ) -> int:
-        """维护管线：按**生命周期分流**决定遗忘方式，返回清除的条目数。
+    def expire_episodic(self, *, now: float | None = None) -> int:
+        """物理出清**已到期**的 `episodic` 条目，返回条数。
 
-        管家的"睡眠整理记忆"：长期没被再次提及的习惯偏好逐渐淡忘，
-        避免画像库被过时信息塞满。
-
-        规则（P2a 分流）:
-        - 手动添加条目（source_session="manual"）不衰减——用户亲写，最高信任
-        - `permanent`（身份/关系/抱负）不衰减：5 年后仍成立，只靠显式 update 替换
-        - `episodic` 且有 `expire_at` 且已到期 → 直接出清（临时事项）
-        - 其余（stateful / episodic 无到期时间）：每过一个半衰期 confidence 减半，
-          低于 floor 删除；时间基准 = max(updated_at, last_referenced_at, created_at)
-
-        Args:
-            now: 时间戳（仅测试注入；生产由每日维护任务不传）。
-
-        挂在 ProactiveEngine 每日维护任务（凌晨静默执行）。
+        到期是用户/模型显式给出的“这个只剩到某天”，不属于衰减；衰减本身
+        已改为只降权不删（见 `audit_freshness`）。
         """
-        now = time.time() if now is None else float(now)
+        ts = time.time() if now is None else float(now)
         removed = 0
         with self._lock:
             kept: list[ProfileEntry] = []
             for e in self._entries:
-                if e.source_session == "manual":
-                    kept.append(e)
-                    continue
-                # P2b：失效条目是历史证据，不参与衰减（也不因 floor 被清）
-                if e.invalidated_at:
-                    kept.append(e)
-                    continue
-                # P2a：permanent 不进半衰期（身份/关系/抱负不该靠反复提及续命）
-                if e.lifecycle == "permanent":
-                    kept.append(e)
-                    continue
-                # P2a：episodic 有到期时间且已过期 → 直接出清
-                if e.lifecycle == "episodic" and e.expire_at and now >= e.expire_at:
+                if e.lifecycle == "episodic" and e.expire_at and ts >= e.expire_at:
                     removed += 1
                     continue
-                basis = max(e.updated_at, e.last_referenced_at, e.created_at)
-                age_days = max(0.0, (now - basis) / 86400.0)
-                e.confidence *= 0.5 ** (age_days / half_life_days)
-                if e.confidence < floor:
-                    removed += 1
-                else:
-                    kept.append(e)
+                kept.append(e)
             if removed:
                 self._entries = kept
                 self._save_locked()
         return removed
+
+    def audit_freshness(
+        self, *, now: float | None = None, floor: float = DORMANT_WEIGHT_FLOOR
+    ) -> int:
+        """巡检：返回处于休眠（权重 < floor）的条目数。**不修改任何数据**。
+
+        旧实现每天把 confidence 乘半衰并把低于 floor 的条目删掉；2026-11-15
+        按用户要求改为降权：条目永久保留，只是不再注入；再被提及即复活。
+        真正会删的只剩：episodic 到期（`expire_episodic`）、超容量淘汰
+        （`prune_over_limit`）、用户/模型显式 `delete`。
+        @author aceFelix
+        """
+        return self.dormant_count(now=now, floor=floor)
 
     # ---- 注入 ----
 
@@ -630,8 +686,9 @@ class ProfileStore:
         # 局部导入：profile_inject 依赖本模块的 ProfileEntry，模块级导入会成环
         from agent.core.memory.profile_inject import render_for_prompt as _render
 
+        # 注入只看“活跃条目”：休眠条目保留在库里，但不占 system prompt 预算
         return _render(
-            self.entries(),
+            self.active_entries(),
             token_limit=token_limit,
             prefer_topics=prefer_topics,
             mode=mode,
