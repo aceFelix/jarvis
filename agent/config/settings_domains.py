@@ -143,6 +143,8 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         # 注入侧 P1c：主题优先与预算口径（prefer_topics 为数组，见 LIST_FIELDS）
         ("profile_inject_prefer_topics", "profile_inject_prefer_topics"),
         ("profile_inject_token_budget_mode", "profile_inject_token_budget_mode"),
+        # 事件轨（P2c）：临时事项日志的保留天数
+        ("profile_event_retention_days", "profile_event_retention_days"),
         ("profile_refine_min_messages", "profile_refine_min_messages"),
         ("profile_refine_interval", "profile_refine_interval"),
         ("profile_refine_min_delta", "profile_refine_min_delta"),

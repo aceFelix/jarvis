@@ -291,6 +291,8 @@ class Settings:
     # 注入侧（P1c）：命中主题的条目置顶；预算口径默认 pseudo＝兼容旧行为
     profile_inject_prefer_topics: list = field(default_factory=list)
     profile_inject_token_budget_mode: str = "pseudo"  # pseudo=len/4 / weighted=中英分权
+    # 事件轨（P2c）：临时/带时间点事实的 append-only 日志，默认不注入
+    profile_event_retention_days: int = 90      # 保留天数（0 = 不按时间清理，只删已到期项）
     profile_refine_min_messages: int = 6       # 会话至少多少条消息才触发提炼
     profile_refine_interval: int = 600         # 两次提炼的最小间隔（秒），防止频繁无意义提炼
     profile_refine_min_delta: int = 6          # 自上次水位后新增多少条才提炼（增量闸）

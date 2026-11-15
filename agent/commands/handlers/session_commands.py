@@ -303,6 +303,7 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     /memory refine       立即提炼新增量（不等节流；只喂水位之后的消息）
     /memory dedup [yes]  画像去重整理（预览可归并的深重复条数，yes 执行）
     /memory sync         同步本地画像到知识图谱（先预览，/memory sync yes 确认写入）
+    /memory events [n]   查看事件轨最近 n 条（临时事项，默认 5、最多 50；不注入对话）
     /memory file         查看长期记忆文件（MEMORY.md，旧功能保留）
     """
     from agent.core.memory.profile_store import ProfileStore
@@ -320,6 +321,31 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
 
     if action == "file":
         _show_memory_file(ctx.ui, ctx.settings)
+        return True
+
+    if action == "events":
+        # P2c：事件轨只做查看；默认不注入 system prompt（临时事项不该长期占预算）
+        from agent.core.memory import profile_events
+
+        limit = 5
+        if rest.isdigit():
+            limit = max(1, min(50, int(rest)))
+        events = profile_events.recent_events(limit=limit)
+        if not events:
+            ctx.ui.info(
+                "事件轨为空。带明确时间边界的临时事项（如“下周三面试”）会在提炼时留痕，"
+                "默认不注入对话。"
+            )
+            return True
+        ctx.ui.info(f"最近 {len(events)} 条事件（未过期，默认不注入）:")
+        for ev in events:
+            when = time.strftime("%m-%d %H:%M", time.localtime(ev.ts))
+            expire = (
+                f" | 到期 {time.strftime('%m-%d %H:%M', time.localtime(ev.expire_at))}"
+                if ev.expire_at
+                else ""
+            )
+            ctx.ui.info(f"  {when} [{ev.category}] {ev.content}{expire}")
         return True
 
     if action == "refine":

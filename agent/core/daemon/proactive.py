@@ -49,6 +49,8 @@ class ProactiveConfig:
         calendar_check_interval_min: int = 30,
         calendar_remind_minutes_before: int = 30,
         profile_maintenance_enabled: bool = True,
+        # P2c：事件轨保留天数（0 = 不按时间清理，只删已到期项）
+        profile_event_retention_days: int = 90,
         auto_clean_enabled: bool = False,
         auto_clean_time: str = "04:30",
         auto_clean_min_mb: float = 20.0,
@@ -60,6 +62,7 @@ class ProactiveConfig:
         self.calendar_enabled = calendar_enabled
         self.calendar_check_interval_min = calendar_check_interval_min
         self.profile_maintenance_enabled = profile_maintenance_enabled
+        self.profile_event_retention_days = profile_event_retention_days
         self.calendar_remind_minutes_before = calendar_remind_minutes_before
         # 自动清理：默认关，且还要 maintenance_enabled 总闸同时开（在两个开关
         # 那里分别把关，任一处关掉都不吵不闹）
@@ -447,26 +450,30 @@ class ProactiveEngine:
         )
 
     def _fire_profile_maintenance(self) -> None:
-        """执行画像维护：episodic 到期出清 + 新鲜度巡检 + 超容量淘汰。静默（写日志）。
+        """执行画像维护：episodic 到期出清 + 新鲜度巡检 + 超容量淘汰 + 事件轨清理。
 
         2026-11-15 起衰减改为**降权**：不再按半衰期删条目，只统计休眠数；
         真正会删的只剩到期 episodic、超 200 条容量兜底、用户显式 delete。
+        事件轨（P2c）按 `profile_event_retention_days` 清理过期/过老记录。
         @author aceFelix
         """
         import logging
 
         logger = logging.getLogger("jarvis.memory.profile")
         try:
+            from agent.core.memory import profile_events
             from agent.core.memory.profile_store import ProfileStore
 
             store = ProfileStore()
             expired = store.expire_episodic()
             dormant = store.audit_freshness()
             pruned = store.prune_over_limit(200)
-            if expired or dormant or pruned:
+            retention = int(getattr(self._config, "profile_event_retention_days", 90) or 0)
+            events_removed = profile_events.prune_events(retention)
+            if expired or dormant or pruned or events_removed:
                 logger.info(
-                    "画像维护完成: 到期出清 %d 条, 休眠 %d 条, 超限淘汰 %d 条, 剩余 %d 条",
-                    expired, dormant, pruned, len(store),
+                    "画像维护完成: 到期出清 %d 条, 休眠 %d 条, 超限淘汰 %d 条, 事件清理 %d 条, 剩余 %d 条",
+                    expired, dormant, pruned, events_removed, len(store),
                 )
         except Exception as e:
             logger.warning("画像维护失败: %s", e)

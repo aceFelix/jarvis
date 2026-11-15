@@ -32,11 +32,13 @@ def _isolate_refine_ledger(tmp_path):
     后续用例（或用户自己）会被莫名节流。
     @author aceFelix
     """
-    from agent.core.memory import profile_ledger as ledger
+    from agent.core.memory import profile_events, profile_ledger as ledger
 
     ledger.configure_ledger_path(tmp_path / "memory" / "refine_ledger.json")
+    profile_events.configure_events_path(tmp_path / "memory" / "events.jsonl")
     yield
     ledger.reset_for_tests()
+    profile_events.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
@@ -471,6 +473,24 @@ class TestMemoryCommand:
     def test_add_empty_usage(self, tmp_path):
         ui = self._run("/memory add", tmp_path / "p.json")
         assert any("用法" in m for m in ui.messages)
+
+    def test_events_empty_hint(self, tmp_path):
+        ui = self._run("/memory events", tmp_path / "p.json")
+        assert any("事件轨为空" in m for m in ui.messages)
+
+    def test_events_shows_records(self, tmp_path):
+        """P2c：`/memory events` 展示未过期事件与到期时间。"""
+        from agent.core.memory import profile_events
+
+        now = time.time()
+        profile_events.append_event(
+            "schedule", "下周三面试", source_session="s1",
+            ts=now, expire_at=now + 7 * 86400,
+        )
+        ui = self._run("/memory events", tmp_path / "p.json")
+        joined = "\n".join(ui.messages)
+        assert "下周三面试" in joined
+        assert "到期" in joined
 
     def test_unknown_subcommand_usage(self, tmp_path):
         ui = self._run("/memory bogus", tmp_path / "p.json")

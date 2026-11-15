@@ -18,6 +18,19 @@
 
 ## [Unreleased]
 
+### 新增（事件轨：临时事项独立留痕，2026-11-15）
+
+- 新增 `agent/core/memory/profile_events.py`：`~/.jarvis/memory/events.jsonl` append-only 事件轨，
+  提供 append / load / recent / prune；坏行跳过、IO 失败静默（旁路绝不打断主流程）。
+- 提炼裁决段新增可选契约：`"lifecycle": "episodic"` + `"expire_days"`（1–365，从今天算）；
+  非 episodic 的候选会被**强制清空**这两个字段。
+- episodic 事实入库时算好 `expire_at`（到期由 `expire_episodic` 出清），同时追写事件轨；
+  其他类型不写事件（事件轨只服务临时事项）。
+- 事件轨默认**不注入** system prompt；新增 `/memory events [n]` 查看最近未过期事件（默认 5、最多 50）。
+- 每日维护按 `profile_event_retention_days`（默认 90，0 = 只删到期项）清理“到期或过老”记录。
+- `Settings` 209 → **210**；两份 `settings.example.toml` 同步。
+- 测试：新增 `tests/core/test_profile_events.py`（16 例）+ 裁决解析/落盘 4 例 + 命令 2 例。
+
 ### 变更（画像衰减改为降权：不删条目，只调权重，2026-11-15）
 
 - **不再按半衰期删条目**：`decay()` 拆为 `expire_episodic()`（只出清显式到期的 episodic）

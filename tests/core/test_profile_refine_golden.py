@@ -45,9 +45,14 @@ def _wait_until(pred, timeout: float = 3.0) -> bool:
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path: Path):
     L.configure_ledger_path(tmp_path / "memory" / "refine_ledger.json")
+    # 事件轨同样隔离：episodic 用例不得写进真实 ~/.jarvis
+    from agent.core.memory import profile_events as EV
+
+    EV.configure_events_path(tmp_path / "memory" / "events.jsonl")
     yield
     _drain_refiner()
     L.reset_for_tests()
+    EV.reset_for_tests()
 
 
 def _drain_refiner(timeout: float = 5.0) -> None:

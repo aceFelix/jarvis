@@ -20,12 +20,15 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from agent.core.memory import profile_events
 from agent.core.memory.profile_json import parse_json_object
 from agent.core.memory.profile_store import (
     CATEGORY_HINTS,
+    LIFECYCLES,
     PROFILE_CATEGORIES,
     ProfileEntry,
     ProfileStore,
@@ -70,6 +73,8 @@ class Decision:
     aliases: list[str] = field(default_factory=list)
     target_id: str = ""
     reason: str = ""
+    lifecycle: str = ""      # P2c：空＝按类别派生；episodic 时才写事件轨
+    expire_days: int = 0     # P2c：episodic 的到期天数（1–365，0＝未给）
 
 
 # ─────────────────────────────────────────────────────────────
@@ -141,6 +146,13 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
     )
     alias_field = ', "aliases": ["...", "..."]' if include_aliases else ""
 
+    # P2c：带时间边界的临时事项 → episodic + expire_days（事件轨的写入信号）
+    episodic_rules = (
+        "\n6. 带明确时间边界、过期就没用的候选（如“下周三面试”“明天出差”“这周搬家”）"
+        " → 额外给 \"lifecycle\": \"episodic\" 与 \"expire_days\": 整数 1–365"
+        "（从今天算起的有效天数，拿不准给 7）；其余候选不要输出这两个字段"
+    )
+
     return f"""你是用户画像的裁决器。下面每条候选都附上了它的相似旧条目。
 请为每条候选决定一个操作，只输出 JSON。
 
@@ -155,7 +167,7 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
 2. 拿不准 → `noop`（宁可少记，也不要制造重复）
 3. update 的 content 仍须 ≤40 字、第三人称简体中文
 4. target_id 只能取下面列出的 `[ent_xxx]`，不要编造
-5. 可以只处理一部分候选，其余不输出{alias_rules}
+5. 可以只处理一部分候选，其余不输出{alias_rules}{episodic_rules}
 
 ## 候选与旧条目
 {body}
@@ -163,6 +175,8 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
 ## 输出（严格 JSON，不要输出其他任何内容）
 {{"facts": [
   {{"op": "add", "content": "...", "category": "...", "confidence": 0.8{alias_field}}},
+  {{"op": "add", "content": "...", "category": "...", "confidence": 0.8,
+   "lifecycle": "episodic", "expire_days": 7{alias_field}}},
   {{"op": "update", "target_id": "ent_xxx", "content": "...", "confidence": 0.9{alias_field}}},
   {{"op": "delete", "target_id": "ent_xxx", "reason": "..."}},
   {{"op": "noop", "target_id": "ent_xxx"}}
@@ -248,6 +262,17 @@ def parse_decisions(data: dict) -> tuple[list[Decision], int]:
         if category not in PROFILE_CATEGORIES:
             category = "other"
         aliases = item.get("aliases") if isinstance(item.get("aliases"), list) else []
+        # P2c：临时事项信号（非 episodic 时强制清空，防模型给普通事实乱设到期）
+        lifecycle = str(item.get("lifecycle", "") or "").strip().lower()
+        if lifecycle not in LIFECYCLES:
+            lifecycle = ""
+        expire_days = 0
+        if lifecycle == "episodic":
+            try:
+                expire_days = int(item.get("expire_days", 0) or 0)
+            except (TypeError, ValueError):
+                expire_days = 0
+            expire_days = max(0, min(365, expire_days))
         out.append(Decision(
             op=op,
             content=content,
@@ -256,6 +281,8 @@ def parse_decisions(data: dict) -> tuple[list[Decision], int]:
             aliases=[str(a) for a in aliases],
             target_id=target,
             reason=str(item.get("reason", ""))[:200],
+            lifecycle=lifecycle,
+            expire_days=expire_days,
         ))
     return out, rejected
 
@@ -308,15 +335,40 @@ def apply_decisions(
       target 幻觉/已失效时降级为 add
     - delete → store.delete（显式删除仍物理删）
     - noop → 不写内容，但调 store.touch_reference 续命（刷新最近提及 + 累计次数）
+    - **episodic（P2c）**：带 `expire_days` 的临时事项 → 入库时算好 `expire_at`，
+      同时追写事件轨 `events.jsonl`（画像库回答“是谁”，事件轨回答“何时何事”）
     计数全部记在 report 上（added/updated/merged/deleted/noop）。
     """
     def _bump(name: str) -> None:
         setattr(report, name, int(getattr(report, name, 0) or 0) + 1)
 
+    now = time.time()
+
+    def _new_entry(d: Decision) -> ProfileEntry:
+        """按裁决字段建条目：episodic 时把 expire_days 换成绝对到期时间。"""
+        expire_at = (
+            now + d.expire_days * 86400
+            if d.lifecycle == "episodic" and d.expire_days
+            else 0.0
+        )
+        return ProfileEntry.new(
+            d.content, d.category, d.confidence, session_id, aliases=d.aliases,
+            lifecycle=d.lifecycle, expire_at=expire_at,
+        )
+
+    def _record_event(entry: ProfileEntry) -> None:
+        """episodic 事实同时进事件轨；其他类型不写（事件轨是旁路日志）。"""
+        if entry.lifecycle != "episodic":
+            return
+        profile_events.append_event(
+            entry.category, entry.content,
+            source_session=session_id, ts=now, expire_at=entry.expire_at,
+        )
+
     for d in decisions:
         if d.op == "noop":
             # P2b/P2c 前的续命接线：noop 意味着“新消息里又说到同一事实、无需改写”，
-            # 刷新 last_referenced_at 与 ref_count——decay 的时间基准才真正成立。
+            # 刷新 last_referenced_at 与 ref_count——衰减依据才真正成立。
             # target 幻觉/已失效时静默忽略（touch_reference 自己会返回 False）。
             if d.target_id:
                 store.touch_reference(d.target_id)
@@ -327,27 +379,21 @@ def apply_decisions(
                 _bump("deleted")
             continue
         if d.op == "add":
-            entry = ProfileEntry.new(
-                d.content, d.category, d.confidence, session_id, aliases=d.aliases
-            )
-            _, merged = store.merge_or_add(entry)
+            kept, merged = store.merge_or_add(_new_entry(d))
+            _record_event(kept)
             _bump("merged" if merged else "added")
             continue
         if d.op == "update":
             # target 不存在（幻觉/已失效）→ 当 add 处理，仍走存储层查重闸
             if d.target_id and store.get(d.target_id):
-                entry = ProfileEntry.new(
-                    d.content, d.category, d.confidence, session_id, aliases=d.aliases
-                )
-                kept, merged = store.merge_or_add(entry)
+                kept, merged = store.merge_or_add(_new_entry(d))
                 # P2b：旧值不物理删——打失效标记并指向新条目。kept 可能就是 target
                 # 自身（update 只是把旧事实再确认/微调），那种情况不能把它标成失效。
                 if kept.id != d.target_id:
                     store.invalidate(d.target_id, superseded_by=kept.id)
+                _record_event(kept)
                 _bump("merged" if merged else "updated")
             else:
-                entry = ProfileEntry.new(
-                    d.content, d.category, d.confidence, session_id, aliases=d.aliases
-                )
-                _, merged = store.merge_or_add(entry)
+                kept, merged = store.merge_or_add(_new_entry(d))
+                _record_event(kept)
                 _bump("merged" if merged else "added")

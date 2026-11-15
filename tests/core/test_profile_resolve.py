@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.core.memory import profile_resolve as PR
+from agent.core.memory import profile_events
 from agent.core.memory import profile_store as PS
 from agent.core.memory.profile_store import ProfileEntry, ProfileStore
 
@@ -27,6 +28,65 @@ def _report() -> SimpleNamespace:
     return SimpleNamespace(
         added=0, updated=0, merged=0, deleted=0, noop=0, extracted=0, rejected=0
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_events(tmp_path: Path):
+    """事件轨钉到临时目录：否则 episodic 用例会把事件写进真实 ~/.jarvis。"""
+    profile_events.configure_events_path(tmp_path / "memory" / "events.jsonl")
+    yield
+    profile_events.reset_for_tests()
+
+
+class TestEpisodicDecisions:
+    """P2c：临时事项 → episodic + expire_days，入库同时追写事件轨。"""
+
+    def test_parse_lifecycle_and_expire_days(self) -> None:
+        decisions, rejected = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "下周三面试", "category": "schedule",
+             "lifecycle": "Episodic", "expire_days": 7},
+            {"op": "add", "content": "普通事实", "category": "other", "expire_days": 7},
+            {"op": "add", "content": "非法值", "category": "other",
+             "lifecycle": "bogus", "expire_days": 3},
+        ]})
+        assert rejected == 0
+        a, b, c = decisions
+        assert a.lifecycle == "episodic" and a.expire_days == 7
+        # 非 episodic：expire_days 被强制清空（防普通事实被误设到期）
+        assert b.lifecycle == "" and b.expire_days == 0
+        assert c.lifecycle == "" and c.expire_days == 0
+
+    def test_expire_days_clamped(self) -> None:
+        decisions, _ = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "x", "lifecycle": "episodic", "expire_days": 9999},
+            {"op": "add", "content": "y", "lifecycle": "episodic", "expire_days": 1},
+        ]})
+        assert decisions[0].expire_days == 365
+        assert decisions[1].expire_days == 1
+
+    def test_apply_episodic_creates_entry_and_event(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        PR.apply_decisions(
+            [PR.Decision("add", "下周三面试", "schedule", 0.9,
+                         lifecycle="episodic", expire_days=7)],
+            store, "s1", _report(),
+        )
+        entry = store.entries()[0]
+        assert entry.lifecycle == "episodic"
+        assert entry.expire_at > 0
+
+        events = profile_events.load_events()
+        assert len(events) == 1
+        assert events[0].content == "下周三面试"
+        assert events[0].expire_at == pytest.approx(entry.expire_at)
+
+    def test_apply_normal_add_writes_no_event(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        PR.apply_decisions(
+            [PR.Decision("add", "喜欢猫", "preference", 0.8)], store, "s1", _report()
+        )
+        assert [e.content for e in store.entries()] == ["喜欢猫"]
+        assert profile_events.load_events() == []
 
 
 class TestValidateCandidate:

@@ -110,6 +110,9 @@ def build_proactive_engine(
             ),
             # 画像维护纯本地计算（无 LLM、无打扰），恒开
             profile_maintenance_enabled=True,
+            profile_event_retention_days=int(
+                getattr(settings, "profile_event_retention_days", 90) or 0
+            ),
             # 自动清理：总闸与子闸同时成立才启用，与 REPL 路径保持同一口径
             auto_clean_enabled=(
                 bool(getattr(settings, "maintenance_enabled", False))

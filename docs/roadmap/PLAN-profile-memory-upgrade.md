@@ -223,9 +223,8 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 
 ### P2 · 生命周期分层 + profile/event 双轨
 
-> ✅ 2026-11-15 **P2a/P2b 已落地**（lifecycle 字段 + 类别派生 + 合并防护；衰减改为**降权休眠、不删条目**；
-> 软删除失效链 `invalidated_at`/`superseded_by`）；P2c（events.jsonl 事件轨）待做。实现见
-> [plans/profile-memory-p2-impl.md](../plans/profile-memory-p2-impl.md)。
+> ✅ 2026-11-15 **P2a/P2b/P2c 全部落地**（lifecycle 分层 + 衰减降权休眠 + 软删除失效链 +
+> 事件轨 `events.jsonl`）；实现见 [plans/profile-memory-p2-impl.md](../plans/profile-memory-p2-impl.md)。
 
 `ProfileEntry` 增正交字段 `lifecycle ∈ {permanent, stateful, episodic}`（不改 category 枚举，加一维）：
 

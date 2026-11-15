@@ -1,6 +1,6 @@
 # 实现方案：画像记忆 P2（生命周期分层 + 事件轨）
 
-> 状态：**P2a/P2b 已落地（2026-11-15），P2c 待做**　作者：aceFelix　日期：2026-11-15
+> 状态：**P2a/P2b/P2c 全部落地（2026-11-15）**　作者：aceFelix　日期：2026-11-15
 > 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P2
 > 本文只写落点与契约；设计取舍在 PLAN，不在本文重复。
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | **P2a** | `lifecycle ∈ {permanent, stateful, episodic}` 字段 + decay 分流 + 类别派生 | ✅ |
 | **P2b** | `stateful` 新值即失效：软删除（`invalidated_at` / `superseded_by`）+ 注入过滤 | ✅ |
-| **P2c** | 事件轨 `events.jsonl`（append-only + 过期清理） | ⏭ 随后 |
+| **P2c** | 事件轨 `events.jsonl`（append-only + 过期清理） | ✅ |
 
 **不做**：P3 向量、P5 RecallProfile。
 
@@ -139,13 +139,14 @@ python scripts/check_md_links.py
 | decay 删多了 | 只影响 confidence 衰减路径；permanent 反而更安全（不再被磨） |
 | 回退 | 删掉 lifecycle 字段读取即可回到旧行为；无配置开关、无外部状态 |
 
-## 十、后续两刀（不在本次）
+## 十、P2c 契约（已落地）
 
-- **P2b 软删除**：`invalidated_at` / `superseded_by`；`update` 同类别替换时旧条目打失效标
-  记而非物理删；`render_for_prompt` / `recall_similar` / `/memory` 过滤失效条目，
-  `/memory history` 可查被替换链路。
-- **P2c 事件轨**：`~/.jarvis/memory/events.jsonl`（append-only），写 `episodic` 与带时间点
-  的事实；`profile_event_retention_days` 过期清理；默认不注入，仅按主题捞最近 K 条。
+- **写入信号**：裁决段可选输出 `"lifecycle": "episodic"` + `"expire_days"`（1–365，从今天算）；
+  非 episodic 的候选强制清空这两个字段。
+- **落盘**：`ProfileEntry.new(..., expire_at=now+days)` + `profile_events.append_event(...)`；
+  事件与条目同源、同内容、同到期时间。
+- **读取**：`/memory events [n]` 看最近未过期事件；默认**不注入** system prompt。
+- **清理**：每日维护 `prune_events(retention_days)`，默认 90 天，`0` = 只删到期项。
 
 ## 十一、实施记录（2026-11-15，P2a）
 
@@ -190,3 +191,17 @@ python scripts/check_md_links.py
 `audit_freshness` / `expire_episodic` / `prune_over_limit(按权重)` / `render_for_prompt(只喂活跃条目)`；
 `profile_inject`（权重参与排序）；`proactive` 维护任务改口径；`/memory` 展示权重与休眠；
 测试 `TestFreshnessWeight` 6 例，全量 1693（core+daemon+commands）通过。
+
+## 十四、实施记录（2026-11-15，P2c）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | `expire_days`（相对天数）而非绝对日期 | 中文日期（“下周三”）解析歧义大；只让模型给天数，换算交给代码 |
+| 2 | 非 episodic 强制清空字段 | 防模型给普通事实乱设到期（“喜欢猫，7 天后忘了”）；解析层就吃掉 |
+| 3 | 事件轨默认不注入 | 临时事项不该长期占 300 token 预算；需要时 `/memory events` 查 |
+| 4 | 事件与条目同写 | 两条腿同一内容：条目靠 `expire_at` 到期出清，事件轨靠保留期清理 |
+| 5 | 写入/读取/清理均失败静默 | 事件轨是旁路日志，绝不能让磁盘问题打断提炼或维护任务 |
+
+已落地：`profile_events.py`（append/load/recent/prune）、`Decision.lifecycle/expire_days` 与解析硬闸、
+`apply_decisions`（episodic 入库 + 事件追写）、`/memory events [n]`、`profile_event_retention_days`
+（Settings 209→210）、每日维护 prune、两份模板；测试 `test_profile_events.py` 16 例 + 裁决 4 例 + 命令 2 例。

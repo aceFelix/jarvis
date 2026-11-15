@@ -100,9 +100,11 @@ Jarvis 支持多层记忆持久化：
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
   后台异步提炼（只喂**增量**：水位台账记“已提炼到第几条”，默认节流 600 秒，可用 `profile_refine_interval` 配置，不影响响应速度）+ 退出/切会话时无视节流把最后一段收干（`profile_refine_on_exit`）+ 空闲 60 分钟无新消息也补一次（`profile_refine_idle_minutes`）+ 每日凌晨维护（过时记忆**只降权不删除**：权重低的进休眠、不再注入，再提一次即复活）。
   写入带确定性查重：同一条事实反复提炼会被归并到已有条目（置信取大），不会记很多遍；历史积压的重复可用 `/memory dedup yes` 一次性整理。
-  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory dedup` 归并重复 / `/memory refine` 立即提炼。
+  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory dedup` 归并重复 / `/memory refine` 立即提炼 / `/memory events` 查看临时事项事件轨。
+  临时事项（如“下周三面试”）会进事件轨（`events.jsonl`）并带到期时间，默认不占对话预算。
   画像**只记关于你的稳定信息**（身份、性格、爱好、作息、愿望、心思），不记助手的工作流程、
-  项目的技术实现（框架/端口/路径）、环境状态与一次性事件——那些属于长期记忆，不占画像预算。
+  项目的技术实现（框架/端口/路径）、环境状态；一次性事件不进画像（进事件轨，不占画像预算）——
+  细碎事实属于长期记忆，不占画像预算。
   可在 `settings.toml` `[memory.refine]` 配置独立便宜模型跑提炼。
   `/memory sync` 可把本地画像同步到 aceFelix 知识图谱（先预览后确认，图谱为唯一事实源）
 - **知识图谱画像桥**：`[profile_bridge] enabled = true` 后，启动时经 MCP 拉取 aceFelix
