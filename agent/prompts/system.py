@@ -458,11 +458,18 @@ def _profile_section(settings: object | None) -> str:
             # P1c 注入侧：主题优先（空列表＝纯按置信度）+ 预算口径（默认 pseudo 兼容旧行为）
             prefer = list(getattr(settings, "profile_inject_prefer_topics", []) or [])
             mode = str(getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo")
-            local = ProfileStore().render_for_prompt(
+            store = ProfileStore()
+            local = store.render_for_prompt(
                 token_limit=limit, prefer_topics=prefer, mode=mode
             )
             if local:
                 sections.append(local)
+            # P5：只有存在“没被注入的条目”时才提示可按需检索，避免小库也推销工具
+            if local and store.dormant_count() > 0:
+                sections.append(
+                    "（画像库中还有部分较早/较少提到的条目未在此列出；"
+                    "用户问到具体个人细节而这里没有时，可调用 RecallProfile 工具按关键词检索。）"
+                )
         _PROFILE_CACHE = "\n\n".join(sections)
     except Exception:
         pass  # 画像注入失败不影响启动

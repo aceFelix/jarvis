@@ -145,6 +145,8 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("profile_inject_token_budget_mode", "profile_inject_token_budget_mode"),
         # 事件轨（P2c）：临时事项日志的保留天数
         ("profile_event_retention_days", "profile_event_retention_days"),
+        # 按需检索（P5）：RecallProfile 工具默认返回条数
+        ("profile_recall_tool_top_k", "profile_recall_tool_top_k"),
         ("profile_refine_min_messages", "profile_refine_min_messages"),
         ("profile_refine_interval", "profile_refine_interval"),
         ("profile_refine_min_delta", "profile_refine_min_delta"),

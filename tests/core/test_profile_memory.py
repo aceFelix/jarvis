@@ -400,6 +400,27 @@ class TestProfileSection:
         assert sys_mod._profile_section(Settings(profile_enabled=False)) == ""
         assert sys_mod._profile_section(None) == ""
 
+    def test_hint_recall_tool_only_when_entries_omitted(self, tmp_path, monkeypatch):
+        """P5：只有存在未注入条目（休眠）时才提示 RecallProfile，小库不推销工具。"""
+        from agent.prompts import system as sys_mod
+        from agent.core.memory import profile_store as ps_mod
+
+        store = ProfileStore(tmp_path / "profile.json")
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9))
+        monkeypatch.setattr(ps_mod, "ProfileStore", lambda: store)
+        settings = Settings(profile_enabled=True)
+
+        sys_mod.reload_profile_cache()
+        assert "RecallProfile" not in sys_mod._profile_section(settings)
+
+        # 加一条很久没提过的条目 → 出现休眠 → 提示按需检索
+        old = ProfileEntry.new("很久前提过的旧事", "other", 0.6)
+        old.created_at = old.updated_at = 1000.0
+        store.upsert(old)
+        sys_mod.reload_profile_cache()
+        assert "RecallProfile" in sys_mod._profile_section(settings)
+        sys_mod.reload_profile_cache()
+
 
 # ─────────────────────────────────────────────────────────────
 # M2: /memory 命令

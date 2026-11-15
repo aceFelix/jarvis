@@ -456,6 +456,8 @@ CAPABILITY_REGISTRY: dict[str, CapabilityMeta] = {
 # 这类工具显式登记在豁免名单里，避免为了凑数给它们编一个能力条目。
 DEPENDENCY_FREE_TOOLS: frozenset[str] = frozenset({
     "DiskClean",   # 纯本地文件操作，走隔离区不依赖第三方库
+    # P5 画像按需检索：只读本地 profile.json，无外部依赖、无网络
+    "RecallProfile",
 })
 
 

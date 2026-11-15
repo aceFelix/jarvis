@@ -248,6 +248,7 @@ profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
 profile_inject_prefer_topics = []    # 优先注入的画像类别（命中者置顶），空＝纯按置信度
 profile_inject_token_budget_mode = "pseudo"  # 预算口径：pseudo（len/4，现状）/ weighted（中英分权真 token）
 profile_event_retention_days = 90   # 事件轨（临时事项日志）保留天数；0 = 只删已到期项
+profile_recall_tool_top_k = 8       # RecallProfile 工具默认返回条数（1–20）
 profile_refine_min_messages = 6      # 会话至少几条消息才触发提炼
 profile_refine_interval = 600        # 两次提炼的最小间隔（秒）。调大降低频率：
                                     #   频繁提炼无增量价值，白花 token，

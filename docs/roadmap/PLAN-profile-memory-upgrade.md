@@ -300,6 +300,11 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 
 ### P5 · 按需检索（RecallProfile 工具，可选后置）
 
+> ✅ 2026-11-15 **已落地**（不依赖 P3 向量）：`RecallProfile` 只读工具（deferred）+ 条件提示词 +
+> `profile_recall_tool_top_k`；检索走本地 bigram/别名，休眠条目也可被捕回。
+> 与本节原稿的差异：未做“core/archival 两层注入预算”（当前仍是一层注入 + 工具按需），
+> `profile_inject_core_only` 与 `profile_recall_min_score` 未加（无实测依据，避免死配置）。
+
 现状注入是"全量或按置信度裁剪"，**不是检索**：300 伪单位只装得下约 37 条（实测 51 条库注入 35 条，
 覆盖率 69%，相关性召回为 0）；库涨到 200 上限时覆盖率跌到 **~17%**。P5 把"全塞进 system prompt"
 改成"常驻少量 + 按需捞取"，即 letta 的 core / archival 分层。

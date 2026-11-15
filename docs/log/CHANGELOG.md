@@ -18,6 +18,16 @@
 
 ## [Unreleased]
 
+### 新增（画像按需检索 RecallProfile 工具，2026-11-15）
+
+- 新增 `agent/tools/memory/recall_profile.py`：`RecallProfile(query, category?, top_k?)` 只读工具，
+  `deferred=True` 经 ToolSearch 按需发现（不占每轮工具 schema）。
+- 检索走纯本地 `recall_similar`（bigram + 别名 + 同类别），**不引向量、不发网络**；
+  休眠条目也会被检索到（用户主动问起就该捕回来）。
+- 提示词只在存在未注入条目（`dormant_count() > 0`）时补一句“可调用 RecallProfile”，小库不推销工具。
+- 配置：`profile_recall_tool_top_k`（默认 8，夹 1–20）；`Settings` 210 → **211**，两份模板同步。
+- 测试：新增 `tests/tools/test_recall_profile.py`（13 例）+ 提示词条件出现 1 例。
+
 ### 新增（事件轨：临时事项独立留痕，2026-11-15）
 
 - 新增 `agent/core/memory/profile_events.py`：`~/.jarvis/memory/events.jsonl` append-only 事件轨，

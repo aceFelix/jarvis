@@ -259,6 +259,7 @@ def _build_default_registry_impl() -> ToolRegistry:
     from agent.tools.config_tool import ConfigExplainTool, ConfigListTool, ConfigSetTool
     from agent.tools.pref_tool import PreferenceTool
     from agent.tools.memory.memory_update import MemoryUpdateTool
+    from agent.tools.memory.recall_profile import RecallProfileTool
     from agent.tools.location import LocationTool
     from agent.tools.extensions.dev_server_tool import DevServerTool
     from agent.tools.extensions.email_box import EmailBoxTool
@@ -286,6 +287,8 @@ def _build_default_registry_impl() -> ToolRegistry:
     registry.register(PreferenceTool())
     # 长期记忆（桌面设置面板可编辑，模型经此追加；2026-11）@author aceFelix
     registry.register(MemoryUpdateTool())
+    # 画像按需检索（P5）：只在注入段没覆盖时按 query 捞取；deferred 不占每轮 schema
+    registry.register(RecallProfileTool())
     registry.register(AskUserTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
