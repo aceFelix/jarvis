@@ -203,6 +203,31 @@ class TestSoftDeleteOnUpdate:
         assert [e.content for e in store.entries()] == ["已改用 GLM"]
 
 
+class TestNoopRenewal:
+    """P2b 续命接线：noop 意味着“新消息里又说到同一事实”，要刷新衰减依据。"""
+
+    def test_noop_refreshes_reference(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        e = ProfileEntry.new("习惯深夜工作", "schedule", 0.9)
+        store.upsert(e)
+
+        PR.apply_decisions([PR.Decision("noop", target_id=e.id)], store, "s1", _report())
+        row = store.get(e.id)
+        assert row.invalidated_at == 0
+        assert row.ref_count == 1
+        assert row.last_referenced_at > 0
+        assert row.confidence == pytest.approx(0.9)
+
+    def test_noop_on_ghost_is_silent(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        report = _report()
+        PR.apply_decisions(
+            [PR.Decision("noop", target_id="ent_ghost")], store, "s1", report
+        )
+        assert report.noop == 1
+        assert len(store) == 0
+
+
 class TestRecallSimilar:
     def test_alias_hit_ranks_first(self, tmp_path: Path) -> None:
         store = _store(tmp_path)

@@ -18,6 +18,16 @@
 
 ## [Unreleased]
 
+### 修复（画像衰减依据是死字段，2026-11-15）
+
+- 核对发现 `last_referenced_at` / `ref_count` **从未被写入**：`decay()` 声称“被引用/被再次提及就续命”，
+  实际只看 `updated_at`，stateful 事实约 90 天必被删。
+- 新增 `ProfileStore.touch_reference()`：提炼裁决为 `noop`（新消息里又说到同一事实）时调用，
+  刷新 `last_referenced_at` 并 `ref_count+1`；`merge_or_add` 命中重复也算一次再确认（+1）。
+- `/memory` 列表在 `ref_count>0` 时展示“提及 N 次”，续命依据对用户可见。
+- 测试：`TestReferenceWiring` 4 例 + `TestNoopRenewal` 2 例 + 列表展示 1 例。
+- 复盘见 `docs/fixlogs/profile-decay-reference-wiring-fix.md`；半衰期 30 天/0.15 仍为经验值，待评测集校准。
+
 ### 新增（画像软删除：update 不再抹掉旧值，2026-11-15）
 
 - `ProfileEntry` 新增 `invalidated_at` / `superseded_by`；`update` 落盘改为

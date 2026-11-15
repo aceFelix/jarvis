@@ -515,6 +515,18 @@ class TestMemoryCommand:
         assert "以前用 DeepSeek" not in joined
         assert "另有 1 条已被新事实取代" in joined
 
+    def test_list_shows_reference_count(self, tmp_path):
+        """续命接线后：被再次确认过的事实在列表里显示“提及 N 次”。"""
+        path = tmp_path / "p.json"
+        store = ProfileStore(path)
+        e = ProfileEntry.new("习惯凌晨两点睡", "schedule", 0.9)
+        store.upsert(e)
+        store.touch_reference(e.id, now=5000.0)
+
+        ui = self._run("/memory", path)
+        joined = "\n".join(ui.messages)
+        assert "提及 1 次" in joined
+
 
 # ─────────────────────────────────────────────────────────────
 # M3: 衰减维护
@@ -750,6 +762,54 @@ class TestSoftDelete:
         assert store.dedup_all() == 1          # 两条有效重复归并
         assert len(store.entries()) == 1
         assert len(store.entries(include_invalidated=True)) == 2  # 历史保留
+
+
+class TestReferenceWiring:
+    """续命接线：被再次提及/确认要真正刷新衰减依据（2026-11-15 修复）。"""
+
+    def test_touch_reference_updates_fields(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("习惯深夜工作", "schedule", 0.9)
+        store.upsert(e)
+        assert e.ref_count == 0 and e.last_referenced_at == 0.0
+
+        assert store.touch_reference(e.id, now=5000.0) is True
+        touched = store.entries()[0]
+        assert touched.ref_count == 1
+        assert touched.last_referenced_at == pytest.approx(5000.0)
+        assert touched.confidence == pytest.approx(0.9)   # 只续命，不改置信
+
+    def test_touch_reference_skips_missing_and_invalidated(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("在做一个项目", "project", 0.9)
+        store.upsert(e)
+        store.invalidate(e.id)
+
+        assert store.touch_reference("ent_ghost") is False
+        assert store.touch_reference(e.id) is False
+
+    def test_merge_counts_as_confirmation(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        first, _ = store.merge_or_add(ProfileEntry.new("习惯深夜工作", "schedule", 0.6))
+        assert first.ref_count == 0
+
+        kept, merged = store.merge_or_add(ProfileEntry.new("习惯深夜工作。", "schedule", 0.9))
+        assert merged is True
+        assert kept.ref_count == 1
+        assert kept.last_referenced_at > 0
+        assert kept.confidence == pytest.approx(0.9)
+
+    def test_decay_basis_uses_last_reference(self, tmp_path):
+        """老条目但最近被提及过 → 按“最近提及”算年龄，不该被磨掉。"""
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("喜欢复古像素风", "preference", 0.8)
+        e.created_at = e.updated_at = 1000.0        # 两年前创建
+        store.upsert(e)
+        store.touch_reference(e.id, now=1000.0 + 700 * 86400)  # 最近刚被提及
+
+        now = 1000.0 + 730 * 86400                   # 距最近提及 30 天 = 一个半衰期
+        assert store.decay(now=now) == 0
+        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
 
 
 class TestProfileMaintenanceTask:

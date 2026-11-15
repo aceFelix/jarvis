@@ -349,12 +349,14 @@ class ProfileStore:
         命中规则：归一化全等，或字符二元组相似度 ≥ _SIM_MERGE_THRESHOLD。
         合并策略（保守，不覆盖旧条目的原文与类别）：
         - confidence 取两者较大值（同一事实再被确认一次，只增信不换写）
-        - updated_at 刷新、created_at 保留最早
+        - updated_at / last_referenced_at 刷新、created_at 保留最早
+        - ref_count：合并本身即“又被确认了一次”，在原累计值上 +1
         - source_session：manual 优先保留；否则留先到者
         返回 (存活的条目, 是否发生合并)。提炼管线与手动入口共用本方法，
-        这是"同一句话说 N 遍记 N 条"的最后一道闸。@author aceFelix
+        这是“同一句话说 N 遍记 N 条”的最后一道闸。@author aceFelix
         """
         with self._lock:
+            now = time.time()
             for e in self._entries:
                 # P2b：失效条目是历史，不参与合并（否则会把旧值“复活”成新值）
                 if e.id == entry.id or e.invalidated_at:
@@ -373,9 +375,10 @@ class ProfileStore:
                         # manual 来源优先；否则留先到者（空值拿另一边的）
                         source_session=e.source_session or entry.source_session,
                         created_at=min(e.created_at, entry.created_at) or entry.created_at,
-                        updated_at=time.time(),
-                        last_referenced_at=max(e.last_referenced_at, entry.last_referenced_at),
-                        ref_count=e.ref_count + entry.ref_count,
+                        updated_at=now,
+                        # 续命依据：再次确认既刷新“最近提及”，也累计提及次数
+                        last_referenced_at=now,
+                        ref_count=e.ref_count + entry.ref_count + 1,
                     )
                     for i, old in enumerate(self._entries):
                         if old.id == e.id:
@@ -475,6 +478,25 @@ class ProfileStore:
             if len(self._entries) != before:
                 self._save_locked()
                 return True
+        return False
+
+    def touch_reference(self, entry_id: str, *, now: float | None = None) -> bool:
+        """标记条目“被再次提及/确认”：刷新 last_referenced_at 且 ref_count+1。
+
+        这是衰减依据的一半：`decay()` 的时间基准取
+        `max(updated_at, last_referenced_at, created_at)`，旧实现没人写这个字段，
+        导致"被引用就续命"只是文档里的说法（2026-11-15 核对发现）。
+        接线点：提炼裁决为 `noop`（新消息里又说到同一事实，无需改写）时调用。
+        不碰内容与置信度；失效条目返回 False。@author aceFelix
+        """
+        ts = time.time() if now is None else float(now)
+        with self._lock:
+            for e in self._entries:
+                if e.id == entry_id and not e.invalidated_at:
+                    e.last_referenced_at = ts
+                    e.ref_count += 1
+                    self._save_locked()
+                    return True
         return False
 
     def invalidate(

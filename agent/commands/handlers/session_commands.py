@@ -157,9 +157,11 @@ def _show_profile(ui, settings, session_name: str = "") -> None:
     for e in entries:
         label = CATEGORY_LABELS.get(e.category, e.category)
         src = e.source_session or "-"
+        # 提及次数 > 0 时才展示：这是“被反复确认”的事实，比单纯置信度更能说明分量
+        seen = f" | 提及 {e.ref_count} 次" if e.ref_count else ""
         ui.info(
             f"  [{e.id}] {label} | {e.content}\n"
-            f"      置信度 {e.confidence:.2f} | 来源 {src}"
+            f"      置信度 {e.confidence:.2f} | 来源 {src}{seen}"
         )
     # P2b：被新事实取代的旧条目不再展示，但告诉用户它们还在（历史可追）
     history_n = len(store.entries(include_invalidated=True)) - len(entries)

@@ -303,11 +303,11 @@ def apply_decisions(
 ) -> None:
     """第④段：落盘。
 
-    - add → merge_or_add（存储层查重仍生效）
+    - add → merge_or_add（存储层查重仍生效；合并即算一次再确认）
     - update → 建新条目 + 旧条目**打失效标记**（P2b 软删除，保留历史）；
       target 幻觉/已失效时降级为 add
     - delete → store.delete（显式删除仍物理删）
-    - noop → 不写
+    - noop → 不写内容，但调 store.touch_reference 续命（刷新最近提及 + 累计次数）
     计数全部记在 report 上（added/updated/merged/deleted/noop）。
     """
     def _bump(name: str) -> None:
@@ -315,6 +315,11 @@ def apply_decisions(
 
     for d in decisions:
         if d.op == "noop":
+            # P2b/P2c 前的续命接线：noop 意味着“新消息里又说到同一事实、无需改写”，
+            # 刷新 last_referenced_at 与 ref_count——decay 的时间基准才真正成立。
+            # target 幻觉/已失效时静默忽略（touch_reference 自己会返回 False）。
+            if d.target_id:
+                store.touch_reference(d.target_id)
             _bump("noop")
             continue
         if d.op == "delete":
