@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 import time
@@ -22,8 +21,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.core.message import Message, TextContent
+from agent.core.memory import profile_ledger, profile_resolve
+from agent.core.memory.profile_json import parse_json_object
 from agent.core.memory.profile_store import (
-    PROFILE_CATEGORIES,
     ProfileEntry,
     ProfileStore,
 )
@@ -38,12 +38,9 @@ REFINE_INTERVAL_SECONDS = 600
 # 喂给 LLM 的消息窗口与单条截断（控制提炼成本）
 _MAX_MESSAGES = 40
 _MAX_CHARS_PER_MSG = 300
-# 冲突裁决时展示的现有画像条数上限（2026-11 去重修复：50 时溢出部分对模型
-# 不可见，重复事实被当新条目反复入库；提到 80 配合存储层确定性查重双保险）
-_MAX_EXISTING_ENTRIES = 80
 
-# 节流状态（模块级，进程内共享）
-_last_refine_ts: float = 0.0
+# 节流状态（模块级，进程内共享）。节流时间戳已改存台账（跨进程一致），
+# 这里只留并发闸：同一进程同时只能跑一个提炼。
 _in_flight = threading.Lock()
 
 
@@ -54,7 +51,12 @@ class RefineReport:
     added: int = 0
     updated: int = 0        # 替换旧条目数
     merged: int = 0         # 命中存储层查重被合并的条数（深重复拦截）
+    deleted: int = 0        # 裁决为 delete 并成功删除的条数
+    noop: int = 0           # 裁决为 noop 的条数（"不记"的正式出口）
+    extracted: int = 0      # 抽取段产出的候选数
+    rejected: int = 0       # 被硬闸拒掉的条数（>40 字/空内容/非法 op）
     skipped: bool = False   # True = 未触发（节流/消息不足/mock 等）
+    advanceable: bool = False  # 本轮是否可推进水位（"没内容"可推进，"没 LLM"不可）
     reason: str = ""
     error: str = ""
 
@@ -191,31 +193,14 @@ def _resolve_api_key_from_env(vendor: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _build_prompt(dialog_text: str, existing: list[ProfileEntry]) -> str:
-    cats = ", ".join(PROFILE_CATEGORIES)
-    existing_lines = "\n".join(
-        f"- [{e.id}] {e.category}: {e.content}" for e in existing[:_MAX_EXISTING_ENTRIES]
-    ) or "（暂无）"
+    """兼容旧名：现在等于“抽取段” prompt。
 
-    return f"""你是用户画像提炼器。从下面的对话中提取关于【用户本人】的持久事实，用于让 AI 助手长期记住这个用户。
-
-## 规则
-1. 只提取多次出现或明确表达的稳定事实（习惯、偏好、背景、常用工具、作息、项目、联系人）
-2. 一次性闲聊、临时性问题、关于贾维斯自身的内容——不记
-3. content 用第三人称简体中文陈述（如"习惯深夜工作"），单条不超过 40 字
-4. category 从以下选择: {cats}
-5. confidence 取 0.3~0.95：明确自述的取高，从行为推断的取低
-6. 与"已有画像"矛盾或重复（含措辞不同但语义相同）的信息，一律放 updates 并给出最接近条目的 replace_id，禁止再放进 new
-7. 拿不准是否重复时，选已有画像里语义最接近的一条放 updates，不要两条都写
-8. 没有值得记的就返回空数组——宁缺毋滥
-
-## 已有画像
-{existing_lines}
-
-## 本次对话
-{dialog_text}
-
-## 输出（严格 JSON，不要输出其他任何内容）
-{{"new": [{{"category": "...", "content": "...", "confidence": 0.8}}], "updates": [{{"replace_id": "ent_xxx", "category": "...", "content": "...", "confidence": 0.9}}]}}"""
+    P1 起提炼拆成两段（抽取 / 裁决），**已有画像只在裁决段出现**——
+    抽取段刻意不带旧画像，避免候选与裁决互相污染。
+    保留本函数是为了不打断既有测试与外部引用。
+    """
+    del existing  # 抽取段不使用旧画像
+    return profile_resolve.build_extract_prompt(dialog_text)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -223,45 +208,21 @@ def _build_prompt(dialog_text: str, existing: list[ProfileEntry]) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _parse_profile_json(raw: str) -> dict:
-    """容错解析 LLM 输出的 JSON。
-
-    依次尝试：直接解析 → 剥 ```json 围栏 → 截取首个 {{ 到最后一个 }}。
-    全部失败返回空 dict（视为本次无可提取内容）。
-    """
-    text = raw.strip()
-    if not text:
-        return {}
-    # 剥 markdown 围栏
-    if text.startswith("```"):
-        text = text.split("```", 2)
-        text = text[1] if len(text) > 1 else ""
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    for candidate in (text,):
-        try:
-            data = json.loads(candidate)
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    # 截取 {...}
-    start, end = raw.find("{"), raw.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            data = json.loads(raw[start:end + 1])
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return {}
+    """兼容旧名：委托给公共解析器（抽取段与裁决段共用）。"""
+    return parse_json_object(raw)
 
 
 # ─────────────────────────────────────────────────────────────
 # 主流程
 # ─────────────────────────────────────────────────────────────
 
-async def _call_llm(provider, model: str, prompt: str) -> str:
+async def _call_llm(
+    provider,
+    model: str,
+    prompt: str,
+    *,
+    max_tokens: int = 1500,
+) -> str:
     """调 provider.stream 收集完整文本（提炼不需要思考，临时关闭）。"""
     msgs = [Message(role="user", content=[TextContent(text=prompt)])]
     old_thinking = provider.is_thinking_enabled()
@@ -273,7 +234,7 @@ async def _call_llm(provider, model: str, prompt: str) -> str:
             system="你是用户画像提炼器，只输出 JSON。",
             messages=msgs,
             tools=[],
-            max_tokens=1500,
+            max_tokens=max_tokens,
             temperature=0.2,
         )
         async for event in events:
@@ -283,6 +244,11 @@ async def _call_llm(provider, model: str, prompt: str) -> str:
     finally:
         provider.set_thinking_enabled(old_thinking)
     return out
+
+
+def _call_llm_sync(provider, model: str, prompt: str, *, max_tokens: int = 1500) -> str:
+    """同步包装：提炼主体跑在后台线程且无事件循环，两段调用都用它。"""
+    return asyncio.run(_call_llm(provider, model, prompt, max_tokens=max_tokens))
 
 
 def refine_session(
@@ -300,53 +266,42 @@ def refine_session(
         if not dialog_text:
             report.skipped = True
             report.reason = "无可提炼对话内容"
+            # 没内容也算"本轮处理完毕"：不推进的话同一段空增量会被反复重试
+            report.advanceable = True
             return report
 
         provider = _build_refine_provider(settings)
         if provider is None:
             report.skipped = True
             report.reason = "无可用 LLM（mock 且未配置独立提炼模型）"
+            report.advanceable = False  # 等配置好再试，不能吞掉这段增量
             return report
 
         model = getattr(settings, "profile_refine_model", "") or settings.model
-        raw = asyncio.run(_call_llm(provider, model, _build_prompt(dialog_text, store.entries())))
-        data = _parse_profile_json(raw)
+        include_aliases = bool(getattr(settings, "profile_aliases_enabled", True))
 
-        for item in data.get("new", []) or []:
-            if not isinstance(item, dict) or not str(item.get("content", "")).strip():
-                continue
-            entry = ProfileEntry.new(
-                content=str(item["content"]),
-                category=str(item.get("category", "other")),
-                confidence=float(item.get("confidence", 0.5)),
-                source_session=session_id,
+        # ① 抽取：只读增量对话，**不判重复**（已有画像不进这一段 prompt）
+        candidates, rejected = profile_resolve.extract_candidates(
+            provider, model, dialog_text, _call_llm_sync
+        )
+        report.extracted = len(candidates)
+        report.rejected = rejected
+
+        if candidates:
+            # ② 逐条召回：每条候选各自带 top-K 最像的旧条目
+            top_k = int(getattr(settings, "profile_recall_top_k", 5) or 5)
+            profile_resolve.attach_recalls(candidates, store, top_k)
+
+            # ③ 四操作裁决：add / update / delete / noop
+            decisions, rejected_resolve = profile_resolve.resolve_decisions(
+                provider, model, candidates, _call_llm_sync,
+                include_aliases=include_aliases,
             )
-            # 存储层确定性查重：LLM 把旧事实当新事实报（updates 不遵守/
-            # 超展示上限看不见）时在这道闸合并，不再产生重复条目
-            _, merged = store.merge_or_add(entry)
-            if merged:
-                report.merged += 1
-            else:
-                report.added += 1
+            report.rejected += rejected_resolve
 
-        for item in data.get("updates", []) or []:
-            if not isinstance(item, dict):
-                continue
-            replace_id = str(item.get("replace_id", ""))
-            if not replace_id or not store.get(replace_id):
-                continue  # LLM 幻觉出不存在的 id → 当新条目处理（仍走查重闸）
-            if store.delete(replace_id):
-                entry = ProfileEntry.new(
-                    content=str(item.get("content", "")),
-                    category=str(item.get("category", "other")),
-                    confidence=float(item.get("confidence", 0.5)),
-                    source_session=session_id,
-                )
-                _, merged = store.merge_or_add(entry)
-                if merged:
-                    report.merged += 1
-                else:
-                    report.updated += 1
+            # ④ 落盘（存储层查重闸仍然生效）
+            profile_resolve.apply_decisions(decisions, store, session_id, report)
+
 
         # 本轮写盘后再做一次全量归并：历史积压的深重复条目（修复前写入的）
         # 随任意一次提炼顺带清理，不需要额外维护任务
@@ -365,6 +320,8 @@ def refine_session(
                 "画像提炼完成: session=%s +%d ~%d 合并重复 %d",
                 session_id, report.added, report.updated, report.merged,
             )
+        # 跑到这里说明整段增量已处理完（包括 0 条提取）：可以推进水位
+        report.advanceable = True
     except Exception as e:  # 提炼失败绝不影响主流程
         report.error = f"{type(e).__name__}: {e}"
         logger.warning("画像提炼失败: %s", report.error)
@@ -381,31 +338,87 @@ def refine_session(
 # 异步触发（_auto_save 挂载点）
 # ─────────────────────────────────────────────────────────────
 
-def maybe_refine_async(messages: list[Message], session_id: str, settings: Any) -> bool:
-    """节流后异步触发提炼。返回是否真的启动了后台任务。
+def _schedule_idle(sid: str, last_msg_ts: float) -> None:
+    """被节流/并发闸挡下时，安排一次空闲补提炼（失败静默）。
 
-    条件：开关开启 + 消息够多 + 距上次提炼超过间隔 + 无进行中的提炼。
-    间隔取 settings.profile_refine_interval（未配置用默认 600 秒），
-    调大可降低提炼频率（频繁提炼无增量价值，白花 token）。
+    只在这两条路径上排："有增量、但现在不能跑"正是空闲触发要覆盖的场景。
+    增量不足 min_delta 时不排——空闲判定用的是同一个阈值，排了也不会提炼。
     """
-    global _last_refine_ts
+    try:
+        from agent.core.memory import profile_idle
+
+        profile_idle.schedule_idle_check(sid, last_msg_ts=last_msg_ts)
+    except Exception:
+        pass
+
+
+def maybe_refine_async(
+    messages: list[Message],
+    session_id: str,
+    settings: Any,
+    *,
+    force: bool = False,
+) -> bool:
+    """按**水位增量**异步触发提炼。返回是否真的启动了后台任务。
+
+    三个触发共用本函数：
+
+    - 阈值（每轮 `_auto_save`）：`delta ≥ profile_refine_min_delta` 且距上次成功提炼
+      超过 `profile_refine_interval`；
+    - 终态（退出 / 切会话）：`force=True`，无视节流；
+    - 空闲（`profile_idle` 到点）：也传 `force=True`。
+
+    `force` 不是"无视水位"：`delta == 0` 时仍不提炼（没有新消息就不该花钱）。
+    只把 `messages[refined_until:]` 的增量交给 LLM，历史部分不再重喂——这是
+    "同一事实被反复提炼"的根治点（见 PLAN-profile-memory-upgrade §P0）。
+    """
     if not getattr(settings, "profile_enabled", False):
         return False
+
+    sid = str(session_id or "default")
+    total = len(messages)
     min_msgs = int(getattr(settings, "profile_refine_min_messages", 6))
-    if len(messages) < min_msgs:
+    if total < min_msgs:
+        return False  # 首提炼的绝对门槛，防两句话就开跑
+
+    # 刷新 last_msg_ts；/rewind 或 /compact 让消息变少时顺带下调水位
+    state = profile_ledger.touch(sid, total)
+    delta = max(0, total - state.refined_until)
+
+    min_delta = max(1, int(getattr(settings, "profile_refine_min_delta", 6)))
+    required = 1 if force else min_delta
+    if delta < required:
+        # 关键："有增量、但不够跑一次 LLM"也要排空闲检查。
+        # 否则"聊两三句就走开"的那几条永远等不到提炼（只能干攼成 6 条或正常退出）。
+        # 空闲触发受时间限制流（一次/小时），所以它能用 delta≥1 的门槛兑底。
+        if delta >= 1:
+            _schedule_idle(sid, state.last_msg_ts)
         return False
+
     interval = int(getattr(settings, "profile_refine_interval", REFINE_INTERVAL_SECONDS))
     now = time.time()
-    if now - _last_refine_ts < interval:
+    # 节流看"最近一次尝试"而不是"最近一次成功"：失败也算，否则 provider 报错时
+    # 每轮 _auto_save 都会再起一个线程重试
+    if not force and (now - state.last_attempt_ts) < interval:
+        _schedule_idle(sid, state.last_msg_ts)
         return False
     if not _in_flight.acquire(blocking=False):
+        _schedule_idle(sid, state.last_msg_ts)
         return False  # 已有线程在提炼
 
-    _last_refine_ts = now
+    profile_ledger.mark_attempt(sid, now=now)
+
+    # 线程启动前就把增量快照下来：调用方随后可能 clear()/截断 messages
+    increment = list(messages[state.refined_until:total])
 
     def _worker() -> None:
         try:
-            refine_session(list(messages), session_id, settings)
+            report = refine_session(increment, sid, settings)
+            if report.error:
+                profile_ledger.mark_error(sid, report.error)
+            elif report.advanceable:
+                profile_ledger.advance(sid, total)
+            # advanceable=False 且无 error：本轮不推进，下次重试同一段增量
         finally:
             _in_flight.release()
 

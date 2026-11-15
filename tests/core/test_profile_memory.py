@@ -24,6 +24,22 @@ from agent.core.memory import profile_refiner as refiner
 
 
 @pytest.fixture(autouse=True)
+def _isolate_refine_ledger(tmp_path):
+    """把提炼水位台账钉到临时目录：用例间互不影响，也不碰真实 ~/.jarvis。
+
+    2026-11 P0 起，提炼节流从模块级 `_last_refine_ts` 改成跨进程台账；
+    不隔离的话第一个用例会把 `last_refine_ts` 写进真实用户目录，
+    后续用例（或用户自己）会被莫名节流。
+    @author aceFelix
+    """
+    from agent.core.memory import profile_ledger as ledger
+
+    ledger.configure_ledger_path(tmp_path / "memory" / "refine_ledger.json")
+    yield
+    ledger.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_llm_client(monkeypatch):
     """禁止本文件用例构造真 LLM 客户端（上面那条泄漏线程能活 1.6s 的原因）。
 
@@ -158,7 +174,7 @@ class TestProfileStore:
         assert not (tmp_path / "profile.json.tmp").exists()
         # JSON 可解析且带 version
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["version"] == 1
+        assert data["version"] == 2
 
 
 # ─────────────────────────────────────────────────────────────
@@ -236,11 +252,9 @@ class TestMaybeRefineAsync:
         # 必须隔离真 provider：不隔离时后台线程会去建真的 AsyncOpenAI 客户端（实测 1.6s），
         # 有 OPENAI_API_KEY 的机器上还会从测试里发出真实请求、并读写用户真实画像库
         monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: None)
-        # 重置节流状态（用 monkeypatch 写入，用例结束自动还原，不再泄漏给后续用例）
-        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
         msgs = [_msg("user", "hi")] * 10
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is True
-        # 间隔内第二次调用直接跳过
+        # 间隔内第二次调用直接跳过（首轮刚写过 last_refine_ts）
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is False
 
     def test_worker_thread_does_not_outlive_test(self, monkeypatch):
@@ -250,7 +264,6 @@ class TestMaybeRefineAsync:
         @author aceFelix
         """
         monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: None)
-        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
         assert refiner.maybe_refine_async(
             [_msg("user", "hi")] * 10, "s", self._settings()
         ) is True
@@ -267,10 +280,11 @@ class TestMaybeRefineAsync:
 # ─────────────────────────────────────────────────────────────
 
 class _FakeProvider:
-    """提炼链路 fake：is_thinking_enabled/set_thinking_enabled + stream 收集。"""
+    """提炼链路 fake：支持脚本化多次回复（抽取段 / 裁决段）。"""
 
-    def __init__(self, reply: str):
-        self._reply = reply
+    def __init__(self, reply: str | list[str]):
+        self._replies = list(reply) if isinstance(reply, list) else [reply]
+        self.prompts: list[str] = []
         self.thinking_state: list[bool] = []
 
     def is_thinking_enabled(self) -> bool:
@@ -281,7 +295,9 @@ class _FakeProvider:
 
     async def stream(self, **kwargs):
         from agent.llm.base import TextDelta
-        yield TextDelta(text=self._reply)
+        self.prompts.append(kwargs["messages"][-1].get_text())
+        reply = self._replies.pop(0) if len(self._replies) > 1 else self._replies[0]
+        yield TextDelta(text=reply)
 
     async def close(self) -> None:
         pass
@@ -293,18 +309,22 @@ class TestRefineSessionE2E:
         old = ProfileEntry.new("以前用 DeepSeek", "tool_usage", 0.6, "s_old")
         store.upsert(old)
 
-        reply = json.dumps({
-            "new": [
-                {"category": "schedule", "content": "习惯深夜工作", "confidence": 0.9},
-                {"category": "bad", "content": "", "confidence": 0.5},  # 空 content → 跳过
-            ],
-            "updates": [
-                {"replace_id": old.id, "category": "tool_usage",
-                 "content": "已改用 GLM", "confidence": 0.95},
-                {"replace_id": "ent_not_exist", "content": "幻觉条目", "confidence": 0.9},
-            ],
+        extract = json.dumps({
+            "candidates": [
+                {"content": "习惯深夜工作", "category": "schedule", "confidence": 0.9},
+                {"content": "", "category": "bad", "confidence": 0.5},  # 空 content → 硬闸拒
+            ]
         }, ensure_ascii=False)
-        fake = _FakeProvider(reply)
+        resolve = json.dumps({
+            "facts": [
+                {"op": "add", "content": "习惯深夜工作", "category": "schedule",
+                 "confidence": 0.9, "aliases": ["熬夜", "晚睡", "作息晚"]},
+                {"op": "update", "target_id": old.id, "content": "已改用 GLM",
+                 "category": "tool_usage", "confidence": 0.95, "aliases": ["GLM"]},
+                {"op": "noop", "target_id": "ent_not_exist"},
+            ]
+        }, ensure_ascii=False)
+        fake = _FakeProvider([extract, resolve])
         monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: fake)
 
         settings = Settings(profile_enabled=True)
@@ -312,18 +332,23 @@ class TestRefineSessionE2E:
         report = refiner.refine_session(msgs, "s_new", settings, store=store)
 
         assert report.error == ""
+        assert report.extracted == 1 and report.rejected == 1
         assert report.added == 1
         assert report.updated == 1
+        assert report.noop == 1
         # 旧条目被替换
         assert store.get(old.id) is None
-        contents = [e.content for e in store.entries()]
+        entries = store.entries()
+        contents = [e.content for e in entries]
         assert "习惯深夜工作" in contents
         assert "已改用 GLM" in contents
         assert "以前用 DeepSeek" not in contents
-        # 幻觉 replace_id 未产生重复条目
         assert len(store) == 2
-        # 提炼时关闭了思考
-        assert fake.thinking_state == [False, True]
+        # 别名落盘
+        new_entry = next(e for e in entries if e.content == "习惯深夜工作")
+        assert "熬夜" in new_entry.aliases
+        # 两段各开关一次思考
+        assert fake.thinking_state == [False, True, False, True]
 
     def test_mock_without_refine_model_skips(self, tmp_path):
         store = ProfileStore(tmp_path / "profile.json")
@@ -551,6 +576,32 @@ class TestMemoryRefineCommand:
         assert any("太少" in m for m in ui.messages)
 
 
+class TestProfileBoundary:
+    """画像只记“人”，不记“事/系统”（2026-11-15 用户校正）。"""
+
+    def test_prompt_has_person_only_boundaries(self):
+        prompt = refiner._build_prompt("用户: 我在改端口", [])
+        # 正面：性格/愿望/心思必须入类别表
+        for cat in ("personality", "aspiration", "mindset"):
+            assert cat in prompt
+        # 反面：排除项与判据必须在 prompt 里
+        assert "画像不是什么" in prompt
+        assert "端口" in prompt and "路径" in prompt
+        assert "MEMORY.md" in prompt
+        assert "5 年后还成立吗" in prompt
+
+    def test_new_categories_accepted(self):
+        for cat in ("personality", "aspiration", "mindset"):
+            e = ProfileEntry.new("x", cat, 0.8)
+            assert e.category == cat
+
+    def test_tech_detail_prompt_lists_exclusions(self):
+        """技术实现与临时事件必须出现在排除清单中。"""
+        prompt = refiner._build_prompt("用户: x", [])
+        for kw in ("技术实现细节", "一次性事件", "环境/网络状态"):
+            assert kw in prompt
+
+
 # ─────────────────────────────────────────────────────────────
 # 配置映射
 # ─────────────────────────────────────────────────────────────
@@ -563,10 +614,9 @@ class TestSettingsMapping:
         assert s.profile_inject_token_limit == 300
         assert s.profile_refine_model == ""
 
-    def test_maybe_refine_async_respects_min_messages_default(self, monkeypatch):
+    def test_maybe_refine_async_respects_min_messages_default(self):
         s = Settings()  # 默认 6 条
         msgs = [_msg("user", "hi")] * 5
-        monkeypatch.setattr(refiner, "_last_refine_ts", 0.0)
         assert refiner.maybe_refine_async(msgs, "s", s) is False
 
 
@@ -664,13 +714,16 @@ class TestRefineDedupIntegration:
         store = ProfileStore(tmp_path / "profile.json")
         store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, "s_old"))
 
-        # 提炼返回里把"习惯深夜工作"放进 new（LLM 未走 updates）
-        reply = json.dumps({
-            "new": [{"category": "schedule", "content": "习惯深夜工作", "confidence": 0.9}],
-            "updates": [],
+        # 裁决段仍报 add（模型没看清），存储层查重闸必须合并而不是新增
+        extract = json.dumps({
+            "candidates": [{"content": "习惯深夜工作", "category": "schedule", "confidence": 0.9}]
+        }, ensure_ascii=False)
+        resolve = json.dumps({
+            "facts": [{"op": "add", "content": "习惯深夜工作",
+                       "category": "schedule", "confidence": 0.9}]
         }, ensure_ascii=False)
         monkeypatch.setattr(refiner, "_build_refine_provider",
-                            lambda s: _FakeProvider(reply))
+                            lambda s: _FakeProvider([extract, resolve]))
         report = refiner.refine_session(
             [_msg("user", "我经常熬夜")], "s_new", Settings(profile_enabled=True),
             store=store)

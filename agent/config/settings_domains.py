@@ -140,8 +140,16 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("profile_enabled", "profile_enabled"),
         ("profile_max_entries", "profile_max_entries"),
         ("profile_inject_token_limit", "profile_inject_token_limit"),
+        # 注入侧 P1c：主题优先与预算口径（prefer_topics 为数组，见 LIST_FIELDS）
+        ("profile_inject_prefer_topics", "profile_inject_prefer_topics"),
+        ("profile_inject_token_budget_mode", "profile_inject_token_budget_mode"),
         ("profile_refine_min_messages", "profile_refine_min_messages"),
         ("profile_refine_interval", "profile_refine_interval"),
+        ("profile_refine_min_delta", "profile_refine_min_delta"),
+        ("profile_refine_on_exit", "profile_refine_on_exit"),
+        ("profile_refine_idle_minutes", "profile_refine_idle_minutes"),
+        ("profile_recall_top_k", "profile_recall_top_k"),
+        ("profile_aliases_enabled", "profile_aliases_enabled"),
         ("profile_refine_model", "profile_refine_model"),
         ("profile_refine_provider", "profile_refine_provider"),
         # 别名：该字段语义就是 api_format（见 Settings.profile_refine_provider），
@@ -378,6 +386,8 @@ LIST_FIELDS: frozenset[str] = frozenset({
     # yolo 目标域限制（2026-11）：两个都是路径数组
     "permissions_yolo_guard_roots",
     "permissions_yolo_hard_deny",
+    # 画像注入优先主题（P1c）：数组字段
+    "profile_inject_prefer_topics",
 })
 
 

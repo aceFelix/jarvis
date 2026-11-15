@@ -308,6 +308,7 @@ def _auto_save(
     dialog_count: int = 0,
     title_generated: bool = False,
     settings: Any = None,
+    final: bool = False,
 ) -> None:
     """保存会话到指定名称（增量刷新，每次对话后都会调用）。
 
@@ -318,7 +319,10 @@ def _auto_save(
     "幽灵"条目出现，自动恢复特性已整体下线（会话靠左栏 /load 手动恢复）。
 
     settings 传入时顺带触发画像记忆提炼（Phase 1a）：
-    后台异步 + 节流（10 分钟一次），不影响保存路径。
+    后台异步 + 水位增量（只喂新消息），不影响保存路径。
+
+    final=True 表示"本次是会话终态"（退出 / 切会话）：无视提炼节流，只要求有新增量；
+    受 `profile_refine_on_exit` 开关控制。
     """
     if not messages:
         return
@@ -343,7 +347,9 @@ def _auto_save(
     if settings is not None:
         try:
             from agent.core.memory.profile_refiner import maybe_refine_async
-            maybe_refine_async(messages, session_name, settings)
+
+            force = bool(final and getattr(settings, "profile_refine_on_exit", True))
+            maybe_refine_async(messages, session_name, settings, force=force)
         except Exception:
             pass
 

@@ -150,7 +150,14 @@ long_term_memory = true         # 启动时加载长期记忆注入 system promp
 profile_enabled = true
 profile_max_entries = 200            # 条目上限（超出按置信度×新近度淘汰）
 profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
+profile_inject_prefer_topics = []    # 优先注入的画像类别（命中者置顶），空＝纯按置信度
+profile_inject_token_budget_mode = "pseudo"  # 预算口径：pseudo（len/4，现状）/ weighted（中英分权真 token）
 profile_refine_min_messages = 6      # 会话至少几条消息才触发提炼
+profile_refine_min_delta = 6         # 自上次水位后新增多少条才提炼（只喂增量）
+profile_refine_on_exit = true         # 退出/切会话时无视节流，把最后一段增量收干
+profile_refine_idle_minutes = 60      # 空闲多久后补一次增量提炼（0 关闭）
+profile_recall_top_k = 5              # 每条候选召回的相似旧条目数
+profile_aliases_enabled = true        # 提炼时生成检索别名（关＝纯 bigram）
 
 # 独立提炼模型（可选）：用便宜模型跑后台提炼，留空 = 用主 LLM。
 # 示例（DashScope qwen-flash，也可配 deepseek 等任意 OpenAI 兼容端点）：

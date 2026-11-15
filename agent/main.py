@@ -228,6 +228,17 @@ async def repl(settings: Settings) -> int:
     )
     try:
         reminder_host.start()
+        # 画像提炼的空闲触发：绑定当前消息/会话（每会话一次性 Timer，非常驻线程）
+        try:
+            from agent.core.memory import profile_idle
+
+            profile_idle.bind(
+                settings,
+                messages_provider=lambda: messages,
+                session_provider=lambda: _session_name,
+            )
+        except Exception:
+            pass
         reminder_tool_count = reminder_host.register_tools(registry)
         if reminder_tool_count > 0 and settings.verbose:
             ui.info(f"✓ 日程提醒工具已注册（{reminder_tool_count} 个）")
@@ -603,10 +614,10 @@ async def repl(settings: Settings) -> int:
 
                 traceback.print_exc()
 
-    # 退出前最终保存
+    # 退出前最终保存（final=True：无视节流把最后一段增量收干）
     _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
                session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated,
-               settings=settings)
+               settings=settings, final=True)
 
     # 先收后台线程再告别：避免 goodbye 之后还有提醒/目标播报插进来，
     # 也避免后台线程拖住进程退出（脊柱与提醒同口径）

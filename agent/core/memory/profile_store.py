@@ -22,32 +22,53 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-from agent.core.memory.compactor import estimate_text_tokens
+from typing import Sequence
 
 # 合法画像类别（提炼 prompt 与存储校验共用，与计划文档一致）
+# 边界：画像只记“关于人”的稳定信息；助手工作流/技术细节/临时事件不属于画像。
 PROFILE_CATEGORIES = (
-    "identity",      # 身份背景（职业、技术栈、所在城市）
-    "preference",    # 偏好（喜欢/不喜欢什么、表达习惯）
-    "work_habit",    # 工作习惯（工作流、文件组织方式）
-    "schedule",      # 作息（睡觉/起床/会议时间）
-    "tool_usage",    # 工具使用（常用软件、模型、编辑器）
-    "relationship",  # 联系人（同事、朋友、协作对象）
-    "project",       # 项目背景（在做什么项目、用什么技术）
+    "identity",      # 身份背景（职业、行业、学历、城市、年龄）
+    "personality",   # 性格与处事风格（内向、急性子、完美主义、怕麻烦）
+    "preference",    # 爱好与口味（喜欢什么、审美、沟通偏好）
+    "work_habit",    # 工作习惯（作息之外的工作方式、计划习惯）
+    "schedule",      # 作息（几点睡、是否熬夜、周末怎么过）
+    "relationship",  # 关系（家人、朋友、同事、合作伙伴的身份）
+    "aspiration",    # 愿望与抱负（想做什么、目标、长期期待）
+    "mindset",       # 心思与状态（在意什么、焦虑/纠结/反复想的事）
+    "tool_usage",    # 长期偏好用什么工具（个人习惯；不记配置/路径/端口）
+    "project",       # 在做什么方向（身份层面；不记技术实现细节）
     "other",
 )
+
+#: 类别的一句话判据（提炼 prompt 直接渲染，避免模型靠名字揣度）
+CATEGORY_HINTS = {
+    "identity": "职业、行业、学历、所在城市、年龄段",
+    "personality": "性格与处事风格，如内向、急性子、完美主义、怕麻烦",
+    "preference": "爱好、审美、口味、沟通偏好（喜欢简短还是详细）",
+    "work_habit": "工作方式与计划习惯（如先做计划再动手）",
+    "schedule": "作息与生活节奏（几点睡、是否熬夜、周末怎么过）",
+    "relationship": "家人、朋友、同事、合作伙伴的身份（不记隐私细节）",
+    "aspiration": "愿望、目标、抱负、长期期待",
+    "mindset": "在意的事、焦虑与纠结、反复想的念头",
+    "tool_usage": "长期偏好用什么软件/工具（个人习惯，不记配置与路径）",
+    "project": "在做什么方向/长期投入的事（不记框架、端口、目录结构）",
+    "other": "确实关于本人但无法归入上述类别的稳定事实",
+}
 
 # 类别中文说明（/memory 展示用）
 CATEGORY_LABELS = {
     "identity": "身份背景",
-    "preference": "偏好",
+    "personality": "性格",
+    "preference": "偏好与爱好",
     "work_habit": "工作习惯",
     "schedule": "作息",
-    "tool_usage": "工具使用",
-    "relationship": "联系人",
-    "project": "项目背景",
+    "relationship": "关系",
+    "aspiration": "愿望与抱负",
+    "mindset": "心思与状态",
+    "tool_usage": "工具偏好",
+    "project": "在做的事",
     "other": "其他",
 }
 
@@ -115,6 +136,33 @@ def profile_content_similarity(a: str, b: str) -> float:
     return inter / union if union else 0.0
 
 
+#: 别名规则：每个 2–6 字；单条最多保留 8 个（合并后）
+_ALIAS_MIN_LEN = 2
+_ALIAS_MAX_LEN = 6
+_ALIAS_CAP = 8
+
+
+def normalize_aliases(raw: object) -> list[str]:
+    """清洗别名列表：去空白、限长 2–6 字、去重、截到 8 个。
+
+    别名只服务检索（用户会怎么问这条事实），不参与展示与去重判据，
+    所以允许脏值被静默丢弃，不抛异常。@author aceFelix
+    """
+    out: list[str] = []
+    if not isinstance(raw, (list, tuple)):
+        return out
+    for item in raw:
+        s = str(item or "").strip()
+        if not (_ALIAS_MIN_LEN <= len(s) <= _ALIAS_MAX_LEN):
+            continue
+        if s in out:
+            continue
+        out.append(s)
+        if len(out) >= _ALIAS_CAP:
+            break
+    return out
+
+
 @dataclass
 class ProfileEntry:
     """一条画像记忆。"""
@@ -122,6 +170,7 @@ class ProfileEntry:
     id: str
     category: str = "other"
     content: str = ""
+    aliases: list[str] = field(default_factory=list)  # 检索别名（2–5 个，2–6 字）
     confidence: float = 0.5           # 0~1，提炼时 LLM 给出
     source_session: str = ""          # 溯源：来自哪个会话
     created_at: float = 0.0
@@ -135,6 +184,7 @@ class ProfileEntry:
         category: str = "other",
         confidence: float = 0.5,
         source_session: str = "",
+        aliases: list[str] | None = None,
     ) -> "ProfileEntry":
         """创建新条目（生成 id 与时间戳）。"""
         now = time.time()
@@ -142,6 +192,7 @@ class ProfileEntry:
             id=f"ent_{uuid.uuid4().hex[:8]}",
             category=category if category in PROFILE_CATEGORIES else "other",
             content=content.strip(),
+            aliases=normalize_aliases(aliases or []),
             confidence=max(0.0, min(1.0, float(confidence))),
             source_session=source_session,
             created_at=now,
@@ -150,7 +201,7 @@ class ProfileEntry:
 
 
 class ProfileStore:
-    """画像记忆存储。线程安全，磁盘格式 version=1。"""
+    """画像记忆存储。线程安全，磁盘格式 version=2（向下兼容 version=1）。"""
 
     def __init__(self, path: Path | None = None):
         self._path = path or profile_store_path()
@@ -175,6 +226,42 @@ class ProfileStore:
                 if e.id == entry_id:
                     return e
         return None
+
+    def recall_similar(
+        self, content: str, category: str = "", top_k: int = 5
+    ) -> list[ProfileEntry]:
+        """按内容相似度召回 top-K 旧条目（写入侧裁决 / 检索共用）。
+
+        打分：
+        - 与 content 的字符二元组相似度；
+        - 别名命中（候选包含别名或反之）+0.30；别名与候选的相似度按 0.8 折算；
+        - 同类别 +0.15（粗粒度语义通道）。
+        只返回 score > 0 的条目，按 (score, confidence, updated_at) 降序。
+        @author aceFelix
+        """
+        query = (content or "").strip()
+        if not query or top_k <= 0:
+            return []
+        scored: list[tuple[float, ProfileEntry]] = []
+        for e in self.entries():
+            if not e.content:
+                continue
+            score = profile_content_similarity(e.content, query)
+            for a in e.aliases:
+                if not a:
+                    continue
+                if a in query or query in a:
+                    score += 0.30
+                else:
+                    score = max(score, profile_content_similarity(a, query) * 0.8)
+            if category and e.category == category:
+                score += 0.15
+            if score > 0:
+                scored.append((score, e))
+        scored.sort(
+            key=lambda kv: (kv[0], kv[1].confidence, kv[1].updated_at), reverse=True
+        )
+        return [e for _, e in scored[:top_k]]
 
     def __len__(self) -> int:
         with self._lock:
@@ -215,11 +302,10 @@ class ProfileStore:
                         id=e.id,
                         category=e.category,
                         content=e.content,
+                        aliases=normalize_aliases(list(e.aliases) + list(entry.aliases)),
                         confidence=max(e.confidence, entry.confidence),
-                        source_session=(
-                            e.source_session if e.source_session == "manual"
-                            else (entry.source_session if not e.source_session else e.source_session)
-                        ),
+                        # manual 来源优先；否则留先到者（空值拿另一边的）
+                        source_session=e.source_session or entry.source_session,
                         created_at=min(e.created_at, entry.created_at) or entry.created_at,
                         updated_at=time.time(),
                         last_referenced_at=max(e.last_referenced_at, entry.last_referenced_at),
@@ -268,13 +354,17 @@ class ProfileStore:
                 primary.updated_at = max(e.updated_at for e in g)
                 primary.created_at = min(e.created_at for e in g if e.created_at) or now
                 primary.confidence = max(e.confidence for e in g)
+                primary.aliases = normalize_aliases(
+                    [a for e in g for a in e.aliases]
+                )
                 primary.ref_count = sum(e.ref_count for e in g)
                 primary.last_referenced_at = max(e.last_referenced_at for e in g)
                 if not primary.source_session:
-                    primary.source_session = next(
-                        (e.source_session for e in g if e.source_session and e.source_session != "manual"),
-                        "",
-                    )
+                    # 继承组内第一个非 manual 的来源会话
+                    for e in g:
+                        if e.source_session and e.source_session != "manual":
+                            primary.source_session = e.source_session
+                            break
                 new_entries.append(primary)
                 merged_away += len(g) - 1
             if merged_away:
@@ -372,23 +462,37 @@ class ProfileStore:
 
     # ---- 注入 ----
 
-    def render_for_prompt(self, token_limit: int = 300) -> str:
-        """渲染注入 system prompt 的画像块（token 硬限额）。
+    def render_for_prompt(
+        self,
+        token_limit: int = 300,
+        *,
+        prefer_topics: Sequence[str] = (),
+        mode: str = "pseudo",
+    ) -> str:
+        """渲染注入 system prompt 的画像块（P1c：主题优先 + 两轮填充 + 预算口径）。
 
-        无条目或首条都放不下时返回空字符串。
+        具体排序与预算裁剪在 `profile_inject.render_for_prompt`，本方法只是把
+        存储快照喂进去——渲染规则改动不再动存储层。
+
+        Args:
+            token_limit: 预算上限（按 `mode` 口径计量）。
+            prefer_topics: 优先注入的类别；空＝纯按置信度×新近度。
+            mode: `pseudo`（默认，len/4 兼容现状）/ `weighted`（中英分权真 token）。
+
+        Returns:
+            注入文本；无条目或预算装不下任何一条时返回空字符串。
+
+        @author aceFelix
         """
-        lines: list[str] = []
-        used = 0
-        for e in self.entries():
-            line = f"- {e.content}"
-            cost = estimate_text_tokens(line)
-            if used + cost > token_limit:
-                continue  # 跳过放不下的，继续尝试更短的
-            lines.append(line)
-            used += cost
-        if not lines:
-            return ""
-        return "# 关于用户（画像记忆）\n" + "\n".join(lines)
+        # 局部导入：profile_inject 依赖本模块的 ProfileEntry，模块级导入会成环
+        from agent.core.memory.profile_inject import render_for_prompt as _render
+
+        return _render(
+            self.entries(),
+            token_limit=token_limit,
+            prefer_topics=prefer_topics,
+            mode=mode,
+        )
 
     # ---- 持久化 ----
 
@@ -410,6 +514,7 @@ class ProfileStore:
             id=str(d.get("id", "")),
             category=d.get("category", "other"),
             content=str(d.get("content", "")),
+            aliases=normalize_aliases(d.get("aliases") or []),
             confidence=float(d.get("confidence", 0.5)),
             source_session=str(d.get("source_session", "")),
             created_at=float(d.get("created_at", 0.0)),
@@ -421,7 +526,7 @@ class ProfileStore:
     def _save_locked(self) -> None:
         """原子写盘（调用方须已持锁）。失败静默——画像丢了可再提炼，不能影响主流程。"""
         try:
-            data = {"version": 1, "entries": [asdict(e) for e in self._entries]}
+            data = {"version": 2, "entries": [asdict(e) for e in self._entries]}
             tmp = self._path.with_suffix(".json.tmp")
             tmp.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),

@@ -115,7 +115,10 @@ def _show_profile(ui, settings) -> None:
         return
 
     limit = getattr(settings, "profile_inject_token_limit", 300)
-    ui.info(f"画像记忆（{len(entries)} 条，按置信度排序；注入限额 {limit} token）:")
+    mode = getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo"
+    ui.info(
+        f"画像记忆（{len(entries)} 条，按置信度排序；注入限额 {limit} token，口径 {mode}）:"
+    )
     for e in entries:
         label = CATEGORY_LABELS.get(e.category, e.category)
         src = e.source_session or "-"
@@ -246,7 +249,7 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     /memory add <文本>    手动添加画像条目（深重复则并入已有条目）
     /memory del <id>     删除指定条目
     /memory clear yes    清空全部画像（需 yes 二次确认）
-    /memory refine       立即提炼当前会话（不等自动节流）
+    /memory refine       立即提炼新增量（不等节流；只喂水位之后的消息）
     /memory dedup [yes]  画像去重整理（预览可归并的深重复条数，yes 执行）
     /memory sync         同步本地画像到知识图谱（先预览，/memory sync yes 确认写入）
     /memory file         查看长期记忆文件（MEMORY.md，旧功能保留）
@@ -275,16 +278,17 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         if len(ctx.messages) < 2:
             ctx.ui.warn("当前会话消息太少，先和贾维斯聊聊再提炼")
             return True
-        import threading
-        from agent.core.memory.profile_refiner import refine_session
+        from agent.core.memory.profile_refiner import maybe_refine_async
 
-        msgs = list(ctx.messages)
-
-        def _worker() -> None:
-            refine_session(msgs, "manual-refine", ctx.settings)
-
-        threading.Thread(target=_worker, name="profile-refiner-manual", daemon=True).start()
-        ctx.ui.info("已开始后台提炼当前会话（用 /memory 查看结果，稍等十几秒）")
+        # 走 force 增量路径：只提炼水位之后的新消息，成功后推进水位。
+        # 旧实现直接调 refine_session 把整个会话重喂一遍，既费 token 又让
+        # 来源字段变成 "manual-refine"，与自动提炼的口径不一致。
+        sid = str(getattr(ctx, "session_name", "") or "manual-refine")
+        started = maybe_refine_async(list(ctx.messages), sid, ctx.settings, force=True)
+        if started:
+            ctx.ui.info("已开始后台提炼新增消息（只喂增量，不会重跑历史）")
+        else:
+            ctx.ui.info("没有需要提炼的新消息（或已有提炼在进行中）")
         return True
 
     if action == "sync":

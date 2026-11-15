@@ -455,7 +455,12 @@ def _profile_section(settings: object | None) -> str:
             from agent.core.memory.profile_store import ProfileStore
 
             limit = int(getattr(settings, "profile_inject_token_limit", 300))
-            local = ProfileStore().render_for_prompt(token_limit=limit)
+            # P1c 注入侧：主题优先（空列表＝纯按置信度）+ 预算口径（默认 pseudo 兼容旧行为）
+            prefer = list(getattr(settings, "profile_inject_prefer_topics", []) or [])
+            mode = str(getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo")
+            local = ProfileStore().render_for_prompt(
+                token_limit=limit, prefer_topics=prefer, mode=mode
+            )
             if local:
                 sections.append(local)
         _PROFILE_CACHE = "\n\n".join(sections)

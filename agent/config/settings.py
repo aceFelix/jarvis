@@ -288,8 +288,16 @@ class Settings:
     profile_enabled: bool = True
     profile_max_entries: int = 200             # 条目上限（超出按置信度×新近度淘汰）
     profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
+    # 注入侧（P1c）：命中主题的条目置顶；预算口径默认 pseudo＝兼容旧行为
+    profile_inject_prefer_topics: list = field(default_factory=list)
+    profile_inject_token_budget_mode: str = "pseudo"  # pseudo=len/4 / weighted=中英分权
     profile_refine_min_messages: int = 6       # 会话至少多少条消息才触发提炼
     profile_refine_interval: int = 600         # 两次提炼的最小间隔（秒），防止频繁无意义提炼
+    profile_refine_min_delta: int = 6          # 自上次水位后新增多少条才提炼（增量闸）
+    profile_refine_on_exit: bool = True        # 退出/切会话时无视频率节流，把最后一段增量收干
+    profile_refine_idle_minutes: int = 60      # 空闲多久后补一次增量提炼（聊一半走开也能落库）
+    profile_recall_top_k: int = 5              # 每条候选召回的相似旧条目数（写入侧裁决用）
+    profile_aliases_enabled: bool = True       # 提炼时生成检索别名（关＝召回降为纯 bigram）
     # 独立提炼模型（便宜模型跑后台提炼；留空 = 用主 LLM 配置）
     profile_refine_model: str = ""
     profile_refine_provider: str = ""          # api_format，如 openai/dashscope

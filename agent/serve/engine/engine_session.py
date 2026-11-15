@@ -210,6 +210,33 @@ class EngineSessionMixin:
         """
         await mcp_runtime.connect_mcp(self, registry)
 
+    def _flush_profile_refine(self) -> None:
+        """切会话前把当前会话的提炼增量收干（终态触发，无视频率节流）。
+
+        必须在清空/替换 ``self._messages`` **之前**调用：``maybe_refine_async``
+        在启线程前会快照增量，晚调用就只剩空列表。任何异常静默——提炼是旁路。
+        @author aceFelix
+        """
+        if not self._messages:
+            return
+        try:
+            from agent.session_manager import _auto_save
+
+            _auto_save(
+                self._ui, self._messages,
+                workdir=self._settings.workdir,
+                model=self._model,
+                provider=self._settings.provider,
+                session_name=self._session_name,
+                verbose=False,
+                dialog_count=self._dialog_count,
+                title_generated=self._title_generated,
+                settings=self._settings,
+                final=True,
+            )
+        except Exception:
+            pass
+
     async def _handle_load(self, name: str) -> None:
         """恢复历史会话：载入消息、渲染给前端，并把工作目录切回它当初所在的目录。"""
         from agent.core.memory.store import load_session
@@ -218,6 +245,8 @@ class EngineSessionMixin:
         if session is None or not session.messages:
             self._emitter.emit("error", f"会话不存在或为空: {name}")
             return
+        # 切走之前先把旧会话的增量收干（此时 _messages 还是旧的）
+        self._flush_profile_refine()
         self._messages.clear()
         self._messages.extend(session.messages)
         self._session_name = session.meta.name
@@ -265,6 +294,8 @@ class EngineSessionMixin:
 
     def _handle_new_session(self) -> None:
         """新建会话：清空消息与轮数，前端同步清空气泡。"""
+        # 新建前把旧会话的增量收干（清空后就只能提炼到空列表）
+        self._flush_profile_refine()
         self._messages.clear()
         self._session_name = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         self._dialog_count = 0
