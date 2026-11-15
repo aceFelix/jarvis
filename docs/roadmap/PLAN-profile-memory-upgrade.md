@@ -223,6 +223,10 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 
 ### P2 · 生命周期分层 + profile/event 双轨
 
+> ✅ 2026-11-15 **P2a 已落地**（lifecycle 字段 + 类别派生 + decay 分流 + 合并防护）；
+> P2b（软删除失效链）/ P2c（events.jsonl 事件轨）待做。实现见
+> [plans/profile-memory-p2-impl.md](../plans/profile-memory-p2-impl.md)。
+
 `ProfileEntry` 增正交字段 `lifecycle ∈ {permanent, stateful, episodic}`（不改 category 枚举，加一维）：
 
 | lifecycle | 典型内容 | 遗忘策略 | 替换语义 |

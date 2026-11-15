@@ -206,7 +206,7 @@ class TestAliasStorage:
         store = ProfileStore(path)
         entries = store.entries()
         assert entries[0].aliases == []
-        # 写回时升到 version 2
+        # 写回时升到 version 3（P2a 加 lifecycle/expire_at）
         store.upsert(ProfileEntry.new("喜欢猫", "preference", 0.8))
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["version"] == 2
+        assert data["version"] == 3

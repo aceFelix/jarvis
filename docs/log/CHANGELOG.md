@@ -18,6 +18,18 @@
 
 ## [Unreleased]
 
+### 新增（画像生命周期分层：permanent 不再被半衰期磨，2026-11-15）
+
+- `ProfileEntry` 新增 `lifecycle`（permanent / stateful / episodic）与 `expire_at`；
+  `profile.json` version 2 → **3**（老库缺字段读取时按类别派生，不写盘迁移）。
+- **类别派生**（确定性）：identity / relationship / aspiration → permanent；
+  其余（偏好/作息/工作习惯/心思/工具/在做的事）→ stateful；episodic 留给带到期时间的事实。
+- **decay 分流**：permanent 不动；episodic 到期直接出清（未设 expire_at 则按 stateful 走）；
+  其余仍 30 天半衰期，<0.15 清除；manual 条目继续完全豁免。
+- **合并防护**：merge_or_add / dedup_all 取更稳的 lifecycle（permanent 不被 stateful 降级），
+  `expire_at` 取大；新增 `decay(now=)` 注入点供测试。
+- 测试：新增 `TestLifecycle`（9 例：派生/兼容读/三类 decay/合并与归并）。
+
 ### 新增（画像提炼遥测：`/memory` 看得见上轮做了什么，2026-11-15）
 
 - 台账 `RefineState` 新增 `last_report`：抽取 / 新增 / 更新 / 删除 / 合并 / 跳过（noop）/ 拒绝

@@ -57,6 +57,44 @@ CATEGORY_HINTS = {
     "other": "确实关于本人但无法归入上述类别的稳定事实",
 }
 
+#: 生命周期白名单（P2a）：决定 decay 与替换语义，与 category 正交
+LIFECYCLES = (
+    "permanent",  # 姓名/学历/出生/家人/长期抱负：永不 decay，只能被显式 update 替换
+    "stateful",   # 所在地/在做什么/主力工具：会变但不会立刻失效，靠半衰期淡忘
+    "episodic",   # 一次性事项：带 expire_at，到期直接出清
+)
+
+#: 稳定性排序（合并时取更稳的一个，不允许 permanent 被 stateful 降级）
+_LIFECYCLE_RANK = {"permanent": 3, "stateful": 2, "episodic": 1}
+
+#: 默认派为 permanent 的类别：只有“5 年后仍成立”的三类
+_PERMANENT_CATEGORIES = frozenset({"identity", "relationship", "aspiration"})
+
+
+def default_lifecycle_for_category(category: str) -> str:
+    """类别 → 初始 lifecycle（P2a 的确定性派生，不靠 LLM 拍脑袋）。
+
+    只有身份背景、关系、长期抱负走 permanent；偏好/习惯/作息/心思/工具/
+    在做的事默认 stateful（会变，交给半衰期淡忘）。episodic 不在此派生——
+    只有带明确到期时间的事实才是临时的（P2c 由提炼显式给出）。
+    @author aceFelix
+    """
+    return "permanent" if str(category) in _PERMANENT_CATEGORIES else "stateful"
+
+
+def _normalize_lifecycle(raw: object, category: str) -> str:
+    """lifecycle 归一：空值按类别派生，非法值落 stateful。"""
+    value = str(raw or "").strip()
+    if not value:
+        return default_lifecycle_for_category(category)
+    return value if value in LIFECYCLES else "stateful"
+
+
+def _most_stable_lifecycle(*lifecycles: str) -> str:
+    """取最稳的生命周期（permanent > stateful > episodic）。"""
+    return max(lifecycles, key=lambda v: _LIFECYCLE_RANK.get(v, 0))
+
+
 # 类别中文说明（/memory 展示用）
 CATEGORY_LABELS = {
     "identity": "身份背景",
@@ -171,6 +209,8 @@ class ProfileEntry:
     category: str = "other"
     content: str = ""
     aliases: list[str] = field(default_factory=list)  # 检索别名（2–5 个，2–6 字）
+    lifecycle: str = "stateful"       # P2a：permanent / stateful / episodic
+    expire_at: float = 0.0            # 仅 episodic：到期直接出清（0 = 不设）
     confidence: float = 0.5           # 0~1，提炼时 LLM 给出
     source_session: str = ""          # 溯源：来自哪个会话
     created_at: float = 0.0
@@ -185,14 +225,22 @@ class ProfileEntry:
         confidence: float = 0.5,
         source_session: str = "",
         aliases: list[str] | None = None,
+        lifecycle: str = "",
+        expire_at: float = 0.0,
     ) -> "ProfileEntry":
-        """创建新条目（生成 id 与时间戳）。"""
+        """创建新条目（生成 id 与时间戳）。
+
+        lifecycle 留空时按类别派生（P2a）；显式给非法值则落 stateful。
+        """
         now = time.time()
+        cat = category if category in PROFILE_CATEGORIES else "other"
         return ProfileEntry(
             id=f"ent_{uuid.uuid4().hex[:8]}",
-            category=category if category in PROFILE_CATEGORIES else "other",
+            category=cat,
             content=content.strip(),
             aliases=normalize_aliases(aliases or []),
+            lifecycle=_normalize_lifecycle(lifecycle, cat),
+            expire_at=max(0.0, float(expire_at or 0.0)),
             confidence=max(0.0, min(1.0, float(confidence))),
             source_session=source_session,
             created_at=now,
@@ -201,7 +249,7 @@ class ProfileEntry:
 
 
 class ProfileStore:
-    """画像记忆存储。线程安全，磁盘格式 version=2（向下兼容 version=1）。"""
+    """画像记忆存储。线程安全，磁盘格式 version=3（兼容 1/2，缺字段按类别派生）。"""
 
     def __init__(self, path: Path | None = None):
         self._path = path or profile_store_path()
@@ -303,6 +351,10 @@ class ProfileStore:
                         category=e.category,
                         content=e.content,
                         aliases=normalize_aliases(list(e.aliases) + list(entry.aliases)),
+                        # P2a：合并取更稳的 lifecycle（permanent 不被 stateful 降级）；
+                        # 到期时间取大，有 expire_at 的那个不因合并丢失
+                        lifecycle=_most_stable_lifecycle(e.lifecycle, entry.lifecycle),
+                        expire_at=max(e.expire_at, entry.expire_at),
                         confidence=max(e.confidence, entry.confidence),
                         # manual 来源优先；否则留先到者（空值拿另一边的）
                         source_session=e.source_session or entry.source_session,
@@ -359,6 +411,8 @@ class ProfileStore:
                 )
                 primary.ref_count = sum(e.ref_count for e in g)
                 primary.last_referenced_at = max(e.last_referenced_at for e in g)
+                primary.lifecycle = _most_stable_lifecycle(*(e.lifecycle for e in g))
+                primary.expire_at = max(e.expire_at for e in g)
                 if not primary.source_session:
                     # 继承组内第一个非 manual 的来源会话
                     for e in g:
@@ -426,27 +480,45 @@ class ProfileStore:
             self._save_locked()
             return len(drop)
 
-    def decay(self, *, half_life_days: float = 30.0, floor: float = 0.15) -> int:
-        """维护管线：按半衰期衰减长期未更新的条目，清除低于 floor 者。
+    def decay(
+        self,
+        *,
+        half_life_days: float = 30.0,
+        floor: float = 0.15,
+        now: float | None = None,
+    ) -> int:
+        """维护管线：按**生命周期分流**决定遗忘方式，返回清除的条目数。
 
         管家的"睡眠整理记忆"：长期没被再次提及的习惯偏好逐渐淡忘，
-        避免画像库被过时信息塞满。返回清除的条目数。
+        避免画像库被过时信息塞满。
 
-        规则:
-        - 时间基准 = max(updated_at, last_referenced_at)（近期更新/引用过的不衰）
-        - 每过一个半衰期，confidence 减半
+        规则（P2a 分流）:
         - 手动添加条目（source_session="manual"）不衰减——用户亲写，最高信任
-        - confidence < floor 的条目删除
+        - `permanent`（身份/关系/抱负）不衰减：5 年后仍成立，只靠显式 update 替换
+        - `episodic` 且有 `expire_at` 且已到期 → 直接出清（临时事项）
+        - 其余（stateful / episodic 无到期时间）：每过一个半衰期 confidence 减半，
+          低于 floor 删除；时间基准 = max(updated_at, last_referenced_at, created_at)
+
+        Args:
+            now: 时间戳（仅测试注入；生产由每日维护任务不传）。
 
         挂在 ProactiveEngine 每日维护任务（凌晨静默执行）。
         """
-        now = time.time()
+        now = time.time() if now is None else float(now)
         removed = 0
         with self._lock:
             kept: list[ProfileEntry] = []
             for e in self._entries:
                 if e.source_session == "manual":
                     kept.append(e)
+                    continue
+                # P2a：permanent 不进半衰期（身份/关系/抱负不该靠反复提及续命）
+                if e.lifecycle == "permanent":
+                    kept.append(e)
+                    continue
+                # P2a：episodic 有到期时间且已过期 → 直接出清
+                if e.lifecycle == "episodic" and e.expire_at and now >= e.expire_at:
+                    removed += 1
                     continue
                 basis = max(e.updated_at, e.last_referenced_at, e.created_at)
                 age_days = max(0.0, (now - basis) / 86400.0)
@@ -510,11 +582,19 @@ class ProfileStore:
 
     @staticmethod
     def _entry_from_dict(d: dict) -> ProfileEntry:
+        category = d.get("category", "other")
+        try:
+            expire_at = max(0.0, float(d.get("expire_at", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            expire_at = 0.0
         return ProfileEntry(
             id=str(d.get("id", "")),
-            category=d.get("category", "other"),
+            category=category,
             content=str(d.get("content", "")),
             aliases=normalize_aliases(d.get("aliases") or []),
+            # P2a：老库（version<=2）没有该字段 → 按类别派生，不写盘迁移
+            lifecycle=_normalize_lifecycle(d.get("lifecycle"), category),
+            expire_at=expire_at,
             confidence=float(d.get("confidence", 0.5)),
             source_session=str(d.get("source_session", "")),
             created_at=float(d.get("created_at", 0.0)),
@@ -524,9 +604,12 @@ class ProfileStore:
         )
 
     def _save_locked(self) -> None:
-        """原子写盘（调用方须已持锁）。失败静默——画像丢了可再提炼，不能影响主流程。"""
+        """原子写盘（调用方须已持锁）。失败静默——画像丢了可再提炼，不能影响主流程。
+
+        version 3（P2a）：新增 lifecycle / expire_at 两个字段；读取对 1/2 向下兼容。
+        """
         try:
-            data = {"version": 2, "entries": [asdict(e) for e in self._entries]}
+            data = {"version": 3, "entries": [asdict(e) for e in self._entries]}
             tmp = self._path.with_suffix(".json.tmp")
             tmp.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),

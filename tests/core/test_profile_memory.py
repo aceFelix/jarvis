@@ -172,9 +172,9 @@ class TestProfileStore:
         store = ProfileStore(path)
         store.upsert(ProfileEntry.new("x", "other", 0.5))
         assert not (tmp_path / "profile.json.tmp").exists()
-        # JSON 可解析且带 version
+        # JSON 可解析且带 version（P2a 起为 3）
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["version"] == 2
+        assert data["version"] == 3
 
 
 # ─────────────────────────────────────────────────────────────
@@ -545,6 +545,105 @@ class TestDecay:
         store.upsert(ProfileEntry.new("刚记的", "other", 0.9))
         assert store.decay() == 0
         assert store.entries()[0].confidence == pytest.approx(0.9)
+
+
+class TestLifecycle:
+    """P2a：生命周期分层（permanent 不衰减 / stateful 半衰期 / episodic 到期出清）。"""
+
+    def test_default_lifecycle_by_category(self):
+        from agent.core.memory.profile_store import default_lifecycle_for_category
+
+        for cat in ("identity", "relationship", "aspiration"):
+            assert default_lifecycle_for_category(cat) == "permanent"
+        for cat in ("preference", "schedule", "work_habit", "project", "other"):
+            assert default_lifecycle_for_category(cat) == "stateful"
+
+    def test_new_derives_and_validates_lifecycle(self):
+        assert ProfileEntry.new("姓名是艾斯", "identity").lifecycle == "permanent"
+        assert ProfileEntry.new("喜欢猫", "preference").lifecycle == "stateful"
+        # 显式非法值 → stateful，不抛
+        assert ProfileEntry.new("喜欢猫", "preference", lifecycle="bogus").lifecycle == "stateful"
+        assert ProfileEntry.new("临时事项", "other", lifecycle="episodic").lifecycle == "episodic"
+
+    def test_legacy_file_without_lifecycle_derives(self, tmp_path):
+        """version<=2 的老库没有 lifecycle 字段：按类别派生，不写盘迁移。"""
+        path = tmp_path / "p.json"
+        path.write_text(
+            json.dumps({
+                "version": 2,
+                "entries": [
+                    {"id": "ent_a", "category": "identity", "content": "姓名是艾斯"},
+                    {"id": "ent_b", "category": "preference", "content": "喜欢猫"},
+                ],
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        by_id = {e.id: e for e in ProfileStore(path).entries()}
+        assert by_id["ent_a"].lifecycle == "permanent"
+        assert by_id["ent_b"].lifecycle == "stateful"
+
+    def test_permanent_never_decays(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("姓名是艾斯", "identity", 0.9)
+        e.created_at = e.updated_at = 1000.0
+        store.upsert(e)
+
+        # 一年后跑 decay：permanent 不动（stateful 同条件早就被磨没了）
+        assert store.decay(now=1000.0 + 365 * 86400) == 0
+        assert store.entries()[0].confidence == pytest.approx(0.9)
+
+    def test_stateful_decays_by_half_life(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("喜欢复古像素风", "preference", 0.8)
+        e.created_at = e.updated_at = 1000.0
+        store.upsert(e)
+
+        assert store.decay(now=1000.0 + 30 * 86400) == 0
+        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
+
+    def test_episodic_expires_at(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        expired = ProfileEntry.new("明天面试", "other", 0.9, lifecycle="episodic", expire_at=2000.0)
+        expired.created_at = expired.updated_at = 1000.0
+        alive = ProfileEntry.new("下周体检", "other", 0.9, lifecycle="episodic", expire_at=9999.0)
+        alive.created_at = alive.updated_at = 1000.0
+        store.upsert(expired)
+        store.upsert(alive)
+
+        assert store.decay(now=3000.0) == 1
+        left = store.entries()
+        assert len(left) == 1 and left[0].content == "下周体检"
+
+    def test_episodic_without_expire_falls_back_to_half_life(self, tmp_path):
+        """没给到期时间就不是“临时事项”：按 stateful 走衰减，不凭空删除。"""
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("临时任务", "other", 0.8, lifecycle="episodic")
+        e.created_at = e.updated_at = 1000.0
+        store.upsert(e)
+
+        assert store.decay(now=1000.0 + 30 * 86400) == 0
+        assert store.entries()[0].confidence == pytest.approx(0.4, abs=0.01)
+
+    def test_merge_keeps_more_stable_lifecycle(self, tmp_path):
+        """permanent 不能被同事实的 stateful 再报降级；expire_at 取大。"""
+        store = ProfileStore(tmp_path / "p.json")
+        base = ProfileEntry.new("姓名是艾斯", "identity", 0.8, lifecycle="permanent")
+        store.upsert(base)
+
+        incoming = ProfileEntry.new(
+            "姓名是艾斯。", "identity", 0.9, lifecycle="stateful", expire_at=1234.0
+        )
+        kept, merged = store.merge_or_add(incoming)
+        assert merged is True
+        assert kept.lifecycle == "permanent"
+        assert kept.expire_at == pytest.approx(1234.0)
+
+    def test_dedup_keeps_most_stable_lifecycle(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9, lifecycle="stateful"))
+        store.upsert(ProfileEntry.new("习惯深夜工作。", "schedule", 0.5, lifecycle="permanent"))
+        assert store.dedup_all() == 1
+        assert store.entries()[0].lifecycle == "permanent"
 
 
 class TestProfileMaintenanceTask:

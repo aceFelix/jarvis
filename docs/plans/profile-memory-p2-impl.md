@@ -1,0 +1,155 @@
+# 实现方案：画像记忆 P2（生命周期分层 + 事件轨）
+
+> 状态：**P2a 已落地（2026-11-15），P2b/P2c 待做**　作者：aceFelix　日期：2026-11-15
+> 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P2
+> 本文只写落点与契约；设计取舍在 PLAN，不在本文重复。
+
+## 一、范围
+
+| 切片 | 内容 | 本次 |
+|---|---|---|
+| **P2a** | `lifecycle ∈ {permanent, stateful, episodic}` 字段 + decay 分流 + 类别派生 | ✅ |
+| **P2b** | `stateful` 新值即失效：软删除（`invalidated_at` / `superseded_by`）+ 注入过滤 | ⏭ 下一刀 |
+| **P2c** | 事件轨 `events.jsonl`（append-only + 过期清理） | ⏭ 随后 |
+
+**不做**：P3 向量、P5 RecallProfile。
+
+## 二、现状事实
+
+| 事实 | 位置 |
+|---|---|
+| 条目字段：id/category/content/aliases/confidence/source_session/时间戳/ref_count | `profile_store.ProfileEntry` |
+| 磁盘 version=2（P1b 加 aliases） | `_save_locked` |
+| decay 对所有条目一视同仁：30 天半衰期，<0.15 删除 | `ProfileStore.decay` |
+| 唯一豁免：`source_session == "manual"` | 同上 |
+| 合并（merge_or_add / dedup_all）只并 confidence/aliases/时间戳 | 同上 |
+| 每日 03:30 维护任务调用 decay + prune | `agent/core/daemon` 维护管线 |
+
+**问题**：身份/关系这类"5 年后还成立"的事实也被半衰期磨，靠反复提及续命；
+而过时状态（在做什么项目）又没有"新值即失效"的语义，只能等衰减慢慢磨。
+
+## 三、数据模型
+
+### 3.1 `ProfileEntry.lifecycle`
+
+```python
+lifecycle: str = "stateful"     # permanent / stateful / episodic
+expire_at: float = 0.0          # 仅 episodic 用：到期直接出清（0 = 不设）
+```
+
+- 白名单 `LIFECYCLES = ("permanent", "stateful", "episodic")`，非法值落 `stateful`。
+- `profile.json` version **2 → 3**；缺字段读取时**按类别派生**（见 3.2），不写盘迁移。
+- 合并策略：`permanent > stateful > episodic`，取更"稳"的那个——同一条事实被
+  以 stateful 再报一次，不能把 permanent 降级。
+
+### 3.2 类别 → 初始 lifecycle（`default_lifecycle_for_category`）
+
+| lifecycle | 类别 | 依据 |
+|---|---|---|
+| `permanent` | identity / relationship / aspiration | 姓名、学历、家人、长期抱负：5 年后仍成立 |
+| `stateful` | personality / preference / work_habit / schedule / mindset / tool_usage / project / other | 会变但不会立刻失效；靠半衰期淡忘 |
+
+`episodic` 不在类别派生里：只有带明确到期时间的事实才走（P2c 由提炼显式给出）。
+
+## 四、decay 分流（P2a 核心）
+
+```
+对每条条目：
+  manual 来源 → 跳过（现状不变，最高信任）
+  lifecycle == permanent → 跳过，confidence 不动
+  lifecycle == episodic:
+      expire_at > 0 且 now > expire_at → 删除
+      否则 → 走半衰期（没给到期时间的临时项按 stateful 处理）
+  其它（stateful/未知）→ 走半衰期（现状）
+```
+
+返回值仍是"清除条数"，调用方（每日维护）不需要改。
+
+## 五、接口契约
+
+```python
+# profile_store.py
+LIFECYCLES: tuple[str, ...]
+def default_lifecycle_for_category(category: str) -> str
+
+class ProfileEntry:
+    lifecycle: str = "stateful"
+    expire_at: float = 0.0
+    @staticmethod
+    def new(content, category="other", confidence=0.5, source_session="",
+             aliases=None, lifecycle="", expire_at=0.0) -> ProfileEntry
+    # lifecycle 为空 → 按类别派生；非法 → stateful
+
+class ProfileStore:
+    def decay(self, *, half_life_days=30.0, floor=0.15, now: float | None = None) -> int
+    # now 仅测试注入；生产不传
+```
+
+`merge_or_add` / `dedup_all`：合并时取更稳的 lifecycle；`expire_at` 取两者较大
+（有到期时间的那个不因合并丢失）。
+
+## 六、代码落点
+
+| 文件 | 改动 | 预估 |
+|---|---|---|
+| `agent/core/memory/profile_store.py` | LIFECYCLES + 派生函数 + 字段 + new() + decay 分流 + 合并策略 + version 3 | 约 80 行 |
+| `tests/core/test_profile_memory.py` | 新增 lifecycle / decay 分流 / 兼容读 / 合并降级防护 | +100 |
+| `docs/architecture/09-记忆与压缩.md` | 生命周期表 + decay 分流说明 | +15 |
+| `docs/log/CHANGELOG.md`、PLAN §P2 状态 | 同步 | +15 |
+
+**不新增配置键**：`lifecycle` 的行为完全由数据决定，没有可调参数（避免死配置）。
+
+## 七、测试矩阵（P2a）
+
+| # | 用例 | 断言 |
+|---|---|---|
+| 1 | `new()` 不给 lifecycle | 按类别派生（identity→permanent，preference→stateful） |
+| 2 | `new()` 给非法 lifecycle | 落 stateful，不抛 |
+| 3 | 老库（无 lifecycle 字段） | 读出按类别派生，不报错 |
+| 4 | permanent 跑 decay | confidence 不变、不删除 |
+| 5 | stateful 跑 decay（越过半衰期） | confidence 衰减，低于 floor 删除 |
+| 6 | episodic 带 expire_at | 到期删除 |
+| 7 | episodic 无 expire_at | 按 stateful 走衰减（不凭空删除） |
+| 8 | manual | 仍豁免（现状回归） |
+| 9 | merge_or_add 合并 | permanent 不被 stateful 降级；expire_at 取大 |
+| 10 | dedup_all 合并组 | 主条目保留最稳 lifecycle |
+| 11 | 磁盘 version | 写盘为 3 |
+
+## 八、验收
+
+```powershell
+python -m pytest tests/core/test_profile_memory.py tests/core/test_profile_refine_golden.py -q
+python -m compileall -q agent/
+python scripts/check_md_links.py
+```
+
+## 九、风险与回退
+
+| 风险 | 处置 |
+|---|---|
+| 老库全部缺字段 | 读取时按类别派生（确定性），无需迁移脚本；下次写盘自动补全 |
+| 把易变事实误判 permanent | 派生表刻意保守：只有 identity/relationship/aspiration 三类 permanent |
+| decay 删多了 | 只影响 confidence 衰减路径；permanent 反而更安全（不再被磨） |
+| 回退 | 删掉 lifecycle 字段读取即可回到旧行为；无配置开关、无外部状态 |
+
+## 十、后续两刀（不在本次）
+
+- **P2b 软删除**：`invalidated_at` / `superseded_by`；`update` 同类别替换时旧条目打失效标
+  记而非物理删；`render_for_prompt` / `recall_similar` / `/memory` 过滤失效条目，
+  `/memory history` 可查被替换链路。
+- **P2c 事件轨**：`~/.jarvis/memory/events.jsonl`（append-only），写 `episodic` 与带时间点
+  的事实；`profile_event_retention_days` 过期清理；默认不注入，仅按主题捞最近 K 条。
+
+## 十一、实施记录（2026-11-15，P2a）
+
+| # | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| 1 | 一次性迁移脚本 `migrate_profile_lifecycle.py` | **不写脚本**：读取时按类别派生 | 派生是确定性的，读到即可用；下次任意写盘自动补全字段，幂等且零失败路径 |
+| 2 | 提炼输出 lifecycle | 本次不输出 | 类别派生已覆盖三类；episodic 需要时间表达式（P2c），现在让 LLM 输出只会徒增解析面 |
+| 3 | decay 直接用当前时间 | 新增 `now=` 注入点 | 半衰期断言不能靠 sleep，也不能靠改系统时间 |
+| 4 | — | `_save_locked` version 2 → 3 | 新字段上线，版本号递增便于用户/工具识别 |
+
+已落地：`profile_store.py`（LIFECYCLES / `default_lifecycle_for_category` / `_normalize_lifecycle` /
+`_most_stable_lifecycle` / 字段 / `new()` / `decay` 分流 / 合并防护 / version 3）、
+`tests/core/test_profile_memory.py`（`TestLifecycle` 9 例）、
+09-记忆与压缩（生命周期表 + decay 分流 + 设计决策）、CHANGELOG、PLAN。
