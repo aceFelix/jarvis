@@ -161,6 +161,10 @@ def _show_profile(ui, settings, session_name: str = "") -> None:
             f"  [{e.id}] {label} | {e.content}\n"
             f"      置信度 {e.confidence:.2f} | 来源 {src}"
         )
+    # P2b：被新事实取代的旧条目不再展示，但告诉用户它们还在（历史可追）
+    history_n = len(store.entries(include_invalidated=True)) - len(entries)
+    if history_n:
+        ui.info(f"  （另有 {history_n} 条已被新事实取代，保留为历史）")
 
 
 def _rebuild_system_prompt(ctx) -> None:

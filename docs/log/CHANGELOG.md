@@ -18,6 +18,17 @@
 
 ## [Unreleased]
 
+### 新增（画像软删除：update 不再抹掉旧值，2026-11-15）
+
+- `ProfileEntry` 新增 `invalidated_at` / `superseded_by`；`update` 落盘改为
+  “建新条目 + 旧条目打失效标记并用 `superseded_by` 指向新条目”，历史可追。
+- 失效条目**不再注入、不召回、不参与去重/衰减/展示**；`entries()` 默认只返有效条目
+  （`include_invalidated=True` 取历史），`get()` 同理；`len(store)` 只算有效条目。
+- `merge_or_add` 跳过失效条目（不把旧值“复活”）；`dedup_all` 只归并有效条目并保留历史；
+  `prune_over_limit` 先淘汰失效条目；`decay` 跳过失效条目。
+- `delete`（模型明确要求删）仍物理删除；`/memory` 末尾提示“另有 N 条已被新事实取代”。
+- 测试：新增 `TestSoftDelete`（8 例）+ `TestSoftDeleteOnUpdate`（3 例）+ 命令 1 例。
+
 ### 新增（画像生命周期分层：permanent 不再被半衰期磨，2026-11-15）
 
 - `ProfileEntry` 新增 `lifecycle`（permanent / stateful / episodic）与 `expire_at`；

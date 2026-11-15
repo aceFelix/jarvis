@@ -304,8 +304,9 @@ def apply_decisions(
     """第④段：落盘。
 
     - add → merge_or_add（存储层查重仍生效）
-    - update → 删目标 + merge_or_add；target 幻觉时降级为 add
-    - delete → store.delete
+    - update → 建新条目 + 旧条目**打失效标记**（P2b 软删除，保留历史）；
+      target 幻觉/已失效时降级为 add
+    - delete → store.delete（显式删除仍物理删）
     - noop → 不写
     计数全部记在 report 上（added/updated/merged/deleted/noop）。
     """
@@ -328,13 +329,16 @@ def apply_decisions(
             _bump("merged" if merged else "added")
             continue
         if d.op == "update":
-            # target 不存在（幻觉）→ 当 add 处理，仍走存储层查重闸
+            # target 不存在（幻觉/已失效）→ 当 add 处理，仍走存储层查重闸
             if d.target_id and store.get(d.target_id):
-                store.delete(d.target_id)
                 entry = ProfileEntry.new(
                     d.content, d.category, d.confidence, session_id, aliases=d.aliases
                 )
-                _, merged = store.merge_or_add(entry)
+                kept, merged = store.merge_or_add(entry)
+                # P2b：旧值不物理删——打失效标记并指向新条目。kept 可能就是 target
+                # 自身（update 只是把旧事实再确认/微调），那种情况不能把它标成失效。
+                if kept.id != d.target_id:
+                    store.invalidate(d.target_id, superseded_by=kept.id)
                 _bump("merged" if merged else "updated")
             else:
                 entry = ProfileEntry.new(

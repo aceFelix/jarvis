@@ -217,6 +217,8 @@ class ProfileEntry:
     updated_at: float = 0.0
     last_referenced_at: float = 0.0   # M3 维护管线衰减依据
     ref_count: int = 0
+    invalidated_at: float = 0.0       # P2b：软删除时间（0 = 有效）
+    superseded_by: str = ""            # P2b：被哪条新事实取代（目标条目 id）
 
     @staticmethod
     def new(
@@ -259,19 +261,29 @@ class ProfileStore:
 
     # ---- 读取 ----
 
-    def entries(self) -> list[ProfileEntry]:
-        """全部条目快照（按 confidence 降序、更新时间新者优先）。"""
+    def entries(self, *, include_invalidated: bool = False) -> list[ProfileEntry]:
+        """条目快照（按 confidence 降序、更新时间新者优先）。
+
+        P2b：默认**只返有效条目**——失效条目（被新事实取代）不再注入、不召回、
+        不计入展示；需要看历史时传 `include_invalidated=True`。
+        """
         with self._lock:
+            items = self._entries if include_invalidated else [
+                e for e in self._entries if not e.invalidated_at
+            ]
             return sorted(
-                self._entries,
+                items,
                 key=lambda e: (e.confidence, e.updated_at),
                 reverse=True,
             )
 
-    def get(self, entry_id: str) -> ProfileEntry | None:
+    def get(self, entry_id: str, *, include_invalidated: bool = False) -> ProfileEntry | None:
+        """按 id 取条目；默认不返回已失效条目（P2b）。"""
         with self._lock:
             for e in self._entries:
                 if e.id == entry_id:
+                    if e.invalidated_at and not include_invalidated:
+                        return None
                     return e
         return None
 
@@ -312,8 +324,9 @@ class ProfileStore:
         return [e for _, e in scored[:top_k]]
 
     def __len__(self) -> int:
+        """有效条目数（P2b：失效条目只算历史，不计入）。"""
         with self._lock:
-            return len(self._entries)
+            return sum(1 for e in self._entries if not e.invalidated_at)
 
     # ---- 写入 ----
 
@@ -343,7 +356,8 @@ class ProfileStore:
         """
         with self._lock:
             for e in self._entries:
-                if e.id == entry.id:
+                # P2b：失效条目是历史，不参与合并（否则会把旧值“复活”成新值）
+                if e.id == entry.id or e.invalidated_at:
                     continue
                 if profile_content_similarity(e.content, entry.content) >= _SIM_MERGE_THRESHOLD:
                     merged = ProfileEntry(
@@ -379,10 +393,15 @@ class ProfileStore:
         分组按 merge_or_add 同款判据；每组保留 confidence × 最新者为主条目
         （与 entries() 排序口径一致），其余并入主条目。用于 /memory dedup
         与画像迁移清理，manual 来源优先作为主条目。
+
+        P2b：只归并有效条目；失效条目原样保留（它们是历史证据，不属于重复）。
         """
         with self._lock:
+            invalidated = [e for e in self._entries if e.invalidated_at]
             groups: list[list[ProfileEntry]] = []
             for e in self._entries:
+                if e.invalidated_at:
+                    continue
                 placed = False
                 for g in groups:
                     if profile_content_similarity(g[0].content, e.content) >= _SIM_MERGE_THRESHOLD:
@@ -422,7 +441,7 @@ class ProfileStore:
                 new_entries.append(primary)
                 merged_away += len(g) - 1
             if merged_away:
-                self._entries = new_entries
+                self._entries = new_entries + invalidated
                 self._save_locked()
             return merged_away
 
@@ -430,10 +449,14 @@ class ProfileStore:
         """只读预演：按 merge_or_add 同款判据分组，返回长度 >1 的重复组。
 
         供 /memory dedup 预览使用，不写盘、不改内存。组内首个为主条目口径。
+
+        P2b：与 dedup_all 同口径，失效条目不参与归并。
         """
         with self._lock:
             groups: list[list[ProfileEntry]] = []
             for e in self._entries:
+                if e.invalidated_at:
+                    continue
                 placed = False
                 for g in groups:
                     if profile_content_similarity(g[0].content, e.content) >= _SIM_MERGE_THRESHOLD:
@@ -454,6 +477,26 @@ class ProfileStore:
                 return True
         return False
 
+    def invalidate(
+        self, entry_id: str, *, superseded_by: str = "", now: float | None = None
+    ) -> bool:
+        """软删除：给条目打失效标记，保留历史（P2b）。
+
+        与 delete 的区别：失效条目不再出现在 entries()/注入/召回里，但留在磁盘上，
+        用 `superseded_by` 能追到"被哪条新事实取代"——update 不再抹掉旧值。
+        已失效的条目不重复打标（幂等）。返回是否本次真的标了。
+        @author aceFelix
+        """
+        ts = time.time() if now is None else float(now)
+        with self._lock:
+            for e in self._entries:
+                if e.id == entry_id and not e.invalidated_at:
+                    e.invalidated_at = ts
+                    e.superseded_by = str(superseded_by or "")
+                    self._save_locked()
+                    return True
+        return False
+
     def clear(self) -> int:
         """清空全部条目（/memory clear）。返回清除数量。"""
         with self._lock:
@@ -466,13 +509,15 @@ class ProfileStore:
         """超出上限时淘汰低价值条目。返回淘汰数量。
 
         价值 = confidence 优先，同分看新近度（updated_at）。
+        P2b：失效条目最先淘汰（它们是历史，保留价值低于有效条目）。
         """
         with self._lock:
             if len(self._entries) <= max_entries:
                 return 0
             ranked = sorted(
                 self._entries,
-                key=lambda e: (e.confidence, e.updated_at),
+                # not invalidated_at：有效条目 True 排前面，失效条目先被淘汰
+                key=lambda e: (not e.invalidated_at, e.confidence, e.updated_at),
                 reverse=True,
             )
             keep, drop = ranked[:max_entries], ranked[max_entries:]
@@ -510,6 +555,10 @@ class ProfileStore:
             kept: list[ProfileEntry] = []
             for e in self._entries:
                 if e.source_session == "manual":
+                    kept.append(e)
+                    continue
+                # P2b：失效条目是历史证据，不参与衰减（也不因 floor 被清）
+                if e.invalidated_at:
                     kept.append(e)
                     continue
                 # P2a：permanent 不进半衰期（身份/关系/抱负不该靠反复提及续命）
@@ -587,6 +636,10 @@ class ProfileStore:
             expire_at = max(0.0, float(d.get("expire_at", 0.0) or 0.0))
         except (TypeError, ValueError):
             expire_at = 0.0
+        try:
+            invalidated_at = max(0.0, float(d.get("invalidated_at", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            invalidated_at = 0.0
         return ProfileEntry(
             id=str(d.get("id", "")),
             category=category,
@@ -601,6 +654,8 @@ class ProfileStore:
             updated_at=float(d.get("updated_at", 0.0)),
             last_referenced_at=float(d.get("last_referenced_at", 0.0)),
             ref_count=int(d.get("ref_count", 0)),
+            invalidated_at=invalidated_at,
+            superseded_by=str(d.get("superseded_by", "") or ""),
         )
 
     def _save_locked(self) -> None:

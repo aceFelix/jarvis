@@ -1,6 +1,6 @@
 # 实现方案：画像记忆 P2（生命周期分层 + 事件轨）
 
-> 状态：**P2a 已落地（2026-11-15），P2b/P2c 待做**　作者：aceFelix　日期：2026-11-15
+> 状态：**P2a/P2b 已落地（2026-11-15），P2c 待做**　作者：aceFelix　日期：2026-11-15
 > 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P2
 > 本文只写落点与契约；设计取舍在 PLAN，不在本文重复。
 
@@ -9,7 +9,7 @@
 | 切片 | 内容 | 本次 |
 |---|---|---|
 | **P2a** | `lifecycle ∈ {permanent, stateful, episodic}` 字段 + decay 分流 + 类别派生 | ✅ |
-| **P2b** | `stateful` 新值即失效：软删除（`invalidated_at` / `superseded_by`）+ 注入过滤 | ⏭ 下一刀 |
+| **P2b** | `stateful` 新值即失效：软删除（`invalidated_at` / `superseded_by`）+ 注入过滤 | ✅ |
 | **P2c** | 事件轨 `events.jsonl`（append-only + 过期清理） | ⏭ 随后 |
 
 **不做**：P3 向量、P5 RecallProfile。
@@ -153,3 +153,18 @@ python scripts/check_md_links.py
 `_most_stable_lifecycle` / 字段 / `new()` / `decay` 分流 / 合并防护 / version 3）、
 `tests/core/test_profile_memory.py`（`TestLifecycle` 9 例）、
 09-记忆与压缩（生命周期表 + decay 分流 + 设计决策）、CHANGELOG、PLAN。
+
+## 十二、实施记录（2026-11-15，P2b）
+
+| # | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| 1 | 软删除另开字段组 | `invalidated_at` + `superseded_by` 追加到 `ProfileEntry` 末尾 | 加在末尾不会影响任何位置参数构造；两字段都缺省为 0/""，向下兼容 |
+| 2 | — | `update` 先 `merge_or_add` 再决定是否失效 | 同义重述会合并回目标自身（`kept.id == target_id`），那种情况绝不能把目标标成失效 |
+| 3 | 失效条目如何处理其他维护 | `decay` 跳过、`prune` 先淘汰、`dedup` 保留、`merge` 跳过 | 失效条目是历史证据，不应被半衰期磨、也不该把旧值“复活”；囤积时优先淘汰 |
+| 4 | `/memory` 是否展示历史 | 不展示条目，末尾只提示条数 | 信任原则：看得到“记得什么”，而完整历史链路（`/memory history`）留到需要时再加 |
+
+已落地：`profile_store.py`（`invalidate` / `entries(include_invalidated=)` / `get(...)` /
+`__len__` 只算有效 / 合并与去重跳过失效 / `decay` 跳过 / `prune` 先淘汰 / 磁盘字段）、
+`profile_resolve.apply_decisions`（update 改软删除）、`session_commands._show_profile`（历史计数提示）、
+`tests/core/test_profile_memory.py`（`TestSoftDelete` 8 例）、`tests/core/test_profile_resolve.py`
+（`TestSoftDeleteOnUpdate` 3 例）。

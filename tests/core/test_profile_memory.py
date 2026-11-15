@@ -499,6 +499,22 @@ class TestMemoryCommand:
         assert "画像记忆为空" in joined
         assert "拒绝 2" in joined
 
+    def test_list_reports_invalidated_history_count(self, tmp_path):
+        """P2b：失效条目不展示，但告诉用户它们作为历史还在。"""
+        path = tmp_path / "p.json"
+        store = ProfileStore(path)
+        alive = ProfileEntry.new("习惯凌晨两点睡", "schedule", 0.9)
+        dead = ProfileEntry.new("以前用 DeepSeek", "tool_usage", 0.6)
+        store.upsert(alive)
+        store.upsert(dead)
+        store.invalidate(dead.id, superseded_by=alive.id)
+
+        ui = self._run("/memory", path)
+        joined = "\n".join(ui.messages)
+        assert "习惯凌晨两点睡" in joined
+        assert "以前用 DeepSeek" not in joined
+        assert "另有 1 条已被新事实取代" in joined
+
 
 # ─────────────────────────────────────────────────────────────
 # M3: 衰减维护
@@ -644,6 +660,96 @@ class TestLifecycle:
         store.upsert(ProfileEntry.new("习惯深夜工作。", "schedule", 0.5, lifecycle="permanent"))
         assert store.dedup_all() == 1
         assert store.entries()[0].lifecycle == "permanent"
+
+
+class TestSoftDelete:
+    """P2b：失效条目不再注入/召回/展示，但保留在磁盘上可追溯。"""
+
+    def test_invalidate_hides_from_active_views(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("在做一个项目", "project", 0.9)
+        store.upsert(e)
+
+        assert store.invalidate(e.id, superseded_by="ent_new", now=100.0) is True
+        assert store.entries() == []
+        assert len(store.entries(include_invalidated=True)) == 1
+        assert store.render_for_prompt() == ""
+        assert store.get(e.id) is None
+        history = store.get(e.id, include_invalidated=True)
+        assert history is not None
+        assert history.superseded_by == "ent_new"
+        assert history.invalidated_at == pytest.approx(100.0)
+
+    def test_invalidate_is_idempotent(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("在做一个项目", "project", 0.9)
+        store.upsert(e)
+        assert store.invalidate(e.id, now=100.0) is True
+        assert store.invalidate(e.id, now=200.0) is False
+        assert store.get(e.id, include_invalidated=True).invalidated_at == pytest.approx(100.0)
+
+    def test_history_fields_persisted(self, tmp_path):
+        path = tmp_path / "p.json"
+        store = ProfileStore(path)
+        e = ProfileEntry.new("以前用 DeepSeek", "tool_usage", 0.6)
+        store.upsert(e)
+        store.invalidate(e.id, superseded_by="ent_next")
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        row = next(r for r in data["entries"] if r["id"] == e.id)
+        assert row["invalidated_at"] > 0
+        assert row["superseded_by"] == "ent_next"
+
+    def test_recall_similar_skips_invalidated(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("习惯深夜工作", "schedule", 0.9, aliases=["熬夜"])
+        store.upsert(e)
+        store.invalidate(e.id)
+        assert store.recall_similar("习惯深夜工作") == []
+
+    def test_merge_does_not_resurrect_invalidated(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("在做一个项目", "project", 0.9)
+        store.upsert(e)
+        store.invalidate(e.id, superseded_by="ent_new")
+
+        kept, merged = store.merge_or_add(ProfileEntry.new("在做一个项目", "project", 0.9))
+        assert merged is False and kept.id != e.id
+        assert len(store.entries()) == 1
+        assert len(store.entries(include_invalidated=True)) == 2
+
+    def test_decay_skips_invalidated(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        e = ProfileEntry.new("早就过时的", "other", 0.9)
+        e.created_at = e.updated_at = 1000.0
+        store.upsert(e)
+        store.invalidate(e.id, now=1000.0)
+
+        assert store.decay(now=1000.0 + 365 * 86400) == 0
+        assert len(store.entries(include_invalidated=True)) == 1
+
+    def test_prune_drops_invalidated_first(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        alive = ProfileEntry.new("有效事实", "other", 0.5)
+        dead = ProfileEntry.new("失效事实", "other", 0.99)
+        store.upsert(alive)
+        store.upsert(dead)
+        store.invalidate(dead.id)
+
+        assert store.prune_over_limit(1) == 1
+        assert [e.content for e in store.entries()] == ["有效事实"]
+
+    def test_dedup_preserves_invalidated_history(self, tmp_path):
+        store = ProfileStore(tmp_path / "p.json")
+        store.upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9))
+        store.upsert(ProfileEntry.new("习惯深夜工作。", "schedule", 0.5))
+        dead = ProfileEntry.new("习惯深夜工作", "schedule", 0.8)
+        store.upsert(dead)
+        store.invalidate(dead.id)
+
+        assert store.dedup_all() == 1          # 两条有效重复归并
+        assert len(store.entries()) == 1
+        assert len(store.entries(include_invalidated=True)) == 2  # 历史保留
 
 
 class TestProfileMaintenanceTask:

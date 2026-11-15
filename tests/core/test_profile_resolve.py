@@ -158,6 +158,51 @@ class TestApply:
         assert report.added == 1 and report.updated == 0
 
 
+class TestSoftDeleteOnUpdate:
+    """P2b：update 不物理删旧值，打失效标记并指向新条目。"""
+
+    def test_update_invalidates_target_with_pointer(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        old = ProfileEntry.new("职业是后端工程师", "identity", 0.8)
+        store.upsert(old)
+        report = _report()
+        PR.apply_decisions(
+            [PR.Decision("update", "职业是Agent开发者", "identity", 0.9, target_id=old.id)],
+            store, "s1", report,
+        )
+        active = store.entries()
+        assert [e.content for e in active] == ["职业是Agent开发者"]
+        history = store.get(old.id, include_invalidated=True)
+        assert history is not None and history.invalidated_at > 0
+        assert history.superseded_by == active[0].id
+        assert report.updated == 1
+
+    def test_update_same_wording_keeps_target_active(self, tmp_path: Path) -> None:
+        """update 只是同义重述 → 合并回目标本身，不能把目标标成失效。"""
+        store = _store(tmp_path)
+        old = ProfileEntry.new("习惯深夜工作", "schedule", 0.8)
+        store.upsert(old)
+        PR.apply_decisions(
+            [PR.Decision("update", "习惯深夜工作。", "schedule", 0.9, target_id=old.id)],
+            store, "s1", _report(),
+        )
+        assert len(store.entries()) == 1
+        assert store.get(old.id).invalidated_at == 0
+
+    def test_update_on_invalidated_target_degrades_to_add(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        old = ProfileEntry.new("以前用 DeepSeek", "tool_usage", 0.6)
+        store.upsert(old)
+        store.invalidate(old.id, superseded_by="ent_new")
+        report = _report()
+        PR.apply_decisions(
+            [PR.Decision("update", "已改用 GLM", "tool_usage", 0.9, target_id=old.id)],
+            store, "s1", report,
+        )
+        assert report.added == 1
+        assert [e.content for e in store.entries()] == ["已改用 GLM"]
+
+
 class TestRecallSimilar:
     def test_alias_hit_ranks_first(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
