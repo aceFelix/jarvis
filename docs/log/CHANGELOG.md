@@ -18,6 +18,13 @@
 
 ## [Unreleased]
 
+### 新增（P4 首批：检索 golden 集，2026-11-15）
+
+- 新增 `tests/memory/test_profile_recall_golden.py`：15 组「提问 → 期望条目」，
+  别名 + bigram 两级召回要求 **top-3 命中 ≥12**（实测 15/15）。
+- 另断言关掉别名后“命中数不增加且不报错”，防止后续调参把降级路径弄崩。
+- 定位：后续调半衰期 / 别名权重 / 注入预算的回归安全网，改召回参数先跑这批。
+
 ### 新增（画像按需检索 RecallProfile 工具，2026-11-15）
 
 - 新增 `agent/tools/memory/recall_profile.py`：`RecallProfile(query, category?, top_k?)` 只读工具，

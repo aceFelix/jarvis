@@ -282,6 +282,11 @@ prompt 里每条候选下方列出它的召回结果 `- [ent_id] category: conte
 
 ### P4 · 记忆评测集（安全网，应尽早）
 
+> ✅ 2026-11-15 **首批已落地**：`tests/memory/test_profile_recall_golden.py`（15 组提问 →
+> top-3 命中 ≥12，实测 15/15；关别名后命中数不增加且不报错）＋ 提炼侧 golden 与
+> 各阶段单测（增量/幂等/四操作/软删除/事件轨/工具）。尚缺：decay 误休眠率与注入预算的
+> 量化基线（待半衰期校准一并做）。
+
 借 LongMemEval / LOCOMO 的形态，做**本地 golden 小样本**回归集 `tests/memory/test_profile_refine_golden.py`：
 用 `_FakeProvider` 固定提炼输出，断言端到端裁决结果。用例族：
 
