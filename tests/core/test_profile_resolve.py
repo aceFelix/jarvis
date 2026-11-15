@@ -89,6 +89,58 @@ class TestEpisodicDecisions:
         assert profile_events.load_events() == []
 
 
+class TestUpdateCategoryInheritance:
+    """2026-11-15 实机回归：update 漏写 category 不得把旧条目降级成 other。"""
+
+    def test_parse_update_without_category_marks_inherit(self) -> None:
+        decisions, _ = PR.parse_decisions({"facts": [
+            {"op": "update", "target_id": "ent_a", "content": "从事人工智能相关工作"},
+        ]})
+        # 空串 = “沿用目标条目类别”，不是 other
+        assert decisions[0].category == ""
+
+    def test_parse_add_without_category_defaults_other(self) -> None:
+        decisions, _ = PR.parse_decisions({"facts": [{"op": "add", "content": "喜欢猫"}]})
+        assert decisions[0].category == "other"
+
+    def test_episodic_without_expire_days_is_dropped(self) -> None:
+        """没给到期时间的“临时事项”没有意义，回退为按类别派生。"""
+        decisions, _ = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "近期常工作到凌晨", "lifecycle": "episodic"},
+        ]})
+        assert decisions[0].lifecycle == ""
+
+    def test_apply_update_inherits_category_and_lifecycle(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        old = ProfileEntry.new("从事编程开发工作", "identity", 0.9)
+        store.upsert(old)
+
+        PR.apply_decisions(
+            [PR.Decision("update", "从事人工智能相关工作", "", 0.85, target_id=old.id)],
+            store, "s1", _report(),
+        )
+        new = store.entries()[0]
+        assert new.category == "identity"   # 继承旧类别，不得落 other
+        assert new.lifecycle == "permanent"  # 身份事实不被降级为 stateful
+        history = store.get(old.id, include_invalidated=True)
+        assert history.superseded_by == new.id
+
+    def test_apply_update_with_explicit_category(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        old = ProfileEntry.new("习惯熬夜", "schedule", 0.8)
+        store.upsert(old)
+        PR.apply_decisions(
+            [PR.Decision("update", "习惯每天早睡", "schedule", 0.9, target_id=old.id)],
+            store, "s1", _report(),
+        )
+        assert store.entries()[0].category == "schedule"
+
+    def test_prompt_update_example_includes_category(self) -> None:
+        prompt = PR.build_resolve_prompt([], include_aliases=True)
+        line = next(l for l in prompt.splitlines() if '"op": "update"' in l)
+        assert '"category"' in line
+
+
 class TestValidateCandidate:
     def test_valid(self) -> None:
         c = PR.validate_candidate({"content": " 习惯深夜工作 ", "category": "schedule",

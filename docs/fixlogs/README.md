@@ -19,12 +19,12 @@
 | 4 | [W1/W3：权限 · 撤销 · 任务脊柱 · 多 Agent](#4-w1w3权限--撤销--任务脊柱--多-agent) | 10 |
 | 5 | [W2 感知与打扰预算](#5-w2-感知与打扰预算) | 5 |
 | 6 | [配置与自配置层](#6-配置与自配置层) | 4 |
-| 7 | [会话 · 记忆 · 上下文](#7-会话--记忆--上下文) | 7 |
+| 7 | [会话 · 记忆 · 上下文](#7-会话--记忆--上下文) | 8 |
 | 8 | [桌面壳与 serve 桥接](#8-桌面壳与-serve-桥接) | 12 |
 | 9 | [终端 · 驾驶舱 · 爬虫窗（UI）](#9-终端--驾驶舱--爬虫窗ui) | 15 |
 | 10 | [扩展生态（MCP · harness · 邮箱 · 网页）](#10-扩展生态mcp--harness--邮箱--网页) | 5 |
 | 11 | [CI · 测试 · 发布与文档门禁](#11-ci--测试--发布与文档门禁) | 10 |
-| | **合计** | **122** |
+| | **合计** | **123** |
 
 ---
 
@@ -142,6 +142,7 @@
 | [profile-refine-auth-fix.md](profile-refine-auth-fix.md) | 画像提炼鉴权失败（提炼模型 key 解析链） |
 | [profile-refine-tail-lost-fix.md](profile-refine-tail-lost-fix.md) | 尾部增量漏提炼（短尾巴被两个门槛同时挡住） |
 | [profile-decay-reference-wiring-fix.md](profile-decay-reference-wiring-fix.md) | 衰减依据是死字段（last_referenced_at/ref_count 没人写） |
+| [profile-update-category-downgrade-fix.md](profile-update-category-downgrade-fix.md) | update 漏写类别把 identity/permanent 降级成 other/stateful |
 
 ## 8. 桌面壳与 serve 桥接
 

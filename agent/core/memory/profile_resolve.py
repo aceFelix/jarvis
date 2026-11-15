@@ -68,6 +68,7 @@ class Decision:
 
     op: str
     content: str = ""
+    # add：具体类别（缺省 other）；update：留空表示“沿用目标旧条目类别”
     category: str = "other"
     confidence: float = 0.5
     aliases: list[str] = field(default_factory=list)
@@ -148,9 +149,15 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
 
     # P2c：带时间边界的临时事项 → episodic + expire_days（事件轨的写入信号）
     episodic_rules = (
-        "\n6. 带明确时间边界、过期就没用的候选（如“下周三面试”“明天出差”“这周搬家”）"
+        "\n6. 只有**明确时间点/期限**的候选（“明天面试”“下周三体检”“这周搬家”“N 天后出差”）"
         " → 额外给 \"lifecycle\": \"episodic\" 与 \"expire_days\": 整数 1–365"
-        "（从今天算起的有效天数，拿不准给 7）；其余候选不要输出这两个字段"
+        "（从今天算起的有效天数，拿不准给 7）；“近期/最近/这段时间”这类模糊说法**不算**，"
+        "按普通事实处理；其余候选不要输出这两个字段"
+    )
+    # update 缺 category 时沿用旧条目类别（2026-11-15 实机：模型不写会把身份降级成 other）
+    update_category_rule = (
+        "\n- update 不写 category 时沿用目标旧条目的类别；要改类别请显式写。\n"
+        "  （add 必须写 category）"
     )
 
     return f"""你是用户画像的裁决器。下面每条候选都附上了它的相似旧条目。
@@ -167,7 +174,7 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
 2. 拿不准 → `noop`（宁可少记，也不要制造重复）
 3. update 的 content 仍须 ≤40 字、第三人称简体中文
 4. target_id 只能取下面列出的 `[ent_xxx]`，不要编造
-5. 可以只处理一部分候选，其余不输出{alias_rules}{episodic_rules}
+5. 可以只处理一部分候选，其余不输出{alias_rules}{episodic_rules}{update_category_rule}
 
 ## 候选与旧条目
 {body}
@@ -177,7 +184,7 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
   {{"op": "add", "content": "...", "category": "...", "confidence": 0.8{alias_field}}},
   {{"op": "add", "content": "...", "category": "...", "confidence": 0.8,
    "lifecycle": "episodic", "expire_days": 7{alias_field}}},
-  {{"op": "update", "target_id": "ent_xxx", "content": "...", "confidence": 0.9{alias_field}}},
+  {{"op": "update", "target_id": "ent_xxx", "content": "...", "category": "...", "confidence": 0.9{alias_field}}},
   {{"op": "delete", "target_id": "ent_xxx", "reason": "..."}},
   {{"op": "noop", "target_id": "ent_xxx"}}
 ]}}"""
@@ -258,9 +265,14 @@ def parse_decisions(data: dict) -> tuple[list[Decision], int]:
             if not content or len(content) > MAX_CONTENT_CHARS:
                 rejected += 1
                 continue
-        category = str(item.get("category", "other")).strip()
-        if category not in PROFILE_CATEGORIES:
-            category = "other"
+        # add 必须有类别（缺省 other）；update 缺省留空 → apply 时继承目标条目类别。
+        # 2026-11-15 实机：模型对 update 不写 category，旧实现默认 other，
+        # 把 identity/permanent 降级成了 other/stateful。
+        raw_category = str(item.get("category", "") or "").strip()
+        if op == "add":
+            category = raw_category if raw_category in PROFILE_CATEGORIES else "other"
+        else:
+            category = raw_category if raw_category in PROFILE_CATEGORIES else ""
         aliases = item.get("aliases") if isinstance(item.get("aliases"), list) else []
         # P2c：临时事项信号（非 episodic 时强制清空，防模型给普通事实乱设到期）
         lifecycle = str(item.get("lifecycle", "") or "").strip().lower()
@@ -273,6 +285,9 @@ def parse_decisions(data: dict) -> tuple[list[Decision], int]:
             except (TypeError, ValueError):
                 expire_days = 0
             expire_days = max(0, min(365, expire_days))
+            if expire_days <= 0:
+                # 没给到期时间的“临时事项”没有意义：回退为按类别派生
+                lifecycle = ""
         out.append(Decision(
             op=op,
             content=content,
@@ -332,7 +347,8 @@ def apply_decisions(
 
     - add → merge_or_add（存储层查重仍生效；合并即算一次再确认）
     - update → 建新条目 + 旧条目**打失效标记**（P2b 软删除，保留历史）；
-      target 幻觉/已失效时降级为 add
+      target 幻觉/已失效时降级为 add；**类别/lifecycle 缺省时继承旧条目**
+      （2026-11-15 实机：模型不写 category 会把身份降级成 other）
     - delete → store.delete（显式删除仍物理删）
     - noop → 不写内容，但调 store.touch_reference 续命（刷新最近提及 + 累计次数）
     - **episodic（P2c）**：带 `expire_days` 的临时事项 → 入库时算好 `expire_at`，
@@ -344,16 +360,27 @@ def apply_decisions(
 
     now = time.time()
 
-    def _new_entry(d: Decision) -> ProfileEntry:
-        """按裁决字段建条目：episodic 时把 expire_days 换成绝对到期时间。"""
+    def _new_entry(
+        d: Decision, *, inherited_category: str = "", inherited_lifecycle: str = ""
+    ) -> ProfileEntry:
+        """按裁决字段建条目：episodic 时把 expire_days 换成绝对到期时间。
+
+        category / lifecycle 留空时用继承值（update 路径）；
+        继承值仍为空则交给 `ProfileEntry.new` 的类别派生/归一。
+        """
         expire_at = (
             now + d.expire_days * 86400
             if d.lifecycle == "episodic" and d.expire_days
             else 0.0
         )
         return ProfileEntry.new(
-            d.content, d.category, d.confidence, session_id, aliases=d.aliases,
-            lifecycle=d.lifecycle, expire_at=expire_at,
+            d.content,
+            d.category or inherited_category,
+            d.confidence,
+            session_id,
+            aliases=d.aliases,
+            lifecycle=d.lifecycle or inherited_lifecycle,
+            expire_at=expire_at,
         )
 
     def _record_event(entry: ProfileEntry) -> None:
@@ -385,8 +412,16 @@ def apply_decisions(
             continue
         if d.op == "update":
             # target 不存在（幻觉/已失效）→ 当 add 处理，仍走存储层查重闸
-            if d.target_id and store.get(d.target_id):
-                kept, merged = store.merge_or_add(_new_entry(d))
+            target = store.get(d.target_id) if d.target_id else None
+            if target is not None:
+                kept, merged = store.merge_or_add(_new_entry(
+                    d,
+                    inherited_category=target.category,
+                    # permanent 不因模型漏写 lifecycle 被降级
+                    inherited_lifecycle=(
+                        "permanent" if target.lifecycle == "permanent" else ""
+                    ),
+                ))
                 # P2b：旧值不物理删——打失效标记并指向新条目。kept 可能就是 target
                 # 自身（update 只是把旧事实再确认/微调），那种情况不能把它标成失效。
                 if kept.id != d.target_id:

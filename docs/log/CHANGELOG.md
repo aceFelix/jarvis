@@ -18,6 +18,15 @@
 
 ## [Unreleased]
 
+### 修复（update 漏写类别把身份降级成 other，2026-11-15）
+
+- 实机验证发现：裁决 prompt 的 `update` 示例没有 `category`，模型不写 → 解析默认 `other` →
+  落盘直接建 `other/stateful` 新条目，`identity/permanent` 被降级成 `other/stateful`。
+- `update` 缺省类别改为**继承目标旧条目**（`Decision.category=""`），lifecycle 同样继承
+  （permanent 不被降级）；prompt 示例补 `category` 并写明继承规则。
+- episodic 收紧：必须给 `expire_days`（否则回退为按类别派生）；“近期/最近”这类模糊说法不算临时事项。
+- 测试：`TestUpdateCategoryInheritance` 6 例；复盘见 `docs/fixlogs/profile-update-category-downgrade-fix.md`。
+
 ### 新增（P4 首批：检索 golden 集，2026-11-15）
 
 - 新增 `tests/memory/test_profile_recall_golden.py`：15 组「提问 → 期望条目」，
