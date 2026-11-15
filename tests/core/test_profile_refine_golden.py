@@ -189,6 +189,29 @@ class TestAdvancePolicy:
         assert _wait_until(lambda: L.load_state("s1").refined_until == 16)
 
 
+class TestReportTelemetry:
+    """P1d：上轮提炼计数随水位一起落台账（/memory 展示的数据源）。"""
+
+    def test_report_written_with_advance(self, settings, monkeypatch) -> None:
+        report = R.RefineReport(
+            advanceable=True, extracted=6, added=2, merged=1, noop=3, rejected=1,
+        )
+        monkeypatch.setattr(R, "refine_session", _Recorder(report))
+        assert R.maybe_refine_async(_dialog(6), "s1", settings) is True
+        assert _wait_until(lambda: L.load_state("s1").refined_until == 6)
+        st = L.load_state("s1")
+        assert st.last_report == {
+            "extracted": 6, "added": 2, "merged": 1, "noop": 3, "rejected": 1,
+        }
+
+    def test_error_does_not_write_report(self, settings, monkeypatch) -> None:
+        """失败轮次只记 last_error，不污染上轮遥测。"""
+        monkeypatch.setattr(R, "refine_session", _Recorder(R.RefineReport(error="boom")))
+        assert R.maybe_refine_async(_dialog(6), "s1", settings) is True
+        assert _wait_until(lambda: L.load_state("s1").last_error == "boom")
+        assert L.load_state("s1").last_report == {}
+
+
 class _FakeProvider:
     """真 refine_session 的假 provider：支持脚本化多次回复（抽取/裁决两段）。"""
 

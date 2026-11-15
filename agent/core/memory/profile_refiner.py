@@ -417,7 +417,20 @@ def maybe_refine_async(
             if report.error:
                 profile_ledger.mark_error(sid, report.error)
             elif report.advanceable:
-                profile_ledger.advance(sid, total)
+                # 计数与水位同一次写入（P1d 遥测：/memory 能看到上轮提炼做了什么）
+                profile_ledger.advance(
+                    sid,
+                    total,
+                    report={
+                        "extracted": report.extracted,
+                        "added": report.added,
+                        "updated": report.updated,
+                        "deleted": report.deleted,
+                        "merged": report.merged,
+                        "noop": report.noop,
+                        "rejected": report.rejected,
+                    },
+                )
             # advanceable=False 且无 error：本轮不推进，下次重试同一段增量
         finally:
             _in_flight.release()

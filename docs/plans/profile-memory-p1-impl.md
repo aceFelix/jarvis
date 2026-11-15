@@ -1,6 +1,6 @@
 # 实现方案：画像记忆 P1（两段式裁决 + 四操作 + 别名）
 
-> 状态：**P1a/P1b/P1c 已落地（2026-11-15），P1d 待做**　作者：aceFelix　日期：2026-11-15
+> 状态：**P1a/P1b/P1c/P1d 已全部落地（2026-11-15）**　作者：aceFelix　日期：2026-11-15
 > 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P1
 > 本文只写落点与契约；设计与成本账在 PLAN，不在本文重复。
 
@@ -11,7 +11,7 @@
 | **P1a** | 两段式：① 抽取候选（不带旧画像）→ ② 逐条召回 → ③ 四操作裁决 | ✅ |
 | **P1b** | 别名：`aliases` 字段、生成规则、并集合并、召回打分接入 | ✅ |
 | **P1c** | 注入侧改造：`prefer_topics` + 两轮填充 + 预算口径切换 | ✅ |
-| **P1d** | 抽取硬闸遥测在 `/memory` 展示、评测集扩量 | ⏭ 随后 |
+| **P1d** | 抽取硬闸遥测在 `/memory` 展示、评测集扩量 | ✅ |
 
 **不做**：P2 lifecycle/事件轨、P3 向量、P5 RecallProfile。
 
@@ -238,3 +238,15 @@ python -m compileall -q agent/
 已落地：`profile_inject.py`（渲染实现）、`profile_store.render_for_prompt`（委托 + 新参数）、
 `settings.py` / `settings_domains.py`（2 键 + `LIST_FIELDS`）/ 两份 `settings.example.toml`、
 `prompts/system.py`（传入 prefer/mode）、`tests/core/test_profile_inject.py`（23 例）。
+
+## 十四、实施记录（2026-11-15，P1d）
+
+| # | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| 1 | 遥测单独开一个台账字段 | `RefineState.last_report`（dict）+ `REPORT_FIELDS` 白名单 | 七项计数拆成七个字段过于琐碎；dict + 白名单过滤在 `_coerce` 里也能兼容脏数据 |
+| 2 | 提炼完单独写一次遥测 | 扩展 `advance(..., report=)`，与水位**同一次锁+写** | 台账是全表原子写；多一次写就多一次锁争用与覆盖风险。`report=None` 时保留旧值 |
+| 3 | `/memory` 展示 | 头部一行「上次提炼 mm-dd HH:mm：抽取/新增/…/拒绝」 | 只在非零项出现，不刷屏；库为空也展示（能看出“全被硬闸拦了”） |
+
+已落地：`profile_ledger.py`（`last_report` + `_clean_report` + `advance(report=)`）、
+`profile_refiner.py`（worker 写计数）、`session_commands.py`（`_format_last_refine` + 列表头部）、
+测试：台账 +4、golden +2、命令 +2。

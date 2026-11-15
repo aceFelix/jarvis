@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from agent.session_manager import (
@@ -101,17 +102,49 @@ def _show_memory_file(ui, settings) -> None:
         ui.info("（暂无长期记忆。可手动创建上述文件写入需要记住的信息。）")
 
 
-def _show_profile(ui, settings) -> None:
-    """/memory — 画像记忆列表（Phase 1a）。"""
+def _format_last_refine(state) -> str:
+    """把台账里的上轮提炼计数拼成一行人话（P1d 遥测；无记录返回空串）。
+
+    只做展示：让人能看出"提炼确实跑了、卡在哪一步"（例如 rejected 不为 0
+    说明候选被硬闸拦下，noop 多说明重复事实被正确跳过）。
+    @author aceFelix
+    """
+    report = getattr(state, "last_report", None) or {}
+    ts = float(getattr(state, "last_refine_ts", 0.0) or 0.0)
+    if not ts:
+        return ""
+    when = time.strftime("%m-%d %H:%M", time.localtime(ts))
+    if not report:
+        return f"上次提炼 {when}：暂无新事实入库"
+    labels = (
+        ("extracted", "抽取"),
+        ("added", "新增"),
+        ("updated", "更新"),
+        ("deleted", "删除"),
+        ("merged", "合并"),
+        ("noop", "跳过"),
+        ("rejected", "拒绝"),
+    )
+    parts = [f"{name} {int(report.get(key, 0))}" for key, name in labels if report.get(key)]
+    return f"上次提炼 {when}：{' / '.join(parts)}"
+
+
+def _show_profile(ui, settings, session_name: str = "") -> None:
+    """/memory — 画像记忆列表（Phase 1a）+ 上轮提炼遥测（P1d）。"""
+    from agent.core.memory import profile_ledger
     from agent.core.memory.profile_store import ProfileStore, CATEGORY_LABELS
 
     store = ProfileStore()
     entries = store.entries()
+    # 遥测先展示：库为空时也能看出"最近一次提炼是否跑过、拒了多少"
+    telemetry = _format_last_refine(profile_ledger.load_state(session_name))
     if not entries:
         ui.info(
             "画像记忆为空。和贾维斯聊聊你的习惯与偏好（如\"我习惯熬夜写代码\"），"
             "会话结束后会自动提炼入库；也可用 /memory add <内容> 手动添加。"
         )
+        if telemetry:
+            ui.info(f"  {telemetry}")
         return
 
     limit = getattr(settings, "profile_inject_token_limit", 300)
@@ -119,6 +152,8 @@ def _show_profile(ui, settings) -> None:
     ui.info(
         f"画像记忆（{len(entries)} 条，按置信度排序；注入限额 {limit} token，口径 {mode}）:"
     )
+    if telemetry:
+        ui.info(f"  {telemetry}")
     for e in entries:
         label = CATEGORY_LABELS.get(e.category, e.category)
         src = e.source_session or "-"
@@ -260,7 +295,7 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     sub = parts[1].strip() if len(parts) > 1 else ""
 
     if not sub:
-        _show_profile(ctx.ui, ctx.settings)
+        _show_profile(ctx.ui, ctx.settings, session_name=getattr(ctx, "session_name", ""))
         return True
 
     action, _, rest = sub.partition(" ")

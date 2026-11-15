@@ -476,6 +476,29 @@ class TestMemoryCommand:
         ui = self._run("/memory bogus", tmp_path / "p.json")
         assert any("用法" in m for m in ui.messages)
 
+    def test_list_shows_last_refine_telemetry(self, tmp_path):
+        """P1d：列表头部展示上轮提炼计数（新增/跳过/拒绝），让人看得见提炼真的跑了。"""
+        from agent.core.memory import profile_ledger as ledger
+
+        path = tmp_path / "p.json"
+        ProfileStore(path).upsert(ProfileEntry.new("习惯深夜工作", "schedule", 0.9))
+        ledger.advance("default", 3, now=time.time(), report={"added": 1, "noop": 2, "rejected": 1})
+
+        ui = self._run("/memory", path)
+        joined = "\n".join(ui.messages)
+        assert "上次提炼" in joined
+        assert "新增 1" in joined and "跳过 2" in joined and "拒绝 1" in joined
+
+    def test_empty_store_still_shows_telemetry(self, tmp_path):
+        """库为空时也要能看到上轮提炼“拒绝/跳过”的原因类信息。"""
+        from agent.core.memory import profile_ledger as ledger
+
+        ledger.advance("default", 3, now=time.time(), report={"rejected": 2})
+        ui = self._run("/memory", tmp_path / "p.json")
+        joined = "\n".join(ui.messages)
+        assert "画像记忆为空" in joined
+        assert "拒绝 2" in joined
+
 
 # ─────────────────────────────────────────────────────────────
 # M3: 衰减维护

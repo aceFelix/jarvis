@@ -133,9 +133,9 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 
 ### P1 · 四操作裁决协议 + 逐条召回
 
-> ✅ 2026-11-15 已落地 P1a（两段式 + 四操作 + 硬闸）、P1b（别名 + 召回打分）
-> 与 P1c（注入侧主题优先 / 两轮填充 / 预算口径）；仅剩 P1d（抽取硬闸遥测展示 + 评测集扩量）。
-> 实现细节见 [plans/profile-memory-p1-impl.md](../plans/profile-memory-p1-impl.md)。
+> ✅ 2026-11-15 **P1 四刀全部落地**：P1a（两段式 + 四操作 + 硬闸）、P1b（别名 + 召回打分）、
+> P1c（注入侧主题优先 / 两轮填充 / 预算口径）、P1d（`/memory` 提炼遥测）。
+> 实现细节与偏离记录见 [plans/profile-memory-p1-impl.md](../plans/profile-memory-p1-impl.md)。
 
 **两段式调用（先抽取、后裁决）**——这是 P1 的结构前提：
 

@@ -16,9 +16,12 @@
 ```json
 {"version": 1, "sessions": {
   "<session_id>": {"refined_until": 42, "last_msg_ts": 1.79e9,
-                   "last_refine_ts": 1.79e9, "last_error": ""}
+                   "last_refine_ts": 1.79e9, "last_error": "",
+                   "last_report": {"added": 2, "noop": 3, "rejected": 1}}
 }}
 ```
+
+`last_report` 是 P1d 的**遥测**：上一次成功提炼的计数（`/memory` 展示用，不参与任何判定）。
 
 ## 铁律
 
@@ -38,7 +41,7 @@ import json
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -47,6 +50,9 @@ from agent.utils.filelock import ensure_dir, file_lock
 
 #: 台账最多保留的会话数（按最后活跃时间淘汰）
 MAX_SESSIONS = 50
+
+#: `last_report` 落盘字段白名单（遥测，仅展示用）
+REPORT_FIELDS = ("extracted", "added", "updated", "deleted", "merged", "noop", "rejected")
 
 _COMPONENT = "memory.ledger"
 
@@ -67,6 +73,7 @@ class RefineState:
     last_attempt_ts: float = 0.0    # 最近一次**尝试**提炼的时间（节流依据：失败也算，防每轮重试）
     last_refine_ts: float = 0.0     # 最近一次**成功推进**的时间（诊断用）
     last_error: str = ""            # 最近一次失败原因（仅诊断用，不参与判定）
+    last_report: dict = field(default_factory=dict)  # 上次成功提炼的计数（P1d 遥测）
 
 
 def ledger_path() -> Path:
@@ -119,7 +126,27 @@ def _coerce(raw: object) -> RefineState:
         last_attempt_ts=last_attempt_ts,
         last_refine_ts=last_refine_ts,
         last_error=str(raw.get("last_error", "") or ""),
+        last_report=_clean_report(raw.get("last_report")),
     )
+
+
+def _clean_report(raw: object) -> dict:
+    """把任意输入洗成 `{字段: 正整数}`（只留白名单内的非零值）。
+
+    遥测只用于展示，脏值应该被静默丢弃而不是让整个台账读取失败。
+    @author aceFelix
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key in REPORT_FIELDS:
+        try:
+            value = int(raw.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value:
+            out[key] = value
+    return out
 
 
 def _read_text_retry(path: Path, *, attempts: int = 5, delay: float = 0.02) -> str:
@@ -261,6 +288,7 @@ def save_state(session_id: str, state: RefineState) -> None:
         target.last_attempt_ts = float(state.last_attempt_ts)
         target.last_refine_ts = float(state.last_refine_ts)
         target.last_error = str(state.last_error or "")
+        target.last_report = _clean_report(state.last_report)
 
     _update(session_id, _mutate)
 
@@ -292,16 +320,32 @@ def pending_delta(session_id: str, msg_count: int) -> int:
     return max(0, int(msg_count) - state.refined_until)
 
 
-def advance(session_id: str, refined_until: int, *, now: float | None = None) -> RefineState:
-    """提炼成功/可推进时调用：前移水位并刷新 last_refine_ts、清空 last_error。"""
+def advance(
+    session_id: str,
+    refined_until: int,
+    *,
+    now: float | None = None,
+    report: dict | None = None,
+) -> RefineState:
+    """提炼成功/可推进时调用：前移水位并刷新 last_refine_ts、清空 last_error。
+
+    Args:
+        refined_until: 新的水位（已处理到的消息下标）。
+        now: 时间戳（测试可注入）。
+        report: 上一次提炼的计数摘要（P1d 遥测）。传入则随本次写入一起落盘，
+            与水位同一次锁+写，不给台账多一次写入开销；`None` 保留旧值。
+    """
     ts = time.time() if now is None else float(now)
     target = max(0, int(refined_until))
+    cleaned = _clean_report(report) if report is not None else None
 
     def _mutate(state: RefineState) -> None:
         # 只增不减：并发下更旧的结果不应覆盖更新的水位
         state.refined_until = max(state.refined_until, target)
         state.last_refine_ts = ts
         state.last_error = ""
+        if cleaned is not None:
+            state.last_report = dict(cleaned)
 
     return _update(session_id, _mutate)
 

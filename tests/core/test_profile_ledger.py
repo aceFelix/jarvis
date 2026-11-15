@@ -180,3 +180,37 @@ class TestIdleDecision:
         L.touch("s1", 10, now=1000.0)
         assert L.idle_sessions(now=99999.0, idle_minutes=0, min_delta=1, counts={"s1": 10}) == []
         assert L.idle_sessions(now=99999.0, idle_minutes=30, min_delta=0, counts={"s1": 10}) == []
+
+
+class TestReportTelemetry:
+    """P1d 遥测：上轮提炼计数随 advance 同一次写入落盘（仅展示用）。"""
+
+    def test_advance_with_report_persists(self) -> None:
+        L.advance("s1", 8, now=100.0, report={"added": 2, "noop": 3, "rejected": 1})
+        st = L.load_state("s1")
+        assert st.last_report == {"added": 2, "noop": 3, "rejected": 1}
+        data = json.loads(_path().read_text(encoding="utf-8"))
+        assert data["sessions"]["s1"]["last_report"]["noop"] == 3
+
+    def test_advance_without_report_keeps_old(self) -> None:
+        L.advance("s1", 8, now=100.0, report={"added": 1})
+        L.advance("s1", 12, now=200.0)
+        st = L.load_state("s1")
+        assert st.refined_until == 12
+        assert st.last_report == {"added": 1}
+
+    def test_report_whitelist_and_coerce(self) -> None:
+        """白名单外字段、非整数、零值一律不进台账。"""
+        L.advance(
+            "s1", 1, now=100.0,
+            report={"added": "3", "bogus": 9, "noop": 0, "rejected": None},
+        )
+        assert L.load_state("s1").last_report == {"added": 3}
+
+    def test_corrupt_report_on_disk_does_not_break_load(self) -> None:
+        _path().parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "sessions": {"s1": {"refined_until": 5, "last_report": "坏值"}}}
+        _path().write_text(json.dumps(payload), encoding="utf-8")
+        st = L.load_state("s1")
+        assert st.refined_until == 5
+        assert st.last_report == {}
