@@ -18,6 +18,70 @@
 
 ## [Unreleased]
 
+### 新增（画像注入侧：主题优先 + 两轮填充 + 预算口径，2026-11-15）
+
+- **渲染拆出** `agent/core/memory/profile_inject.py`：`ProfileStore.render_for_prompt` 只负责取快照，
+  排序与预算裁剪进新模块（局部导入避免与存储层成环）。
+- **主题优先**：`profile_inject_prefer_topics` 命中的类别置顶（空列表＝保持旧排序），
+  无论用户问什么，注入的不再永远是“高置信那批”。
+- **两轮填充**：主题命中 → 短条目（长度 ≤ 中位数）→ 长条目，逐条试装、放不下就跳过；
+  一条 40 字事实不再挤掉 4–5 条短事实。
+- **预算口径可切换**：`profile_inject_token_budget_mode` = `pseudo`（默认，`len/4` 兼容现状）/
+  `weighted`（中英分权真 token，中文不再低估六成）。**默认不变**；切 weighted 需同步下调
+  `profile_inject_token_limit`，具体值待评测集实测定，不凭估算改。
+- **空白条目**：内容全空白的条目不再渲染（原先会输出一行空横杠白占预算）。
+- **配置**：新增 2 键；`Settings` 字段 207 → **209**；两份 `settings.example.toml` 同步。
+- **测试**：新增 `tests/core/test_profile_inject.py`（23 例）；画像相关合计 **154 例通过**。
+
+### 新增（画像提炼两段式 + 四操作裁决 + 别名，2026-11-15）
+
+- **两段式**：① 抽取（第 1 次 LLM，只读增量对话，**不带旧画像**）→ ② 逐条召回（纯本地 top-K）
+  → ③ 裁决（第 2 次 LLM，候选 + 各自近邻）→ ④ 落盘。候选与裁决不再互相污染。
+- **四操作**：`add` / `update` / `delete` / `noop`。`noop` 是“不记”的正式出口，
+  承接“看着像重复但不值得改”的全部情况——只给 add/update 时，重复是协议逼出来的。
+- **硬闸**：空内容、>40 字、非法 op 直接拒绝并计 `rejected`；类别白名单；置信度 clamp 0.3~0.95。
+- **别名**：`add`/`update` 生成 2–5 个（每个 2–6 字），合并取并集≤ 8；`profile.json`
+  version 1 → **2**（旧文件缺字段按 `[]` 读，不迁移不备份）。
+- **召回打分**：`ProfileStore.recall_similar` = bigram 相似度 + 别名命中 0.30 + 同类别 0.15。
+- **配置**：`profile_recall_top_k`（默认 5）、`profile_aliases_enabled`（默认 true）；
+  `Settings` 字段 205 → **207**。
+- **成本**：每次提炼从 1 次 LLM 变 2 次（裁决段多带候选与近邻，别名 +~50 token）；
+  由于 P0 已干掉整窗重喂，总成本仍低于改造前。
+- **测试**：新增 `tests/core/test_profile_resolve.py`（19 例）；画像相关共 **800 passed**。
+- 注入侧改造当时未做（`profile_inject_prefer_topics` 未进配置表，避免死配置），
+  已在下一刀 P1c 补齐（见上一条）。
+
+### 新增（画像提炼改为水位增量，不再重喂整窗，2026-11-14）
+
+- 新增 `agent/core/memory/profile_ledger.py`：按会话记录 `refined_until`（已提炼到第几条），
+  提炼只喂 `messages[refined_until:]` 的增量。根治“每 600 秒把最近 40 条重喂一遍、
+  同一事实被反复发现”的重复源头。
+- 节流依据从“最近一次成功”改为“最近一次尝试”（`last_attempt_ts`）：provider 持续报错时
+  不会每轮重试（每次 `_auto_save` 都起线程）。
+- 新增终态触发：退出 / 切换会话时 `final=True` 无视节流，把最后一段增量收干。
+- 新增空闲触发：60 分钟无新消息（且仍有 ≥`profile_refine_min_delta` 条增量）时补提炼一次。
+  用**每会话一次性 Timer**而非宿主 Scheduler——后者会把内部任务持久化进 `schedule.json`
+  并出现在 `/schedule` 列表里。
+- 新增配置：`profile_refine_min_delta`（默认 6）、`profile_refine_on_exit`（默认 true）、
+  `profile_refine_idle_minutes`（默认 60）；`Settings` 字段 202 → **205**
+  （记忆提炼参数不进真源表，与现有 `profile_*` 一致）。
+- **画像边界校正（2026-11-15）**：提炼 prompt 改为"只记关于本人"的正面清单 + 排除清单
+  （助手工作流、命令/端口/路径、技术实现细节、环境状态、一次性事件），类别新增
+  `personality`（性格）/ `aspiration`（愿望抱负）/ `mindset`（心思）；判断口径固定为
+  "这条 5 年后还成立吗？描述的是人还是事/系统？"；细碎事实归长期记忆 `MEMORY.md`。
+- 台账健壮性：50 会话 LRU；损坏当空表；`/rewind`、`/compact` 导致消息变少时自动下调水位；
+  读-改-写全程持跨进程锁，拿不到锁只更新内存（不阻提炼）——Windows 下读写与 `os.replace`
+  撞车时加短重试，不再把水位误读成 0。
+- **修复（2026-11-15 实机测试）**：短尾巴（1–5 条增量）原先被两处门槛同时挡住——
+  主路径 `delta < min_delta` 提前返回且不排空闲，空闲判定也用 `min_delta`。现改为：
+  增量不足时也排空闲兜底，空闲门槛降到 **delta ≥ 1**（已按小时限流）；
+  `/memory refine` 改走 force 增量路径（不再整窗重喂、来源不再是 `manual-refine`）。
+  另修测试 worker 晚于 fixture 写回真实台账的问题，并清理已写入的 `s1` 脏数据。
+  复盘见 `docs/fixlogs/profile-refine-tail-lost-fix.md`。
+- 测试：新增 `tests/core/test_profile_ledger.py`（15 例）、
+  `tests/core/test_profile_refine_golden.py`（12 例）与 `tests/core/test_profile_idle.py`（10 例）；
+  画像相关合计 **88 例通过**。
+
 ### 文档（更新日志分册化，2026-11-14）
 
 - `docs/log/CHANGELOG.md` 1420 行 → **604 行**：主文件只留 `[Unreleased]` 与当前 **2.5.x**，

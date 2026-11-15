@@ -1,6 +1,6 @@
 # 实现方案：画像记忆 P0（增量提炼 + 三触发）与 P4（评测集）
 
-> 状态：**待开工**　作者：aceFelix　日期：2026-11-14
+> 状态：**步骤 1-3 已落地，步骤 4（文档收尾与提交）待做**　作者：aceFelix　日期：2026-11-14
 > 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P0 / §P4
 > 本文只写"落到函数签名与文件"的细节；设计取舍、成本账、P1-P5 不在本文范围。
 
@@ -22,7 +22,7 @@
 | 事实 | 位置 |
 |---|---|
 | 每轮对话后调用提炼 | `agent/main.py`（REPL 每轮 `_auto_save`）、`agent/serve/engine/engine.py:596` |
-| 节流与门槛 | `agent/core/memory/profile_refiner.py`：`REFINE_INTERVAL_SECONDS=600`、`profile_refine_min_messages=6`、模块级 `_last_refine_ts` + `_in_flight` |
+| 节流与门槛 | `agent/core/memory/profile_refiner.py`：`REFINE_INTERVAL_SECONDS=600`、`profile_refine_min_messages=6`、模块级 `_in_flight`；节流时间戳存台账（`last_attempt_ts`） |
 | 全文重喂 | `maybe_refine_async` → `refine_session(list(messages))` → `_collect_dialog_text`（最近 40 条） |
 | `_auto_save` 签名 | `agent/session_manager.py:205`，末尾调 `maybe_refine_async(messages, session_name, settings)` |
 | 可用 Scheduler | `CliReminderHost.scheduler`（`cli_reminder.py:61`）、`ProactiveHub.scheduler`（`hub.py:194`） |
@@ -253,3 +253,26 @@ python scripts/check_md_links.py
 | 3 | 无会话名时的 key | `"default"` + 一次 diag_warn |
 | 4 | 台账文件损坏 | 当空表（重提炼一次），不备份不阻断 |
 | 5 | 空闲触发是否朗读/提示 | **否**，静默后台 |
+
+## 十、实施记录（2026-11-14）
+
+步骤 1-2 已落地。与本文原稿的差异（均已写进代码注释）：
+
+| # | 原稿 | 实际 | 原因 |
+|---|---|---|---|
+| 1 | `RefineState.last_refine_ts` 兼作节流依据 | 新增 `last_attempt_ts`，节流按“尝试”计；`last_refine_ts` 只记成功 | 否则 provider 持续报错时每轮都会重试（既有用例 `test_throttle_second_call_skipped` 抓到） |
+| 2 | 3 个配置键进 `config_specs` 真源表 | 只进 `settings.py` + `settings_domains.py` + 两份 example | 与现有 `profile_*` 一致（记忆参数不由模型代改）；“58 项”不变，只有目录总数 202→205 |
+| 3 | `touch` 后直接用旧 state | 用 `touch` 的**返回值** | `touch` 会下调水位（rewind/compact），旧值会让增量算错 |
+| 4 | 增量在 worker 内取 | 启线程前 `list(messages[...])` 快照 | 切会话/新建会 `clear()` 消息列表，晚取只剩空表 |
+| 5 | 空闲触发挂宿主 Scheduler | 改为**每会话一次性 `threading.Timer`** | `Scheduler` 会把任务持久化进 `schedule.json`，且 `list_pending()` 会在 `/schedule` 里列出——内部提炼任务污染用户可见提醒；Timer 非常驻、取消即释放，无需改 Scheduler 语义 |
+| 6 | 空闲触发也要求 `delta ≥ min_delta` | 空闲门槛降为 **`delta ≥ 1`** | 实测：聊两三句走开，短尾巴被主路径与空闲两处门槛同时挡死，永远不入库；空闲已按小时限流，不需要再卡条数 |
+| 7 | `/memory refine` 直调 `refine_session` | 改走 `maybe_refine_async(force=True)` | 旧路径整窗重喂且不推进水位，来源还被写成 `manual-refine` |
+
+已落地：`profile_ledger.py`、`profile_idle.py`、`test_profile_ledger.py`（15 例）、
+`test_profile_refine_golden.py`（12 例）、`test_profile_idle.py`（10 例）、
+`profile_refiner.py`（`advanceable` + 三触发入口）、`session_manager.py`（`final` 参数）、
+`main.py`（退出终态 + 空闲绑定）、`app.py`（桌面空闲绑定）、
+`engine_session.py`（切会话/新建前 flush）、settings/domains/两份模板、
+`09-记忆与压缩.md`、`concepts.md`、`CHANGELOG.md`。
+
+剩余：步骤 4——按四个提交切分提交（台账 / 增量+终态 / 空闲 / 文档），推送前过 L3。
