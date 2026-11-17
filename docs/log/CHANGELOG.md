@@ -18,6 +18,17 @@
 
 ## [Unreleased]
 
+### 修复（提炼把推断当事实，2026-11-17）
+
+- 实机发现“关注贵阳天气，可能与出差或探亲有关”被当成画像事实入库：抽取 prompt 规则写着
+  “从行为推断取低”（等于允许写推断），且“一次性事件不记”与 P2c 的 episodic 互相矛盾。
+- 抽取 prompt：改为“不要从行为反推性格或意图”+“禁止推测/替用户补因果”；
+  “不是什么”列表改为允许**带明确期限的未来安排**（与 episodic 对齐）。
+- 裁决 prompt：content 只写用户明确陈述部分（例：“下周五可能去贵阳出差” → 只写“下周五有出差安排”）。
+- 解析硬闸：非 `episodic` 的 add/update 含“可能/也许/或许/大概/恐怕/应该是/不确定/猜测”
+  直接拒收并计入 `rejected` 遥测。
+- 测试：`TestSpeculationGate` 4 例；复盘见 `docs/fixlogs/profile-refine-speculation-fix.md`。
+
 ### 修复（update 漏写类别把身份降级成 other，2026-11-15）
 
 - 实机验证发现：裁决 prompt 的 `update` 示例没有 `category`，模型不写 → 解析默认 `other` →

@@ -37,6 +37,9 @@ from agent.core.memory.profile_store import (
 #: 单条事实的字数上限（硬闸：超过直接拒绝，不截断）
 MAX_CONTENT_CHARS = 40
 
+#: 推测/不确定措辞：画像事实必须是被明确陈述的，非临时事项含这些词一律拒收
+_UNCERTAIN_MARKERS = ("可能", "也许", "或许", "大概", "恐怕", "应该是", "不确定", "猜测")
+
 #: 允许的裁决操作
 _OPS = {"add", "update", "delete", "noop"}
 
@@ -101,7 +104,8 @@ def build_extract_prompt(dialog_text: str) -> str:
 ## 画像不是什么（一律不记）
 - 贾维斯/助手自身的工作流程、工具调用、命令、端口、路径、依赖、报错与调试过程
 - 具体项目的技术实现细节（框架、端口、目录结构、部署方式、配置项）
-- 一次性事件、临时任务、当天安排、闹钟提醒
+- 已过去的一次性事件、当天琐事、闹钟提醒；**带明确期限的未来安排**（如“下周五出差”）除外——
+  下一步会把它当临时事项（episodic）处理
 - 环境/网络状态、设备配置、软件安装位置
 - 对话寒暄、工具输出、代码片段
 
@@ -115,9 +119,11 @@ def build_extract_prompt(dialog_text: str) -> str:
 ## 抽取规则
 1. 一条只装一个事实，≤40 字；超过 40 字的请概括或拆成多条
 2. content 用第三人称简体中文陈述（如“习惯深夜工作”），不要写“用户说……”
-3. confidence 取 0.3~0.95：明确自述取高，从行为推断取低
+3. confidence 取 0.3~0.95：明确自述取高；**不要从行为反推性格或意图**
 4. 这一阶段**不要判断是否与已有画像重复**，那是下一步的事
-5. 没有值得记的就返回空数组
+5. **只写用户明确陈述的内容**：禁止推测（“可能/也许/大概/或许/应该是”），也不要替用户
+   补因果（如由“查贵阳天气”推断“可能要出差”）——不确定就不记
+6. 没有值得记的就返回空数组
 
 ## 本次对话
 {dialog_text}
@@ -174,7 +180,9 @@ def build_resolve_prompt(candidates: list[Candidate], *, include_aliases: bool =
 2. 拿不准 → `noop`（宁可少记，也不要制造重复）
 3. update 的 content 仍须 ≤40 字、第三人称简体中文
 4. target_id 只能取下面列出的 `[ent_xxx]`，不要编造
-5. 可以只处理一部分候选，其余不输出{alias_rules}{episodic_rules}{update_category_rule}
+5. **content 只写用户明确陈述的部分**，不要写“可能/也许/大概/或许”等推测；
+   临时事项（episodic）也只写确定信息（例：用户说“下周五可能去贵阳出差”→ content="下周五有出差安排"）
+6. 可以只处理一部分候选，其余不输出{alias_rules}{episodic_rules}{update_category_rule}
 
 ## 候选与旧条目
 {body}
@@ -288,6 +296,13 @@ def parse_decisions(data: dict) -> tuple[list[Decision], int]:
             if expire_days <= 0:
                 # 没给到期时间的“临时事项”没有意义：回退为按类别派生
                 lifecycle = ""
+        # 非临时事项必须是“明确陈述”：含推测措辞一律拒收。
+        # 2026-11-17 实机：“关注贵阳天气，可能与出差或探亲有关”被当成画像事实入库。
+        # episodic 不在此拦（用户对临时安排可以带预期语气），但 prompt 要求只写确定部分。
+        if op in ("add", "update") and lifecycle != "episodic":
+            if any(marker in content for marker in _UNCERTAIN_MARKERS):
+                rejected += 1
+                continue
         out.append(Decision(
             op=op,
             content=content,

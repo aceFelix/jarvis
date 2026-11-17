@@ -141,6 +141,41 @@ class TestUpdateCategoryInheritance:
         assert '"category"' in line
 
 
+class TestSpeculationGate:
+    """2026-11-17 实机回归：推断/猜测不得被当成画像事实。"""
+
+    def test_speculative_fact_rejected(self) -> None:
+        decisions, rejected = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "关注贵阳天气，可能与出差或探亲有关",
+             "category": "other"},
+        ]})
+        assert decisions == []
+        assert rejected == 1
+
+    def test_speculative_update_rejected(self) -> None:
+        decisions, rejected = PR.parse_decisions({"facts": [
+            {"op": "update", "target_id": "ent_a", "content": "也许换工作了"},
+        ]})
+        assert decisions == []
+        assert rejected == 1
+
+    def test_episodic_keeps_hedged_schedule(self) -> None:
+        """临时事项不拦推测词（用户对行程可以不确定）；prompt 负责只写确定部分。"""
+        decisions, rejected = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "下周五有出差安排", "category": "other",
+             "lifecycle": "episodic", "expire_days": 10},
+        ]})
+        assert rejected == 0
+        assert decisions[0].lifecycle == "episodic"
+
+    def test_plain_fact_not_affected(self) -> None:
+        decisions, rejected = PR.parse_decisions({"facts": [
+            {"op": "add", "content": "居住在杭州", "category": "identity"},
+        ]})
+        assert rejected == 0
+        assert decisions[0].content == "居住在杭州"
+
+
 class TestValidateCandidate:
     def test_valid(self) -> None:
         c = PR.validate_candidate({"content": " 习惯深夜工作 ", "category": "schedule",
