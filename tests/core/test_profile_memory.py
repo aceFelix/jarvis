@@ -250,14 +250,35 @@ class TestMaybeRefineAsync:
         msgs = [_msg("user", "hi")] * 3
         assert refiner.maybe_refine_async(msgs, "s", self._settings()) is False
 
-    def test_throttle_second_call_skipped(self, monkeypatch):
-        # 必须隔离真 provider：不隔离时后台线程会去建真的 AsyncOpenAI 客户端（实测 1.6s），
-        # 有 OPENAI_API_KEY 的机器上还会从测试里发出真实请求、并读写用户真实画像库
-        monkeypatch.setattr(refiner, "_build_refine_provider", lambda settings: None)
+    def test_success_is_not_time_throttled(self, monkeypatch):
+        """成功后不按时间节流：凑够 min_delta 就立刻提炼（2026-11-17 口径）。"""
+        calls: list[int] = []
+
+        def _ok(messages, sid, settings, store=None):  # noqa: ARG001
+            calls.append(1)
+            return refiner.RefineReport(advanceable=True)
+
+        monkeypatch.setattr(refiner, "refine_session", _ok)
+        settings = self._settings(
+            profile_refine_interval=99999, profile_refine_min_delta=7,  # 间隔很大也不影响成功路径
+        )
         msgs = [_msg("user", "hi")] * 10
-        assert refiner.maybe_refine_async(msgs, "s", self._settings()) is True
-        # 间隔内第二次调用直接跳过（首轮刚写过 last_refine_ts）
-        assert refiner.maybe_refine_async(msgs, "s", self._settings()) is False
+        assert refiner.maybe_refine_async(msgs, "s", settings, wait_seconds=5) is True
+        assert refiner.maybe_refine_async(
+            msgs + [_msg("user", "more")] * 7, "s", settings, wait_seconds=5
+        ) is True
+        assert len(calls) == 2
+
+    def test_failure_backoff_within_interval(self, monkeypatch):
+        """失败后按 interval 退避，不每轮重试（成功已不节流，退避只剩失败路径）。"""
+        def _fail(messages, sid, settings, store=None):  # noqa: ARG001
+            return refiner.RefineReport(error="boom")
+
+        monkeypatch.setattr(refiner, "refine_session", _fail)
+        settings = self._settings(profile_refine_interval=600, profile_refine_min_delta=7)
+        msgs = [_msg("user", "hi")] * 10
+        assert refiner.maybe_refine_async(msgs, "s", settings, wait_seconds=5) is True
+        assert refiner.maybe_refine_async(msgs, "s", settings, wait_seconds=5) is False
 
     def test_worker_thread_does_not_outlive_test(self, monkeypatch):
         """守住本文件 autouse fixture 依赖的那条不变量：节流触发后台线程后，线程必须

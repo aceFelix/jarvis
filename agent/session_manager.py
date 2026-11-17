@@ -309,6 +309,7 @@ def _auto_save(
     title_generated: bool = False,
     settings: Any = None,
     final: bool = False,
+    refine_wait: float = 0.0,
 ) -> None:
     """保存会话到指定名称（增量刷新，每次对话后都会调用）。
 
@@ -323,6 +324,8 @@ def _auto_save(
 
     final=True 表示"本次是会话终态"（退出 / 切会话）：无视提炼节流，只要求有新增量；
     受 `profile_refine_on_exit` 开关控制。
+    refine_wait > 0 时阻塞等待提炼线程（上限该秒数）——仅退出路径传，
+    否则 daemon 线程会被进程退出直接带走（2026-11-17）。
     """
     if not messages:
         return
@@ -349,7 +352,10 @@ def _auto_save(
             from agent.core.memory.profile_refiner import maybe_refine_async
 
             force = bool(final and getattr(settings, "profile_refine_on_exit", True))
-            maybe_refine_async(messages, session_name, settings, force=force)
+            maybe_refine_async(
+                messages, session_name, settings, force=force,
+                wait_seconds=refine_wait if final else 0.0,
+            )
         except Exception:
             pass
 

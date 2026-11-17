@@ -98,6 +98,10 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 
 ### P0 · 提炼触发改为消息水位增量 + 终态提炼
 
+> **2026-11-17 简化**：空闲触发已下线（用户判定冗余：多一条计时器路径 + 一个配置键，收益不抵成本）。
+> 现行触发只有三类：**阈值（默认每 7 条新消息）/ 终态（退出·切会话·新建）/ 手动 `/memory refine`**；
+> 成功不节流，`profile_refine_interval` 只在失败后退避；退出路径最多等 15 秒把后台提炼跑完。
+
 **水位台账**（新文件 `agent/core/memory/profile_ledger.py`，从 refiner 拆出守行数）：
 `~/.jarvis/memory/refine_ledger.json`，结构 `{session_id: {"refined_until": int, "last_ts": float}}`，
 复用 `agent/utils/filelock.py` 的 `file_lock` + 临时文件 + `os.replace` 原子写；读坏当空表，不拦提炼。
@@ -105,19 +109,16 @@ ProfileStore.merge_or_add        ← 落盘环节：字面查重（已落地，�
 **`maybe_refine_async` 改造**：
 
 1. 先读 `refined_until`，算 `delta = len(messages) - refined_until`；
-2. `delta < settings.profile_refine_min_delta`（新键，默认 6）→ **直接跳过**（不再看全量 len）；
+2. `delta < settings.profile_refine_min_delta`（新键，默认 **7**）→ **直接跳过**（不再看全量 len）；
 3. `_collect_dialog_text` 只喂 `messages[refined_until:]` 的**增量区间**（不再喂重叠窗口）；
 4. 提炼成功后 `refined_until = len(messages)` 写回台账；失败不推进（下次重试同样增量）。
-5. 600s 节流保留，作为"同一会话极高频保存"的成本兜底，与水位是 **AND** 关系。
+5. 2026-11-17 起**成功不节流**（水位 + 条数已限频）；`profile_refine_interval` 只用于失败退避。
 
-**空闲超时触发**（对标 memobase 第三触发，防"聊一半走开、增量永不落库"）：
+**~~空闲超时触发~~（2026-11-17 已下线）**：
 
-- `maybe_refine_async` 本身不新增计时器：当 `delta ≥ 1` 但距上次提炼不足 `profile_refine_interval` 时
-  照旧跳过；由**宿主已有的定时回路**补一次"空闲判定"——serve/桌面挂在 `ProactiveHub` 的分钟级 tick，
-  REPL 挂在现有日程提醒的轮询上，判定条件 `delta ≥ 1 且 now - 最后一条消息时间 ≥ profile_refine_idle_minutes`。
-- 该判定**只读水位与时间戳**，不调 LLM、不起新线程常驻，不违反 hot-path 铁律。
-- 与另两个触发的关系：阈值触发管"聊得够多"、空闲触发管"聊得够久"、终态触发管"会话结束"，三者幂等
-  （都走同一水位闸，重复调用只会有一次真正提炼）。
+原设计用空闲计时器给“聊一半走开”兑底；实测退出/切会话已覆盖主要尾巴，而空闲只增加一条计时器
+路径与一个配置键，故整体移除。**异常退出无法在进程内触发**，但水位不会推进——尾巴保留在台账里，
+下次同会话继续提炼时一并补上。
 
 **终态提炼**（保证最后一段增量不丢）：
 
@@ -397,9 +398,9 @@ RecallProfile(query: str, category: str = "", top_k: int = 8)
 
 | 键 | 默认 | tier | 说明 |
 |---|---|---|---|
-| `memory.profile_refine_min_delta` | 6 | auto | 自上次水位后新增多少消息才提炼（替代旧的"看全量 len"） |
-| `memory.profile_refine_on_exit` | true | auto | 退出/切会话时做无视节流的终态提炼 |
-| `memory.profile_refine_idle_minutes` | 60 | auto | 空闲多久后补一次增量提炼（防"聊一半走开"增量不落库） |
+| `memory.profile_refine_min_delta` | 7 | auto | 自上次水位后新增多少消息才提炼（默认 7 条一次） |
+| `memory.profile_refine_on_exit` | true | auto | 退出/切会话时做终态提炼（退出最多等 15 秒） |
+| ~~`memory.profile_refine_idle_minutes`~~ | ~~60~~ | — | **2026-11-17 下线**：空闲触发已移除 |
 | `memory.profile_recall_top_k` | 5 | auto | 每条候选事实召回的相似旧条目数 |
 | `memory.profile_inject_prefer_topics` | [] | auto | 注入优先主题（命中者置顶），空＝纯按置信度 |
 | `memory.profile_inject_token_budget_mode` | "pseudo" | auto | 注入预算口径：`pseudo`（`len/4`，现状）/ `weighted`（中英分权真 token） |
@@ -449,7 +450,8 @@ RecallProfile(query: str, category: str = "", top_k: int = 8)
 
 - **P0**：构造 20 轮会话、每轮 `_auto_save`，断言 LLM 实际被调用次数 ≤ `⌈20/min_delta⌉`（而非旧的"每 600s 一次全窗口"）；
   同一事实在增量里出现一次即不再被后续提炼重复"发现"；退出会话时最后增量被终态提炼收干；
-  **模拟"聊 3 轮后静置超过 `profile_refine_idle_minutes`"→ 空闲触发必须补提炼一次，且只补一次（幂等）。**
+  `/memory refine` 立即提炼增量；**成功路径不按时间节流**（间隔配置只影响失败重试）；
+  ~~空闲触发~~已于 2026-11-17 下线。
 - **P1**：golden 集"措辞不同但同义"用例走 `noop`/`update`，新库不再产同义重复条目；>40 字候选 100% 被拒并计数；
   **别名**：`add`/`update` 必须产出 2–5 个；老库缺字段按 `[]` 加载；合并取并集且 ≤8；
   `profile_aliases_enabled=false` 时降为两级且不报错；

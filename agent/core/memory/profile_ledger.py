@@ -372,44 +372,6 @@ def mark_error(session_id: str, error: str) -> None:
     _update(session_id, _mutate)
 
 
-def idle_sessions(
-    *,
-    now: float,
-    idle_minutes: int,
-    min_delta: int,
-    counts: dict[str, int],
-) -> list[str]:
-    """纯判定：哪些会话"够久没动且有足够增量"，需要补一次提炼。
-
-    Args:
-        now: 当前时间戳。
-        idle_minutes: 空闲阈值（分钟）。
-        min_delta: 至少多少条新消息才值得提炼。
-        counts: `{session_id: 当前消息数}`，由宿主提供。
-
-    Returns:
-        满足条件的 session_id 列表（按 last_msg_ts 从旧到新）。
-    """
-    if idle_minutes <= 0 or min_delta <= 0:
-        return []
-    sessions = _read_file()
-    with _cache_lock:
-        for sid, v in _cache.items():
-            sessions.setdefault(sid, v)
-    threshold = float(idle_minutes) * 60.0
-    due: list[tuple[float, str]] = []
-    for sid, state in sessions.items():
-        if state.last_msg_ts <= 0:
-            continue
-        if float(now) - state.last_msg_ts < threshold:
-            continue
-        total = int(counts.get(sid, state.refined_until))
-        if total - state.refined_until >= int(min_delta):
-            due.append((state.last_msg_ts, sid))
-    due.sort()
-    return [sid for _, sid in due]
-
-
 def prune_sessions(max_sessions: int = MAX_SESSIONS) -> int:
     """立即按上限淘汰一次，返回被淘汰的会话数。"""
     path = ledger_path()

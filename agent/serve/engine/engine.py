@@ -675,7 +675,13 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
     # ---- 收尾 ----
 
     async def _shutdown(self) -> None:
-        """引擎退出：停预热、停实时语音、停半双工语音、关 provider。"""
+        """引擎退出：收干画像提炼 → 停预热/语音 → 关 provider。"""
+        # 退出也是提炼触发点（P0 终态）：等最多 15 秒让后台线程跑完；
+        # 不等的话 daemon 线程会被进程退出直接带走，尾巴就丢了。
+        try:
+            self._flush_profile_refine(wait_seconds=15.0)
+        except Exception:
+            pass
         task = self._prewarm_task
         if task is not None and not task.done():
             task.cancel()

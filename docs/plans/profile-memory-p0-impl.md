@@ -1,6 +1,10 @@
 # 实现方案：画像记忆 P0（增量提炼 + 三触发）与 P4（评测集）
 
-> 状态：**步骤 1-3 已落地，步骤 4（文档收尾与提交）待做**　作者：aceFelix　日期：2026-11-14
+> 状态：**步骤 1-3 已落地（其中步骤 3 已于 2026-11-17 下线），步骤 4（文档收尾与提交）已由后续提交覆盖**　作者：aceFelix　日期：2026-11-14
+>
+> **2026-11-17 修订**：空闲触发（`profile_idle.py`）已整体移除；默认 `profile_refine_min_delta` 6→**7**；
+> **成功不再按时间节流**（`profile_refine_interval` 只用于失败退避）；退出路径最多等 15 秒把后台提炼跑完。
+> 本文其余内容为历史实现记录，现行口径见 `09-记忆与压缩.md`。
 > 上位文档：[roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) §P0 / §P4
 > 本文只写"落到函数签名与文件"的细节；设计取舍、成本账、P1-P5 不在本文范围。
 
@@ -248,11 +252,11 @@ python scripts/check_md_links.py
 
 | # | 决策 | 默认 |
 |---|---|---|
-| 1 | `profile_refine_min_delta` 默认 | **6**（与原 `min_messages` 对齐） |
-| 2 | `profile_refine_idle_minutes` 默认 | **60**（对标 memobase） |
+| 1 | `profile_refine_min_delta` 默认 | ~~6~~ → **7**（2026-11-17 定：每 7 条一次） |
+| 2 | `profile_refine_idle_minutes` 默认 | ~~60（对标 memobase）~~ → **2026-11-17 下线** |
 | 3 | 无会话名时的 key | `"default"` + 一次 diag_warn |
 | 4 | 台账文件损坏 | 当空表（重提炼一次），不备份不阻断 |
-| 5 | 空闲触发是否朗读/提示 | **否**，静默后台 |
+| 5 | 空闲触发是否朗读/提示 | ~~否，静默后台~~ → **2026-11-17 连同空闲触发一并下线** |
 
 ## 十、实施记录（2026-11-14）
 

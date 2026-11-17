@@ -161,27 +161,6 @@ class TestRobustness:
             assert states[sid].refined_until == 5
 
 
-class TestIdleDecision:
-    def test_idle_sessions_requires_idle_and_delta(self) -> None:
-        L.touch("old", 10, now=1000.0)
-        L.advance("old", 4, now=1001.0)          # 还有 6 条增量
-        L.touch("fresh", 10, now=3500.0)         # 刚动过
-        L.advance("fresh", 4, now=3501.0)
-        L.touch("tiny", 5, now=1000.0)
-        L.advance("tiny", 4, now=1001.0)         # 只有 1 条增量
-
-        due = L.idle_sessions(
-            now=3700.0, idle_minutes=30, min_delta=3,
-            counts={"old": 10, "fresh": 10, "tiny": 5},
-        )
-        assert due == ["old"]
-
-    def test_idle_disabled_by_zero_threshold(self) -> None:
-        L.touch("s1", 10, now=1000.0)
-        assert L.idle_sessions(now=99999.0, idle_minutes=0, min_delta=1, counts={"s1": 10}) == []
-        assert L.idle_sessions(now=99999.0, idle_minutes=30, min_delta=0, counts={"s1": 10}) == []
-
-
 class TestReportTelemetry:
     """P1d 遥测：上轮提炼计数随 advance 同一次写入落盘（仅展示用）。"""
 

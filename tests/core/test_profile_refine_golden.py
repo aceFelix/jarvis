@@ -108,21 +108,6 @@ class TestDeltaGate:
         # 成功后水位推进到 16
         assert _wait_until(lambda: L.load_state("s1").refined_until == 16)
 
-    def test_small_tail_schedules_idle(self, settings, monkeypatch) -> None:
-        """增量不够 min_delta 时不提炼，但必须排空闲兜底。
-
-        2026-11-15 实测：聊两三句就走开，这几条既没提炼也没排空闲，直接丢了。
-        """
-        scheduled: list[tuple[str, float]] = []
-        monkeypatch.setattr(R, "_schedule_idle", lambda sid, ts: scheduled.append((sid, ts)))
-        rec = _Recorder()
-        monkeypatch.setattr(R, "refine_session", rec)
-        L.advance("s1", 10, now=0.0)
-
-        assert R.maybe_refine_async(_dialog(12), "s1", settings) is False  # 2 < 6
-        assert rec.calls == []
-        assert scheduled and scheduled[0][0] == "s1"
-
     def test_three_rounds_feed_each_message_once(self, settings, monkeypatch) -> None:
         """连续三轮：每轮只喂新增量，任何一条消息都不会被重复喂。"""
         rec = _Recorder()

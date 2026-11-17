@@ -151,7 +151,6 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("profile_refine_interval", "profile_refine_interval"),
         ("profile_refine_min_delta", "profile_refine_min_delta"),
         ("profile_refine_on_exit", "profile_refine_on_exit"),
-        ("profile_refine_idle_minutes", "profile_refine_idle_minutes"),
         ("profile_recall_top_k", "profile_recall_top_k"),
         ("profile_aliases_enabled", "profile_aliases_enabled"),
         ("profile_refine_model", "profile_refine_model"),

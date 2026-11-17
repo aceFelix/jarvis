@@ -286,7 +286,7 @@ class Settings:
     # 画像记忆（长期记忆 Phase 1a：自动从会话提炼用户偏好/习惯，
     # 存 ~/.jarvis/memory/profile.json，注入 system prompt）
     profile_enabled: bool = True
-    profile_max_entries: int = 200             # 条目上限（超出按置信度×新近度淘汰）
+    profile_max_entries: int = 200             # 条目上限（超出按权重最低淘汰）
     profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
     # 注入侧（P1c）：命中主题的条目置顶；预算口径默认 pseudo＝兼容旧行为
     profile_inject_prefer_topics: list = field(default_factory=list)
@@ -295,10 +295,9 @@ class Settings:
     profile_event_retention_days: int = 90      # 保留天数（0 = 不按时间清理，只删已到期项）
     profile_recall_tool_top_k: int = 8          # P5：RecallProfile 工具默认返回条数（1–20）
     profile_refine_min_messages: int = 6       # 会话至少多少条消息才触发提炼
-    profile_refine_interval: int = 600         # 两次提炼的最小间隔（秒），防止频繁无意义提炼
-    profile_refine_min_delta: int = 6          # 自上次水位后新增多少条才提炼（增量闸）
-    profile_refine_on_exit: bool = True        # 退出/切会话时无视频率节流，把最后一段增量收干
-    profile_refine_idle_minutes: int = 60      # 空闲多久后补一次增量提炼（聊一半走开也能落库）
+    profile_refine_interval: int = 600         # **失败后**的最短重试间隔（秒）；成功不节流
+    profile_refine_min_delta: int = 7          # 自上次水位后新增多少条才提炼（默认 7 条一次）
+    profile_refine_on_exit: bool = True        # 退出/切会话时把最后一段增量收干（退出时最多等 15 秒）
     profile_recall_top_k: int = 5              # 每条候选召回的相似旧条目数（写入侧裁决用）
     profile_aliases_enabled: bool = True       # 提炼时生成检索别名（关＝召回降为纯 bigram）
     # 独立提炼模型（便宜模型跑后台提炼；留空 = 用主 LLM 配置）

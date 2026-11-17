@@ -30,9 +30,9 @@ from agent.core.memory.profile_store import (
 
 logger = logging.getLogger("jarvis.memory.profile")
 
-# 提炼节流：两次提炼之间的最小间隔（秒）。_auto_save 每轮对话都会调用，
-# 不能每轮都跑 LLM——间隔内直接跳过，用户中途强关终端最近行为也已提炼过。
-# 默认值，实际取 settings.profile_refine_interval（settings.toml [memory] 段可配）。
+# 提炼失败退避：两次**失败尝试**之间的最小间隔（秒）。成功不节流——
+# 水位 + 条数（min_delta）已经限住频率；这里只在 provider 持续报错时
+# 防止每轮 _auto_save 都起线程重试。默认值，实际取 settings.profile_refine_interval。
 REFINE_INTERVAL_SECONDS = 600
 
 # 喂给 LLM 的消息窗口与单条截断（控制提炼成本）
@@ -338,39 +338,29 @@ def refine_session(
 # 异步触发（_auto_save 挂载点）
 # ─────────────────────────────────────────────────────────────
 
-def _schedule_idle(sid: str, last_msg_ts: float) -> None:
-    """被节流/并发闸挡下时，安排一次空闲补提炼（失败静默）。
-
-    只在这两条路径上排："有增量、但现在不能跑"正是空闲触发要覆盖的场景。
-    增量不足 min_delta 时不排——空闲判定用的是同一个阈值，排了也不会提炼。
-    """
-    try:
-        from agent.core.memory import profile_idle
-
-        profile_idle.schedule_idle_check(sid, last_msg_ts=last_msg_ts)
-    except Exception:
-        pass
-
-
 def maybe_refine_async(
     messages: list[Message],
     session_id: str,
     settings: Any,
     *,
     force: bool = False,
+    wait_seconds: float = 0.0,
 ) -> bool:
     """按**水位增量**异步触发提炼。返回是否真的启动了后台任务。
 
-    三个触发共用本函数：
+    三类触发共用本函数（2026-11-17 简化：空闲触发已下线）：
 
-    - 阈值（每轮 `_auto_save`）：`delta ≥ profile_refine_min_delta` 且距上次成功提炼
-      超过 `profile_refine_interval`；
-    - 终态（退出 / 切会话）：`force=True`，无视节流；
-    - 空闲（`profile_idle` 到点）：也传 `force=True`。
+    - 阈值（每轮 `_auto_save`）：`delta ≥ profile_refine_min_delta`（默认 7）；
+      **成功不节流**——水位 + 条数已限住频率，每 7 条才一次；
+    - 终态（退出 / 切会话 / 新建）：`force=True`，只要求 `delta ≥ 1`；
+    - 手动（`/memory refine`）：`force=True`。
 
-    `force` 不是"无视水位"：`delta == 0` 时仍不提炼（没有新消息就不该花钱）。
-    只把 `messages[refined_until:]` 的增量交给 LLM，历史部分不再重喂——这是
-    "同一事实被反复提炼"的根治点（见 PLAN-profile-memory-upgrade §P0）。
+    `profile_refine_interval` 只用于**失败退避**：上次提炼报错（`last_error`
+    非空）时，间隔内不再重试，避免 provider 持续报错时每轮起线程。
+
+    `wait_seconds > 0` 时阻塞等待提炼线程结束（上限该秒数）——仅退出路径用：
+    后台线程是 daemon，进程退出会直接带走它，必须等一等才能真收干。
+    超时无妨：水位不推进，尾巴会在下次触发时重提。
     """
     if not getattr(settings, "profile_enabled", False):
         return False
@@ -385,25 +375,18 @@ def maybe_refine_async(
     state = profile_ledger.touch(sid, total)
     delta = max(0, total - state.refined_until)
 
-    min_delta = max(1, int(getattr(settings, "profile_refine_min_delta", 6)))
+    min_delta = max(1, int(getattr(settings, "profile_refine_min_delta", 7)))
     required = 1 if force else min_delta
     if delta < required:
-        # 关键："有增量、但不够跑一次 LLM"也要排空闲检查。
-        # 否则"聊两三句就走开"的那几条永远等不到提炼（只能干攼成 6 条或正常退出）。
-        # 空闲触发受时间限制流（一次/小时），所以它能用 delta≥1 的门槛兑底。
-        if delta >= 1:
-            _schedule_idle(sid, state.last_msg_ts)
         return False
 
     interval = int(getattr(settings, "profile_refine_interval", REFINE_INTERVAL_SECONDS))
     now = time.time()
-    # 节流看"最近一次尝试"而不是"最近一次成功"：失败也算，否则 provider 报错时
-    # 每轮 _auto_save 都会再起一个线程重试
-    if not force and (now - state.last_attempt_ts) < interval:
-        _schedule_idle(sid, state.last_msg_ts)
+    # 只对“上次失败”退避：成功后下一批 7 条立刻提炼（用户要的“聊 7 条一次”）。
+    # last_error 由 advance() 清空，mark_error() 写入。
+    if not force and state.last_error and (now - state.last_attempt_ts) < interval:
         return False
     if not _in_flight.acquire(blocking=False):
-        _schedule_idle(sid, state.last_msg_ts)
         return False  # 已有线程在提炼
 
     profile_ledger.mark_attempt(sid, now=now)
@@ -435,5 +418,8 @@ def maybe_refine_async(
         finally:
             _in_flight.release()
 
-    threading.Thread(target=_worker, name="profile-refiner", daemon=True).start()
+    thread = threading.Thread(target=_worker, name="profile-refiner", daemon=True)
+    thread.start()
+    if wait_seconds > 0:
+        thread.join(timeout=float(wait_seconds))
     return True

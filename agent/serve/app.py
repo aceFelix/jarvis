@@ -96,17 +96,6 @@ async def _serve_main(settings: Settings) -> None:
         # 主动播报中枢：调度器轮询 + 每日简报/截止日期任务注册（事件泵启动后，
         # 确保到期事件有消费方；补播定时器延迟 5 秒等桌面壳 WS 连上）
         hub.start()
-        # 画像提炼的空闲触发：绑定引擎的当前消息/会话（每会话一次性 Timer，非常驻线程）
-        try:
-            from agent.core.memory import profile_idle
-
-            profile_idle.bind(
-                settings,
-                messages_provider=lambda: engine._messages,
-                session_provider=lambda: engine._session_name,
-            )
-        except Exception:
-            pass
         # init 事件改为按连接推送（DesktopBridgeServer._on_client_connected）：
         # 启动期一次性 broadcast 在无在线客户端时会被静默丢弃，桌面壳首屏
         # （含设置面板回填）将永不触发。@author aceFelix

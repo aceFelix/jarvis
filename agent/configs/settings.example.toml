@@ -241,22 +241,18 @@ long_term_memory = true         # 启动时加载长期记忆注入 system promp
 # ── 画像记忆（长期记忆 Phase 1a）──
 # 会话结束后自动用 LLM 提炼"关于用户的持久事实"（偏好/习惯/背景），
 # 存 ~/.jarvis/memory/profile.json，下次会话限额注入 system prompt。
-# 后台异步 + 节流，不影响对话响应速度。
+# 后台异步（默认每 7 条新消息一次；退出/切会话必收干），不影响对话响应速度。
 profile_enabled = true
-profile_max_entries = 200            # 条目上限（超出按置信度×新近度淘汰）
+profile_max_entries = 200            # 条目上限（超出按权重最低淘汰）
 profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
 profile_inject_prefer_topics = []    # 优先注入的画像类别（命中者置顶），空＝纯按置信度
 profile_inject_token_budget_mode = "pseudo"  # 预算口径：pseudo（len/4，现状）/ weighted（中英分权真 token）
 profile_event_retention_days = 90   # 事件轨（临时事项日志）保留天数；0 = 只删已到期项
 profile_recall_tool_top_k = 8       # RecallProfile 工具默认返回条数（1–20）
 profile_refine_min_messages = 6      # 会话至少几条消息才触发提炼
-profile_refine_interval = 600        # 两次提炼的最小间隔（秒）。调大降低频率：
-                                    #   频繁提炼无增量价值，白花 token，
-                                    #   半小时一次（1800）或一小时（3600）通常足够
-profile_refine_min_delta = 6         # 自上次水位后新增多少条消息才提炼。提炼只喂增量，
-                                    #   不再把最近 40 条整窗重喂（重复入库的根源）
-profile_refine_on_exit = true         # 退出/切会话时无视节流，把最后一段增量收干
-profile_refine_idle_minutes = 60      # 空闲多久后补一次增量提炼（聊一半走开也能落库；0 关闭）
+profile_refine_interval = 600        # **失败后**的最短重试间隔（秒）；成功不节流
+profile_refine_min_delta = 7         # 自上次水位后新增多少条才提炼（默认 7 条一次；只喂增量）
+profile_refine_on_exit = true         # 退出/切会话时把最后一段增量收干（退出时最多等 15 秒）
 profile_recall_top_k = 5              # 每条候选召回的相似旧条目数（写入侧裁决用）
 profile_aliases_enabled = true        # 提炼时生成检索别名（关＝召回降为纯 bigram）
 

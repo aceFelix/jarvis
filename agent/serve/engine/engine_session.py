@@ -210,11 +210,15 @@ class EngineSessionMixin:
         """
         await mcp_runtime.connect_mcp(self, registry)
 
-    def _flush_profile_refine(self) -> None:
-        """切会话前把当前会话的提炼增量收干（终态触发，无视频率节流）。
+    def _flush_profile_refine(self, *, wait_seconds: float = 0.0) -> None:
+        """切会话/退出前把当前会话的提炼增量收干（终态触发，无视频率节流）。
 
         必须在清空/替换 ``self._messages`` **之前**调用：``maybe_refine_async``
         在启线程前会快照增量，晚调用就只剩空列表。任何异常静默——提炼是旁路。
+
+        Args:
+            wait_seconds: >0 时阻塞等待提炼线程（仅引擎退出路径传，
+                否则 daemon 线程会被进程退出直接带走）。
         @author aceFelix
         """
         if not self._messages:
@@ -233,6 +237,7 @@ class EngineSessionMixin:
                 title_generated=self._title_generated,
                 settings=self._settings,
                 final=True,
+                refine_wait=wait_seconds,
             )
         except Exception:
             pass
