@@ -35,6 +35,11 @@ logger = logging.getLogger("jarvis.memory.profile")
 # 防止每轮 _auto_save 都起线程重试。默认值，实际取 settings.profile_refine_interval。
 REFINE_INTERVAL_SECONDS = 600
 
+# 全量归并（dedup_all）是 O(n²)：库大后每轮提炼都跑会把后台拖慢。
+# 超过此规模就跳过“顺带归并”，依赖写入时的 merge_or_add 兜底；
+# 用户仍可随时用 /memory dedup 手动整理。
+_MAX_AUTO_DEDUP_ENTRIES = 600
+
 # 喂给 LLM 的消息窗口与单条截断（控制提炼成本）
 _MAX_MESSAGES = 40
 _MAX_CHARS_PER_MSG = 300
@@ -304,13 +309,15 @@ def refine_session(
 
 
         # 本轮写盘后再做一次全量归并：历史积压的深重复条目（修复前写入的）
-        # 随任意一次提炼顺带清理，不需要额外维护任务
-        retro = store.dedup_all()
-        if retro:
-            report.merged += retro
+        # 随任意一次提炼顺带清理；库超过 _MAX_AUTO_DEDUP_ENTRIES 时跳过（O(n²)），
+        # 新重复由写入时的 merge_or_add 拦住，历史积压用 /memory dedup 手动清。
+        if len(store) <= _MAX_AUTO_DEDUP_ENTRIES:
+            retro = store.dedup_all()
+            if retro:
+                report.merged += retro
 
-        # 上限淘汰
-        max_entries = int(getattr(settings, "profile_max_entries", 200))
+        # 容量上限：默认 0 = 不限（不淘汰）；用户显式配了上限才按权重淘汰
+        max_entries = int(getattr(settings, "profile_max_entries", 0))
         pruned = store.prune_over_limit(max_entries)
         if pruned:
             report.reason = f"淘汰低价值条目 {pruned} 条"

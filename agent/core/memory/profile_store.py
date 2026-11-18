@@ -608,10 +608,16 @@ class ProfileStore:
 
         权重 = 置信度 × 新鲜度（见 `entry_weight`）：衰减不再删条，这里才是
         唯一的“容量兜底才删”；失效条目仍最先被淘汰。
+
+        `max_entries <= 0` 表示**不限**（默认）——单用户长期使用不应因硬上限
+        把“一年没提”的事实删掉；而把它交给休眠 + RecallProfile 按需检索。
         """
+        limit = int(max_entries)
+        if limit <= 0:
+            return 0
         ts = time.time() if now is None else float(now)
         with self._lock:
-            if len(self._entries) <= max_entries:
+            if len(self._entries) <= limit:
                 return 0
             ranked = sorted(
                 self._entries,
@@ -621,7 +627,7 @@ class ProfileStore:
                 ),
                 reverse=True,
             )
-            keep, drop = ranked[:max_entries], ranked[max_entries:]
+            keep, drop = ranked[:limit], ranked[limit:]
             self._entries = keep
             self._save_locked()
             return len(drop)
@@ -653,8 +659,8 @@ class ProfileStore:
 
         旧实现每天把 confidence 乘半衰并把低于 floor 的条目删掉；2026-11-15
         按用户要求改为降权：条目永久保留，只是不再注入；再被提及即复活。
-        真正会删的只剩：episodic 到期（`expire_episodic`）、超容量淘汰
-        （`prune_over_limit`）、用户/模型显式 `delete`。
+        真正会删的只剩：episodic 到期（`expire_episodic`）、用户显式设了容量上限
+        后的超限淘汰（`prune_over_limit`）、用户/模型显式 `delete`。
         @author aceFelix
         """
         return self.dormant_count(now=now, floor=floor)
@@ -667,6 +673,7 @@ class ProfileStore:
         *,
         prefer_topics: Sequence[str] = (),
         mode: str = "pseudo",
+        max_entries: int = 0,
     ) -> str:
         """渲染注入 system prompt 的画像块（P1c：主题优先 + 两轮填充 + 预算口径）。
 
@@ -677,6 +684,7 @@ class ProfileStore:
             token_limit: 预算上限（按 `mode` 口径计量）。
             prefer_topics: 优先注入的类别；空＝纯按置信度×新近度。
             mode: `pseudo`（默认，len/4 兼容现状）/ `weighted`（中英分权真 token）。
+            max_entries: 最多注入的条目数（0 = 不限）；其余靠 RecallProfile 按需检索。
 
         Returns:
             注入文本；无条目或预算装不下任何一条时返回空字符串。
@@ -692,6 +700,7 @@ class ProfileStore:
             token_limit=token_limit,
             prefer_topics=prefer_topics,
             mode=mode,
+            max_entries=max_entries,
         )
 
     # ---- 持久化 ----

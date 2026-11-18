@@ -165,6 +165,29 @@ class TestStoreDelegation:
         assert store.render_for_prompt(token_limit=300, mode=mode) != ""
 
 
+class TestCoreCap:
+    """P5 核心预算：常驻只注入前 N 条（按权重/主题排序），其余走按需检索。"""
+
+    def test_cap_limits_lines(self):
+        items = [_entry(f"事实{i}", confidence=0.9 - i * 0.1) for i in range(4)]
+        text = render_for_prompt(items, token_limit=300, max_entries=2)
+        assert len([l for l in text.splitlines() if l.startswith("- ")]) == 2
+
+    def test_zero_means_unlimited(self):
+        items = [_entry(f"事实{i}") for i in range(4)]
+        text = render_for_prompt(items, token_limit=300, max_entries=0)
+        assert len([l for l in text.splitlines() if l.startswith("- ")]) == 4
+
+    def test_cap_respects_priority(self):
+        """核心预算截断发生在排序之后：主题命中先占位。"""
+        preferred = _entry("偏好事实", "preference", 0.5)
+        other = _entry("其它事实", "other", 0.95)
+        text = render_for_prompt(
+            [other, preferred], token_limit=300, prefer_topics=["preference"], max_entries=1
+        )
+        assert "偏好事实" in text and "其它事实" not in text
+
+
 class TestSettingsWiring:
     """配置键必须真能进 Settings（防"进了表没接线"的死配置）。"""
 

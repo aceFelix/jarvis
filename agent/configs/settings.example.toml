@@ -243,8 +243,9 @@ long_term_memory = true         # 启动时加载长期记忆注入 system promp
 # 存 ~/.jarvis/memory/profile.json，下次会话限额注入 system prompt。
 # 后台异步（默认每 7 条新消息一次；退出/切会话必收干），不影响对话响应速度。
 profile_enabled = true
-profile_max_entries = 200            # 条目上限（超出按权重最低淘汰）
+profile_max_entries = 0              # 条目上限：0 = 不限（默认）；>0 时超限按权重淘汰
 profile_inject_token_limit = 300     # 注入 system prompt 的 token 硬限额
+profile_inject_core_max = 12         # 常驻注入的条目数上限（0 = 不限）；其余走 RecallProfile 按需检索
 profile_inject_prefer_topics = []    # 优先注入的画像类别（命中者置顶），空＝纯按置信度
 profile_inject_token_budget_mode = "pseudo"  # 预算口径：pseudo（len/4，现状）/ weighted（中英分权真 token）
 profile_event_retention_days = 90   # 事件轨（临时事项日志）保留天数；0 = 只删已到期项

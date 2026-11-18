@@ -140,6 +140,8 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("profile_enabled", "profile_enabled"),
         ("profile_max_entries", "profile_max_entries"),
         ("profile_inject_token_limit", "profile_inject_token_limit"),
+        # 核心注入条数（P5）：其余条目走 RecallProfile 按需检索
+        ("profile_inject_core_max", "profile_inject_core_max"),
         # 注入侧 P1c：主题优先与预算口径（prefer_topics 为数组，见 LIST_FIELDS）
         ("profile_inject_prefer_topics", "profile_inject_prefer_topics"),
         ("profile_inject_token_budget_mode", "profile_inject_token_budget_mode"),

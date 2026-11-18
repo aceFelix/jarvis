@@ -66,6 +66,7 @@ def render_for_prompt(
     prefer_topics: Sequence[str] = (),
     mode: str = "pseudo",
     now: float | None = None,
+    max_entries: int = 0,
 ) -> str:
     """把条目渲染成注入块。
 
@@ -75,6 +76,7 @@ def render_for_prompt(
         prefer_topics: 优先注入的类别列表；空列表＝不设主题偏好。
         mode: `pseudo`（默认，兼容现状）或 `weighted`。
         now: 权重计算时间基准（仅测试注入）。
+        max_entries: 最多注入的条目数（0 = 不限）；超出部分靠 RecallProfile 按需检索。
 
     Returns:
         注入文本；无条目或预算装不下任何一条时返回空字符串。
@@ -88,6 +90,7 @@ def render_for_prompt(
 
     budget_mode = mode if mode in BUDGET_MODES else "pseudo"
     budget = int(token_limit)
+    cap = max(0, int(max_entries or 0))
     prefer = {str(t) for t in (prefer_topics or []) if str(t)}
 
     def _key(e: ProfileEntry) -> tuple[float, float, float]:
@@ -105,6 +108,8 @@ def render_for_prompt(
     used = 0
     # 顺序：主题命中 → 短条目 → 长条目；放不下就跳过，继续试后面的
     for entry in preferred + short + long_:
+        if cap and len(lines) >= cap:
+            break
         line = _line(entry)
         cost = _cost(line, budget_mode)
         if used + cost > budget:

@@ -49,6 +49,8 @@ class ProactiveConfig:
         calendar_check_interval_min: int = 30,
         calendar_remind_minutes_before: int = 30,
         profile_maintenance_enabled: bool = True,
+        # 画像条目上限（0 = 不限）；仅用户显式设置时才做容量淘汰
+        profile_max_entries: int = 0,
         # P2c：事件轨保留天数（0 = 不按时间清理，只删已到期项）
         profile_event_retention_days: int = 90,
         auto_clean_enabled: bool = False,
@@ -62,6 +64,7 @@ class ProactiveConfig:
         self.calendar_enabled = calendar_enabled
         self.calendar_check_interval_min = calendar_check_interval_min
         self.profile_maintenance_enabled = profile_maintenance_enabled
+        self.profile_max_entries = profile_max_entries
         self.profile_event_retention_days = profile_event_retention_days
         self.calendar_remind_minutes_before = calendar_remind_minutes_before
         # 自动清理：默认关，且还要 maintenance_enabled 总闸同时开（在两个开关
@@ -467,7 +470,9 @@ class ProactiveEngine:
             store = ProfileStore()
             expired = store.expire_episodic()
             dormant = store.audit_freshness()
-            pruned = store.prune_over_limit(200)
+            pruned = store.prune_over_limit(
+                int(getattr(self._config, "profile_max_entries", 0) or 0)
+            )
             retention = int(getattr(self._config, "profile_event_retention_days", 90) or 0)
             events_removed = profile_events.prune_events(retention)
             if expired or dormant or pruned or events_removed:

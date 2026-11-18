@@ -286,9 +286,12 @@ class Settings:
     # 画像记忆（长期记忆 Phase 1a：自动从会话提炼用户偏好/习惯，
     # 存 ~/.jarvis/memory/profile.json，注入 system prompt）
     profile_enabled: bool = True
-    profile_max_entries: int = 200             # 条目上限（超出按权重最低淘汰）
+    # 条目上限：0 = **不限**（默认）；>0 时超出按权重最低淘汰。
+    # 单用户长期使用不会无限膨胀到影响性能，不该用硬上限把“一年没提”的事实删掉。
+    profile_max_entries: int = 0
     profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
-    # 注入侧（P1c）：命中主题的条目置顶；预算口径默认 pseudo＝兼容旧行为
+    # 注入侧（P1c/核心预算）：常驻只放核心条，其余用 RecallProfile 按需检索
+    profile_inject_core_max: int = 12          # 每轮注入的条目数上限（0 = 不设上限）
     profile_inject_prefer_topics: list = field(default_factory=list)
     profile_inject_token_budget_mode: str = "pseudo"  # pseudo=len/4 / weighted=中英分权
     # 事件轨（P2c）：临时/带时间点事实的 append-only 日志，默认不注入

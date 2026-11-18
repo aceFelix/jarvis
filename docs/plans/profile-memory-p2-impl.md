@@ -187,6 +187,10 @@ python scripts/check_md_links.py
 | 4 | 超容量仍物理淘汰 | 200 条是磁盘/预算的硬上限；按权重最低先淘汰，属于“容量兜底”而非衰减 |
 | 5 | `decay()` 不保留为别名 | 语义已变（不再删），保留旧名会让后人误以为还在衰减删除；拆为 `expire_episodic` + `audit_freshness` |
 
+> **2026-11-18 修订**：默认改为 `profile_max_entries = 0`（**不限**）——单用户不应因硬上限丢掉
+> “一年没提”的事实；仅用户显式设了上限才按权重淘汰。大批量归并 `dedup_all` 改为仅在
+> ≤ 600 条时随提炼自动跑（O(n²) 保护），超出后用 `/memory dedup` 手动整理。
+
 已落地：`profile_store.entry_weight` / `weighted_entries` / `active_entries` / `dormant_count` /
 `audit_freshness` / `expire_episodic` / `prune_over_limit(按权重)` / `render_for_prompt(只喂活跃条目)`；
 `profile_inject`（权重参与排序）；`proactive` 维护任务改口径；`/memory` 展示权重与休眠；

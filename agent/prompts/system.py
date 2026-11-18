@@ -455,19 +455,24 @@ def _profile_section(settings: object | None) -> str:
             from agent.core.memory.profile_store import ProfileStore
 
             limit = int(getattr(settings, "profile_inject_token_limit", 300))
+            # 核心预算：常驻只放少量条目，其余靠 RecallProfile 按需检索
+            core_max = int(getattr(settings, "profile_inject_core_max", 12) or 0)
             # P1c 注入侧：主题优先（空列表＝纯按置信度）+ 预算口径（默认 pseudo 兼容旧行为）
             prefer = list(getattr(settings, "profile_inject_prefer_topics", []) or [])
             mode = str(getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo")
             store = ProfileStore()
             local = store.render_for_prompt(
-                token_limit=limit, prefer_topics=prefer, mode=mode
+                token_limit=limit, prefer_topics=prefer, mode=mode, max_entries=core_max
             )
             if local:
                 sections.append(local)
-            # P5：只有存在“没被注入的条目”时才提示可按需检索，避免小库也推销工具
-            if local and store.dormant_count() > 0:
+            # P5：只要“库里还有没列出的条目”（休眠/超出核心预算）就提示按需检索；
+            # 小库全量列出时不推销工具。
+            injected = sum(1 for line in local.splitlines() if line.startswith("- "))
+            omitted = max(0, len(store.entries()) - injected)
+            if local and omitted > 0:
                 sections.append(
-                    "（画像库中还有部分较早/较少提到的条目未在此列出；"
+                    f"（画像库中还有 {omitted} 条未在此列出（较早/较少提及或超出核心预算）；"
                     "用户问到具体个人细节而这里没有时，可调用 RecallProfile 工具按关键词检索。）"
                 )
         _PROFILE_CACHE = "\n\n".join(sections)

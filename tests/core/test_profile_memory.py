@@ -163,6 +163,14 @@ class TestProfileStore:
         e = ProfileEntry.new("x", "not_a_category", 0.5)
         assert e.category == "other"
 
+    def test_prune_zero_means_unlimited(self, tmp_path):
+        """`profile_max_entries=0`（默认）= 不限：一条也不淘汰。"""
+        store = ProfileStore(tmp_path / "profile.json")
+        for i in range(10):
+            store.upsert(ProfileEntry.new(f"条目{i}", "other", 0.5))
+        assert store.prune_over_limit(0) == 0
+        assert len(store) == 10
+
     def test_corrupt_file_starts_empty(self, tmp_path):
         path = tmp_path / "profile.json"
         path.write_text("not json {", encoding="utf-8")
@@ -440,6 +448,22 @@ class TestProfileSection:
         store.upsert(old)
         sys_mod.reload_profile_cache()
         assert "RecallProfile" in sys_mod._profile_section(settings)
+        sys_mod.reload_profile_cache()
+
+    def test_hint_reports_omitted_beyond_core_budget(self, tmp_path, monkeypatch):
+        """P5 核心预算：超过 `profile_inject_core_max` 的条目不注入，但提示还有多少条可按需检索。"""
+        from agent.prompts import system as sys_mod
+        from agent.core.memory import profile_store as ps_mod
+
+        store = ProfileStore(tmp_path / "profile.json")
+        for i in range(3):
+            store.upsert(ProfileEntry.new(f"事实{i}", "other", 0.8))
+        monkeypatch.setattr(ps_mod, "ProfileStore", lambda: store)
+
+        sys_mod.reload_profile_cache()
+        text = sys_mod._profile_section(Settings(profile_enabled=True, profile_inject_core_max=2))
+        assert "还有 1 条未在此列出" in text
+        assert "RecallProfile" in text
         sys_mod.reload_profile_cache()
 
 
@@ -1004,7 +1028,8 @@ class TestSettingsMapping:
     def test_defaults(self):
         s = Settings()
         assert s.profile_enabled is True
-        assert s.profile_max_entries == 200
+        assert s.profile_max_entries == 0      # 0 = 不限（2026-11-18 起）
+        assert s.profile_inject_core_max == 12
         assert s.profile_inject_token_limit == 300
         assert s.profile_refine_model == ""
 

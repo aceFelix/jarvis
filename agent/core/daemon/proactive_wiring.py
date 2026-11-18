@@ -110,6 +110,9 @@ def build_proactive_engine(
             ),
             # 画像维护纯本地计算（无 LLM、无打扰），恒开
             profile_maintenance_enabled=True,
+            profile_max_entries=int(
+                getattr(settings, "profile_max_entries", 0) or 0
+            ),
             profile_event_retention_days=int(
                 getattr(settings, "profile_event_retention_days", 90) or 0
             ),
