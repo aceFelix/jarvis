@@ -18,6 +18,42 @@
 
 ## [Unreleased]
 
+### 修复（/memory clear 未清人设卡与事件轨，2026-11-19）
+
+- 代码核对发现：`/memory clear yes` 只清 `profile.json`；旧 `persona.json` 仍被注入，
+  `/memory events` 仍能看到“已清空”的旧行程。更糟的是空库会让 `build_persona` 返回 None、
+  `startup_check_async` 对空库直接返回，旧卡**永久残留**且无法用 rebuild 覆盖。
+- 新增 `profile_persona.discard()`：删除卡片与 pending，并刷新注入缓存；重建线程正在跑时
+  拒绝删除并如实提示（删了也会被 worker 写回）。
+- 新增 `profile_events.clear_events()`：整轨清空并返回删除条数；与 append 共用进程锁与
+  跨进程文件锁，文件不存在 / IO 失败静默返回 0。
+- `/memory clear yes` 一并调用两者，输出“已丢弃常驻人设卡 / 已清空事件轨（N 条）”。
+- 测试：discard 3 例、clear_events 3 例、命令级 clear 断言扩展；全量 5383 passed。
+- 复盘见 `docs/fixlogs/profile-clear-orphan-persona-fix.md`。
+
+### 新增（P6：常驻人设卡 + 全量分页 + 跨记忆边界，2026-11-18）
+
+- **常驻人设卡**：新增 `agent/core/memory/profile_persona.py`，把全量条目蒸馏成
+  600–800 tokens 的“他是谁”（固定 7 节）；`persona.json` + `persona_state.json`；
+  每条 bullet 必须带 `sources` 接地，查不到来源即丢弃；超限按 current_focus→…→identity 裁剪。
+- **只在退出重建**：正常退出（REPL / 桌面 `_shutdown`）在提炼后重建，最多等 15 秒；
+  异常退出靠 `pending` + 下次启动补偿；新建/切会话不重建，会话内靠 L1 最近 5 条变化；
+  `/memory persona [rebuild]` 查看或手动重建；首次无卡且有条目时启动首建一次。
+- **注入**：有卡时注入人设卡 + L1 最近变化，无卡回退 P1c 核心注入；KG 画像存在时不重复注入；
+  提示词声明“画像为自动观察，冲突时以长期记忆为准”。
+- **全量浏览**：`RecallProfile` 新增 `mode="list"`（按类别+权重分页，20/页、最多 50，
+  含休眠标记与分类统计），回答“你了解我多少”时可翻完全库。
+- **跨记忆边界（P6a）**：`MemoryUpdate` 收紧为“仅用户显式要求记住时使用”；
+  提炼 prompt 遇“记住/以后都”不再记成画像；写入前与 MEMORY.md 条目比对
+  （≥0.85 跳过并计 `memory_md_skip`，0.6–0.85 计 `conflict` 但照写）；
+  **画像永不改写 MEMORY.md**；仲裁顺序 MEMORY.md > KG 画像 > 本地画像/人设卡 > 会话记忆。
+- 配置：`profile_persona_enabled=true`、`profile_persona_token_limit=800`；两份模板同步；
+  `Settings` 261 字段。
+- 测试：人设卡 16 例、golden 4 例、list 7 例、跨记忆 6 例；全量 5383 passed。
+- 文档：`research/always-on-profile-memory.md`、`plans/profile-memory-p6-persona-impl.md`、
+  09 架构、concepts、commands、README、plans 索引。
+
+
 ### 变更（提炼触发精简：去掉空闲触发，改为“每 7 条 + 终态”，2026-11-17）
 
 - **空闲触发整体下线**（`profile_idle.py` 删除、`profile_refine_idle_minutes` 配置移除）：
