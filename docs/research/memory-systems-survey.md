@@ -108,7 +108,7 @@ MCP server 接进来——但那要额外三个服务、迁移现有 `profile.js
 ## 五、改变设计的五个发现
 
 这五条比「用谁」更重要，直接校准了
-[PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) 的 P0/P1/P2：
+[PLAN-profile-memory-upgrade.md](../roadmap/memory-config/PLAN-profile-memory-upgrade.md) 的 P0/P1/P2：
 
 1. **P0 的方向被验证，但少一个触发条件。** memobase 的 buffer 是**三触发**：阈值（~1024 token）/
    **空闲超时（~1h）** / 会话关闭显式 flush。我们原计划只有「增量水位 + 退出终态」，缺**空闲超时**——
@@ -145,7 +145,7 @@ MCP server 接进来——但那要额外三个服务、迁移现有 `profile.js
 
 1. **不引入任何依赖**，继续自研，保持 `profile.json` 纯 JSON 可读可编辑；
 2. **采纳五条发现**，其中三条（空闲超时、注入侧主题预算、profile/event 双轨）已写入
-   [PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md)；
+   [PLAN-profile-memory-upgrade.md](../roadmap/memory-config/PLAN-profile-memory-upgrade.md)；
 3. 向量召回维持 P3 后置、默认关闭；
 4. 若要进一步深入，优先读 memobase 源码（同源度最高）与 mem0 的 resolver prompt，
    而不是引入它们的包。

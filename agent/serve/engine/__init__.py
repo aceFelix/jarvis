@@ -15,7 +15,7 @@ pywebview 窗口壳（``app.py`` / ``single_instance.py`` / ``win32_icon.py`` /
 ``window_geometry.py`` 与 ``assets/``）已于 2026-10 删除，入口参数
 ``jarvis --gui`` / ``--talk`` 已于 2026-11 删除；把纯引擎留在终端 UI 层目录下
 只剩误导，故整体迁入 ``agent/serve/`` 并改名 ``engine``。判断依据与影响面见
-``docs/fixlogs/workbench-gui-retired.md``。
+``docs/fixlogs/desktop-serve/workbench-gui-retired.md``。
 """
 
 from __future__ import annotations

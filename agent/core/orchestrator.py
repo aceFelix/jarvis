@@ -241,7 +241,7 @@ class ToolOrchestrator:
         # 3. 按输入顺序对齐输出（缺失项补占位结果，保证与输入等长）
         # 调度异常/中断可能让个别调用拿不到结果；若直接过滤掉，历史里就会留下
         # 悬空 tool_use，使该会话所有后续请求被 API 拒收。
-        # 见 docs/fixlogs/dangling-tool-use-fix.md。
+        # 见 docs/fixlogs/agent-runtime/dangling-tool-use-fix.md。
         # @author aceFelix
         results: list[ToolResultContent] = []
         for tu in tool_uses:
@@ -605,13 +605,13 @@ class ToolOrchestrator:
 
         为什么要返回一个正常结果而不能什么都不返：本轮历史里已经留下了这个
         tool_use，缺对应 tool_result 会让该会话之后所有请求被 API 拒收（见
-        docs/fixlogs/dangling-tool-use-fix.md）。
+        docs/fixlogs/agent-runtime/dangling-tool-use-fix.md）。
 
         为什么文案里必须写死「不要绕道」：实机测过（2026-10-21），只告诉模型
         「已排队、稍后自动执行」时，它会自己判断「换个工具效果一样」，转头用
         Bash/curl 把被拦下的那件事真做掉——窗口拦的是一条工具调用，不拦等价
         路径就等于没拦，而且用户以为拦住了（详见
-        docs/fixlogs/w3-delay-window-bypass-fix.md）。
+        docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md）。
         @author aceFelix
         """
         cfg = actions_config(ctx)

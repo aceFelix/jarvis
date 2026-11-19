@@ -328,7 +328,7 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("deferred_loading", "tools_deferred_loading"),
         ("chat_detection", "tools_chat_detection"),
     )),
-    # [repair] 表：能力自我修复的闸门（docs/plans/capability-selfcheck.md 第 4 节）。
+    # [repair] 表：能力自我修复的闸门（docs/plans/config/capability-selfcheck.md 第 4 节）。
     # 子键不带 repair_ 前缀，与 [tools]/[percept] 同口径；Settings 字段写全名。
     # @author aceFelix
     ("repair", (

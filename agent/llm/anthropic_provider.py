@@ -121,7 +121,7 @@ def _messages_to_anthropic(
 
     出口兜底：转换前先跑 ensure_tool_pairing，保证每个 tool_use 后面都有配对的
     tool_result（悬空调用会让请求在受理前就被拒收，用户表现为该会话永久失败，
-    见 docs/fixlogs/dangling-tool-use-fix.md）。
+    见 docs/fixlogs/agent-runtime/dangling-tool-use-fix.md）。
     """
     messages = ensure_tool_pairing(messages)
     from agent.core.message import ThinkingContent

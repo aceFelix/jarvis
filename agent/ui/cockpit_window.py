@@ -22,6 +22,7 @@ from agent.ui.cockpit import (
     CockpitState,
     VisualOptions,
     _fmt_ms,
+    completion_line,
     describe_target,
     step_rows,
 )
@@ -726,7 +727,7 @@ class _Hud:
             self._text(PAD + 12, top + 18, head, fill=color, font=("Microsoft YaHei UI", 11, "bold"))
             self._text(
                 PAD + 12, top + 38,
-                f"共 {state.display_steps()} 步 · {_fmt_elapsed(state.elapsed_ms())} · 窗口保留",
+                _clip(completion_line(state), 62),
                 fill=DIM, font=FONT_SMALL,
             )
         elif state.current is not None:

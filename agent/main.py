@@ -214,7 +214,7 @@ async def repl(settings: Settings) -> int:
     # 定时提醒宿主：把桌面已有的 ScheduleReminder 能力对齐到 CLI/语音端。
     # 此前这批工具只在 agent/serve/app.py 里注册，纯 CLI 说「提醒我」时
     # ToolSearch 根本找不到工具，模型会转去手搜 Register-ScheduledTask 绕道
-    # 实现，思考撞穿 max_tokens 后空转（详 docs/fixlogs/agent-loop-stall-fix.md）。
+    # 实现，思考撞穿 max_tokens 后空转（详 docs/fixlogs/agent-runtime/agent-loop-stall-fix.md）。
     # 局限：仅在进程存活期间触发，CLI 关闭后不会提醒（常驻提醒请用桌面版）。
     # @author aceFelix
     from agent.core.daemon.cli_reminder import CliReminderHost

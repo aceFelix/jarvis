@@ -144,7 +144,7 @@ rules:
 
 修前与修后的区别就在播报：旧代码对着一个**什么也没做成**的步骤说「已完成：1/1 步」，
 现在要么真的做完、要么如实说「卡在第 1 步…需要授权」。详见
-[w3-driver-approval-blocked-report.md](../fixlogs/w3-driver-approval-blocked-report.md)。
+[w3-driver-approval-blocked-report.md](../fixlogs/w1-w3/w3-driver-approval-blocked-report.md)。
 
 ## 1. 阶段一：账本装配与遗留作废
 
@@ -317,7 +317,7 @@ rules:
 | 走查脚本要不要手动清理 | 不用：台账/账本都在系统临时目录里，跑完随目录删掉（`tests/test_w3_smoke_script.py` 里钉了这条） |
 | 驱动器到点开工了，却播报「需要授权」 | 默认配置的必然结果：`FileWrite` 无条件 ASK，无 UI 就落 DENY。三条解法：配一条带路径 spec 的 allow 规则（见 §0.6）、在桌面面板点「批准并重试」（走 `tasks.exec approve`，签限定范围租约）、或终端 `/lease <工具名> [路径glob] [分钟]` 手工签一条租约（`/lease` **没有 `grant` 子命令**，签发就是带工具名那种形式；TTL 缺省 120 分钟，`/lease list` 查、`/lease revoke <id>` 撤）。补一句：`/back` 本期只呈批不重放，签完租约被拦那次调用不会自己跑起来，要重新发起一次或走桌面「批准并重试」。**这不是回退**：旧代码同场景播报的是「已完成」 |
 | 播报「已完成」但工作区里没那个文件 | 本轮修掉的谎报缺陷（D2）。先跑 `scripts/livecheck_w3.py`，它有一项判据专盯「结论与实际产出一致」 |
-| 走查场景 1 还没走到 ASK，终端就回显 `<｜｜DSML｜｜ …>` 裸码、只说一句前言就结束 | **不是无人值守的 bug**，是上游的 `chat_detection` 误判：短问句（如「把 a.txt 改成 alpha2」）被判纯聊天 → 本轮 0 工具 → 模型照旧吐文本态调用 → 被空 `valid_names` 过滤。2026-10-22 已加结构判据（文件名/路径形态）修掉这一类；测时请**另起新会话**（旧存档里的 DSML 原文会被当示范回灌），真要绕开判定用 `[tools] chat_detection = false`。见 [deepseek-dsml-toolcall-leak-fix.md](../fixlogs/deepseek-dsml-toolcall-leak-fix.md) 「四次补漏」 |
+| 走查场景 1 还没走到 ASK，终端就回显 `<｜｜DSML｜｜ …>` 裸码、只说一句前言就结束 | **不是无人值守的 bug**，是上游的 `chat_detection` 误判：短问句（如「把 a.txt 改成 alpha2」）被判纯聊天 → 本轮 0 工具 → 模型照旧吐文本态调用 → 被空 `valid_names` 过滤。2026-10-22 已加结构判据（文件名/路径形态）修掉这一类；测时请**另起新会话**（旧存档里的 DSML 原文会被当示范回灌），真要绕开判定用 `[tools] chat_detection = false`。见 [deepseek-dsml-toolcall-leak-fix.md](../fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md) 「四次补漏」 |
 
 ## 附录 A：手工往台账写一个固定 id 的目标
 

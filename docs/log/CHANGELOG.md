@@ -29,7 +29,7 @@
   跨进程文件锁，文件不存在 / IO 失败静默返回 0。
 - `/memory clear yes` 一并调用两者，输出“已丢弃常驻人设卡 / 已清空事件轨（N 条）”。
 - 测试：discard 3 例、clear_events 3 例、命令级 clear 断言扩展；全量 5383 passed。
-- 复盘见 `docs/fixlogs/profile-clear-orphan-persona-fix.md`。
+- 复盘见 `docs/fixlogs/session-memory/profile-clear-orphan-persona-fix.md`。
 
 ### 新增（P6：常驻人设卡 + 全量分页 + 跨记忆边界，2026-11-18）
 
@@ -50,9 +50,20 @@
 - 配置：`profile_persona_enabled=true`、`profile_persona_token_limit=800`；两份模板同步；
   `Settings` 261 字段。
 - 测试：人设卡 16 例、golden 4 例、list 7 例、跨记忆 6 例；全量 5383 passed。
-- 文档：`research/always-on-profile-memory.md`、`plans/profile-memory-p6-persona-impl.md`、
+- 文档：`research/always-on-profile-memory.md`、`plans/profile-memory/profile-memory-p6-persona-impl.md`、
   09 架构、concepts、commands、README、plans 索引。
 
+### 变更（驾驶舱耗时拆成模型/工具，2026-11-18）
+
+- **HUD 与终端的「耗时」拆成两段**：原先只写「耗时 ELAPSED 7.6s」，而执行序列里两条
+  命令是 467ms + 151ms，用户拿两者对比会以为统计在造假——实际是两个口径：总耗时含
+  等模型往返与逐字生成，分步明细只有工具本身。
+- `run_end` 新增 `tool_ms`：工具占用的墙钟**区间并集**（并行工具不重复计），与
+  `duration_ms` 同口径可直接相减；HUD 完成带显示 `7.6s（模型 7.0s · 工具 0.6s）`，
+  终端完成行同源。旧 trace 文件没有该字段时保持原句，不伪造 `模型 0ms`。
+- 测试：区间并集 4 组（串行/重叠/包含/乱序零长）、`run_end` 必带 `tool_ms`、空闲
+  不计入工具段、拆分与 clamp、终端渲染 3 例。复盘见
+  [cockpit-elapsed-breakdown-fix.md](../fixlogs/ui/cockpit-elapsed-breakdown-fix.md)。
 
 ### 变更（提炼触发精简：去掉空闲触发，改为“每 7 条 + 终态”，2026-11-17）
 
@@ -78,7 +89,7 @@
 - 裁决 prompt：content 只写用户明确陈述部分（例：“下周五可能去贵阳出差” → 只写“下周五有出差安排”）。
 - 解析硬闸：非 `episodic` 的 add/update 含“可能/也许/或许/大概/恐怕/应该是/不确定/猜测”
   直接拒收并计入 `rejected` 遥测。
-- 测试：`TestSpeculationGate` 4 例；复盘见 `docs/fixlogs/profile-refine-speculation-fix.md`。
+- 测试：`TestSpeculationGate` 4 例；复盘见 `docs/fixlogs/session-memory/profile-refine-speculation-fix.md`。
 
 ### 修复（update 漏写类别把身份降级成 other，2026-11-15）
 
@@ -87,7 +98,7 @@
 - `update` 缺省类别改为**继承目标旧条目**（`Decision.category=""`），lifecycle 同样继承
   （permanent 不被降级）；prompt 示例补 `category` 并写明继承规则。
 - episodic 收紧：必须给 `expire_days`（否则回退为按类别派生）；“近期/最近”这类模糊说法不算临时事项。
-- 测试：`TestUpdateCategoryInheritance` 6 例；复盘见 `docs/fixlogs/profile-update-category-downgrade-fix.md`。
+- 测试：`TestUpdateCategoryInheritance` 6 例；复盘见 `docs/fixlogs/session-memory/profile-update-category-downgrade-fix.md`。
 
 ### 新增（P4 首批：检索 golden 集，2026-11-15）
 
@@ -141,7 +152,7 @@
   刷新 `last_referenced_at` 并 `ref_count+1`；`merge_or_add` 命中重复也算一次再确认（+1）。
 - `/memory` 列表在 `ref_count>0` 时展示“提及 N 次”，续命依据对用户可见。
 - 测试：`TestReferenceWiring` 4 例 + `TestNoopRenewal` 2 例 + 列表展示 1 例。
-- 复盘见 `docs/fixlogs/profile-decay-reference-wiring-fix.md`；半衰期 30 天/0.15 仍为经验值，待评测集校准。
+- 复盘见 `docs/fixlogs/session-memory/profile-decay-reference-wiring-fix.md`；半衰期 30 天/0.15 仍为经验值，待评测集校准。
 
 ### 新增（画像软删除：update 不再抹掉旧值，2026-11-15）
 
@@ -235,7 +246,7 @@
   增量不足时也排空闲兜底，空闲门槛降到 **delta ≥ 1**（已按小时限流）；
   `/memory refine` 改走 force 增量路径（不再整窗重喂、来源不再是 `manual-refine`）。
   另修测试 worker 晚于 fixture 写回真实台账的问题，并清理已写入的 `s1` 脏数据。
-  复盘见 `docs/fixlogs/profile-refine-tail-lost-fix.md`。
+  复盘见 `docs/fixlogs/session-memory/profile-refine-tail-lost-fix.md`。
 - 测试：新增 `tests/core/test_profile_ledger.py`（15 例）、
   `tests/core/test_profile_refine_golden.py`（12 例）与 `tests/core/test_profile_idle.py`（10 例）；
   画像相关合计 **88 例通过**。
@@ -261,7 +272,7 @@
     目标取 `Path.home()/.ssh/id_rsa`，而保护根默认是 `c:\\`；POSIX 上 home 不在 C 盘，于是从 ASK 落成 ALLOW。
     修法：保护根显式传当前用户 home，让“两条清单互不顶替”这条不变量平台无关；默认 C 盘根由
     `test_guard_roots_default_is_c_drive` 单独钉住，覆盖不丢。
-  - 复盘：新增 `docs/fixlogs/ci-linux-screenshot-and-yolo-fix.md`。
+  - 复盘：新增 `docs/fixlogs/ci-release/ci-linux-screenshot-and-yolo-fix.md`。
 
 ### 新增（图片驾驶舱 P0：终端终于能看见图，2026-11-11）
 
@@ -476,6 +487,17 @@
 
 ### 文档
 
+- **复盘日志按主题分目录**：`docs/fixlogs/` 的 126 篇复盘拆进 11 个子目录（`voice` / `llm` /
+  `agent-runtime` / `w1-w3` / `percept` / `config` / `session-memory` / `desktop-serve` /
+  `ui` / `ecosystem` / `ci-release`），每个子目录自带 `README.md` 索引，根 README 退化为分类总览；
+  同步重写全仓 317 条引用、44 条内部互引与 23 处正文里的纯文本路径。此前“不分子目录”的理由
+  （链接与 AOCI 索引代价）由脚本化改写 + 死链门禁覆盖。
+- **实施计划同样分目录**：`docs/plans/` 的 21 篇拆进 7 个子目录（`profile-memory` /
+  `visualization` / `desktop` / `visibility` / `config` / `fileops` / `voice`），
+  每类自带 `README.md`，根索引只做分类总览；同步改写全仓 95 条引用。
+- **升级计划同样分目录**：`docs/roadmap/` 的 14 篇拆进 6 个子目录（`voice` / `desktop` /
+  `agent` / `memory-config` / `butler` / `security`），新建根索引（该目录此前没有 README）
+  并补上与 plans / fixlogs 的三方分工说明；同步改写全仓 60 条引用。
 - **README 瘦身**：“任务驾驶舱”一行原本把滚轮滚动、缩放平移、动画时长等交互细节全写进表格（1172 字），
   改为“什么时候弹 / 显示什么 / 抓取能干什么”三条人话，细节交回三篇方案文档；
   “15 字标题生成”这类内部实现从能力表整体撤除（语音行与记忆行各有一处）——README 讲能力，不讲实现。
@@ -502,7 +524,7 @@
 - 新增 `tests/core/test_stdio_guard.py` 8 例（反证必抛、降级后中文不受伤、无 `reconfigure` /
   `None` / `reconfigure` 抛错三种流静默跳过、幂等、两条入口接线），并做反向变异验牙
   （撤掉调用 → 入口级用例立刻红）。复盘见
-  [doctor-redirect-encoding-fix.md](../fixlogs/doctor-redirect-encoding-fix.md)。
+  [doctor-redirect-encoding-fix.md](../fixlogs/ui/doctor-redirect-encoding-fix.md)。
 
 ## [2.5.2] — 2026-11-10
 
@@ -571,7 +593,7 @@
   旁路字段（不进入 tool_result 文本、不参与截断），orchestrator 原样传给
   tool_after 钩子，`TraceRecorder` 据此派生 `web_extract` 事件；窗口显示
   域名 + 前 3 个字段，缺失时标“缺 N”。
-- 文档：`docs/architecture/05-工具系统.md` 工具表、`docs/plans/crawler-cockpit.md`
+- 文档：`docs/architecture/05-工具系统.md` 工具表、`docs/plans/visualization/crawler-cockpit.md`
   数据契约同步；新增测试 `tests/tools/test_web_extract.py`。
 
 ### 优化（语音交互，2026-11-09）
@@ -585,12 +607,12 @@
 - **修复：长回答结束后误待机**：静默计时原先从“用户上次说话”开始算，LLM 思考 +
   工具 + TTS 播报超过 10 秒时，话一说完就立刻进待机。现在每轮回到聆听前重置
   `last_speech`，给用户完整的 10 秒窗口；连续“没听清”的空轮次仍会累计。
-  复盘见 [voice-idle-standby-after-reply-fix.md](../fixlogs/voice-idle-standby-after-reply-fix.md)。
+  复盘见 [voice-idle-standby-after-reply-fix.md](../fixlogs/voice/voice-idle-standby-after-reply-fix.md)。
 - **修复：无声音自动唤醒 / 对话幻听**：对话与待机录音都不再下发唤醒热词（避免 ASR
   在静音/噪音/TTS 尾音时幻听「贾维斯」）；待机唤醒改用 `matches_wake`（整句≤12 字 +
   唤醒词在前 8 字）；对话/待机都加 VAD 门禁——没有服务端语音事件的结果直接丢弃，
   对话阶段也不会再出现“没出声却识别出「贾维斯」”。复盘见
-  [voice-false-wake-fix.md](../fixlogs/voice-false-wake-fix.md)。
+  [voice-false-wake-fix.md](../fixlogs/voice/voice-false-wake-fix.md)。
 - **配置**：`[voice]` 新增 `idle_standby_seconds`；`/config` 语音面板同步展示。
 - 文档同步：`docs/guide/voice.md`、`docs/architecture/06-语音系统.md`、
   `docs/test/TEST_CHECKLIST.md`（T-129 空格打断、T-133 静默待机）。
@@ -612,7 +634,7 @@
      剥掉代码块/行内代码/URL/绝对路径再截；只有链接时回退原文。
   3. 驾驶舱执行序列只显示最近 4 步，8 步任务里唯一的失败被挤出，出现“失败 1”
      但列表全 ✓ 的矛盾。现在失败步固定置顶（总行数仍为 4）。
-  复盘见 [toolsearch-title-failed-step-fix.md](../fixlogs/toolsearch-title-failed-step-fix.md)。
+  复盘见 [toolsearch-title-failed-step-fix.md](../fixlogs/agent-runtime/toolsearch-title-failed-step-fix.md)。
 - **新增左侧“爬虫驾驶舱”窗口（C2-lite，原名“抓取网络”）**：网页抓取可视化不再挤在右侧 430px 的
   驾驶舱里，改为**屏幕最左侧独立窗口**（520×520，与 HUD 同一视觉语言、整面可拖）。
   本轮出现第一条 `web_fetch` 才弹出，显示 URL 去重清单（状态/耗时/字节/×命中）、
@@ -625,7 +647,7 @@
   配对写入 `messages`，再用串行落库任务调用 `advance_session`——与文本、`/voice`
   共用「每轮保存 + 15 字标题」口径。配对规则与桌面 `WorkbenchRealtimeUI` 同口径：
   正常顺序 / 转写滞后 / 开场白 / 回声轮丢弃 / 打断轮 / 退出 flush。复盘见
-  [talk-session-persist-fix.md](../fixlogs/talk-session-persist-fix.md)。
+  [talk-session-persist-fix.md](../fixlogs/voice/talk-session-persist-fix.md)。
 - **修复：`/voice` 会话只有时间戳、从不生成标题**：语音每轮走 `voice_loop` 直连
   `query_loop`，绕过了 REPL 的轮数统计与标题生成，退出时仍叫
   `session-YYYYMMDD-HHMMSS`。现在收尾逻辑收敛为 `advance_session`，**文本与语音
@@ -633,13 +655,13 @@
   语音都即时落盘**（此前只在退出时保存）。`voice_loop.on_turn_end` 支持 async 回调。
   会话元信息保留 `created_at`/`updated_at`，`/sessions` 与 `/load` 选择器新增
   **创建时间**，`sessions.list` 返回 `created_at`。复盘见
-  [voice-session-title-fix.md](../fixlogs/voice-session-title-fix.md)。
+  [voice-session-title-fix.md](../fixlogs/voice/voice-session-title-fix.md)。
 - **修复：纯闲聊也会弹出任务驾驶舱**：旧逻辑在 `run_start` 就懒创建窗口，所以每轮
   不调用任何工具的闲聊都会弹出一张“共 0 步 · 0 工具 · 任务完成”的 HUD。
   现在 `run_start` 只缓存，等本轮首个工具/抓取事件才建窗并补投 `run_start`（耗时仍从
   任务开始算）；没有工具调用的 `run_end` 直接丢弃，已显示的窗口在闲聊期间保持上一轮
   真实汇总，不再被刷成“0 步”。复盘见
-  [cockpit-chat-pops-fix.md](../fixlogs/cockpit-chat-pops-fix.md)。
+  [cockpit-chat-pops-fix.md](../fixlogs/ui/cockpit-chat-pops-fix.md)。
 - **任务驾驶舱执行序列可展开**：主 HUD 的“执行序列 // EXEC”行支持点击展开/收起，
   显示该步工具名、目标、调用入参（最多 3 个短字段）、耗时与失败错误；详情面板覆盖
   数据流/抓取区，再次点击同一步收起；拖动窗口不会误触展开。
@@ -678,7 +700,7 @@
 - **实现说明**：纯逻辑与 Tk 分离在 `agent/ui/cockpit_agents.py`
   （`AgentCardPlanner` / `AgentCardManager`），共享造型常量在
   `agent/ui/hud_theme.py`；方案见
-  [agent-cards.md](../plans/agent-cards.md)。
+  [agent-cards.md](../plans/visualization/agent-cards.md)。
 
 ### 新增（多任务浮窗 C3-lite，2026-11-08）
 
@@ -695,7 +717,7 @@
 - **实现说明**：卡片逻辑拆为 `agent/ui/cockpit_cards.py`（`CardPlanner` 纯逻辑 +
   `CardManager` Tk 线程），共享配色/截断工具抽到 `agent/ui/hud_theme.py`；
   退出时显式断开卡片对 Tk 根的引用，避免 `Tcl_AsyncDelete` 崩进程。
-  方案见 [cockpit-multicards.md](../plans/cockpit-multicards.md)。
+  方案见 [cockpit-multicards.md](../plans/visualization/cockpit-multicards.md)。
 
 ### 新增（独立任务驾驶舱 C1b，2026-11-08）
 
@@ -722,22 +744,22 @@
   整个进程；同时旧语义是“本会话永久关闭”，关闭后无法再显示。改为：点 ✕ 只
   `withdraw` 隐藏、不退出；下一轮任务首个工具自动 `deiconify` 重现；进程退出时
   单次销毁（不再调用任何已销毁 Tk 的方法）。复盘见
-  [cockpit-window-close-exit-fix.md](../fixlogs/cockpit-window-close-exit-fix.md)。
+  [cockpit-window-close-exit-fix.md](../fixlogs/ui/cockpit-window-close-exit-fix.md)。
 - **cmd 下思考面板不显示**：cmd 是 legacy Windows 控制台（`legacy_windows=True`），
   Rich Live 的原地刷新/擦除不可靠，思考面板帧画不出来；Git Bash 因非 TTY 走静态
   打印反而正常。改为 legacy 控制台与“输出被重定向”同口径降级为静态模式，
   并用纯文本分隔块替代 Rich Panel（Panel 在 legacy 渲染器下会竖排乱码），
   思考结束一次性打印完整内容。复盘见
-  [cmd-thinking-panel-legacy-console-fix.md](../fixlogs/cmd-thinking-panel-legacy-console-fix.md)。
+  [cmd-thinking-panel-legacy-console-fix.md](../fixlogs/ui/cmd-thinking-panel-legacy-console-fix.md)。
 - **窗口跟随首次动作被节流吞掉**：节流判断原来用 `0.0` 表示“从未执行”，
   Linux 上 `time.monotonic()` 是开机秒数，CI 新虚拟机的 uptime 低于阈值时
   首次“定位目录 / 显示窗口”会被误判为重复而直接跳过；改为 `None` 哨兵，
   首次一定放行、后续仍节流。复盘见
-  [window-follow-throttle-uptime-fix.md](../fixlogs/window-follow-throttle-uptime-fix.md)。
+  [window-follow-throttle-uptime-fix.md](../fixlogs/ci-release/window-follow-throttle-uptime-fix.md)。
 - **任务收尾关不掉被操作窗口**：收尾清理把“当前前台窗口”一律当用户正在看而保留，
   但 WPS 等 COM 自动化会自己激活窗口，导致本轮新开的 WPS 壳窗口留在桌面上；
   现在只有“本轮没操作过”的前台窗口才保留。复盘见
-  [wps-window-cleanup-foreground-fix.md](../fixlogs/wps-window-cleanup-foreground-fix.md)。
+  [wps-window-cleanup-foreground-fix.md](../fixlogs/ecosystem/wps-window-cleanup-foreground-fix.md)。
 - **思考面板 Live 残留导致输出错乱**：窗口观察器（后台线程）与模型线程撞在
   同一份面板状态上，`_end_thinking` 又按“是否启动过”早退，一旦 stop 失败就留下
   泄漏的 Live，以 12fps 持续重绘把正文撕成一字一行；改为状态锁 + 句柄清单强制收口。
@@ -746,7 +768,7 @@
   口径识别并保留；同时新增 `Tool.window_policy` 契约（`keep` / `transient` / 未声明），
   未声明时默认保留（`[ui] window_cleanup_unknown = "keep"`），只有显式关闭动作
   或声明 `transient` 才收尾关闭。两处复盘见
-  [thinking-live-leak-and-gui-window-close-fix.md](../fixlogs/thinking-live-leak-and-gui-window-close-fix.md)。
+  [thinking-live-leak-and-gui-window-close-fix.md](../fixlogs/ui/thinking-live-leak-and-gui-window-close-fix.md)。
 
 
 ## [2.5.1] — 2026-11-08
@@ -781,14 +803,14 @@
 - **窗口标题误配**：同一条文件名同时出现在记事本与 Notepad++ 标题里时，
   模糊匹配改为「精确优先、标题更短优先」，避免点击/输入发错窗口。
 - 复盘见
-  [docs/fixlogs/operation-visibility-bash-multiline-sandbox-fix.md](../fixlogs/operation-visibility-bash-multiline-sandbox-fix.md)。
+  [docs/fixlogs/agent-runtime/operation-visibility-bash-multiline-sandbox-fix.md](../fixlogs/agent-runtime/operation-visibility-bash-multiline-sandbox-fix.md)。
 
 ### 修复（实机走查发现，2026-11-07）
 
 - **Bash 复合后台命令卡满 timeout**：`cd <dir> && notepad.exe ... &` 的 `&` 作用于
   整个列表，`> /dev/null 2>&1` 只落在后半段，后台子 shell 仍握着管道，工具等 EOF
   到 120 秒超时。现对复合体整组加括号重定向，详见
-  [docs/fixlogs/bash-compound-background-fix.md](../fixlogs/bash-compound-background-fix.md)。
+  [docs/fixlogs/agent-runtime/bash-compound-background-fix.md](../fixlogs/agent-runtime/bash-compound-background-fix.md)。
 - **摘要口径**：`文件工具 N 次` 只统计文件工具；GUI「另存为」产生的文件不计入，
   不再用「N 个文件」造成「没改文件」的误读。
 - **按键跟随**：`KeyTap` 执行后也跟随当前前台窗口，Ctrl+S 弹出的「另存为」对话框

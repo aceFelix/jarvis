@@ -5,7 +5,7 @@
 画像条目回答“有哪些事实”，人设卡回答“他是一个什么样的人”。前者按需检索，
 后者每次会话常驻，解决“按需检索只能让助手这一分钟才想起我”的问题。
 调研见 `docs/research/always-on-profile-memory.md`，方案见
-`docs/plans/profile-memory-p6-persona-impl.md`。
+`docs/plans/profile-memory/profile-memory-p6-persona-impl.md`。
 
 ## 铁律
 

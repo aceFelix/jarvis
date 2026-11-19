@@ -33,7 +33,7 @@ class StepOutcome:
     里取回）。驱动器把它与“本步到底有没有产出”合起来判：有 denial 且一个副作用都
     没记上，才是真卡住（去问用户）；已有产出却夹着被拒，则照实把被拒项附在结论里
     落 done。两种都不能把被拦下报成“已完成”（2026-10-22 两轮实机各踩过一头，
-    见 docs/fixlogs/w3-driver-approval-blocked-report.md）。注入通路（测试/自定义
+    见 docs/fixlogs/w1-w3/w3-driver-approval-blocked-report.md）。注入通路（测试/自定义
     编排）不填即表示未受阻。
 
     @author aceFelix
@@ -144,12 +144,12 @@ def default_spawn(
     ctx.extra，编排器记账时据此填 ``EffectRecord.task_id``（``/undo --task`` 的查询
     键）；effect_ids 是同一个列表对象，编排器往里追加本步产生的账本 id，驱动器
     跑完回填到 ``TaskStep.journal_ids``。没这一段，台账里那列永远为空（这条链路
-    2026-10-21 实机暴露过断点，见 docs/fixlogs/w3-delay-window-bypass-fix.md）。
+    2026-10-21 实机暴露过断点，见 docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md）。
 
     受阻清单 ``denials`` 的容器由本函数建好写进子代理的 ctx.extra，编排器在
     被拦下的第一现场往里追加，跑完由本函数取回装进 ``StepOutcome.denials``——
     驱动器据此判断“这步到底是被拒还是做完了”（2026-10-22 实机暴露的谎报缺陷，
-    见 docs/fixlogs/w3-driver-approval-blocked-report.md）。两个容器不同的归宿各有原因：
+    见 docs/fixlogs/w1-w3/w3-driver-approval-blocked-report.md）。两个容器不同的归宿各有原因：
     effect_ids 要落到台账字段所以由驱动器持有，denials 只用于本轮判定所以由通路回报。
     ``settings`` 则同时供两件事：把用户配好的声明式规则递给子代理（否则
     “前台已放行、后台仍被拒”两个入口口径不一致），以及为本步打一个

@@ -169,10 +169,20 @@ def render_event(event: dict[str, Any], *, for_review: bool = False) -> str | No
         return f"🪟 {event.get('message', '')}"
     if etype == "run_end":
         total = _fmt_duration(float(event.get("duration_ms") or 0))
+        # 2026-11-18：把整轮耗时拆成“模型 / 工具”两段再展示。
+        # 不拆的时候，用户拿执行序列里的单步明细（共几百毫秒）对比这行总耗时
+        # （七八秒）会以为统计在造假；差额其实是等模型的往返与生成。
+        # tool_ms 来自 trace 的区间并集，与 duration_ms 同口径；旧 trace 文件
+        # 回放没有这个字段，就不加括号（不伪造 0ms）。@author aceFelix
+        split = ""
+        tool_ms = event.get("tool_ms")
+        if isinstance(tool_ms, (int, float)) and tool_ms > 0:
+            model_ms = max(0.0, float(event.get("duration_ms") or 0) - float(tool_ms))
+            split = f"（模型 {_fmt_duration(model_ms)} · 工具 {_fmt_duration(float(tool_ms))}）"
         return (
             f"✓ 完成 · 共 {event.get('steps', 0)} 步 · "
             f"文件工具 {event.get('files_changed', 0)} 次 · "
-            f"{event.get('failed', 0)} 失败 · {total}"
+            f"{event.get('failed', 0)} 失败 · {total}{split}"
         )
     if etype == "web_fetch":
         return _agent_tag(_render_web_fetch(event)) if for_review else None

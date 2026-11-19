@@ -1,6 +1,6 @@
 """能力自检层：让 jarvis 知道「自己能做到什么、缺什么、怎么补」。
 
-三层结构与各自边界（设计依据见 docs/plans/capability-selfcheck.md）：
+三层结构与各自边界（设计依据见 docs/plans/config/capability-selfcheck.md）：
 
 - `registry`：声明。能力由哪些前置条件构成、能否降级、允许哪些修复动作。
 - `probe` / `smoke`：探测。静态档（包/二进制/数据资产/凭据/平台）启动即跑；

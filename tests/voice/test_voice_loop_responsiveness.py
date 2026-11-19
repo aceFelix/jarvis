@@ -1,6 +1,6 @@
 """语音循环事件循环饿死修复回归测试（桌面壳按钮无响应 bug）。
 
-背景（见 docs/fixlogs/voice-stop-unresponsive-fix.md）：stt.listen /
+背景（见 docs/fixlogs/voice/voice-stop-unresponsive-fix.md）：stt.listen /
 StreamTTSPlayer.start / finish 原是同步阻塞 pyaudio / 网络调用，直接在
 async 函数里调用会饿死宿主事件循环；serve 宿主下引擎指令循环（消费
 voice.stop / voice.interrupt / start_talk 队列）被录音播放卡死，桌面壳

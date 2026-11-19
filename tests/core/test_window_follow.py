@@ -119,7 +119,7 @@ def test_first_show_is_not_throttled_on_small_clock(monkeypatch) -> None:
 
     回归 2026-11-08 CI：Linux 的 ``time.monotonic()`` 是开机秒数，GitHub runner
     刚开机时只有几十秒；旧实现拿 0.0 当“从未执行”的哨兵值，把首次动作误判成
-    “5 秒内重复”（见 docs/fixlogs/window-follow-throttle-uptime-fix.md）。
+    “5 秒内重复”（见 docs/fixlogs/ci-release/window-follow-throttle-uptime-fix.md）。
     """
     backend = FakeBackend()
     director = WindowDirector(_settings(), backend=backend)

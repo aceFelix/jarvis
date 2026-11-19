@@ -10,7 +10,7 @@
 - LOW: 直接放行，无需沙箱
 - MEDIUM: 沙箱开启时自动放行（在沙箱内执行）；未开启时 ASK
   （例外：W3.2 延时窗口里还压着未结案的不可逆外发预约时，网络外发类命令不再
-  自动放行，见 ``looks_network_outbound`` 与 docs/fixlogs/w3-delay-window-bypass-fix.md）
+  自动放行，见 ``looks_network_outbound`` 与 docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md）
 - HIGH: 强制沙箱执行 + 文件快照保护
 - CRITICAL: 沙箱 + 快照 + 用户确认（即使沙箱开启也需确认）
 """

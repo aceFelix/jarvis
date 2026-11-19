@@ -1,7 +1,7 @@
 # 常驻用户画像记忆调研（"一直懂我"，而不是"这一分钟才想起"）
 
 > 调研日期：2026-11-18 ｜ 作者：aceFelix ｜ 状态：调研定稿；**已立 P6**，实施细节见
-> [plans/profile-memory-p6-persona-impl.md](../plans/profile-memory-p6-persona-impl.md)
+> [plans/profile-memory/profile-memory-p6-persona-impl.md](../plans/profile-memory/profile-memory-p6-persona-impl.md)
 >
 > 触发问题：按需检索只能让助手在“被问到”时想起用户；要让它**始终知道我是一个什么样的人**，
 > 是不是必须把全部画像塞进上下文？全量注入的 token 成本怎么办？有没有不依赖本地大模型的折中方案？
@@ -23,7 +23,7 @@
 5. 对 jarvis：**不需要向量库、不需要本地大模型、不引新依赖**。
    用现有提炼模型在后台生成一张 `persona` 人设卡（约 600–800 tokens），常驻注入；
    原始条目继续全量保留，靠 `RecallProfile` 的 `search/list` 兜底。
-   实施细节见 [P6 方案](../plans/profile-memory-p6-persona-impl.md)。
+   实施细节见 [P6 方案](../plans/profile-memory/profile-memory-p6-persona-impl.md)。
 
 ## 二、一手资料怎么说的
 

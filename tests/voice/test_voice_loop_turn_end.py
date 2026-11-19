@@ -1,6 +1,6 @@
 """voice_loop on_turn_end 每轮落库回调测试（半双工语音会话保存修复）。
 
-背景（见 docs/fixlogs/voice-half-duplex-persist-fix.md）：半双工语音轮次
+背景（见 docs/fixlogs/voice/voice-half-duplex-persist-fix.md）：半双工语音轮次
 写入 ctx.messages（与工作台引擎 self._messages 同一列表），但整段语音会话
 从未触发宿主持久化，重启即丢。voice_loop 新增 on_turn_end 可选回调——本轮
 消息有增长即通知宿主（工作台传 _after_turn）。

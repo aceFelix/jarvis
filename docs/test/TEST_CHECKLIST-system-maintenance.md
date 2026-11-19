@@ -5,7 +5,7 @@
 > **编号与主清单连续（T-397–T-433），不重号**。
 >
 > 机制与设计取舍详见 [19-系统维护层](../architecture/19-系统维护层.md)；
-> 计划文档 [PLAN-system-maintenance](../roadmap/PLAN-system-maintenance.md)；
+> 计划文档 [PLAN-system-maintenance](../roadmap/butler/PLAN-system-maintenance.md)；
 > 配置项见 [配置指南·系统维护层](../../config-docs/configuration.md)。
 >
 > 自动化单测（**139 例，已全绿**）：

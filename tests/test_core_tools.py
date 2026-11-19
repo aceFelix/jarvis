@@ -209,7 +209,7 @@ class TestBashExecution:
         """非零退出属正常命令结果：不标 is_error，带 [exit=N] 表头回传模型。
 
         旧行为把 exit!=0 当工具失败，会触发自愈重试 + 阻塞式「是否重试」
-        问句导致整轮卡死（docs/fixlogs/serve-bash-tool-hang-fix.md）。
+        问句导致整轮卡死（docs/fixlogs/desktop-serve/serve-bash-tool-hang-fix.md）。
         @author aceFelix
         """
         tool = BashTool()

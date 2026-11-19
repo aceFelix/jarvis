@@ -1,6 +1,6 @@
 """Crawl —— 广度优先抓取站点（爬虫能力 P2）。
 
-设计要点（方案见 ``docs/plans/crawler-cockpit.md`` §4）：
+设计要点（方案见 ``docs/plans/visualization/crawler-cockpit.md`` §4）：
 - BFS frontier + 规范化 URL 去重，限页数/深度/同域/延迟，默认礼貌爬取；
 - 默认读同域 ``robots.txt``，禁止路径不入队；
 - 复用 WebFetch 的 ``_fetch_url``（requests/httpx/urllib 自动选择）与 SSRF 校验；

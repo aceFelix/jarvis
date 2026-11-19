@@ -4,7 +4,7 @@
 
 `_auto_save` 每轮对话都会触发 `maybe_refine_async`，而旧实现只有"距上次提炼 ≥600s"一道闸，
 不记"上次提炼到第几条"。于是长会话每 10 分钟把最近 40 条**重喂一遍**，同一事实被反复
-"发现"——这是画像记忆重复入库的源头（见 docs/roadmap/PLAN-profile-memory-upgrade.md §P0）。
+"发现"——这是画像记忆重复入库的源头（见 docs/roadmap/memory-config/PLAN-profile-memory-upgrade.md §P0）。
 
 本模块为每个会话记录 `refined_until`（已提炼到的消息下标），让提炼只处理 `messages[refined_until:]`
 的增量。

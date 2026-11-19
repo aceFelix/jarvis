@@ -4,9 +4,9 @@
 里的 MCP 连接步骤，导致桌面壳永远缺少 MCP 工具（如 mcp__amap-maps__*），
 模型查天气等场景只能"念叨"计划而拿不到专业工具。
 修复：_ensure_session 在系统提示词生成前 await _connect_mcp(registry)。
-见 docs/fixlogs/serve-mcp-truncation-fix.md。
+见 docs/fixlogs/desktop-serve/serve-mcp-truncation-fix.md。
 后续优化：MCP 连接前移到启动后台预热（_prewarm），首条消息复用预热
-registry 不再同步等 MCP；见 docs/fixlogs/mcp-prewarm-first-send.md。
+registry 不再同步等 MCP；见 docs/fixlogs/ecosystem/mcp-prewarm-first-send.md。
 
 @author aceFelix
 """

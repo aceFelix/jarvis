@@ -108,7 +108,7 @@ _DEFAULT_SOURCE_WEIGHTS = {
     # 事件落到 default 0.5，乘上源自带的低先验后**全部低于 0.3 门槛**，
     # 再叠加“入队→下一条冲刷”的乒乓，实际效果是“该静默的照样吵你、
     # 该吵的反而被门槛吃掉”（2026-10 人工走查发现，详见
-    # docs/fixlogs/notify-budget-percept-relay-fix.md）。取值口径：
+    # docs/fixlogs/percept/notify-budget-percept-relay-fix.md）。取值口径：
     # 用户显式开启且值得打断 > 顺路看到的现场事实。
     "percept:mail": 0.9,       # 白名单来信：最该打断
     "percept:vcs": 0.7,        # 仓库卫生（未提交/未推/落后）：开发者每天用得上
@@ -123,7 +123,7 @@ _DEFAULT_SOURCE_WEIGHTS = {
     # 驱动器递出来的紧迫度固定给 0.45（后台结果不是“突发紧事”），因此
     # 0.9×0.45=0.405 仍在门槛之上；不登记则落 default 0.5→得分 0.225，
     # 整个脊柱会“永远不吱声”——与 percept 当年那个坑同源，故一并登记
-    # （docs/fixlogs/notify-budget-percept-relay-fix.md）。
+    # （docs/fixlogs/percept/notify-budget-percept-relay-fix.md）。
     "task": 0.9,
 }
 
@@ -242,7 +242,7 @@ class NotifyBudget:
         冲刷与当前请求**合一返回**：旧实现在冲刷分支直接 `return`，把触发
         冲刷的那条事件整条丢掉（既没播也没入队），而冲刷本身又无冷却，
         导致“入队→下一条冲刷”乒乓、门槛被自己的冲刷路径旁路。
-        2026-10 人工走查发现，详见 docs/fixlogs/notify-budget-percept-relay-fix.md。
+        2026-10 人工走查发现，详见 docs/fixlogs/percept/notify-budget-percept-relay-fix.md。
 
         @author aceFelix
         """

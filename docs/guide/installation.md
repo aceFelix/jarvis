@@ -120,7 +120,7 @@ jarvis 将不同能力拆分为可选依赖组，按需安装：
 
 > 原 `realtime_ui`（pywebview 三栏工作台窗口）已于 2026-10 随 `--gui` / `--talk`
 > 一并退役，图形化桌面由独立仓库 **jarvis-desktop** 提供（见
-> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）。
+> [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md)）。
 
 ## 平台系统依赖
 

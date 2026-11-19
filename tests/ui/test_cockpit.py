@@ -15,6 +15,7 @@ from agent.ui.cockpit import (
     _fmt_ms,
     _short_url,
     cockpit_enabled,
+    completion_line,
     normalize_mode,
 )
 from agent.ui.cockpit_window import CockpitWindow
@@ -236,6 +237,52 @@ class TestStateModel:
         assert state.failed == 0
         assert state.current is None
         assert list(state.feed) == []
+
+
+class TestElapsedSplit:
+    """整轮耗时拆成「模型 / 工具」两段（2026-11-18 用户反馈）。
+
+    起因：HUD 写「耗时 7.6s」，执行序列却是 467ms + 151ms，用户以为统计造假。
+    实际是两个口径：总耗时含等模型的时间，分步明细只有工具本身。拆分后就对得上了。
+    """
+
+    @staticmethod
+    def _finished(duration_ms: float, **extra: object) -> CockpitState:
+        """造一个已收到 run_end 的状态；``extra`` 用于传 ``tool_ms``。"""
+        state = CockpitState(_Clock())
+        state.update({"type": "run_start", "run_id": "r"})
+        state.update(
+            {"type": "run_end", "steps": 2, "failed": 0, "duration_ms": duration_ms, **extra}
+        )
+        return state
+
+    def test_split_subtracts_tool_from_total(self) -> None:
+        """工具段直接用 trace 的并集，模型段 = 整轮 - 工具段。"""
+        assert self._finished(7580, tool_ms=620).split_ms() == (620.0, 6960.0)
+
+    def test_split_is_none_before_run_end(self) -> None:
+        """运行中不拆：工具还在跑，此时拆出来的数没有意义。"""
+        state = CockpitState(_Clock())
+        state.update({"type": "run_start", "run_id": "r"})
+        assert state.split_ms() is None
+
+    def test_split_is_none_for_old_trace_without_tool_ms(self) -> None:
+        """旧 trace 回放没有 tool_ms：返回 None，不伪造 0ms。"""
+        assert self._finished(4200).split_ms() is None
+
+    def test_tool_time_is_clamped_to_total(self) -> None:
+        """并行/子代理极端场景下并集可能超过整轮，clamp 后不出现负的模型段。"""
+        assert self._finished(1000, tool_ms=1500).split_ms() == (1000.0, 0.0)
+
+    def test_completion_line_shows_split(self) -> None:
+        """HUD 完成带第二行：步数 · 整轮（模型/工具）· 尾部提示。"""
+        assert completion_line(self._finished(7580, tool_ms=620)) == (
+            "共 2 步 · 7.6s（模型 7.0s · 工具 620ms） · 窗口保留"
+        )
+
+    def test_completion_line_keeps_short_form_without_split(self) -> None:
+        """拿不到工具段时保持原句，不显示空白括号。"""
+        assert completion_line(self._finished(4200)) == "共 2 步 · 4.2s · 窗口保留"
 
 
 class TestMode:

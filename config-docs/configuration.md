@@ -418,7 +418,7 @@ away 时沙箱中风险自动放行也升级待批，无租约且非 away 时零
 | `[actions] journal_enabled` | `true` | 副作用账本总开关（`false` = 不记账也不延时，`/undo` 无从下手） |
 | `[actions] undo_window_s` | `30` | 不可逆动作延时窗口（秒）；`0` = 不拦、直接执行（**照样记账**） |
 | `[actions] track_local_writes` | `true` | 本地破坏性写是否记一条可回滚条目（引用本轮 shadow-git 检查点） |
-| `[actions] irreversible_tools` | `[]` | 应急口子：确实要多保护的工具才填（改配置不改代码）。❗ 拿 `WebFetch` 这类只读工具演示窗口是错的测法：它无副作用、可重来，只能演出一堆成本（见 [w3-delay-window-bypass-fix](../docs/fixlogs/w3-delay-window-bypass-fix.md)） |
+| `[actions] irreversible_tools` | `[]` | 应急口子：确实要多保护的工具才填（改配置不改代码）。❗ 拿 `WebFetch` 这类只读工具演示窗口是错的测法：它无副作用、可重来，只能演出一堆成本（见 [w3-delay-window-bypass-fix](../docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md)） |
 | `[actions] hold_blocks_equivalent` | `true` | 待发窗口未结案时，网络外发类中风险命令（`curl`/`wget`/`Invoke-WebRequest`…）取消沙箱自动放行、改问人；本机命令不受影响。无 UI 环境 ASK→DENY 误伤不可接受时设 `false` |
 | `[tasks] enabled` | `false` | 驱动器总开关（`false` = 只读台账不自走，`/tasks` 第二节照旧能列） |
 | `[tasks] blocked_ask_days` | `3` | 阻塞超此天数主动问一次（走 `[policy.notify_budget]` 闸门；同一件事不重复问） |
@@ -491,7 +491,7 @@ RPC 可临时传 `minutes`）签一条限定范围的授权租约，查看与提
 ## 能力自我修复（`[repair]`）
 
 让管家自己补上「看着有、其实跑不通」的能力（下浏览器内核、装可选依赖）。
-机制与设计理由见 [能力自检升级计划](../docs/plans/capability-selfcheck.md)，
+机制与设计理由见 [能力自检升级计划](../docs/plans/config/capability-selfcheck.md)，
 入口命令是 `/health caps`（静态档）、`/health caps --deep`（加跑冒烟）、`/repair`（闸门与台账）。
 
 > ⚖️ **默认开是有意的，但权限不靠默认值守**：六道门按序判——总闸 → 单动作开关 →

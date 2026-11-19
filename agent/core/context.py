@@ -37,7 +37,7 @@ class UIProtocol(Protocol):
 
         为什么单开一个方法：面板收尾以前只隐含在「第一条正文增量到达」那条路径里，
         而失败轮（如厂商 503）可以一个字正文都没有，面板就永远停在首帧。详见
-        docs/fixlogs/provider-busy-error-classification-fix.md。
+        docs/fixlogs/llm/provider-busy-error-classification-fix.md。
         """
         ...
     def tool_use(self, tool_name: str, tool_input: dict[str, Any], tool_use_id: str) -> None: ...

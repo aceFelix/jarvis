@@ -16,7 +16,7 @@
 - **纯聊天零工具**：短问句 + 无动作意图 + 历史无工具调用 → 本轮一个工具都不发
   （0 token）。误判的代价是「模型想调工具却拿不到 schema」，所以关键词表
   **宁全勿缺**，且补一道**不依赖词表的结构判据**（文件名/路径形态），详见
-  docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md。
+  docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md。
 
 @author aceFelix
 """

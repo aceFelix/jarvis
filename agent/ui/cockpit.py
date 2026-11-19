@@ -21,6 +21,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from agent.ui.hud_theme import fmt_elapsed
 from agent.ui.trace_view import describe_target, render_event
 
 # 状态容器容量：全部有界，防止长任务内存增长
@@ -369,6 +370,8 @@ class CockpitState:
         self.final_steps: int | None = None
         self.final_failed: int | None = None
         self.final_duration_ms: float | None = None
+        # 工具占用的墙钟（run_end 的 tool_ms，区间并集）；模型段靠它相减得出
+        self.final_tool_ms: float | None = None
         self.steps = 0
         self.failed = 0
         self.active: dict[str, dict[str, Any]] = {}
@@ -391,6 +394,7 @@ class CockpitState:
         self.final_steps = None
         self.final_failed = None
         self.final_duration_ms = None
+        self.final_tool_ms = None
         self.steps = 0
         self.failed = 0
         self.active.clear()
@@ -420,6 +424,24 @@ class CockpitState:
         """展示用失败数：结束后取 run_end 汇总。"""
         return int(self.final_failed) if self.finished and self.final_failed is not None else self.failed
 
+    def split_ms(self) -> tuple[float, float] | None:
+        """结束后返回 ``(工具毫秒, 模型毫秒)``；未结束或没数据时返回 ``None``。
+
+        工具段是 trace 侧的区间并集（并行工具不重复计），模型段 = 整轮 - 工具段。
+        两个数字与三格指标里的总耗时同口径，用户拿执行序列里的单步明细对比时
+        不会再出现“工具才 0.6s、怎么写了 7.6s”的矛盾感（2026-11-18）。
+
+        @author aceFelix
+        """
+        if not self.finished:
+            return None
+        if self.final_duration_ms is None or self.final_tool_ms is None:
+            return None
+        total = max(0.0, float(self.final_duration_ms))
+        # 子代理/并行极端场景下并集可能比整轮还大，clamp 到整轮，不输出负的模型段
+        tool = min(max(0.0, float(self.final_tool_ms)), total)
+        return (tool, max(0.0, total - tool))
+
     def active_tools(self) -> list[str]:
         """当前并行工具名列表（按启动顺序）。"""
         return [
@@ -448,6 +470,8 @@ class CockpitState:
             self.final_steps = _as_int(event.get("steps"))
             self.final_failed = _as_int(event.get("failed"))
             self.final_duration_ms = _as_float(event.get("duration_ms"))
+            # 工具段（区间并集）；旧 trace 回放没有这个字段，保持 None 不伪造
+            self.final_tool_ms = _as_float(event.get("tool_ms"))
             return
         if not self.started_at:
             # 直接喂工具事件（无 run_start）时兜底起算
@@ -551,6 +575,29 @@ class CockpitState:
         if not ok:
             self.failed += 1
         self.current = self.active[self.active_order[-1]] if self.active_order else None
+
+
+def completion_line(state: "CockpitState", tail: str = "窗口保留") -> str:
+    """HUD 完成带第二行文案：步数 · 整轮耗时（模型/工具）· 尾部提示。
+
+    拆分只在拿到 ``run_end.tool_ms`` 时追加；旧 trace 回放或数据缺失时保持
+    原来的短句式——宁可不说，也不显示“模型 0ms”这种假拆分。
+
+    Args:
+        state: 已结束的驾驶舱状态（未结束时只输出总耗时）。
+        tail: 行尾提示；传空串则不带。
+
+    Returns:
+        单行文案，供 HUD 完成带渲染。
+
+    @author aceFelix
+    """
+    line = f"共 {state.display_steps()} 步 · {fmt_elapsed(state.elapsed_ms())}"
+    split = state.split_ms()
+    if split is not None:
+        tool_ms, model_ms = split
+        line += f"（模型 {fmt_elapsed(model_ms)} · 工具 {fmt_elapsed(tool_ms)}）"
+    return f"{line} · {tail}" if tail else line
 
 
 def step_rows(history: list[dict[str, Any]], limit: int = 4) -> list[dict[str, Any]]:

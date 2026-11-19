@@ -333,7 +333,7 @@
 
 > 背景：语音（TTS/STT）固定走阿里云百炼，与 LLM 厂商无关，因此是**两套凭据**。
 > 旧实现里 `/voice` 只认环境变量、并会无条件借主 LLM 的 key，引导也完全不问这一项。
-> 复盘见 [fixlogs/voice-api-key-onboarding-fix.md](../fixlogs/voice-api-key-onboarding-fix.md)。
+> 复盘见 [fixlogs/voice/voice-api-key-onboarding-fix.md](../fixlogs/voice/voice-api-key-onboarding-fix.md)。
 
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
@@ -415,7 +415,7 @@
 > `test_retired_gui_and_talk_flags_are_gone` 断言这两个参数现在会走 argparse 的
 > unknown argument 分支（否则说明有人把它们悄悄加回来了）。
 >
-> 存量开机自启的手动清理路径仍在 [`workbench-gui-retired`](../fixlogs/workbench-gui-retired.md)
+> 存量开机自启的手动清理路径仍在 [`workbench-gui-retired`](../fixlogs/desktop-serve/workbench-gui-retired.md)
 > 第七节与 [desktop 指南](../guide/desktop.md) 里，只是不再由 `jarvis --gui` 代为打印。
 
 ### 16.2 语音互斥锁（替代原托盘多模式互斥）
@@ -438,7 +438,7 @@
 > 原 T-171～T-174（`python -m agent.daemon.autostart install / status / uninstall / desktop`）
 > 随 `agent/daemon/autostart.py` 于 2026-10 删除一并废除：本仓库不再提供自启注册能力，
 > 开机启动请在 jarvis-desktop 设置内开启；存量残留的手动清理见
-> [workbench-gui-retired](../fixlogs/workbench-gui-retired.md) 第七节。
+> [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md) 第七节。
 
 ### 16.5 快速启动
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -499,7 +499,7 @@
 > 口径变更（2026-10-14）：终端 REPL / 语音此前不注册提醒工具，T-SP-001 曾以「终端如实说明
 > 暂不支持」为通过标准。现终端由 `CliReminderHost` 装配，**终端走 T-SP-002**，T-SP-001 退化
 > 为纯单元口径（用空 registry 验证条件注入本身）。详见
-> [agent-loop-stall-fix.md](../fixlogs/agent-loop-stall-fix.md)。
+> [agent-loop-stall-fix.md](../fixlogs/agent-runtime/agent-loop-stall-fix.md)。
 
 ### 17.7 终端提醒宿主与流式中断（2026-10-14）
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
@@ -829,7 +829,7 @@
 | T-338 | 手机 PWA 旧协议回归 | 用 BridgeServer 原 `query`/`abort` 协议连接 | 行为不变、向后兼容 |
 | T-339 | MCP 就绪补刷事件 | 启动 `--serve` 连上桌面壳，静候后台 MCP 预热（约 9s） | MCP 连接落定后推一次 `mcp_ready` 事件（payload=`state.get` 的 mcp 快照 `{connected,failed,tools}`）；右栏「运行健康」从 `init` 时的「MCP 未启用」自动刷新为真实连接态（单测 `test_engine_mcp.py`） |
 | T-340 | 语音 `<standby/>` 不泄漏上屏 | 语音模式说「退下吧」，观察桌面/终端气泡 | 告别语气泡**不出现字面 `<standby/>`**（全量 `on_ai_text` 与流式 `on_ai_text_delta` 均剥标）；仍正常进入待机（退下检测读原始消息不受影响）；单测 `test_voice_standby_display.py` |
-| T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/serve-toolsearch-registration-fix.md) |
+| T-341 | 桌面壳优先用 MCP 工具 | 桌面壳（`--serve`）已连高德 MCP，问「明天天气如何」 | 模型先调 `ToolSearch`（query 含天气/amap）加载→再调 `mcp__amap-maps__maps_weather` 拿结构化预报并出正文答案；**不走 `Bash`+curl 抓网页**（与终端 REPL 行为一致）；根因=桌面引擎补注册 `ToolSearch`（单测 `test_engine_mcp.py::test_ensure_session_registers_tool_search_when_deferred`）；复盘见 [serve-toolsearch-registration-fix.md](../fixlogs/desktop-serve/serve-toolsearch-registration-fix.md) |
 
 ## 36. 消息回溯与检查点（2026-10，shadow git）
 
@@ -855,7 +855,7 @@
 
 ### 36.3 三通道 query 锁的取消语义（2026-10，等锁窗口）
 
-> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/serve/engine/test_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/query-lock-cancel-leak-fix.md)。
+> 原语：`agent/utils/query_lock.py::acquire_lock_cancellable`；单测 `tests/test_query_lock.py`（3 例）；引擎路径回归 `tests/serve/engine/test_stdin_abort.py::test_abort_during_lock_wait_returns_lock_and_closes_turn`；缺陷复盘 [query-lock-cancel-leak-fix.md](../fixlogs/agent-runtime/query-lock-cancel-leak-fix.md)。
 
 | 编号 | 测试目的 | 测试步骤 | 通过标准 |
 |------|---------|---------|---------|
@@ -911,9 +911,9 @@
 > 另：文档一致性（本地链接有效性）由 `scripts/check_md_links.py` 作为 CI 门禁，
 > 其 17 条 pytest 用例见 `tests/test_md_link_checker.py`：既含 Linux CI 视角的平台无关判定
 > （首版曾在 Linux 上误报全仓链接，复盘见
-> [md-link-checker-linux-ci-fix.md](../fixlogs/md-link-checker-linux-ci-fix.md)），
+> [md-link-checker-linux-ci-fix.md](../fixlogs/ci-release/md-link-checker-linux-ci-fix.md)），
 > 也含「链接目标必须已入 git」的入库门禁（曾漏过指向 `.gitignore` 排除目录的链接，
-> 复盘见 [md-link-checker-untracked-link-fix.md](../fixlogs/md-link-checker-untracked-link-fix.md)），
+> 复盘见 [md-link-checker-untracked-link-fix.md](../fixlogs/ci-release/md-link-checker-untracked-link-fix.md)），
 > 以上不计入本清单用例数。
 >
 > 另：全量 `pytest` 当前为 **4148 passed, 1 skipped**（2026-10-31 死配置清零时实测；

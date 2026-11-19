@@ -23,7 +23,7 @@ from agent.core.message import (
     ToolUseContent,
 )
 # 发送前修复 tool_use / tool_result 配对：历史里的悬空调用会让 API 拒收整个
-# 请求（用户表现为该会话永久失败）。见 docs/fixlogs/dangling-tool-use-fix.md。
+# 请求（用户表现为该会话永久失败）。见 docs/fixlogs/agent-runtime/dangling-tool-use-fix.md。
 # @author aceFelix
 from agent.core.tool_pairing import ensure_tool_pairing
 from agent.llm.base import (

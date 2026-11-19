@@ -4,7 +4,7 @@
 而纯 CLI 与语音 REPL 此前**从未注册**——于是用户对终端贾维斯说「明天中午
 提醒我面试」，它搜不到工具是事实而非幻觉，接着无视工具描述里「不要自行绕道
 拼凑实现」的警告，转去手搓 `Register-ScheduledTask`，思考长度撞穿
-`max_tokens` 后开始空转（见 docs/fixlogs/agent-loop-stall-fix.md 第六节）。
+`max_tokens` 后开始空转（见 docs/fixlogs/agent-runtime/agent-loop-stall-fix.md 第六节）。
 本模块把 Scheduler 生命周期搬进 REPL 进程，让三条装配路径能力对齐。
 
 设计要点:

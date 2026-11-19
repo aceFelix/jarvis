@@ -3,7 +3,7 @@
 覆盖三通道 query 锁（桌面 send / 手机 bridge / 微信）等锁语义的三条关键性质：
 - 正常路径：返回 True 且调用方确实持有锁（必须自行 release）；
 - 取消路径：取消落在等锁窗口时抛 CancelledError，而线程池事后拿到的锁被归还
-  （回归用例见 docs/fixlogs/query-lock-cancel-leak-fix.md）；
+  （回归用例见 docs/fixlogs/agent-runtime/query-lock-cancel-leak-fix.md）；
 - 串行路径：锁被占用期间多个等待者都进不来，释放后各自拿到并归还。
 
 注释作者 aceFelix

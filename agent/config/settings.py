@@ -172,7 +172,7 @@ class Settings:
     # 迟迟不创建响应：用户说完话半天无回复，且触发「响应救援」反复补发
     # response.create 的死循环（事件链 response.done[cancelled] reason=turn_deleted）。
     # 2026-10-09 曾误将默认改为 "all" 造成实时语音完全不可用，已回退，详见
-    # docs/fixlogs/realtime-talk-tools-mode-default-fix.md。
+    # docs/fixlogs/voice/realtime-talk-tools-mode-default-fix.md。
     realtime_tools_mode: str = "builtin"
 
     # P3-1 跨设备协同（手机通过 PWA 连接）
@@ -250,7 +250,7 @@ class Settings:
 
     # 操作可见性（2026-11）：终端操作轨迹 + 窗口跟随。
     # trace 只记路径/窗口标题/计数，不记文件内容；window_follow 默认 show
-    # （置顶可见但不激活），不会抢用户键鼠。详见 docs/plans/operation-visibility.md。
+    # （置顶可见但不激活），不会抢用户键鼠。详见 docs/plans/visibility/operation-visibility.md。
     trace_enabled: bool = True
     trace_keep_runs: int = 20
     window_follow: str = "show"           # off / show / focus
@@ -575,7 +575,7 @@ class Settings:
     # 只有清出超过这个量才提示一句；低于它就完全静默（例行的无需消耗注意力）
     maintenance_auto_clean_notify_mb: float = 200.0
 
-    # 能力自我修复（docs/plans/capability-selfcheck.md 第 4 节）
+    # 能力自我修复（docs/plans/config/capability-selfcheck.md 第 4 节）
     # 这是维护层头一次会「改环境」的动作，所以它是一个自己的闸，不是复用
     # maintenance_enabled：清理关掉不该连带把补依赖也关掉（两者风险完全不同）。
     #
@@ -602,7 +602,7 @@ class Settings:
     # 核心工具始终携带，MCP/harness/可选工具仅发名字摘要，通过 ToolSearch 按需加载。
     # 纯聊天检测：短消息 + 无动作意图 + 不含文件名/路径形态 → 不发任何工具（0 token）。
     # 结构判据是 2026-10-22 加的：只枚举口语说法补不全，误判会让本轮 0 工具、
-    # 模型改吐文本态 DSML（见 docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md）。
+    # 模型改吐文本态 DSML（见 docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md）。
     tools_deferred_loading: bool = True    # 总开关（false = 回退到全量发送）
     tools_chat_detection: bool = True      # 纯聊天零工具检测
 

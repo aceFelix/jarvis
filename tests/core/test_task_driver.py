@@ -616,7 +616,7 @@ class TestThreadedLoop:
 class TestSideEffectBinding:
     """副作用归属接线：task_id 传给执行体、账本 id 回填 TaskStep.journal_ids。
 
-    实机走查暴露的链路断点（docs/fixlogs/w3-delay-window-bypass-fix.md 3）：编排器
+    实机走查暴露的链路断点（docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md 3）：编排器
     只从 ctx.extra["task_id"] 取归属，驱动器全程没写入，journal_ids 也没回填，
     于是 `/undo --task <goal>` 端到端列不到任何条目。旧用例的 spawn 都是两参函数，
     刚好把这条断链绕过去了本类把"谁写、谁收"补成显式契约。

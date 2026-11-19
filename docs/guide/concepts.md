@@ -212,7 +212,7 @@ Jarvis 用「三道源头 + 一道出口」自动修好：
 - **出口兜底**：所有发往 LLM 的消息在 provider 转换入口先跑 `ensure_tool_pairing()` 校验配对，并可**自愈已中毒的旧会话**（无需丢弃历史）
 - **不破坏缓存**：仅在有违规时重建发送副本，健康历史零拷贝返回（`id`/`timestamp` 不变），冻结前缀的 prompt cache 不受影响
 
-详见 [docs/fixlogs/dangling-tool-use-fix.md](../fixlogs/dangling-tool-use-fix.md)。
+详见 [docs/fixlogs/agent-runtime/dangling-tool-use-fix.md](../fixlogs/agent-runtime/dangling-tool-use-fix.md)。
 
 ## 性能优化
 

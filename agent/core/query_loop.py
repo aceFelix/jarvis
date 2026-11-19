@@ -390,7 +390,7 @@ class QueryLoop:
         # 思考型模型在 max_tokens 预算内写不完「长思考 + 工具调用 JSON」时，
         # 每轮都被截断 → 续写指令又诱导它用散文继续写代码 → 反复空转直至
         # 烧满迭代。连续续写封顶 _MAX_CONTINUATIONS 次仍凑不出完整响应就
-        # 停下来向用户汇报，把决定权交还人。详见 docs/fixlogs/agent-loop-stall-fix.md。
+        # 停下来向用户汇报，把决定权交还人。详见 docs/fixlogs/agent-runtime/agent-loop-stall-fix.md。
         # @author aceFelix
         _MAX_CONTINUATIONS = 2
         cont_streak = 0
@@ -493,7 +493,7 @@ class QueryLoop:
             # reason 口径：openai 协议 finish_reason="length"；anthropic 协议原生
             # stop_reason="max_tokens"（含推理预算耗尽的截断）。此前只认 "length"，
             # 导致 anthropic 协议下截断轮被静默当作最终答案（只剩 thinking、
-            # 无正文无工具调用），见 docs/fixlogs/serve-mcp-truncation-fix.md。
+            # 无正文无工具调用），见 docs/fixlogs/desktop-serve/serve-mcp-truncation-fix.md。
             # @author aceFelix
             if isinstance(stop_event, Stop) and stop_event.reason in ("length", "max_tokens"):
                 cont_streak += 1
@@ -512,7 +512,7 @@ class QueryLoop:
                 # JSON 容错会让残缺工具调用照样产出（anthropic_provider 对
                 # input_json 截断会补 } 或退化为 {"_raw": ...}），而这里不执行
                 # 工具 → 不补结果就会留下悬空 tool_use，让该会话所有后续请求被
-                # API 拒收（见 docs/fixlogs/dangling-tool-use-fix.md）。
+                # API 拒收（见 docs/fixlogs/agent-runtime/dangling-tool-use-fix.md）。
                 # 占位结果与续写指令合并进同一条 user 消息，保持 role 交替合法。
                 continuation: list[ContentBlock] = []
                 truncated_uses = assistant_msg.get_tool_uses()
@@ -548,7 +548,7 @@ class QueryLoop:
             # assistant 消息已在上面入历史，缺失结果会留下悬空调用，使该会话
             # 所有后续请求被 API 拒收（DeepSeek/Anthropic 报 "tool_use ids were
             # found without tool_result blocks"）。详见
-            # docs/fixlogs/dangling-tool-use-fix.md。
+            # docs/fixlogs/agent-runtime/dangling-tool-use-fix.md。
             # @author aceFelix
             try:
                 tool_results = await self._orchestrator.execute_calls(tool_uses, ctx)
@@ -744,7 +744,7 @@ class QueryLoop:
         # 故此处逐个事件检查 abort：置位即抛 CancelledError，交由 run() 既有的
         # except 分支收口（不入历史，避免残缺 tool_use 悬空污染会话）。
         # finally 显式 aclose 异步生成器，中断时及时释放底层 HTTP 连接。
-        # 详见 docs/fixlogs/agent-loop-stall-fix.md。
+        # 详见 docs/fixlogs/agent-runtime/agent-loop-stall-fix.md。
         # @author aceFelix
         stream = self._provider.stream(
             model=self._model,

@@ -45,11 +45,6 @@
 | Cloud assistants **don't know your machine**, and your data isn't yours | Local-first: it lives in your OS, reads your files, drives your apps; memory, logs and configs stay in local `~/.jarvis`, keys go into the OS credential manager |
 | Most assistants **forget you every session** | Three-layer memory: session persistence + long-term memory + profile distillation (auto-learns your habits) — it knows you better the longer you use it |
 
-<div align="center">
-  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw.png" alt="JARVIS vs Claude Code vs OpenClaw ten-dimension capability comparison" width="640"/>
-  <p><em>Measured ten-dimension comparison: JARVIS leads on voice interaction, computer control, visual perception and proactive service</em></p>
-</div>
-
 ## Showcase
 
 <div align="center">
@@ -132,8 +127,8 @@
 | 🧑‍🤝‍🧑 **Agent team** | jarvis-desktop right-column block: complex tasks are split across subagents/teammates running in parallel, each agent shows its status and current action live, can be stopped individually and messaged when it is a teammate; same implementation as the terminal /tasks /agents tools | [Multi-agent collaboration](docs/guide/ecosystem.md#多-agent-协作) |
 | 🧭 **Plan before acting** | The model can enter plan mode on its own (read-only survey → submit a plan → restore write access); the plan is saved to `.jarvis/PLAN.md` and the desktop shows its summary and preview as a system message. You can also pick “规划” manually in the composer | [Desktop guide · Plan mode (中文)](docs/guide/desktop.md#规划模式桌面2026-11) |
 | 🧠 **Three-layer memory** | Session persistence (saved after every turn; `/sessions` and `/load` show **created / updated time**) + long-term memory + profile distillation, knows you better over time; long-term memory is **visible and editable** in desktop Settings → Long-term Memory, and you can just say “remember …” | [Memory](docs/guide/concepts.md#记忆系统) |
-| 🛰️ **Task cockpit + web crawling** | A pinned panel shows up only while it is actually doing something (chit-chat never pops it; ✕ just hides it) — at a glance: which step it is on, what failed, how long it took, and clicking any step opens the details; every running tool and every subagent gets its own small card. On the far left a second panel covers web work: pages it fetched listed by depth, extracted fields laid out as a table, and how pages link to each other drawn as a graph you can pop out and enlarge. `Crawl` walks the site itself (page/depth/same-domain limits, honours robots.txt) and switches to a real browser when a page is just a JS shell; anti-bot challenges are reported as-is, never bypassed. All of it can be turned off with the `[visualization]` switch | [Cockpit plan](docs/plans/terminal-cockpit.md) · [Multi-task cards](docs/plans/cockpit-multicards.md) · [Agent cards](docs/plans/agent-cards.md) (中文) |
-| 🖼️ **Image cockpit** | Screenshots, camera shots and page captures also land in their own window (top-left by default, draggable, position remembered): the original image large, a thumbnail strip for history, and metadata with source, size and path. The terminal could only *send* images to the model — you never saw them; this closes the "for humans" half, so when the model says "I looked at the screenshot" you can check it saw the same one. It does **not** change what is sent to the model, nor the model-side receipt wording (attached ≠ seen) | [Image cockpit plan](docs/plans/image-window.md) (中文) |
+| 🛰️ **Task cockpit + web crawling** | A pinned panel shows up only while it is actually doing something (chit-chat never pops it; ✕ just hides it) — at a glance: which step it is on, what failed, how long it took, and clicking any step opens the details; every running tool and every subagent gets its own small card. On the far left a second panel covers web work: pages it fetched listed by depth, extracted fields laid out as a table, and how pages link to each other drawn as a graph you can pop out and enlarge. `Crawl` walks the site itself (page/depth/same-domain limits, honours robots.txt) and switches to a real browser when a page is just a JS shell; anti-bot challenges are reported as-is, never bypassed. All of it can be turned off with the `[visualization]` switch | [Cockpit plan](docs/plans/visualization/terminal-cockpit.md) · [Multi-task cards](docs/plans/visualization/cockpit-multicards.md) · [Agent cards](docs/plans/visualization/agent-cards.md) (中文) |
+| 🖼️ **Image cockpit** | Screenshots, camera shots and page captures also land in their own window (top-left by default, draggable, position remembered): the original image large, a thumbnail strip for history, and metadata with source, size and path. The terminal could only *send* images to the model — you never saw them; this closes the "for humans" half, so when the model says "I looked at the screenshot" you can check it saw the same one. It does **not** change what is sent to the model, nor the model-side receipt wording (attached ≠ seen) | [Image cockpit plan](docs/plans/visualization/image-window.md) (中文) |
 | 📱 **One session, many ends** | jarvis-desktop shell / phone QR / WeChat ClawBot share the same session | [Desktop & Remote](docs/guide/desktop.md) |
 | 🧭 **Butler runtime layer** | Path-scoped no-confirmation rules in permissions.yaml + authorization leases (stop interrupting me) + notify budget (cut the noise) + `/away` unattended queue for approval | [W1 runtime layer](docs/architecture/16-W1判断层.md) (中文) |
 | 🧾 **The layer that makes it safe to let go** | Outbound mail waits in a 30-second send window (`/undo cancel` stops it, and equivalent outbound commands like `curl` stop being auto-allowed while a hold is open), files it wrote for you roll back per turn with `/undo`; long-lived goals survive across sessions via the task spine (zero LLM calls while it waits), and **one sentence is enough to create one** — `/tasks add …` or just ask J.A.R.V.I.S | [W3 execution layer](docs/architecture/18-W3兑现层.md) (中文) |
@@ -227,7 +222,7 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 - [x] **Phase 10**: W3 execution layer (effect journal + delay window for irreversible actions + `/undo`; cross-session task spine + background driver + `/tasks`) — shipped in v2.3.0
 - [x] **Phase 11**: Perception source adoption (the dormant `CalendarSource` / `SystemMonitor` feed the event bus) — shipped in v2.3.0
 - [x] **Phase 12**: System maintenance slice (disk cleanup / malware scan / performance diagnosis) — shipped in v2.3.2; design and measurements in [System maintenance layer](docs/architecture/19-系统维护层.md) (中文)
-- [x] **Phase 13**: Capability self-check and self-repair (13 live capability probes + pre-call capability gate + `/health caps` + `/repair`, plus three-state model capability) — shipped in v2.4.0; design in [Capability self-check & self-repair](docs/architecture/20-能力自检与自我修复.md) (中文), implementation log in [capability-selfcheck.md](docs/plans/capability-selfcheck.md)
+- [x] **Phase 13**: Capability self-check and self-repair (13 live capability probes + pre-call capability gate + `/health caps` + `/repair`, plus three-state model capability) — shipped in v2.4.0; design in [Capability self-check & self-repair](docs/architecture/20-能力自检与自我修复.md) (中文), implementation log in [capability-selfcheck.md](docs/plans/config/capability-selfcheck.md)
 
 > Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/blueprint/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
@@ -270,29 +265,6 @@ J.A.R.V.I.S. is still in **development and validation**; features are not yet fu
 
 Scan to join and exchange Agent app development experience, plugins and various AI use cases with other Agent app peers.
 
-<table>
-<tr>
-  <td align="center">WeChat group "Hello Jarvis."</td>
-  <td align="center">QQ group "Hello Jarvis."<br/>(1109055256)</td>
-  <td align="center">Douyin group "Hello Jarvis."<br/>(777346526350)</td>
-</tr>
-<tr>
-  <td><img src="assets/communication/discussion-group.png" alt="WeChat group Hello Jarvis." width="150"/></td>
-  <td><img src="assets/communication/discussion-group2.jpg" alt="QQ group Hello Jarvis." width="150"/></td>
-  <td><img src="assets/communication/discussion-group3.jpg" alt="Douyin group Hello Jarvis." width="150"/></td>
-</tr>
-</table>
-
-> The WeChat QR code is valid for 7 days; once it expires, get the latest invite from the QQ group. The QQ and Douyin groups can be joined by searching the group number directly in their apps, so they are not affected by expired QR codes.
-
-</div>
-
-### Buy Me a Coffee
-
-<div align="center">
-
-If J.A.R.V.I.S. has been helpful to you, feel free to buy me a coffee — your support keeps this project moving forward. 🦀🦀
-
-<img src="assets/communication/thanks-for-the-tip.png" alt="WeChat tip QR code" width="200"/>
+<img src="assets/communication/discussion-group.png" alt="WeChat group Hello Jarvis." width="200"/>
 
 </div>

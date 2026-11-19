@@ -46,11 +46,6 @@
 | 云端助手**不认识你的电脑**，数据也不在你手里 | 本地优先：常驻你的系统、读你的文件、操控你的软件；记忆、日志、配置全在本地 `~/.jarvis`，密钥进系统凭据管理器 |
 | 大多数助手**每次都像初见**，交代过的背景全忘 | 四层记忆：会话存盘 + 长期记忆 + 画像记忆（自动提炼）+ **常驻人设卡（P6）**，越用越懂你 |
 
-<div align="center">
-  <img src="docs/assets/Jarvis_vs_Claude_Code_vs_OpenClaw.png" alt="JARVIS vs Claude Code vs OpenClaw 十维能力对比" width="640"/>
-  <p><em>十维能力实测对比：JARVIS 在语音交互、电脑控制、视觉感知、主动服务上差异化领先</em></p>
-</div>
-
 ## 效果展示
 
 <div align="center">
@@ -126,9 +121,9 @@
 | 🖥️ **终端原生 Agent** | Rich 终端 REPL + 70+ 工具（可扩展至 100+）+ ReAct 编排，Ctrl+C 任意阶段打断 | [核心机制](docs/guide/concepts.md) · [命令参考](docs/guide/commands.md) |
 | 🎙️ **能听会说** | `/voice` 逐轮语音对话（空格打断、10 秒无话自动待机等唤醒），`/talk` 全双工实时聊天（说话即打断）；TTS 播报主动提醒 | [语音系统](docs/guide/voice.md) |
 | 🖱️ **操控电脑** | 鼠标/键盘/截屏/窗口管理 + 视觉模板定位，像人一样操作任意软件 | [GUI 自动化](docs/guide/ecosystem.md#gui-自动化) |
-| 👁️ **看得见它在干什么** | 终端逐条打出操作时间线（工具/目标/耗时/失败原因），被操作的窗口自动置顶可见但**不抢键鼠**；**任何工具开新窗都会跟随**（通用观察器，不按工具名登记）；任务收尾自动关闭中间产物窗口（最终结果、前台与未保存窗口保留）；`/trace` 回看最近一轮，轨迹只记路径与窗口标题、不记文件内容 | [操作可见性](docs/plans/operation-visibility.md) |
-| 🛰️ **任务驾驶舱 + 网页抓取** | 干活时弹出一块置顶面板（纯闲聊不弹，点 ✕ 只隐藏），一眼看清做到第几步、哪一步失败、花了多久，点任意一步可展开细节；每个运行中的工具、每个子代理各有一张小卡片。最左边另有「爬虫驾驶舱」：抓过的网页按层级列出、抽到的字段排成表、页面关系画成图，能拖出来单独放大看。`Crawl` 会按顺序翻页（自己限页数、深度与同域，遵守 robots.txt），遇到 JS 空壳页自动改用浏览器渲染，反爬提示只如实报告、不绕过。全部可视化都能用 `[visualization]` 总开关关掉 | [驾驶舱方案](docs/plans/terminal-cockpit.md) · [多任务浮窗](docs/plans/cockpit-multicards.md) · [子代理卡](docs/plans/agent-cards.md) |
-| 🖼️ **图片驾驶舱** | 截图、拍照、网页截图会同时显示在一块独立图片驾驶舱里（默认停屏幕左上角、可拖动，位置记住）：大图看原图、缩略条翻历史、元信息带来源/尺寸/路径。终端此前只能把图送给模型、人却看不到——这个窗口补上「给人看」那一半，模型说「我看了截图」时可以当场核对它看的是不是同一张。它**不改变**送给模型的图片，也不改变模型侧回执口径（附上 ≠ 看见） | [图片驾驶舱方案](docs/plans/image-window.md) |
+| 👁️ **看得见它在干什么** | 终端逐条打出操作时间线（工具/目标/耗时/失败原因），被操作的窗口自动置顶可见但**不抢键鼠**；**任何工具开新窗都会跟随**（通用观察器，不按工具名登记）；任务收尾自动关闭中间产物窗口（最终结果、前台与未保存窗口保留）；`/trace` 回看最近一轮，轨迹只记路径与窗口标题、不记文件内容 | [操作可见性](docs/plans/visibility/operation-visibility.md) |
+| 🛰️ **任务驾驶舱 + 网页抓取** | 干活时弹出一块置顶面板（纯闲聊不弹，点 ✕ 只隐藏），一眼看清做到第几步、哪一步失败、花了多久，点任意一步可展开细节；每个运行中的工具、每个子代理各有一张小卡片。最左边另有「爬虫驾驶舱」：抓过的网页按层级列出、抽到的字段排成表、页面关系画成图，能拖出来单独放大看。`Crawl` 会按顺序翻页（自己限页数、深度与同域，遵守 robots.txt），遇到 JS 空壳页自动改用浏览器渲染，反爬提示只如实报告、不绕过。全部可视化都能用 `[visualization]` 总开关关掉 | [驾驶舱方案](docs/plans/visualization/terminal-cockpit.md) · [多任务浮窗](docs/plans/visualization/cockpit-multicards.md) · [子代理卡](docs/plans/visualization/agent-cards.md) |
+| 🖼️ **图片驾驶舱** | 截图、拍照、网页截图会同时显示在一块独立图片驾驶舱里（默认停屏幕左上角、可拖动，位置记住）：大图看原图、缩略条翻历史、元信息带来源/尺寸/路径。终端此前只能把图送给模型、人却看不到——这个窗口补上「给人看」那一半，模型说「我看了截图」时可以当场核对它看的是不是同一张。它**不改变**送给模型的图片，也不改变模型侧回执口径（附上 ≠ 看见） | [图片驾驶舱方案](docs/plans/visualization/image-window.md) |
 | 🗓️ **主动管家** | 每日简报、定时提醒（桌面与终端 REPL 都能对话安排）、截止日期追踪、系统监控——不用叫，它自己看着办 | [主动提醒系统](docs/guide/desktop.md#主动提醒系统-p2-3已接线) |
 | 👀 **工作现场感知** | 前台窗口 / 目录堆积 / 仓库状况 / 重要来信 / 摄像头在场 / 日程临近 / 系统资源七类事件进统一总线，经打扰预算后只在该说话时开口（**逐源默认关**，从未表过态时连接后告知一次，采了什么可导出自查） | [感知源](docs/guide/desktop.md#感知源阶段-9--w2已接线) |
 | 🛎️ **管家服务** | jarvis-desktop 标题栏入口：邮箱服务（查看/修改当前邮箱 + 配置 SMTP + 发送邮件）直连后端工具（后续可扩展更多服务） | [桌面与多端](docs/guide/desktop.md) |
@@ -231,7 +226,7 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 - [x] **阶段 10**：W3 兑现层（副作用账本 + 不可逆动作延时窗口 + `/undo`；跨会话任务脊柱 + 后台驱动器 + `/tasks`）——已随 v2.3.0 发布
 - [x] **阶段 11**：感知层收编（休眠的 `CalendarSource` / `SystemMonitor` 接进事件总线）——已随 v2.3.0 发布
 - [x] **阶段 12**：系统维护切片（清理 / 查毒 / 性能诊断）——已随 v2.3.2 发布，设计与实测数据见 [19-系统维护层](docs/architecture/19-系统维护层.md)
-- [x] **阶段 13**：能力自检与自我修复（13 项能力实测 + 调用前能力门 + `/health caps` + `/repair`，另补模型能力面三值化）——已随 v2.4.0 发布，设计与取舍见 [20-能力自检与自我修复](docs/architecture/20-能力自检与自我修复.md)，逐段实做记录见 [capability-selfcheck.md](docs/plans/capability-selfcheck.md)
+- [x] **阶段 13**：能力自检与自我修复（13 项能力实测 + 调用前能力门 + `/health caps` + `/repair`，另补模型能力面三值化）——已随 v2.4.0 发布，设计与取舍见 [20-能力自检与自我修复](docs/architecture/20-能力自检与自我修复.md)，逐段实做记录见 [capability-selfcheck.md](docs/plans/config/capability-selfcheck.md)
 
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 > 阶段 12 / 13 的**编号口径**（本文与蓝图曾各指一件事）见蓝图 §9.4 说明。
@@ -275,29 +270,6 @@ J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳
 
 扫码加入，和其他Agent应用伙伴一起交流 Agent 应用开发经验、插件及各种AI玩法。
 
-<table>
-<tr>
-  <td align="center">微信群「Hello Jarvis.」</td>
-  <td align="center">QQ 群「Hello Jarvis.」<br/>（群号 1109055256）</td>
-  <td align="center">抖音群「Hello Jarvis.」<br/>（群号 777346526350）</td>
-</tr>
-<tr>
-  <td><img src="assets/communication/discussion-group.png" alt="微信群 Hello Jarvis." width="150"/></td>
-  <td><img src="assets/communication/discussion-group2.jpg" alt="QQ 群 Hello Jarvis." width="150"/></td>
-  <td><img src="assets/communication/discussion-group3.jpg" alt="抖音群 Hello Jarvis." width="150"/></td>
-</tr>
-</table>
-
-> 微信群二维码 7 天内有效，过期后可从 QQ 群获取最新入群方式；QQ 群与抖音群可直接在 App 内搜索群号加入。
-
-</div>
-
-### 赞赏支持
-
-<div align="center">
-
-如果 J.A.R.V.I.S. 对你有帮助，欢迎请我喝杯咖啡——你的支持是项目持续迭代的动力，🦀🦀。
-
-<img src="assets/communication/thanks-for-the-tip.png" alt="微信赞赏码" width="200"/>
+<img src="assets/communication/discussion-group.png" alt="微信群 Hello Jarvis." width="200"/>
 
 </div>

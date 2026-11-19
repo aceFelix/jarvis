@@ -54,7 +54,7 @@ LLM 协议（Anthropic / OpenAI 一致）要求 `tool_use` 与 `tool_result` **�
 
 另有一道**出口兜底**：两个 provider 的消息转换入口（`_messages_to_openai` / `_messages_to_anthropic`）都会先跑 `ensure_tool_pairing()`，兜住主循环之外的所有 LLM 请求路径（压缩、标题生成、realtime 语音等），并能自愈已中毒的旧会话。
 
-详见 [tool_pairing.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_pairing.py) 与 [docs/fixlogs/dangling-tool-use-fix.md](../fixlogs/dangling-tool-use-fix.md)。
+详见 [tool_pairing.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/tool_pairing.py) 与 [docs/fixlogs/agent-runtime/dangling-tool-use-fix.md](../fixlogs/agent-runtime/dangling-tool-use-fix.md)。
 
 ### `ensure_tool_pairing()` 关键设计
 
@@ -182,7 +182,7 @@ async for event in self._provider.stream(...):
   要跑完一轮才轮到下一轮循环顶部的检查，而语音模式 SIGINT 只置标志不抛异常（见
   [06-语音系统](06-语音系统.md)），Ctrl+C 会形同失效。被中断的残缺轮不入历史，
   以免半截 `tool_use` 悬空（详见
-  [fixlogs/agent-loop-stall-fix](../fixlogs/agent-loop-stall-fix.md)）
+  [fixlogs/agent-loop-stall-fix](../fixlogs/agent-runtime/agent-loop-stall-fix.md)）
 - **空回复保护**：空 assistant 消息不加入历史，避免污染后续请求
 - **单轮失败不炸主循环**：错误回灌给模型让它自我修正
 - **网络重试**：网络类错误每轮自动重试 1 次（按 `ProviderError.category` 判定，不再匹配文案）
@@ -190,7 +190,7 @@ async for event in self._provider.stream(...):
   厂商 5xx/过载不走网络重试，直接到这里求切厂商
 - **日志可观测**：`agent` 命名空间上挂了与 `jarvis` 同一对 handler，所以
   `logging.getLogger(__name__)` 的模块（共 19 个，含本文件所在的 `query_loop`）也能落盘；
-  复盘见 [fixlogs/provider-busy-error-classification-fix.md](../fixlogs/provider-busy-error-classification-fix.md)
+  复盘见 [fixlogs/llm/provider-busy-error-classification-fix.md](../fixlogs/llm/provider-busy-error-classification-fix.md)
 - **手动切模型**：`switch_model()` 就地换 `_provider` / `_model`（REPL `/model` 与工作台/桌面壳
   `models.select` 共用同一链路：不重建 QueryLoop，会话 token 累计 / 思考模式覆盖 / 消息上下文
   全保留，旧 provider 交调用方 `close()`；见 [07-UI层.md](07-UI层.md) 「模型热切换」）
@@ -329,7 +329,7 @@ registry.all_deferred()  # deferred=True 的延迟工具池（需 ToolSearch 发
 纯聊天（短问句且无动作意图关键词、不含文件名/路径形态、历史里无 `tool_use`）本轮 0 工具下发；判定取保守策略
 ——“宁可多发不可漏发”，误判为纯聊天会让模型发的文本态工具调用被全量过滤，表现为
 “思考完就停止”（见
-[`docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)）。
+[`docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md)）。
 关键词表与上限（`ACTION_KEYWORDS` / `CHAT_ONLY_MAX_CHARS`）均为模块级常量，便于按案例调整；
 但只靠枚举自然语言说法会无限复发误判（2026-10-22 第四次），因此另有结构判据
 `_looks_fileish()`：出现 `名字.扩展名`（`_FILE_TOKEN_RE`，汉字文件名也算）或路径形态

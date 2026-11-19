@@ -6,7 +6,7 @@
   给左侧「爬虫驾驶舱」的“抽取 // EXTRACT”区提供数据（工具本身不依赖 UI）。
 
 选择器实现：``beautifulsoup4`` + 内置 ``html.parser``（用户 2026-11-09 决策，
-不引入 lxml，避免桌面打包带编译依赖）。方案见 ``docs/plans/crawler-cockpit.md``。
+不引入 lxml，避免桌面打包带编译依赖）。方案见 ``docs/plans/visualization/crawler-cockpit.md``。
 
 @author aceFelix
 """

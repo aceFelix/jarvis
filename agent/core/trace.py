@@ -119,6 +119,35 @@ def _target_of(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | N
     return None
 
 
+def _union_ms(spans: list[tuple[float, float]]) -> int:
+    """把若干墙钟区间求并集，返回毫秒。
+
+    为什么不用简单相加：工具可以并行（``CockpitState.active`` 里同时挂多个），
+    相加会把重叠的那段算两遍，拆出来的“工具时间”甚至会超过整轮耗时。并集
+    只统计**真正被工具占用的墙钟**，与 ``duration_ms`` 同口径，可以直接相减
+    得出模型段。
+
+    Args:
+        spans: ``(start, end)`` 秒，来自 ``time.monotonic()``；允许乱序、零长度。
+
+    Returns:
+        并集时长（毫秒，向下取整）。
+    """
+    ordered = [span for span in sorted(spans) if span[1] > span[0]]
+    if not ordered:
+        return 0
+    total = 0.0
+    cur_start, cur_end = ordered[0]
+    for start, end in ordered[1:]:
+        if start > cur_end:
+            total += cur_end - cur_start
+            cur_start, cur_end = start, end
+        else:
+            cur_end = max(cur_end, end)
+    total += cur_end - cur_start
+    return max(0, int(total * 1000))
+
+
 @dataclass
 class TraceRecorder:
     """一轮对话的轨迹采集器。
@@ -152,6 +181,10 @@ class TraceRecorder:
     _failed: int = 0
     _files_changed: int = 0
     _started: float = 0.0
+    # 本轮每次工具的墙钟区间（start, end）：让 run_end 能把“整轮耗时”拆成
+    # 模型段与工具段。并行工具取并集（见 _union_ms），不重复计。
+    # @author aceFelix
+    _tool_spans: list[tuple[float, float]] = field(default_factory=list)
     _pending: dict[str, dict[str, Any]] = field(default_factory=dict)
     _last_input: dict[str, Any] = field(default_factory=dict)
     _workdir: str = ""
@@ -205,6 +238,7 @@ class TraceRecorder:
         self._show_at = {}
         self._last_close_intent_at = 0.0
         self._started = time.monotonic()
+        self._tool_spans = []
         self._rotate()
         self._emit({"type": "run_start", "input_chars": int(input_chars)})
 
@@ -228,6 +262,9 @@ class TraceRecorder:
                 "failed": self._failed,
                 "files_changed": self._files_changed,
                 "duration_ms": duration,
+                # 工具占用的墙钟（区间并集）；模型段 = duration_ms - tool_ms。
+                # 两者同口径，HUD 与终端都据此拆分，不再各自猜。@author aceFelix
+                "tool_ms": _union_ms(self._tool_spans),
             }
         )
         with self._lock:
@@ -319,8 +356,14 @@ class TraceRecorder:
         tool_use_id = str(payload.get("tool_use_id") or "")
         pending = self._pending.pop(tool_use_id, None)
         agent_meta = pending.get("agent") if pending else _agent_meta(payload.get("ctx"))
-        started = pending["started"] if pending else time.monotonic()
-        duration = int((time.monotonic() - started) * 1000)
+        # 起止只取一次 monotonic：duration 与 _tool_spans 必须用同一对端点，
+        # 否则拆分出来的工具段与实际 duration_ms 会有毫秒级对不上。
+        ended = time.monotonic()
+        started = pending["started"] if pending else ended
+        duration = int((ended - started) * 1000)
+        # 2026-11-18：留区间给 finish_run 做“模型 / 工具”耗时拆分。
+        # 子代理的工具也记——它们确实占用了本轮的墙钟。@author aceFelix
+        self._tool_spans.append((started, ended))
         is_error = bool(payload.get("is_error"))
         if is_error and not (agent_meta or {}):
             # 子代理失败不计入主任务失败数；它由代理卡自己汇总
@@ -341,7 +384,7 @@ class TraceRecorder:
                 **(agent_meta or {}),
             }
         )
-        # 抓取类工具派生 web_fetch（工具实现零改动，见 docs/plans/terminal-cockpit.md）。
+        # 抓取类工具派生 web_fetch（工具实现零改动，见 docs/plans/visualization/terminal-cockpit.md）。
         # 字段缺失即省略：http_status / parent_url / depth 本轮无数据源，不写假值。
         # @author aceFelix
         if pending is not None:
@@ -751,7 +794,7 @@ def install_observability(settings: Any, ui: Any) -> TraceRecorder:
         on_event=getattr(ui, "on_trace_event", None),
     )
 
-    # 通用窗口观察器：快照差分决定跟随，不依赖工具名（见 docs/plans/window-observer.md）
+    # 通用窗口观察器：快照差分决定跟随，不依赖工具名（见 docs/plans/visibility/window-observer.md）
     if director is not None:
         try:
             from agent.core.window_observer import WindowObserver

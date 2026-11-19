@@ -13,6 +13,7 @@ import time
 from agent.core.trace import (
     MASKED_WINDOW,
     TraceRecorder,
+    _union_ms,
     mask_window_title,
 )
 
@@ -100,6 +101,61 @@ def test_trace_records_full_run(tmp_path) -> None:
     assert events[3]["diff"] == {"added": 1, "removed": 0}
     assert events[4]["steps"] == 1
     assert events[4]["files_changed"] == 1
+
+
+def test_union_ms_merges_overlapping_spans() -> None:
+    """工具耗时按区间并集算：串行相加、重叠只算一次、乱序与零长不影响。"""
+    assert _union_ms([]) == 0
+    # 串行两段 0.25s + 0.25s
+    assert _union_ms([(0.25, 0.5), (0.75, 1.0)]) == 500
+    # 并行重叠：0~0.5 与 0.25~0.75 → 并集 0.75s，而不是相加的 1.0s
+    assert _union_ms([(0.0, 0.5), (0.25, 0.75)]) == 750
+    # 完全包含：大区间覆盖小区间
+    assert _union_ms([(0.0, 1.0), (0.25, 0.5)]) == 1000
+    # 乱序 + 零长区间（同一时刻开始并结束）
+    assert _union_ms([(0.75, 1.0), (0.25, 0.5), (0.5, 0.5)]) == 500
+
+
+def test_run_end_carries_tool_ms(tmp_path) -> None:
+    """run_end 必须带 tool_ms，且工具段不得超过整轮耗时。
+
+    HUD 与终端都靠这个字段把“整轮 7.6s”拆成“模型 / 工具”；缺了它就只能显示
+    总时长，用户拿单步明细（几百毫秒）对比时会以为统计在造假。
+    """
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before({"tool_name": "Bash", "tool_use_id": "t9", "tool_input": {}})
+    rec.on_tool_after(
+        {"tool_name": "Bash", "tool_use_id": "t9", "result": "ok", "is_error": False}
+    )
+    rec.finish_run()
+
+    end = [e for e in _read_events(rec) if e["type"] == "run_end"][0]
+    assert "tool_ms" in end, "run_end 缺 tool_ms，拆分口径无法下发"
+    assert 0 <= end["tool_ms"] <= end["duration_ms"]
+
+
+def test_tool_ms_excludes_idle_between_tools(tmp_path) -> None:
+    """两段工具之间的等模型时间不进 tool_ms。"""
+    rec = _recorder(tmp_path)
+    rec.start_run()
+    rec.on_tool_before({"tool_name": "Bash", "tool_use_id": "a", "tool_input": {}})
+    time.sleep(0.03)
+    rec.on_tool_after({"tool_name": "Bash", "tool_use_id": "a", "result": "", "is_error": False})
+    time.sleep(0.05)  # 模型思考：不属于工具段
+    rec.on_tool_before({"tool_name": "Bash", "tool_use_id": "b", "tool_input": {}})
+    time.sleep(0.03)
+    rec.on_tool_after({"tool_name": "Bash", "tool_use_id": "b", "result": "", "is_error": False})
+    rec.finish_run()
+
+    end = [e for e in _read_events(rec) if e["type"] == "run_end"][0]
+    # 只断言“空闲没被算进工具段”，不断言绝对毫秒：sleep 在慢 CI 上只会更长，
+    # 写死上限反而会把调度抖动当成缺陷。中间故意留了 50ms 空闲，取 40ms 作下限。
+    idle = end["duration_ms"] - end["tool_ms"]
+    assert idle >= 40, (
+        f"两段工具之间约 50ms 的等模型时间被算进了工具段："
+        f"duration={end['duration_ms']}ms tool={end['tool_ms']}ms"
+    )
 
 
 def test_trace_failed_tool_keeps_first_error_line(tmp_path) -> None:

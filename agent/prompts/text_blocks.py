@@ -443,7 +443,7 @@ _SECURITY_SECTION = """\
 # 日程提醒段。按需注入：只有当前环境真正注册了提醒工具（serve/桌面宿主经
 # registry_hook 挂载 ScheduleReminder 等）时才拼进系统提示。
 # 终端 CLI 不注册这些工具，若不条件化注入，模型会以为能用而反复 ToolSearch
-# 搜索不存在的工具，白白空转（见 fixlogs/schedule-prompt-conditional-fix.md）。
+# 搜索不存在的工具，白白空转（见 fixlogs/agent-runtime/schedule-prompt-conditional-fix.md）。
 _SCHEDULE_SECTION = """\
 # 日程提醒
 

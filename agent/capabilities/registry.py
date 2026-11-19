@@ -1,7 +1,7 @@
 """能力登记表 —— jarvis「我能不能做到」的事实来源。
 
 为什么需要这一层（2026-11-03 实机复盘，计划见
-docs/plans/capability-selfcheck.md）：一次"写个简易贪吃蛇"的任务花了约 40 次工具调用，
+docs/plans/config/capability-selfcheck.md）：一次"写个简易贪吃蛇"的任务花了约 40 次工具调用，
 根因是系统对能力的认知**只到"包能不能 import"这一层**。playwright 包装得好好的，
 `BrowserNavigate` 因此照常注册、照常出现在 ToolSearch 结果里，而真正缺的是浏览器内核
 （revision 1223）。模型不知道，于是撞上去、自动重试、再撞；最后用"假设"填空，

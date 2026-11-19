@@ -195,7 +195,7 @@ class TestRunAbort:
 
         必须给这批 tool_use 留下配对结果——否则历史里出现悬空调用，
         该会话此后每次请求都会被 API 拒收（见
-        docs/fixlogs/dangling-tool-use-fix.md）。
+        docs/fixlogs/agent-runtime/dangling-tool-use-fix.md）。
         """
         provider = ScriptedProvider([_tool_script()])
         orch = FakeOrchestrator()
@@ -523,7 +523,7 @@ class TestRunEdgeCases:
 
         回归：此前只认 openai 口径 "length"，anthropic 协议下截断轮被静默当作
         最终答案（只剩 thinking、无正文无工具调用），
-        见 docs/fixlogs/serve-mcp-truncation-fix.md。@author aceFelix
+        见 docs/fixlogs/desktop-serve/serve-mcp-truncation-fix.md。@author aceFelix
         """
         provider = ScriptedProvider([
             [TextDelta("推理的前半段"), Stop(reason="max_tokens", usage=Usage())],

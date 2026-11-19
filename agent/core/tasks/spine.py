@@ -11,7 +11,7 @@
 为什么不是升级计划里写的 ``~/.jarvis/tasks/goals/``：``~/.jarvis/tasks/<team>/`` 已被
 协作 TaskList 用作团队目录，插一个 ``goals`` 子目录会在团队恰好叫 "goals" 时串目录、
 双方互相读坏。挪到顶层独立目录，两套存储天然隔离（代价：路径与计划文档不一致，
-已在 docs/roadmap/PLAN-butler-autonomy-upgrade.md §4 的进度块里记明）。
+已在 docs/roadmap/butler/PLAN-butler-autonomy-upgrade.md §4 的进度块里记明）。
 
 写入一律"临时文件 + os.replace"（对齐 ``profile_store`` / ``memory/recovery`` 的崩溃
 安全范式），并用 ``agent/utils/filelock`` 的跨进程锁做读-改-写：CLI 与 serve 是两个

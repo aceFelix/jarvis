@@ -215,7 +215,7 @@ DeepSeek 的内部工具调用序列化格式 DSML（`<｜｜DSML｜｜ invoke n
    误判方向仍取“宁多发不可漏发”。详见 fixlog「四次补漏」。
 
 Zai / DashScope 原生 SDK 走各自的工具块协议，暂未接入，若复现按同一 guard 三行接入即可。
-详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md)。
+详见 [fixlog](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md)。
 
 ### 2. Anthropic Provider
 
@@ -410,7 +410,7 @@ def classify(exc) -> ClassifiedError:
 `ProviderError.category`（四个 Provider 的抛出点统一走它），`effective_category()` 在异常
 没带分类时回退到文案匹配（兼容外部裸构造）。以前只有文案往下传，`QueryLoop` 只能靠匹配
 「网络错误」四个字选恢复动作——改一句提示语就会让重试静默失效、测试还全绿。复盘见
-[fixlogs/provider-busy-error-classification-fix.md](../fixlogs/provider-busy-error-classification-fix.md)。
+[fixlogs/llm/provider-busy-error-classification-fix.md](../fixlogs/llm/provider-busy-error-classification-fix.md)。
 
 ## 十、工具调用统一抽象
 
@@ -437,7 +437,7 @@ Provider 把它们统一转成 `ToolCall(id, name, input)` 事件，QueryLoop �
 - **Anthropic**：`tool_result` 块排在 user 消息 content 的**前置**位置
 - 空 assistant 消息（既无正文也无 tool_calls）→ 补空串/占位文本，**不跳过**（跳过会破坏 role 交替）
 
-详见 [docs/fixlogs/dangling-tool-use-fix.md](../fixlogs/dangling-tool-use-fix.md)。
+详见 [docs/fixlogs/agent-runtime/dangling-tool-use-fix.md](../fixlogs/agent-runtime/dangling-tool-use-fix.md)。
 
 ## 十一、多模态图片处理
 

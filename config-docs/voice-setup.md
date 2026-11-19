@@ -69,7 +69,7 @@ Key 在[阿里云百炼控制台](https://bailian.console.aliyun.com/)取。
    去连阿里云，必然 401；而报错只说“TTS 连接建立失败”，完全看不出是 key 混用。
 
 两个都已修掉，并把首启引导补上了这一项（复盘见
-[voice-api-key-onboarding-fix.md](../docs/fixlogs/voice-api-key-onboarding-fix.md)）。
+[voice-api-key-onboarding-fix.md](../docs/fixlogs/voice/voice-api-key-onboarding-fix.md)）。
 
 ### 自查
 
@@ -189,7 +189,7 @@ echo_suppress_with_aec = false   # 默认 true；仅耳机场景建议关闭
 > 若 `/talk` 出现“一直在说、AI 完全不回复”，退出时的诊断摘要会提示“回复被取消”
 > 及其回声成因；打开 `event_log = true` 可在 `~/.jarvis/logs/diag.log` 看到完整事件时间线。
 > 完整复盘见
-> [realtime-talk-echo-self-cancel-fix.md](../docs/fixlogs/realtime-talk-echo-self-cancel-fix.md)。
+> [realtime-talk-echo-self-cancel-fix.md](../docs/fixlogs/voice/realtime-talk-echo-self-cancel-fix.md)。
 
 ### 外放时 AI 说完就不接话？半双工轮替（默认开启）
 
@@ -208,7 +208,7 @@ echo_suppress_with_aec = false   # 默认 true；仅耳机场景建议关闭
 half_duplex = false   # 默认 true（半双工）；设为 false 需配合耳机使用
 ```
 
-复盘见 [realtime-talk-half-duplex.md](../docs/fixlogs/realtime-talk-half-duplex.md)。
+复盘见 [realtime-talk-half-duplex.md](../docs/fixlogs/voice/realtime-talk-half-duplex.md)。
 
 ### 轮次检测：为什么默认 server_vad（2026-09-28 根因翻案）
 

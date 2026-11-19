@@ -1,6 +1,6 @@
 """通用窗口观察器：用"窗口事实变化"决定是否跟随，而不是工具名白名单。
 
-设计定稿见 ``docs/plans/window-observer.md``。一句话：
+设计定稿见 ``docs/plans/visibility/window-observer.md``。一句话：
 
 > 工具执行前后拍两次窗口快照，谁新出现、且成了前台，就跟谁；
 > 工具入参里写了窗口标题，就按标题跟。

@@ -118,7 +118,7 @@ class TestScheduleSectionConditional:
     """「# 日程提醒」段按环境能力条件化注入。
 
     终端 CLI 不注册提醒工具，若不条件化，模型会反复 ToolSearch 搜索不存在
-    的工具空转（见 fixlogs/schedule-prompt-conditional-fix.md）。
+    的工具空转（见 fixlogs/agent-runtime/schedule-prompt-conditional-fix.md）。
     """
 
     def test_absent_when_no_schedule_tool(self):

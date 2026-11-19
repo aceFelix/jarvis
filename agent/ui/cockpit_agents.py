@@ -11,7 +11,7 @@
   创建/渲染/销毁 ``Toplevel``；工具栏位置在主 HUD 左侧第二列。
 
 用户 2026-11-08 拍板：每个代理一张卡、保留终端原始输出、空闲卡保留、
-代理卡放主 HUD 左侧第二列。方案见 docs/plans/agent-cards.md。
+代理卡放主 HUD 左侧第二列。方案见 docs/plans/visualization/agent-cards.md。
 
 @author aceFelix
 """

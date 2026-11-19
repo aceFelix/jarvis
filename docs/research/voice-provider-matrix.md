@@ -158,4 +158,4 @@ DashScope Key”那一行，且 CI 可无 key 测试）。核实后判断为**�
 2. 之后按计划顺序：先落 S4 回放测试（帧序护栏），再动 S2 抽象层，最后 S3 接第二家；
 3. 本文档的第四节结论段在拍板后更新为最终决定；
 4. 已完成（2026-11-03）：`docs/architecture/06-语音系统.md` 已加指针指向本文档，立项计划文档见
-   [plans/voice-provider-decoupling.md](../plans/voice-provider-decoupling.md)。
+   [plans/voice/voice-provider-decoupling.md](../plans/voice/voice-provider-decoupling.md)。

@@ -49,7 +49,7 @@ def test_no_undefined_names_in_agent() -> None:
         # 必须显式指定编码：中文 Windows 的默认解码是 GBK，ruff 输出里只要
         # 带一句中文注释就在 reader thread 里 UnicodeDecodeError，导致这条
         # 门禁"静默失败"——报的错与 F821 毫无关系，排查时极易被带偏。
-        # 与 docs/fixlogs/doctor-redirect-encoding-fix.md 同源。
+        # 与 docs/fixlogs/ui/doctor-redirect-encoding-fix.md 同源。
         encoding="utf-8",
         errors="replace",
     )

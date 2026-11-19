@@ -22,7 +22,7 @@
   2026-10-09 曾误把默认改成 "all" 导致实时语音完全不可用，已回退。产品定位：
   **实时语音只做闲聊/低延迟对话，需要工具时走半双工 /voice**。确需工具子集时
   精选 10~20 个（勿一次性注册全量），并实机验证。详见
-  docs/fixlogs/realtime-talk-tools-mode-default-fix.md。
+  docs/fixlogs/voice/realtime-talk-tools-mode-default-fix.md。
 - MCP 工具仍在首个 session.update 之前加载（会话配置一次性 IDLE 完成）。
 
 用法: /talk 启动，ESC 退出

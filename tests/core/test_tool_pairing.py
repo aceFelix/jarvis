@@ -10,7 +10,7 @@
 背景：残缺历史会让 Anthropic 兼容端点（DeepSeek 等）在受理前拒收整个请求
 （"tool_use ids were found without tool_result blocks immediately after"），
 一旦被持久化，该会话每次请求都携带它 → 永久失败。详见
-docs/fixlogs/dangling-tool-use-fix.md。
+docs/fixlogs/agent-runtime/dangling-tool-use-fix.md。
 
 @author aceFelix
 """

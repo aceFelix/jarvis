@@ -1,6 +1,6 @@
 """Bash 工具的后台命令脱离与输出收集回归测试。
 
-背景（见 docs/fixlogs/bash-background-command-wait-fix.md）：
+背景（见 docs/fixlogs/agent-runtime/bash-background-command-wait-fix.md）：
 - MSYS2/Git Bash 的 `bash -c 'cmd &'` **不会**立刻返回，它会等这个后台 job
   （实测 `sleep 3 &` = 3.18s，`sleep 3 >/dev/null &` = 0.21s）。
   于是模型写 `firefox.exe URL &` 时，「打开一个网页」照样卡满 timeout。

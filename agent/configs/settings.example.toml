@@ -485,7 +485,7 @@ auto_clean_min_mb = 20     # 低于此可回收量就不建批次（零感知垃
 auto_clean_notify_mb = 200 # 清出超过这个量才提示一句；低于它全静默
 
 # ── 能力自我修复 ────────────────────────────────────────────────
-# 设计依据见 docs/plans/capability-selfcheck.md 第 4 节。
+# 设计依据见 docs/plans/config/capability-selfcheck.md 第 4 节。
 #
 # 这一层是维护层头一次会「改环境」（下内核、装 extras、改配置），
 # 所以它是一个自己的闸，不复用 [maintenance].enabled：清理关掉不该连带

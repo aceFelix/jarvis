@@ -11,7 +11,7 @@
 调用点一字不改（``self._block`` / ``self._ask`` / ``self.request_approval``
 仍然有效），拆分的唯一可见结果是模块边界。
 
-2026-10-22 实机走查后新增三条口径（见 docs/fixlogs/w3-driver-approval-blocked-report.md）：
+2026-10-22 实机走查后新增三条口径（见 docs/fixlogs/w1-w3/w3-driver-approval-blocked-report.md）：
 - 受阻步骤必须挂 ``APPROVAL_HOLD_S`` 安全退避（受阻没有 ``wait`` 护身，不退避
   就是每轮重跑一次 LLM 的死循环）；
 - 用户答复后必须清零退避并立刻唤醒，且**没命中步骤时返回 False**——这个返回值

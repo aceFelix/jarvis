@@ -388,7 +388,7 @@ pitch_rate = 1.0                     # 音高（0.5-2.0）
 > 两个参数已于 2026-11-01 一并删除，敲它们现在会报 unknown argument。
 > 注意：对话引擎层本身**没有退役**，它已从 `agent/ui/workbench/` 迁到
 > `agent/serve/engine/`，仍是 `--serve` 与桌面壳共用的后端引擎；
-> 判断依据与影响面见 [workbench-gui-retired](docs/fixlogs/workbench-gui-retired.md)。
+> 判断依据与影响面见 [workbench-gui-retired](docs/fixlogs/desktop-serve/workbench-gui-retired.md)。
 
 > 📌 原「无窗口后台常驻 + 系统托盘」模式已于 2026-08 下线。
 > 定时提醒/每日简报等主动服务已于 2026-09 重新接线：通过 **jarvis-desktop 桌面应用**（连 `jarvis --serve` 后端）播报——每日简报、对话内“提醒我”、截止日期提醒到期时会在聊天区上屏并弹系统通知。因 serve 进程随桌面壳启停，主动服务仅在桌面壳（或手动 `--serve`）运行期间生效。

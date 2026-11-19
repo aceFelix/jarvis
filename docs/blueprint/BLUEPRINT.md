@@ -104,10 +104,10 @@ J.A.R.V.I.S 目前已经是一个**功能完整的 Windows 个人智能体**：7
 |---|---|---|
 | 实时语音 Function Calling | "已接入 ToolRegistry 全部工具" | 工具 schema 数与服务端建响应延迟近似线性（≈12ms/个）：294 个 → 3.45s，被响应救援与 server_vad 尾音重检掐死，表现为"半天不回复"。**默认只注册 2 个内置工具**，全量工具正解是"口手分离"（阶段 11） |
 | §2.1「系统维护 = 完全空白」 | 无 / ☆ | 已于 2026-10-31 交付（阶段 12）并随 v2.3.2 发布：19 条规则库 + 隔离区 + `SecurityCenter2` 杀软判定 + 七区块体检，详见 [19-系统维护层](../architecture/19-系统维护层.md)；本行于 2026-11-05 复核更新 |
-| 模型的交付汇报（2026-11-03 贪吃蛇会话） | "我已经用浏览器打开验证过了，布局对齐、按键响应都正常" | 当时本机**没有 playwright 浏览器内核**，`chromium.launch()` 必然报错——它验不了。根因不是态度问题：代码层把“工具有没有”等价于“包能不能 import”，没有任何“能力”概念，模型只能从“工具存在”推断“我做得到”。现由阶段 13 在调用前拦住并禁止把未执行写成已验证，复盘见 [snake-visual-claim-fix.md](../fixlogs/snake-visual-claim-fix.md) |
+| 模型的交付汇报（2026-11-03 贪吃蛇会话） | "我已经用浏览器打开验证过了，布局对齐、按键响应都正常" | 当时本机**没有 playwright 浏览器内核**，`chromium.launch()` 必然报错——它验不了。根因不是态度问题：代码层把“工具有没有”等价于“包能不能 import”，没有任何“能力”概念，模型只能从“工具存在”推断“我做得到”。现由阶段 13 在调用前拦住并禁止把未执行写成已验证，复盘见 [snake-visual-claim-fix.md](../fixlogs/agent-runtime/snake-visual-claim-fix.md) |
 | 本文与 README 的「阶段 12」 | 同一编号指两件事 | 本文 §7 把阶段 12 记为“让 jarvis 自己管配置”，README 开发路线把阶段 12 记为“系统维护切片”。**自阶段 13 起以 README 为准**（能力自检与自我修复 = 阶段 13）；自配置层的工作本身已交付，不重编历史，只在此说明口径 |
 
-> 复盘详见 [realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md)。
+> 复盘详见 [realtime-talk-tools-mode-default-fix.md](../fixlogs/voice/realtime-talk-tools-mode-default-fix.md)。
 
 ---
 
@@ -270,7 +270,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 缺口 | ~~电池/温度/启动项巡检、“体检报告”式汇总~~ ✅ 已补齐（温度/SMART/卷影/DISM 均需管理员，当前策略是**如实标注需提权**而不是隐藏）；网络连通性巡检仍未做 |
 | 落点 | `tools/system/maintenance.py` 一组工具 + scheduler 定期执行 |
 | 「加速」口径 | **改名「性能诊断」**：只做**发现 + 解释 + 建议**，执行权永远在用户手里。Win10/11 的「加速球」属产品噱头（进程调度与内存管理已够好），而「一键杀进程」杀掉的可能是跑了两小时的编译、导入到一半的模型、正在保存的文档。**绝不自动结束进程 / 禁用启动项**；SSD 走 TRIM 不做碎片整理 |
-| 升级说明 | 见 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B4 批（磁盘 SMART / 进程热点 Top N / 启动项清单 / 体检报告汇总）。✅ **2026-10-31 已交付**：`agent/core/maintenance/health.py` 一次 PowerShell 取回七区块（资源/磁盘/安全/进程/启动项/电源/温度），`SystemHealth` 工具 + `/health`（含 `--markdown` / `--save`）；提权失败的区块用 `need_admin=True` 标出来而不是返回 0。实现见 [19-系统维护层](../architecture/19-系统维护层.md) |
+| 升级说明 | 见 [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md) B4 批（磁盘 SMART / 进程热点 Top N / 启动项清单 / 体检报告汇总）。✅ **2026-10-31 已交付**：`agent/core/maintenance/health.py` 一次 PowerShell 取回七区块（资源/磁盘/安全/进程/启动项/电源/温度），`SystemHealth` 工具 + `/health`（含 `--markdown` / `--save`）；提权失败的区块用 `need_admin=True` 标出来而不是返回 0。实现见 [19-系统维护层](../architecture/19-系统维护层.md) |
 
 ### 6.2 清理垃圾
 
@@ -281,7 +281,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 现状 | ✅ 2026-10-31 交付（B1 只读诊断 + B2 隔离区清理）：`agent/config/cleaners.toml` 18 条规则 + `rules` / `scanner` / `cleaner` 三模块 + `DiskReport` / `DiskClean` 工具 + `/disk` `/clean` |
 | 成熟方案的边界 | **BleachBit 只借格式、不借规则**：CleanerML 是声明式的好范式，但它的规则集面向 Linux（`~/.cache/*`、`/var/tmp`），Windows 系统级垃圾（`Windows.old`、`SoftwareDistribution`、WinSxS）**不在其覆盖内**。Windows 侧真正有效的是系统自带能力：`Dism /StartComponentCleanup`（WinSxS，常省 2–5 GB）、`cleanmgr`、回收站。**通用开源里没有能直接覆盖 Windows 系统级垃圾又安全可编排的清理器，规则表必须自己写** |
 | 落点 | `agent/core/maintenance/`（rules / scanner / cleaner）+ `tools/extensions/maintenance.py` + `/disk` `/clean` 命令 |
-| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，分 **B1 只读诊断**（零风险，先做）/ **B2 可撤销清理**（隔离区 + 快照 + `/undo`）两批；每批独立可用、独立验收。<br>✅ **两批均已于 2026-10-31 交付**，但隔离区口径与本文原稿不同：**用移动而非复制式快照**——现有 `FileGuard` 写前留底是复制式且阈值只有 50MB，GB 级垃圾复制一份等于先把磁盘占满。因此撤销入口是 `/clean --restore <batch>`（隔离区批次不走 W3 账本，`/undo` 是另一套记录）。另补了 PLAN 未覆盖的 `top_dirs`（`/disk --top`），因为实测可回收只有 27MB 而 C 盘只剩 14.6GB —— 用户真正问的是“空间被谁占了” |
+| 升级说明 | [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md)，分 **B1 只读诊断**（零风险，先做）/ **B2 可撤销清理**（隔离区 + 快照 + `/undo`）两批；每批独立可用、独立验收。<br>✅ **两批均已于 2026-10-31 交付**，但隔离区口径与本文原稿不同：**用移动而非复制式快照**——现有 `FileGuard` 写前留底是复制式且阈值只有 50MB，GB 级垃圾复制一份等于先把磁盘占满。因此撤销入口是 `/clean --restore <batch>`（隔离区批次不走 W3 账本，`/undo` 是另一套记录）。另补了 PLAN 未覆盖的 `top_dirs`（`/disk --top`），因为实测可回收只有 27MB 而 C 盘只剩 14.6GB —— 用户真正问的是“空间被谁占了” |
 
 ### 6.3 整理文件
 
@@ -291,7 +291,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 去重 | 参考 `dupeGuru` 的思路（内容指纹 + 模糊匹配），不自研算法 |
 | 整理 | 按规则归档（类型/日期/项目）+ 保持可撤销（走副作用账本） |
 | 现状 | ⭐ 已有原生文件工具（读写/移动/回收站）；缺规则化整理闭环 |
-| 落点 | 落地文档：[plans/fileops-desktop-upgrade.md](../plans/fileops-desktop-upgrade.md) |
+| 落点 | 落地文档：[plans/fileops/fileops-desktop-upgrade.md](../plans/fileops/fileops-desktop-upgrade.md) |
 
 ### 6.4 杀毒
 
@@ -302,7 +302,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 原则 | **绝不写查杀引擎**——只做"扫描编排 + 结果解读 + 处置建议" |
 | 现状 | ✅ 2026-10-31 交付（B3）：`agent/core/maintenance/{defender,psrun}.py` + `SystemHealth` 的 `security` / `threats` / `scan` / `scan_status` 四个 action + `/health security|threats|scan|status` |
 | 落点 | `agent/core/maintenance/health.py` 的 security 区块 + `SystemHealth` 的 action 分支 |
-| 升级说明 | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) B3 批。两个硬约束：全盘扫描可跑一小时以上，**必须异步执行 + 进度查询**（复用后台命令句柄），不得阻塞主循环；`Remove-MpThreat` 处置威胁需**管理员 + 强制确认**。<br>✅ **2026-10-31 已交付**（异步扫描已做，`Remove-MpThreat` 本期不做——处置威胁属不可逆动作，入口先留在 Defender 自身 UI）。<br>⚠️ **实测推翻了一个前提**：只看 `Get-MpComputerStatus` 会对装了第三方杀软的用户报「你没有实时防护」——本机（Defender 被「电脑管家系统防护」接管）实测该命令照常返回且字段全为 false。权威源是 `root/SecurityCenter2` 的 `productState` 位（`0x1000`=启用 / `0x10`=库最新）。实现见 [19-系统维护层](../architecture/19-系统维护层.md) §4 |
+| 升级说明 | [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md) B3 批。两个硬约束：全盘扫描可跑一小时以上，**必须异步执行 + 进度查询**（复用后台命令句柄），不得阻塞主循环；`Remove-MpThreat` 处置威胁需**管理员 + 强制确认**。<br>✅ **2026-10-31 已交付**（异步扫描已做，`Remove-MpThreat` 本期不做——处置威胁属不可逆动作，入口先留在 Defender 自身 UI）。<br>⚠️ **实测推翻了一个前提**：只看 `Get-MpComputerStatus` 会对装了第三方杀软的用户报「你没有实时防护」——本机（Defender 被「电脑管家系统防护」接管）实测该命令照常返回且字段全为 false。权威源是 `root/SecurityCenter2` 的 `productState` 位（`0x1000`=启用 / `0x10`=库最新）。实现见 [19-系统维护层](../architecture/19-系统维护层.md) §4 |
 
 ### 6.5 日常电脑办公
 
@@ -347,14 +347,14 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 | 监控电脑健康 | 高 | 阶段 8–9（配合事件总线） | 无 | 系统维护计划 B4 ✅ |
 | 性能诊断（原「加速」） | 高 | 阶段 12（并入体检报告一起交） | 无 | 系统维护计划 B4 ✅ |
 | 清理垃圾 | 中 | 阶段 10（需副作用账本才安全） | W3 账本 ✅ | 系统维护计划 B1 + B2 ✅ |
-| 整理文件 | 高 | 阶段 10 | W3 账本 | [fileops-desktop-upgrade](../plans/fileops-desktop-upgrade.md) |
+| 整理文件 | 高 | 阶段 10 | W3 账本 | [fileops-desktop-upgrade](../plans/fileops/fileops-desktop-upgrade.md) |
 | 杀毒 | 中 | 阶段 9+ | 无（Defender 编排） | 系统维护计划 B3 ✅ |
 | 日常办公 | 高 | 持续（工具层补齐） | 无 | — |
 | 查阅资料 | 中 | 持续 | 无 | — |
 | 管理线上事务 | 中 | 阶段 10 | W3 账本 | — |
-| 复杂软件操作 | 高 | 阶段 11+（UIA 语义层） | 无 | [PLAN-p1-gui-automation](../roadmap/PLAN-p1-gui-automation.md) |
+| 复杂软件操作 | 高 | 阶段 11+（UIA 语义层） | 无 | [PLAN-p1-gui-automation](../roadmap/desktop/PLAN-p1-gui-automation.md) |
 
-> 「系统维护计划」即 [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)，
+> 「系统维护计划」即 [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md)，
 > 分批 B1–B4，每批独立可用、独立验收——B1（只读诊断）零风险、不碰任何文件，可随时开工。
 
 > ✅ **前置依赖已清**（2026-10 阶段 10 后端交付）：上表三行“W3 账本”均就位——
@@ -389,7 +389,7 @@ Layer 3 ▸ 键盘操控（精确）  快捷键序列 Ctrl+S / Alt+Tab / Tab Tab
 ### 阶段 12+ 远期能力清单
 
 > 📌 编号说明：阶段 12 已用于“让 jarvis 自己管配置”（见
-> [PLAN-self-config](../roadmap/PLAN-self-config.md)，P1 已交付），本节标题里的
+> [PLAN-self-config](../roadmap/memory-config/PLAN-self-config.md)，P1 已交付），本节标题里的
 > “12+”是早先留下的**远期能力区间标签**，不随实际阶段编号重排。
 > 其中 F-3（情感记忆与人格演化）的近端落点就是 PLAN-self-config 的 P3 偏好账本：
 > 先把它“说过一次的习惯”记住（`prefs.jsonl` + 推导层），再谈人格演化。
@@ -472,7 +472,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ### 9.2 阶段 8–11：管家形态（W1–W4，当前主线）
 
-> 详细执行计划见 **[PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md)**。此处只给纲领与依赖顺序。
+> 详细执行计划见 **[PLAN-butler-autonomy-upgrade.md](../roadmap/butler/PLAN-butler-autonomy-upgrade.md)**。此处只给纲领与依赖顺序。
 
 **问题陈述**：横向能力已经不缺，但"真正的管家"体验卡在三处**接口**上——
 
@@ -503,7 +503,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 |---|---|---|---|
 | **阶段 8（W1）** 判断层 | 管线规则放宽 + 授权租约 + 打扰预算 + 无人值守 | 新增 `agent/core/policy/{lease,budget}.py`；声明式规则并入五层管线（`permissions/checker.py` 放宽语义 + `path_match.py`）；`ProactiveEngine.on_notify` 前插预算过滤 | 同一操作在"有租约/无租约/away"下三态确定且可解释；静默时段只入库（**2026-10-22 补充**：用户自设提醒不再不过闸，但命中静默/超额时走**降级投递**——上屏不发声，见 `reminder_channels`）；权限零回归（初版独立策略引擎已降级合并入管线） |
 | **阶段 9（W2）** 感知层 | 统一事件总线（前台窗口 / 文件 / 仓库 / 邮件 / 日历 / 系统） | 新增 `agent/core/percept/`（bus + 一源一文件）；`Scheduler` 降级为事件源之一；**默认全关 + 逐源开关** | 四类事件各产出**恰好一条**聚合提醒；常驻 CPU 增量 < 1%；单源故障隔离 |
-| **阶段 10（W3）** 兑现层 | 持久任务脊柱（条件等待/断点续跑）+ 可撤销行动账本 | ✅ **后端已交付**：`agent/core/tasks/{spine,spine_ops,spawn,driver,cli_host}.py`（台账 `~/.jarvis/goals/<id>.json`）、`agent/core/actions/journal.py`（`~/.jarvis/actions.jsonl`）、`Tool.is_irreversible` 声明位 + orchestrator 统一拦截（预约未结案期间网络外发命令取消自动放行，堵等价通路绕道）、`/undo`（含 `--task` 批量）、**建目标的三个入口**：`/tasks add|show|pause|resume|cancel|advance|delete`、`TrackGoal` 工具（`agent/tools/track_goal.py`）、serve `tasks.exec`/`actions.exec`（`agent/serve/rpc_tasks.py`）——三者同源于 `spine_ops.py`；`[actions]`/`[tasks]` 两组配置；桌面「任务中心」面板属 jarvis-desktop 仓 | 重启续跑；条件等待不烧轮询；副作用可一键回滚；不可逆动作有延时窗口且绕道会被问（均有单测锁定 309 例，**实机复测尚未跑穿**，见 [w3-testing.md](../test/w3-testing.md) 与 [走查后的补记](../fixlogs/w3-journal-spine-delivery.md)） |
+| **阶段 10（W3）** 兑现层 | 持久任务脊柱（条件等待/断点续跑）+ 可撤销行动账本 | ✅ **后端已交付**：`agent/core/tasks/{spine,spine_ops,spawn,driver,cli_host}.py`（台账 `~/.jarvis/goals/<id>.json`）、`agent/core/actions/journal.py`（`~/.jarvis/actions.jsonl`）、`Tool.is_irreversible` 声明位 + orchestrator 统一拦截（预约未结案期间网络外发命令取消自动放行，堵等价通路绕道）、`/undo`（含 `--task` 批量）、**建目标的三个入口**：`/tasks add|show|pause|resume|cancel|advance|delete`、`TrackGoal` 工具（`agent/tools/track_goal.py`）、serve `tasks.exec`/`actions.exec`（`agent/serve/rpc_tasks.py`）——三者同源于 `spine_ops.py`；`[actions]`/`[tasks]` 两组配置；桌面「任务中心」面板属 jarvis-desktop 仓 | 重启续跑；条件等待不烧轮询；副作用可一键回滚；不可逆动作有延时窗口且绕道会被问（均有单测锁定 309 例，**实机复测尚未跑穿**，见 [w3-testing.md](../test/w3-testing.md) 与 [走查后的补记](../fixlogs/w1-w3/w3-journal-spine-delivery.md)） |
 | **阶段 11（W4）** 体验补齐 | 口手分离（语音真能干活）+ 结构化长期记忆 | `realtime_tools.select_tools_for_turn()`（tool-RAG，≤12 个）；"要动手"意图转后台 Agent 异步回报；新增 `agent/core/memory/facts.py` | 按轮挂 ≤12 工具建响应 < 1s；语音说"帮我查一下 XX"能异步拿结果；记忆带时效与出处 |
 
 **W4 · 口手分离的实测依据**（官方 endpoint，文本触发轮）：
@@ -573,7 +573,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 阶段 | 内容 | 关键落点 | 验收要点 |
 |---|---|---|---|
 | **阶段 12**（README 口径：系统维护切片） | 清理 / 查毒 / 性能诊断（本文 §6.1 / 6.2 / 6.4） | `agent/core/maintenance/`（规则库 + 扫描 + 隔离区 + 体检）；`/disk` `/clean` `/health` 三命令与三个工具；`[maintenance]` 十二项配置 | 已随 v2.3.2 发布；详见 [19-系统维护层](../architecture/19-系统维护层.md) |
-| **阶段 13** | 能力自检与自我修复（知道自己缺什么、缺了能不能自己补、补不了不许谎报） | 新增 `agent/capabilities/`（registry / probe / smoke / report / repair）+ `agent/llm/model_capability.py`；编排器调用前门（含两条逃逸路径）；`/health caps` 全族 + `/repair` + `[repair]` 五项配置 | 五个变异全部被测试抓到；缺件工具调用前拦截且回执明写「本次没有执行」；`probe_failed` 不拦也不给安装命令；修复必须复测才算成、不进 `/undo`（快照盖不到工作区外）；模型无视觉时提示词给替代手段降级链。详见 [20-能力自检与自我修复](../architecture/20-能力自检与自我修复.md) 与执行计划 [capability-selfcheck.md](../plans/capability-selfcheck.md) |
+| **阶段 13** | 能力自检与自我修复（知道自己缺什么、缺了能不能自己补、补不了不许谎报） | 新增 `agent/capabilities/`（registry / probe / smoke / report / repair）+ `agent/llm/model_capability.py`；编排器调用前门（含两条逃逸路径）；`/health caps` 全族 + `/repair` + `[repair]` 五项配置 | 五个变异全部被测试抓到；缺件工具调用前拦截且回执明写「本次没有执行」；`probe_failed` 不拦也不给安装命令；修复必须复测才算成、不进 `/undo`（快照盖不到工作区外）；模型无视觉时提示词给替代手段降级链。详见 [20-能力自检与自我修复](../architecture/20-能力自检与自我修复.md) 与执行计划 [capability-selfcheck.md](../plans/config/capability-selfcheck.md) |
 
 > **编号口径**：本文 §7 早期把“让 jarvis 自己管配置”记作阶段 12，README 开发路线把“系统维护切片”记作阶段 12。自阶段 13 起**统一以 README 为准**；配置自层已交付的事实不受编号影响（已记入 §2.3 修正表）。
 
@@ -609,14 +609,14 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
   vitest 全绿），**只剩桌面实机渲染一段未人工看过**，故此处不打钩；
   逐项跑法与判据见 [W3 实机走查清单](../test/w3-testing.md)。
   交付时的四处设计偏离与四个被测试打出的真缺陷见
-  [w3-journal-spine-delivery](../fixlogs/w3-journal-spine-delivery.md)；
+  [w3-journal-spine-delivery](../fixlogs/w1-w3/w3-journal-spine-delivery.md)；
   实机走查又抽出的两处（绕道、归属断链）见
-  [w3-delay-window-bypass-fix](../fixlogs/w3-delay-window-bypass-fix.md)；
+  [w3-delay-window-bypass-fix](../fixlogs/w1-w3/w3-delay-window-bypass-fix.md)；
   目标入口三件套的交付取舍见
-  [w3-entry-rpc-delivery](../fixlogs/w3-entry-rpc-delivery.md)；
+  [w3-entry-rpc-delivery](../fixlogs/w1-w3/w3-entry-rpc-delivery.md)；
   到点真执行那次跑出的四条断链（子代理不继承规则 / 受阻谎报已完成 / 后台改动
   不入账 / `[actions]` 对后台无效）见
-  [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)。
+  [w3-driver-approval-blocked-report](../fixlogs/w1-w3/w3-driver-approval-blocked-report.md)。
 - [ ] **W4**：按轮挂 ≤12 工具时建响应 < 1s + 语音说"帮我查一下 XX"能异步拿到结果 + 记忆带时效与出处
 
 ### 电脑管家八件事（第 6 节）
@@ -651,7 +651,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 ## 12. 待决策项
 
-> 1–3 已于 **2026-10 拍板**（与 [升级计划第 8 节](../roadmap/PLAN-butler-autonomy-upgrade.md#8-待决策项需你拍板) 同步维护）；4–6 仍待定。
+> 1–3 已于 **2026-10 拍板**（与 [升级计划第 8 节](../roadmap/butler/PLAN-butler-autonomy-upgrade.md#8-待决策项需你拍板) 同步维护）；4–6 仍待定。
 
 | # | 问题 | 影响 | 建议 | 结论 |
 |---|---|---|---|---|
@@ -660,7 +660,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 3 | 邮件集成方式：IMAP 只读（IDLE/轮询），还是走既有邮件工具 API 通道？ | 决定 W2 实现复杂度与权限提示频率 | 先只读信封头（发件人/主题/时间） | ✅ 已定（2026-10）：IMAP IDLE 长连接 + 断线降级轮询；只读信封头。注：现仓 `SendEmailTool` 只能发不能收，"既有 API 通道"不成立，需新增 `[email].imap_*` 字段 |
 | 4 | 重要度评分是否引入**本地小模型**？ | 纯规则省资源但笨；小模型更准但增依赖与常驻占用 | 先用规则 + 历史接受率，量到再评估 | ⏳ 暂不定，不阻塞 W2 |
 | 5 | W1 效果语义 `dry_run` 是否同时用于**工具层**（而非仅通知层）？ | 影响与既有五层权限管线的耦合面 | 已定：独立策略引擎降级合并退出 W1，dry_run 随 W3 副作用账本再定 | ✅ 已定（归 W3.2） |
-| 6 | 是否按第 6 节顺序优先做"系统维护"（健康/清理/整理/杀毒）？ | 决定阶段 8 之后的实际排期 | 建议在 W1 之后、W2 并行展开 | ⏳ 待定（开工前可再确认；清理/整理类写操作仍需 W3 账本才安全）。<br>**2026-10-29 补**：详细计划已成文——[PLAN-system-maintenance](../roadmap/PLAN-system-maintenance.md)，B1 只读诊断零风险可先行，不必等排期决定 |
+| 6 | 是否按第 6 节顺序优先做"系统维护"（健康/清理/整理/杀毒）？ | 决定阶段 8 之后的实际排期 | 建议在 W1 之后、W2 并行展开 | ⏳ 待定（开工前可再确认；清理/整理类写操作仍需 W3 账本才安全）。<br>**2026-10-29 补**：详细计划已成文——[PLAN-system-maintenance](../roadmap/butler/PLAN-system-maintenance.md)，B1 只读诊断零风险可先行，不必等排期决定 |
 
 ---
 
@@ -668,25 +668,25 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 
 | 类型 | 文档 |
 |---|---|
-| **管家形态升级详细计划（W1–W4）** | [roadmap/PLAN-butler-autonomy-upgrade.md](../roadmap/PLAN-butler-autonomy-upgrade.md) |
-| **系统维护（清理 / 查毒 / 性能诊断）详细计划** | [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md) |
-| W3 兑现层交付复盘（设计偏离 + 真缺陷清单） | [fixlogs/w3-journal-spine-delivery.md](../fixlogs/w3-journal-spine-delivery.md) |
-| W3 驱动器受阻谎报实机复盘（四条断链） | [fixlogs/w3-driver-approval-blocked-report.md](../fixlogs/w3-driver-approval-blocked-report.md) |
-| 实时语音待机/唤醒/计费 | [roadmap/PLAN-future-realtime-voice-upgrade.md](../roadmap/PLAN-future-realtime-voice-upgrade.md) |
-| 实时语音稳定性 | [roadmap/PLAN-p1-realtime-stability.md](../roadmap/PLAN-p1-realtime-stability.md) |
-| 主动提醒既有实现 | [roadmap/PLAN-p2-proactive-reminder.md](../roadmap/PLAN-p2-proactive-reminder.md) |
-| 沙箱与回滚 | [roadmap/PLAN-p3-sandbox-execution.md](../roadmap/PLAN-p3-sandbox-execution.md) |
-| 文件整理落地 | [plans/fileops-desktop-upgrade.md](../plans/fileops-desktop-upgrade.md) |
-| 画像记忆落地 | [plans/memory-profile-phase1a.md](../plans/memory-profile-phase1a.md) |
-| 画像记忆提炼源头治理（阶段 13·升级计划） | [roadmap/PLAN-profile-memory-upgrade.md](../roadmap/PLAN-profile-memory-upgrade.md) |
+| **管家形态升级详细计划（W1–W4）** | [roadmap/butler/PLAN-butler-autonomy-upgrade.md](../roadmap/butler/PLAN-butler-autonomy-upgrade.md) |
+| **系统维护（清理 / 查毒 / 性能诊断）详细计划** | [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md) |
+| W3 兑现层交付复盘（设计偏离 + 真缺陷清单） | [fixlogs/w1-w3/w3-journal-spine-delivery.md](../fixlogs/w1-w3/w3-journal-spine-delivery.md) |
+| W3 驱动器受阻谎报实机复盘（四条断链） | [fixlogs/w1-w3/w3-driver-approval-blocked-report.md](../fixlogs/w1-w3/w3-driver-approval-blocked-report.md) |
+| 实时语音待机/唤醒/计费 | [roadmap/voice/PLAN-future-realtime-voice-upgrade.md](../roadmap/voice/PLAN-future-realtime-voice-upgrade.md) |
+| 实时语音稳定性 | [roadmap/voice/PLAN-p1-realtime-stability.md](../roadmap/voice/PLAN-p1-realtime-stability.md) |
+| 主动提醒既有实现 | [roadmap/butler/PLAN-p2-proactive-reminder.md](../roadmap/butler/PLAN-p2-proactive-reminder.md) |
+| 沙箱与回滚 | [roadmap/security/PLAN-p3-sandbox-execution.md](../roadmap/security/PLAN-p3-sandbox-execution.md) |
+| 文件整理落地 | [plans/fileops/fileops-desktop-upgrade.md](../plans/fileops/fileops-desktop-upgrade.md) |
+| 画像记忆落地 | [plans/profile-memory/memory-profile-phase1a.md](../plans/profile-memory/memory-profile-phase1a.md) |
+| 画像记忆提炼源头治理（阶段 13·升级计划） | [roadmap/memory-config/PLAN-profile-memory-upgrade.md](../roadmap/memory-config/PLAN-profile-memory-upgrade.md) |
 | 常驻画像记忆调研（人设卡 vs 全量注入） | [research/always-on-profile-memory.md](../research/always-on-profile-memory.md) |
-| 常驻人设卡 P6 实施计划 | [plans/profile-memory-p6-persona-impl.md](../plans/profile-memory-p6-persona-impl.md) |
-| 画像记忆重复入库修复 | [fixlogs/profile-duplicate-memory-fix.md](../fixlogs/profile-duplicate-memory-fix.md) |
+| 常驻人设卡 P6 实施计划 | [plans/profile-memory/profile-memory-p6-persona-impl.md](../plans/profile-memory/profile-memory-p6-persona-impl.md) |
+| 画像记忆重复入库修复 | [fixlogs/session-memory/profile-duplicate-memory-fix.md](../fixlogs/session-memory/profile-duplicate-memory-fix.md) |
 | **修复复盘索引（按主题分类，125 篇）** | [fixlogs/README.md](../fixlogs/README.md) |
 | **实施计划索引（按主题分类，21 篇）** | [plans/README.md](../plans/README.md) |
-| 实时语音工具模式故障复盘 | [fixlogs/realtime-talk-tools-mode-default-fix.md](../fixlogs/realtime-talk-tools-mode-default-fix.md) |
-| 语音能力厂商解耦（阶段一计划） | [plans/voice-provider-decoupling.md](../plans/voice-provider-decoupling.md) |
-| 能力自检与自我修复（升级计划） | [plans/capability-selfcheck.md](../plans/capability-selfcheck.md) |
+| 实时语音工具模式故障复盘 | [fixlogs/voice/realtime-talk-tools-mode-default-fix.md](../fixlogs/voice/realtime-talk-tools-mode-default-fix.md) |
+| 语音能力厂商解耦（阶段一计划） | [plans/voice/voice-provider-decoupling.md](../plans/voice/voice-provider-decoupling.md) |
+| 能力自检与自我修复（升级计划） | [plans/config/capability-selfcheck.md](../plans/config/capability-selfcheck.md) |
 | 语音厂商协议同构度矩阵（S1 调研） | [research/voice-provider-matrix.md](../research/voice-provider-matrix.md) |
 | 架构设计（19 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
 | 全部路线图 | [roadmap/](../roadmap/) |
@@ -704,13 +704,13 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 > 2026-10-22 实机自检切片：`scripts/livecheck_w3.py` 把“到点真执行 + 副作用入账 +
 > 按目标撤销”跑穿（12/12），当场抓出的四条断链已修（子代理继承宿主规则、受阻不再
 > 谎报已完成、任务级检查点入账、`[actions]` 对后台生效），单测 315 → 362 例，
-> 复盘见 [w3-driver-approval-blocked-report](../fixlogs/w3-driver-approval-blocked-report.md)。
+> 复盘见 [w3-driver-approval-blocked-report](../fixlogs/w1-w3/w3-driver-approval-blocked-report.md)。
 > 同日接桌面面板那一刀：发现「批准并重试」原本只是把步骤退回待执行（按钮空转），
 > 现在走 `tasks.exec approve` 签**限定范围租约**（只放本步被拦的工具 + 只限目标目录 + 只给 30 分钟），
 > 单测 362 → 374 例；兄弟仓 jarvis-desktop 右栏「跨会话目标」与「副作用账本」两个区块同时接完。
 > **2026-10-29 系统维护落计划**：第 6 节八件事中「清理垃圾 / 杀毒」与缺失的「加速」
 > 从“只有蓝图头目”补到可开工粒度——新建
-> [roadmap/PLAN-system-maintenance.md](../roadmap/PLAN-system-maintenance.md)（B1 只读诊断 /
+> [roadmap/butler/PLAN-system-maintenance.md](../roadmap/butler/PLAN-system-maintenance.md)（B1 只读诊断 /
 > B2 可撤销清理 / B3 Defender 编排 / B4 性能诊断）；本节 6.1 补「加速」口径（改为性能诊断，
 > 绝不自动杀进程）、6.2 补成熟方案的**边界**（BleachBit 只借格式不借规则，Windows 系统级
 > 垃圾靠 `Dism` 等原生能力）、6.4 把首选从 `MpCmdRun.exe` 改为 Defender PowerShell 模块

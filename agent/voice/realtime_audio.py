@@ -82,7 +82,7 @@ def mic_muted(
 
     > 旧注曾声明“静音只能从 `response.created` 之后开始”（第五次实机修正），
     > 该结论已被 2026-09-28 复盘推翻（真因是 MCP 中途 session.update 毒化会话，
-    > 见本文件第 42 行注与 fixlogs/realtime-talk-half-duplex.md 第六次修正）。
+    > 见本文件第 42 行注与 fixlogs/voice/realtime-talk-half-duplex.md 第六次修正）。
 
     悬挂保护：响应状态异常持续超过 `MIC_MUTE_MAX_SECONDS` 时解除静音并清空恢复
     时刻，保证麦克风不会永久哑掉（表现为“AI 再也听不到你说话”）。

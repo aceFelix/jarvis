@@ -181,7 +181,7 @@ def _add_custom_model_flow(ui: RichCLI, settings: Settings) -> bool:
             "name": "模型类型",
             "type": "select",
             "options": _MODEL_TYPE_OPTIONS,
-            # 新模型保守给 text（见 docs/roadmap/PLAN-self-config.md P4 记录 ②）
+            # 新模型保守给 text（见 docs/roadmap/memory-config/PLAN-self-config.md P4 记录 ②）
             "default": MODEL_TYPE_TEXT,
         },
     ]

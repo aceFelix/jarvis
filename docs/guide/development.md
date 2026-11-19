@@ -104,7 +104,7 @@ agent/
 │       └── project_switch.py / remote_bridge.py / mcp_runtime.py /
 │           render.py / voice_adapter.py # 引擎协作件
 │       （原 pywebview 窗口壳 app/single_instance/win32_icon/window_geometry
-│        与 assets/ 已于 2026-10 退役删除，见 docs/fixlogs/workbench-gui-retired.md）
+│        与 assets/ 已于 2026-10 退役删除，见 docs/fixlogs/desktop-serve/workbench-gui-retired.md）
 ├── voice/             # 语音引擎
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
 │   ├── stt/           # STT 识别包（单一后端 QwenASR）

@@ -1,6 +1,6 @@
 """语音可选依赖缺失时的降级回归测试。
 
-背景（见 docs/fixlogs/voice-missing-deps-degrade-fix.md）：`dashscope` /
+背景（见 docs/fixlogs/voice/voice-missing-deps-degrade-fix.md）：`dashscope` /
 `pyaudio` 属 [voice] 可选依赖，且均为「方法内懒导入」——包能 import 成功、
 `create_stt()` 也能返回对象，直到 `stt.listen()` 内部才抛 ModuleNotFoundError。
 2.1.1 实测：缺依赖时 `/voice` 会进入「聆听→识别失败→再聆听」的无限刷屏。

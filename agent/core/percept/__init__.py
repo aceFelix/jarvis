@@ -11,7 +11,7 @@
 - 播报侧不直接订阅总线：由 serve 的 `ProactiveHub` 适配一层，把事件拼成
   文本后走 W1 预算闸门，保证"所有打扰都过同一个闸"这条不变量不被破坏。
 
-一期范围已定（见 docs/roadmap/PLAN-butler-autonomy-upgrade.md 第 8 节）：
+一期范围已定（见 docs/roadmap/butler/PLAN-butler-autonomy-upgrade.md 第 8 节）：
 只做**电脑管家**——事件源全部来自本机与网络协议，不接 IoT/Home Assistant。
 
 配置字段全部经 `_cfg` 读取（getattr + 默认值），因此 Settings 尚未登记这些

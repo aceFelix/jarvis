@@ -157,10 +157,10 @@ cd /e/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis
 
 > 2026-10 修正：本阶段原判据写的是“切应用应该看到气泡”，**错**。
 > 普通切换的重要度 = `percept:window` 权重 0.5 × 先验 0.3 = 0.15，低于门槛
-> 0.3 ⇒ 只留痕不出声（[复盘](../fixlogs/notify-budget-percept-relay-fix.md)）。
+> 0.3 ⇒ 只留痕不出声（[复盘](../fixlogs/percept/notify-budget-percept-relay-fix.md)）。
 > 2026-10-19 再修正：静默时段**不再是门槛的后门**——低分事件夜里也不入库，
 > 因此早上的补播摘要里不会再夹着“切到 记事本”这类碎事（
-> [复盘](../fixlogs/percept-panel-history-lost-on-rebuild-fix.md)）。
+> [复盘](../fixlogs/percept/percept-panel-history-lost-on-rebuild-fix.md)）。
 
 | # | 操作 | 判据 |
 |---|---|---|
@@ -204,7 +204,7 @@ cd /e/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis
 | S5 日程只报一次 | 按下方造一份 ICS 并配 `[calendar] ics_path`，日程设在 10 分钟后 | 出现**一条** `source=calendar`，`payload.minutes_until` 落在提前窗口内；本源节拍 **300s**，再等两轮（约 10 分钟）**不重复播报**同一条 |
 | S6 全天/已开始的不报 | ICS 里再加一条全天日程（`DTSTART;VALUE=DATE:`）、一条已经开始 5 分钟的日程 | 两条都不出现在 `events.jsonl` |
 | S7 恢复通知不占额度 | S2 之后把 `[monitor] memory_threshold` 改回 `90.0` 重启（让内存“回落”） | 不弹「内存已恢复」气泡、`events.jsonl` 里**不出现** `recovery` 行；面板该源「观察范围」里的 `last_alert` 仍是上一条告警 |
-| S8 改配置不重报 | 在面板上把任意一个开关**连拨 4 次**（每次保存都会热重装配、换一台新总线） | `events.jsonl` 尾部同一 `source + kind` 在 `dedup_window_s`（300s）内**只应出现一条**。旧行为是连点几次就重复入库几次（白扣打扰额度），复盘见 [热重装配丢去重账本](../fixlogs/percept-dedup-lost-on-hot-rebuild-fix.md) |
+| S8 改配置不重报 | 在面板上把任意一个开关**连拨 4 次**（每次保存都会热重装配、换一台新总线） | `events.jsonl` 尾部同一 `source + kind` 在 `dedup_window_s`（300s）内**只应出现一条**。旧行为是连点几次就重复入库几次（白扣打扰额度），复盘见 [热重装配丢去重账本](../fixlogs/percept/percept-dedup-lost-on-hot-rebuild-fix.md) |
 
 造一份最小 ICS（存成 `~/cal-test.ics`）：
 
@@ -269,8 +269,8 @@ ls ~/.jarvis/settings.toml*
 按项目规矩，人工测试发现并修掉的缺陷要补 `docs/fixlogs/` 复盘——
 本轮已产出两份：
 
-- [percept-config-set-envelope-fix.md](../fixlogs/percept-config-set-envelope-fix.md)
+- [percept-config-set-envelope-fix.md](../fixlogs/percept/percept-config-set-envelope-fix.md)
   （协议信封键 `type` 混进配置白名单，导致面板所有开关点了没反应）；
-- [notify-budget-percept-relay-fix.md](../fixlogs/notify-budget-percept-relay-fix.md)
+- [notify-budget-percept-relay-fix.md](../fixlogs/percept/notify-budget-percept-relay-fix.md)
   （感知源权重未登记 + 冲刷无冷却且绕开门槛，导致“每两条必播一条”与
   “静默时段积压 1 条”的谎话文案；顺带修了 TTS 逐字符念路径）。

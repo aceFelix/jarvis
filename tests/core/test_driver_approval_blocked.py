@@ -1,6 +1,6 @@
 """W3 受阻判定回归：被权限拦下的步骤绝不能报成"已完成"。
 
-盯的是 2026-10-22 实机走查抓到的谎报缺陷（docs/fixlogs/w3-driver-approval-blocked-report.md）：
+盯的是 2026-10-22 实机走查抓到的谎报缺陷（docs/fixlogs/w1-w3/w3-driver-approval-blocked-report.md）：
 无人值守的后台步骤里 ``FileWrite`` 无条件 ASK、无 UI 时落成 DENY，子代理如实汇报
 "需要授权"，而旧代码凭 ``success=True``（它的含义其实只是"子代理跑完没抛异常"）把
 步骤定成 done、目标定成 done，还向用户播报"已完成：1/1 步"。

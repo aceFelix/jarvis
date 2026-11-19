@@ -3,7 +3,7 @@
 覆盖三条不变量（都在守"敢放手"与"历史不能坏"）：
 1. 被 hold 的调用**必须回一个非 error 的 tool_result**：本轮历史里已经留下了
    tool_use，缺对应 tool_result 会让这个会话之后所有请求被 API 拒收
-   （docs/fixlogs/dangling-tool-use-fix.md）；
+   （docs/fixlogs/agent-runtime/dangling-tool-use-fix.md）；
 2. 窗口内真的没执行（工具一次都没被调），到点才按**账本里冻结的那一份 args**
    执行，模型后续改写参数、用户中断、/undo cancel 都不该把它发出去；
 3. 只记"确实发生且没报错"的副作用：本地写引用本轮检查点（没检查点就不记，
@@ -175,7 +175,7 @@ class TestHoldPath:
         实机回归防线（2026-10-21）：文案只说「已排队、稍后自动执行」时，模型会
         自己判断「换个工具效果一样」而改用 Bash curl 把被拦下的动作做掉——窗口
         拦不住等价路径就等于没拦，见
-        docs/fixlogs/w3-delay-window-bypass-fix.md。
+        docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md。
         @author aceFelix
         """
         tool = SpyTool()
@@ -521,7 +521,7 @@ class TestUndoFlowIntegration:
 class TestTaskSideEffectBinding:
     """副作用归属接线：task_id 落账 + 账本 id 回扣给宿主（/undo --task 的两端）。
 
-    实机走查暴露的链路断点（docs/fixlogs/w3-delay-window-bypass-fix.md §3）：驱动器
+    实机走查暴露的链路断点（docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md §3）：驱动器
     从没往 ctx.extra 写 task_id，也不回收账本 id，于是 TaskStep.journal_ids 永远为空、
     ``/undo --task`` 端到端列不到任何条目单测却因手工构造记录一直是绿的。
     本类把"谁写、谁收"钉住，防止再退回只有测试造得起的状态。

@@ -37,11 +37,11 @@ Jarvis 提供两套独立的语音系统：
 - **待机唤醒门禁（2026-11-09）**：对话与待机录音**都不带唤醒热词**（防 ASR 在静音/噪音时凭空输出「贾维斯」）；
   待机只接受**短句（≤12 字）且唤醒词在前 8 字内**；服务端没有检测到任何 VAD 语音事件的结果直接丢弃
   （对话阶段同样丢弃，避免“没出声却出现「你说: 贾维斯」”）。
-  复盘见 [voice-false-wake-fix.md](../fixlogs/voice-false-wake-fix.md)。
+  复盘见 [voice-false-wake-fix.md](../fixlogs/voice/voice-false-wake-fix.md)。
 - **轮次收尾**：每轮（回复完成 / 被打断 / 待机退下 / 中途出错）voice_loop 都补发一次
   `on_turn_done()`，serve 适配器映射为文本轮同一 `assistant_done`，桌面壳据此定稿气泡并
   清忙碌态（修复「语音已回复却仍在思考、停不下来」）；终端适配器未覆盖该方法，行为不变
-  （2026-10-12，见 [06-语音系统](../architecture/06-语音系统.md) 与 `../fixlogs/voice-turn-done-fix.md`）
+  （2026-10-12，见 [06-语音系统](../architecture/06-语音系统.md) 与 `../fixlogs/voice/voice-turn-done-fix.md`）
 - **会话保存与标题（2026-11-09）**：每轮语音对话结束都会**即时落盘**，并与文本对话
   共用同一套收尾逻辑（`advance_session`）：第 1 轮取用户首句前 **15 字**做标题，
   第 2 轮由 LLM 根据前两轮生成 ≤15 字标题。此前语音会话一直沿用启动时的时间戳名字
@@ -85,7 +85,7 @@ Jarvis 提供两套独立的语音系统：
   实现见 `agent/voice/talk_history.py`（`TalkHistoryRecorder`）。
 - **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
   工作台 `--gui` 已于 2026-10 退役，见
-  [workbench-gui-retired](../fixlogs/workbench-gui-retired.md)）
+  [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md)）
 - 退出方式：ESC 键或说"退下"
 
 > **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，

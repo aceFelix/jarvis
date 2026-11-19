@@ -8,7 +8,7 @@ tool_use 却放行等价通路等于没拦。本文件锁两件事：
 2. 窗口里有未结案项时，外发类中风险命令从 ALLOW 降级成 ASK，其余命令照旧，
    且 ``actions.hold_blocks_equivalent = false`` 能退回旧行为。
 
-复盘：docs/fixlogs/w3-delay-window-bypass-fix.md
+复盘：docs/fixlogs/w1-w3/w3-delay-window-bypass-fix.md
 @author aceFelix
 """
 

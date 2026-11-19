@@ -4,7 +4,7 @@
 > `daemon.py`（守护进程）、`tray.py`（pystray 托盘）、`terminal_spawner.py`（文本终端派生）、
 > `sessions.py`、`realtime.py`、`notifications.py`、`daemon/voice_state.py` 均已删除，
 > `--daemon` / `--with-tray` / `--detached` 启动参数一并移除。
-> 当时由新一代**三栏 GUI 工作台**取代（2026-08 一期落地，见 `docs/plans/workbench-gui.md`）。
+> 当时由新一代**三栏 GUI 工作台**取代（2026-08 一期落地，见 `docs/plans/visualization/workbench-gui.md`）。
 >
 > ❌ **退役（2026-10-14）**：三栏 pywebview 工作台已整体退役——`jarvis --gui` / `--talk`
 > 下线，窗口壳（`agent/ui/workbench/{app,single_instance,win32_icon,window_geometry}.py` +
@@ -12,11 +12,11 @@
 > `jarvis --gui`）。图形化桌面唯一入口为 **jarvis-desktop**（自带开机自启）；
 > 对话引擎层**没有退役**，它已从 `agent/ui/workbench/` 迁到 `agent/serve/engine/`
 > 并改用中性名（2026-11），仍是 serve 与桌面壳共用的后端。判断依据与影响面见
-> [`docs/fixlogs/workbench-gui-retired.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/workbench-gui-retired.md)。
+> [`docs/fixlogs/desktop-serve/workbench-gui-retired.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/desktop-serve/workbench-gui-retired.md)。
 >
-> ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` 已在 2026-10 由 W2 感知总线收编，`holidays` 仍休眠）。详见 [`docs/plans/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/proactive-desktop.md)。
+> ✅ **接线更新（2026-09）**：主动感知三件套（Scheduler / ProactiveEngine / DeadlineTracker）已由 serve 宿主 [`ProactiveHub`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/serve/hub.py) 重新装配，经 jarvis-desktop 桌面壳播报每日简报 / 提醒 / 截止日期（`monitor` / `calendar_source` / `vision_watcher` 已在 2026-10 由 W2 感知总线收编，`holidays` 仍休眠）。详见 [`docs/plans/desktop/proactive-desktop.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/plans/desktop/proactive-desktop.md)。
 >
-> ✅ **终端接线（2026-10-14）**：新增 [`core/daemon/cli_reminder.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) 的 `CliReminderHost`，`main.py` 装配 REPL（含 `/voice` 语音）时启动 Scheduler 后台线程并挂载 schedule 四件套，到期经 `RichCLI.notify_reminder()` 在终端上屏 `⏰` 提醒。只接**对话内定时提醒**，不接简报/截止日期/TTS，详见 [`docs/fixlogs/agent-loop-stall-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/agent-loop-stall-fix.md)。
+> ✅ **终端接线（2026-10-14）**：新增 [`core/daemon/cli_reminder.py`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) 的 `CliReminderHost`，`main.py` 装配 REPL（含 `/voice` 语音）时启动 Scheduler 后台线程并挂载 schedule 四件套，到期经 `RichCLI.notify_reminder()` 在终端上屏 `⏰` 提醒。只接**对话内定时提醒**，不接简报/截止日期/TTS，详见 [`docs/fixlogs/agent-runtime/agent-loop-stall-fix.md`](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/fixlogs/agent-runtime/agent-loop-stall-fix.md)。
 
 ## 一、现存核心文件
 

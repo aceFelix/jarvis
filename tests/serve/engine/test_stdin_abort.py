@@ -1,6 +1,6 @@
 """serve 宿主卡死修复与停止回复（reply.abort）回归测试。
 
-覆盖三处修复（背景见 docs/fixlogs/serve-bash-hang-fix.md）：
+覆盖三处修复（背景见 docs/fixlogs/desktop-serve/serve-bash-hang-fix.md）：
 - BashTool._call_normal 子进程 stdin 必须显式 DEVNULL（继承 serve 宿主的
   永不关闭管道会让 MSYS2 bash 挂死），且取消时回收子进程；
 - WorkbenchUI.ask_user_async 等待回答期间宿主事件循环保持可调度

@@ -6,7 +6,7 @@
 - ``CardWindow`` / ``CardManager``：只在驾驶舱的 Tk 守护线程里创建/渲染/销毁
   ``Toplevel``，不抢键盘焦点。
 
-2026-11-08 方案见 docs/plans/cockpit-multicards.md。@author aceFelix
+2026-11-08 方案见 docs/plans/visualization/cockpit-multicards.md。@author aceFelix
 """
 
 from __future__ import annotations

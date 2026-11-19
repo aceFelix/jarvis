@@ -6,7 +6,7 @@
 
 历史教训（决定了关键词表为什么这么长）：误判纯聊天会让本轮 0 工具下发，模型
 照样吐文本态工具调用却被全量过滤，表现为「思考完就停止」，见
-docs/fixlogs/deepseek-dsml-toolcall-leak-fix.md。
+docs/fixlogs/llm/deepseek-dsml-toolcall-leak-fix.md。
 
 @author aceFelix
 """
