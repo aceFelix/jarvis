@@ -56,7 +56,7 @@
 
 | 命令 | 说明 |
 |---|---|
-| `/memory` | 画像记忆管理（查看/add/del/clear/dedup/refine/sync/events；`dedup yes` 归并重复记忆，`events [n]` 看临时事项事件轨，`file` 看长期记忆文件） |
+| `/memory` | 画像记忆管理（查看/add/del/clear/dedup/refine/persona/sync/events；`clear yes` 连人设卡与事件轨一起清空，`dedup yes` 归并重复记忆，`persona` 看常驻人设卡、`persona rebuild` 立即重建，`events [n]` 看临时事项事件轨，`file` 看长期记忆文件） |
 | `/skills` | 列出已加载的技能包 |
 
 ## 语音功能

@@ -24,6 +24,14 @@ from agent.core.memory import profile_refiner as refiner
 
 
 @pytest.fixture(autouse=True)
+def _no_persona_by_default(monkeypatch):
+    """默认把人设卡钉成“无卡”：注入用例仍测 P1c 核心路径，不读真实 ~/.jarvis。"""
+    from agent.core.memory import profile_persona
+
+    monkeypatch.setattr(profile_persona, "load_persona", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_refine_ledger(tmp_path):
     """把提炼水位台账钉到临时目录：用例间互不影响，也不碰真实 ~/.jarvis。
 
@@ -467,6 +475,70 @@ class TestProfileSection:
         sys_mod.reload_profile_cache()
 
 
+class TestPersonaInjection:
+    """P6d：有卡时注入人设卡 + L1 最近变化，不再堆 12 条核心条目。"""
+
+    def test_persona_replaces_core_block(self, tmp_path, monkeypatch):
+        from agent.prompts import system as sys_mod
+        from agent.core.memory import profile_store as ps_mod
+        from agent.core.memory import profile_persona as pp
+
+        store = ProfileStore(tmp_path / "profile.json")
+        for i in range(20):
+            store.upsert(ProfileEntry.new(f"习惯{i}号动作", "schedule", 0.8))
+        monkeypatch.setattr(ps_mod, "ProfileStore", lambda: store)
+        persona = pp.Persona(
+            source_count=20,
+            token_count=50,
+            sections=[pp.PersonaSection(
+                "identity", "他是谁",
+                [pp.PersonaBullet("杭州的 AI 开发者", ["ent_x"])],
+            )],
+        )
+        monkeypatch.setattr(pp, "load_persona", lambda: persona)
+        sys_mod._PROFILE_CACHE = None
+
+        text = sys_mod._profile_section(Settings(profile_enabled=True))
+        assert "常驻人设" in text
+        assert "杭州的 AI 开发者" in text
+        assert "最近变化" in text
+        assert "画像库共 20 条" in text
+        assert "RecallProfile" in text
+        sys_mod.reload_profile_cache()
+
+
+class TestMemoryLines:
+    """P6a：长期记忆条目行读取（供画像去重），只读不写。"""
+
+    def test_parse_headings_bullets_and_fences(self, tmp_path, monkeypatch):
+        from agent.core.memory import store as store_mod
+
+        user = tmp_path / "USER_MEMORY.md"
+        proj = tmp_path / "PROJECT_MEMORY.md"
+        user.write_text(
+            "# 长期记忆\n\n- 用户喜欢简短回答\n- 用户喜欢简短回答\n"
+            "```\n代码块里的不算\n```\n> 引用不算\n",
+            encoding="utf-8",
+        )
+        proj.write_text("## 项目约定\n\n1. 提交前跑 pytest\n", encoding="utf-8")
+        monkeypatch.setattr(store_mod, "user_memory_path", lambda: user)
+        monkeypatch.setattr(store_mod, "project_memory_path", lambda workdir: proj)
+
+        lines = store_mod.load_memory_lines(str(tmp_path))
+        assert "用户喜欢简短回答" in lines
+        assert "提交前跑 pytest" in lines
+        assert "代码块里的不算" not in lines
+        assert "引用不算" not in lines
+        assert lines.count("用户喜欢简短回答") == 1
+
+    def test_missing_files_are_empty(self, tmp_path, monkeypatch):
+        from agent.core.memory import store as store_mod
+
+        monkeypatch.setattr(store_mod, "user_memory_path", lambda: tmp_path / "none.md")
+        monkeypatch.setattr(store_mod, "project_memory_path", lambda workdir: tmp_path / "none2.md")
+        assert store_mod.load_memory_lines(str(tmp_path)) == []
+
+
 # ─────────────────────────────────────────────────────────────
 # M2: /memory 命令
 # ─────────────────────────────────────────────────────────────
@@ -525,16 +597,50 @@ class TestMemoryCommand:
         ui = self._run("/memory del ent_not_exist", tmp_path / "p.json")
         assert any("未找到" in m for m in ui.messages)
 
+    def test_persona_view_and_rebuild(self, tmp_path, monkeypatch):
+        from agent.core.memory import profile_persona as pp
+
+        persona = pp.Persona(
+            token_count=50, source_count=3,
+            sections=[pp.PersonaSection(
+                "identity", "他是谁",
+                [pp.PersonaBullet("杭州的 AI 开发者", ["ent_x"])],
+            )],
+        )
+        monkeypatch.setattr(pp, "load_persona", lambda: persona)
+        monkeypatch.setattr(pp, "maybe_rebuild_async", lambda *a, **k: True)
+
+        ui = self._run("/memory persona", tmp_path / "p.json")
+        assert any("人设卡" in m for m in ui.messages)
+
+        ui = self._run("/memory persona rebuild", tmp_path / "p.json")
+        assert any("人设卡" in m for m in ui.messages)
+
     def test_clear_requires_yes(self, tmp_path):
+        from agent.core.memory import profile_events, profile_persona
+
         path = tmp_path / "p.json"
         self._run("/memory add a", path)
         ui = self._run("/memory clear", path)
         assert any("确认" in m for m in ui.messages)
         assert len(ProfileStore(path)) == 1
 
+        # 2026-11-19：人设卡与事件轨也是画像派生数据，clear 必须一并清掉
+        profile_persona._write_json(
+            profile_persona.persona_path(), {"version": 1, "sections": []}
+        )
+        profile_persona.mark_pending()
+        profile_events.append_event("schedule", "下周三面试")
+
         ui = self._run("/memory clear yes", path)
-        assert any("已清空" in m for m in ui.messages)
+        joined = "\n".join(ui.messages)
+        assert "已清空" in joined
         assert len(ProfileStore(path)) == 0
+        assert not profile_persona.persona_path().exists()
+        assert profile_persona.load_state()["pending"] is False
+        assert profile_events.load_events() == []
+        assert "已丢弃常驻人设卡" in joined
+        assert "已清空事件轨（1 条" in joined
 
     def test_add_empty_usage(self, tmp_path):
         ui = self._run("/memory add", tmp_path / "p.json")

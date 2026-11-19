@@ -292,6 +292,9 @@ class Settings:
     profile_inject_token_limit: int = 300      # 注入 system prompt 的 token 硬限额
     # 注入侧（P1c/核心预算）：常驻只放核心条，其余用 RecallProfile 按需检索
     profile_inject_core_max: int = 12          # 每轮注入的条目数上限（0 = 不设上限）
+    # 常驻人设卡（P6）：把全量条目蒸馏成 600–800 tokens 的“他是谁”，退出时重建
+    profile_persona_enabled: bool = True
+    profile_persona_token_limit: int = 800     # 人设卡 token 硬上限
     profile_inject_prefer_topics: list = field(default_factory=list)
     profile_inject_token_budget_mode: str = "pseudo"  # pseudo=len/4 / weighted=中英分权
     # 事件轨（P2c）：临时/带时间点事实的 append-only 日志，默认不注入

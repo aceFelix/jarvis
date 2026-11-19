@@ -96,6 +96,13 @@ async def _serve_main(settings: Settings) -> None:
         # 主动播报中枢：调度器轮询 + 每日简报/截止日期任务注册（事件泵启动后，
         # 确保到期事件有消费方；补播定时器延迟 5 秒等桌面壳 WS 连上）
         hub.start()
+        # P6：人设卡启动补偿（仅 pending 或首次无卡时构建，正常启动不重建）
+        try:
+            from agent.core.memory import profile_persona
+
+            profile_persona.startup_check_async(settings)
+        except Exception:
+            pass
         # init 事件改为按连接推送（DesktopBridgeServer._on_client_connected）：
         # 启动期一次性 broadcast 在无在线客户端时会被静默丢弃，桌面壳首屏
         # （含设置面板回填）将永不触发。@author aceFelix

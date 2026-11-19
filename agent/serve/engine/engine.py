@@ -682,6 +682,15 @@ class ChatEngine(EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineV
             self._flush_profile_refine(wait_seconds=15.0)
         except Exception:
             pass
+        # P6：正常退出时重建人设卡（在提炼之后；超时由下次启动补建）
+        try:
+            from agent.core.memory import profile_persona
+
+            profile_persona.maybe_rebuild_async(
+                self._settings, force=False, wait_seconds=15.0
+            )
+        except Exception:
+            pass
         task = self._prewarm_task
         if task is not None and not task.done():
             task.cancel()

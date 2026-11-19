@@ -128,6 +128,63 @@ class TestFailure:
         assert "画像检索失败" in out.data
 
 
+class TestListMode:
+    """P6b：mode=list 分页列出全库（含休眠），用于“你了解我多少”。"""
+
+    def _seed(self, store: ProfileStore, n: int = 23) -> None:
+        for i in range(n):
+            category = "preference" if i % 2 else "schedule"
+            store.upsert(ProfileEntry.new(f"习惯{i}号动作", category, 0.8))
+
+    def _entry_lines(self, data: str) -> list[str]:
+        return [l for l in data.splitlines() if l.startswith("- [")]
+
+    def test_pagination_without_overlap(self, store) -> None:
+        self._seed(store)
+        first = _run(RecallProfileTool(), {"mode": "list", "limit": 20})
+        assert "共 23 条" in first.data
+        assert len(self._entry_lines(first.data)) == 20
+        assert 'offset=20' in first.data
+
+        second = _run(RecallProfileTool(), {"mode": "list", "offset": 20, "limit": 20})
+        assert len(self._entry_lines(second.data)) == 3
+        a = set(self._entry_lines(first.data))
+        b = set(self._entry_lines(second.data))
+        assert a.isdisjoint(b)
+        assert len(a | b) == 23
+
+    def test_offset_beyond_end(self, store) -> None:
+        self._seed(store, 3)
+        out = _run(RecallProfileTool(), {"mode": "list", "offset": 99})
+        assert "已到末尾" in out.data
+        assert "共 3 条" in out.data
+
+    def test_category_filter(self, store) -> None:
+        self._seed(store, 4)
+        out = _run(RecallProfileTool(), {"mode": "list", "category": "preference"})
+        assert "共 2 条" in out.data
+        assert all("偏好与爱好" in l for l in self._entry_lines(out.data))
+
+    def test_dormant_entry_marked(self, store) -> None:
+        old = ProfileEntry.new("很久前提过的旧事", "other", 0.8)
+        old.created_at = old.updated_at = 1000.0
+        store.upsert(old)
+        out = _run(RecallProfileTool(), {"mode": "list"})
+        assert "很久前提过的旧事" in out.data
+        assert "休眠" in out.data
+
+    def test_list_needs_no_query(self) -> None:
+        assert RecallProfileTool().validate_input({"mode": "list"}, _ctx()).ok is True
+
+    def test_search_still_needs_query(self) -> None:
+        res = RecallProfileTool().validate_input({"mode": "search"}, _ctx())
+        assert res.ok is False
+
+    def test_invalid_mode_rejected(self) -> None:
+        res = RecallProfileTool().validate_input({"mode": "dump"}, _ctx())
+        assert res.ok is False
+
+
 class TestRegistry:
     def test_registered_as_deferred(self) -> None:
         from agent.core.tool import build_default_registry

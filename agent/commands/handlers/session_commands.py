@@ -124,9 +124,51 @@ def _format_last_refine(state) -> str:
         ("merged", "合并"),
         ("noop", "跳过"),
         ("rejected", "拒绝"),
+        ("memory_md_skip", "长期重复跳过"),
+        ("conflict", "疑冲突"),
     )
     parts = [f"{name} {int(report.get(key, 0))}" for key, name in labels if report.get(key)]
     return f"上次提炼 {when}：{' / '.join(parts)}"
+
+
+def _show_persona(ui, settings, *, rebuild: bool = False) -> None:
+    """/memory persona — 查看常驻人设卡；rebuild 时先同步重建再展示。"""
+    from agent.core.memory import profile_persona
+
+    if not getattr(settings, "profile_enabled", False):
+        ui.warn("画像记忆未开启（settings.toml [memory] profile_enabled）")
+        return
+    if not getattr(settings, "profile_persona_enabled", True):
+        ui.warn("人设卡未启用（settings.toml [memory] profile_persona_enabled）")
+        return
+    if rebuild:
+        profile_persona.maybe_rebuild_async(settings, force=True, wait_seconds=20.0)
+        try:
+            from agent.prompts.system import reload_profile_cache
+
+            reload_profile_cache()
+        except Exception:
+            pass
+
+    persona = profile_persona.load_persona()
+    if persona is None:
+        ui.info("人设卡未构建（需要有效画像条目；构建失败会保留旧卡，可稍后重试）")
+        return
+    when = (
+        time.strftime("%m-%d %H:%M", time.localtime(persona.built_at))
+        if persona.built_at
+        else "-"
+    )
+    ui.info(
+        f"人设卡：{persona.token_count} tokens / 上限 {persona.token_limit} · "
+        f"来源 {persona.source_count} 条 · 构建于 {when}"
+    )
+    text = profile_persona.render_persona(persona)
+    console = getattr(ui, "_console", None)
+    if console:
+        console.print(text)
+    else:
+        print(text)
 
 
 def _show_profile(ui, settings, session_name: str = "") -> None:
@@ -162,6 +204,21 @@ def _show_profile(ui, settings, session_name: str = "") -> None:
     )
     if telemetry:
         ui.info(f"  {telemetry}")
+    # P6：人设卡状态一眼可见（不展开卡片，避免刷屏；完整卡用 /memory persona）
+    try:
+        from agent.core.memory import profile_persona
+
+        ps = profile_persona.status(settings)
+        if ps["exists"]:
+            when = time.strftime("%m-%d %H:%M", time.localtime(ps["built_at"])) if ps["built_at"] else "-"
+            ui.info(
+                f"  人设卡：{ps['token_count']} tokens · {ps['source_count']} 条来源 · "
+                f"构建于 {when}（/memory persona 查看）"
+            )
+        else:
+            ui.info("  人设卡：未构建（退出时自动构建，或 /memory persona rebuild）")
+    except Exception:
+        pass
     for weight, e in weighted:
         label = CATEGORY_LABELS.get(e.category, e.category)
         src = e.source_session or "-"
@@ -304,6 +361,8 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
     /memory dedup [yes]  画像去重整理（预览可归并的深重复条数，yes 执行）
     /memory sync         同步本地画像到知识图谱（先预览，/memory sync yes 确认写入）
     /memory events [n]   查看事件轨最近 n 条（临时事项，默认 5、最多 50；不注入对话）
+    /memory persona      查看常驻人设卡（P6）
+    /memory persona rebuild  立即重建人设卡（正常退出时也会自动重建）
     /memory file         查看长期记忆文件（MEMORY.md，旧功能保留）
     """
     from agent.core.memory.profile_store import ProfileStore
@@ -321,6 +380,10 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
 
     if action == "file":
         _show_memory_file(ctx.ui, ctx.settings)
+        return True
+
+    if action == "persona":
+        _show_persona(ctx.ui, ctx.settings, rebuild=(rest.lower() == "rebuild"))
         return True
 
     if action == "events":
@@ -403,9 +466,21 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         if rest.lower() != "yes":
             ctx.ui.warn("清空全部画像不可恢复。确认请输入: /memory clear yes")
             return True
+        from agent.core.memory import profile_events, profile_persona
+
         n = ProfileStore().clear()
+        # 人设卡与事件轨也是画像派生数据：只清 profile.json 会留下“已清空但
+        # 仍在注入旧人设卡 / events 还能看到旧行程”的不一致（2026-11-19 修复）。
+        persona_dropped = profile_persona.discard()
+        events_removed = profile_events.clear_events()
         _rebuild_system_prompt(ctx)
         ctx.ui.info(f"已清空画像记忆（{n} 条）")
+        if persona_dropped:
+            ctx.ui.info("已丢弃常驻人设卡（下次提炼后会重新生成）")
+        else:
+            ctx.ui.warn("人设卡未丢弃（可能正在重建），请稍后重试 /memory clear yes")
+        if events_removed:
+            ctx.ui.info(f"已清空事件轨（{events_removed} 条临时事项）")
         return True
 
     if action == "dedup":
@@ -435,6 +510,7 @@ async def handle_memory(ctx: "CommandContext", stripped: str) -> bool:
         "  /memory clear yes    清空全部\n"
         "  /memory dedup        归并深重复记忆（先预览，加 yes 执行）\n"
         "  /memory refine       立即提炼当前会话\n"
+        "  /memory persona      查看常驻人设卡；persona rebuild 立即重建\n"
         "  /memory sync         同步画像到知识图谱（先预览，加 yes 确认写入）\n"
         "  /memory file         查看 MEMORY.md 长期记忆文件"
     )

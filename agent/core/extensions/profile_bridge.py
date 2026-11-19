@@ -78,7 +78,7 @@ def render_profile_json(raw: str, token_limit: int) -> str:
     return (
         "# 关于用户（知识图谱画像）\n"
         + "\n".join(kept)
-        + "\n（来自 aceFelix 知识图谱，为唯一事实源；与本地画像记忆冲突时以本段为准）"
+        + "\n（来自 aceFelix 知识图谱；画像内部以本段为准；若与长期记忆 MEMORY.md 冲突，仍以长期记忆为准）"
     )
 
 

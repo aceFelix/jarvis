@@ -60,6 +60,8 @@ class RefineReport:
     noop: int = 0           # 裁决为 noop 的条数（"不记"的正式出口）
     extracted: int = 0      # 抽取段产出的候选数
     rejected: int = 0       # 被硬闸拒掉的条数（>40 字/空内容/非法 op）
+    memory_md_skip: int = 0 # 与 MEMORY.md 重复而跳过的条数
+    conflict: int = 0       # 与 MEMORY.md 相近但不相同的条数（只提示）
     skipped: bool = False   # True = 未触发（节流/消息不足/mock 等）
     advanceable: bool = False  # 本轮是否可推进水位（"没内容"可推进，"没 LLM"不可）
     reason: str = ""
@@ -282,6 +284,15 @@ def refine_session(
             report.advanceable = False  # 等配置好再试，不能吞掉这段增量
             return report
 
+        # P6a：跨记忆去重——读 MEMORY.md 条目行，画像不重复存用户显式记忆
+        memory_lines: list[str] = []
+        try:
+            from agent.core.memory.store import load_memory_lines
+
+            memory_lines = load_memory_lines(getattr(settings, "workdir", "") or "")
+        except Exception:
+            memory_lines = []
+
         model = getattr(settings, "profile_refine_model", "") or settings.model
         include_aliases = bool(getattr(settings, "profile_aliases_enabled", True))
 
@@ -304,8 +315,10 @@ def refine_session(
             )
             report.rejected += rejected_resolve
 
-            # ④ 落盘（存储层查重闸仍然生效）
-            profile_resolve.apply_decisions(decisions, store, session_id, report)
+            # ④ 落盘（存储层查重闸 + 跨记忆去重仍然生效）
+            profile_resolve.apply_decisions(
+                decisions, store, session_id, report, memory_lines=memory_lines
+            )
 
 
         # 本轮写盘后再做一次全量归并：历史积压的深重复条目（修复前写入的）
@@ -419,8 +432,18 @@ def maybe_refine_async(
                         "merged": report.merged,
                         "noop": report.noop,
                         "rejected": report.rejected,
+                        "memory_md_skip": report.memory_md_skip,
+                        "conflict": report.conflict,
                     },
                 )
+                # P6：有条目变化 → 标记人设卡待重建（真正重建在退出/启动补偿/手动）
+                if report.added or report.updated or report.merged or report.deleted:
+                    try:
+                        from agent.core.memory import profile_persona
+
+                        profile_persona.mark_pending()
+                    except Exception:
+                        pass
             # advanceable=False 且无 error：本轮不推进，下次重试同一段增量
         finally:
             _in_flight.release()

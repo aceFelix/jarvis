@@ -90,8 +90,9 @@ class TestRenderProfileJson:
         assert "- HAS_SKILL: Python" in section
         # 反向关系带"（被）"前缀
         assert "（被）MENTORED_BY: 老王" in section
-        # 冲突规则声明：图谱为唯一事实源
-        assert "唯一事实源" in section
+        # 冲突规则声明：画像内部以图谱为准，但长期记忆仍最高
+        assert "画像内部以本段为准" in section
+        assert "长期记忆" in section
 
     def test_invalid_json_returns_empty(self):
         assert pb.render_profile_json("not json", token_limit=400) == ""

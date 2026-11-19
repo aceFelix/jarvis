@@ -235,6 +235,14 @@ async def repl(settings: Settings) -> int:
         if settings.verbose:
             ui.warn(f"日程提醒初始化失败（本轮不提供定时提醒）: {e}")
 
+    # P6：人设卡启动补偿——仅 pending（异常退出）或首次无卡时构建，正常启动不重建
+    try:
+        from agent.core.memory import profile_persona
+
+        profile_persona.startup_check_async(settings)
+    except Exception:
+        pass
+
     # LSP 集成
     lsp_tool_count = 0
     if settings.enable_lsp and settings.lsp_servers:
@@ -607,6 +615,14 @@ async def repl(settings: Settings) -> int:
     _auto_save(ui, messages, workdir=settings.workdir, model=model, provider=settings.provider,
                session_name=_session_name, dialog_count=_dialog_count, title_generated=_title_generated,
                settings=settings, final=True, refine_wait=15.0)
+
+    # P6：正常退出时重建人设卡（提炼之后；最多再等 15 秒，超时下次启动补）
+    try:
+        from agent.core.memory import profile_persona
+
+        profile_persona.maybe_rebuild_async(settings, force=False, wait_seconds=15.0)
+    except Exception:
+        pass
 
     # 先收后台线程再告别：避免 goodbye 之后还有提醒/目标播报插进来，
     # 也避免后台线程拖住进程退出（脊柱与提醒同口径）

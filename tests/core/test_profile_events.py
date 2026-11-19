@@ -131,3 +131,27 @@ class TestFileShape:
         lines = E.events_path().read_text(encoding="utf-8").splitlines()
         assert len(lines) == 2
         assert json.loads(lines[0])["content"] == "A"
+
+
+class TestClearEvents:
+    """2026-11-19：`/memory clear` 必须把事件轨一起清掉。
+
+    回归背景：clear 曾只清 profile.json，导致“画像已清空但 /memory events
+    仍能看到旧行程”，且事件永远不会被清空。
+    """
+
+    def test_clear_removes_all_and_reports_count(self) -> None:
+        E.append_event("schedule", "下周三面试", ts=100.0)
+        E.append_event("schedule", "周五搬家", ts=200.0)
+        assert E.clear_events() == 2
+        assert E.load_events() == []
+        assert not E.events_path().exists()
+
+    def test_clear_missing_file_is_noop(self) -> None:
+        assert E.clear_events() == 0
+
+    def test_append_after_clear_works(self) -> None:
+        E.append_event("schedule", "旧行程", ts=100.0)
+        E.clear_events()
+        assert E.append_event("schedule", "新行程", ts=200.0)
+        assert [e.content for e in E.load_events()] == ["新行程"]

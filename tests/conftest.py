@@ -21,6 +21,20 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_persona_card(tmp_path, monkeypatch):
+    """人设卡默认钉到 tmp：避免全量测试读到用户真实 ~/.jarvis/memory/persona.json。
+
+    P6 起 system prompt 会优先注入人设卡；不隔离会让测试结果依赖用户机器状态。
+    @author aceFelix
+    """
+    from agent.core.memory import profile_persona
+
+    monkeypatch.setattr(
+        profile_persona, "memory_dir", lambda: tmp_path / "persona_home"
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_policy_singletons(tmp_path):
     """所有测试默认把 policy 包单例指向 tmp_path，结束后复位。
 

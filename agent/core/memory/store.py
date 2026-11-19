@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -384,6 +385,46 @@ def get_memory_files(workdir: str) -> dict[str, Path | None]:
         "user": user_memory_path(),
         "project": project_memory_path(workdir),
     }
+
+
+def load_memory_lines(workdir: str) -> list[str]:
+    """读取用户级 + 项目级 MEMORY.md 的**条目行**（供画像写入去重）。
+
+    只取“像条目”的行：跳过标题、引用块、代码围栏、空行；剥掉列表符号；
+    单行截 200 字；总量截 500 行（成本闸）。任何读取失败都跳过该文件，
+    绝不阻断画像提炼。
+
+    @author aceFelix
+    """
+    paths: list[Path] = [user_memory_path()]
+    if workdir:
+        paths.append(project_memory_path(workdir))
+    out: list[str] = []
+    seen: set[str] = set()
+    in_fence = False
+    for path in paths:
+        try:
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence or not line or line.startswith(("#", ">", "<!--")):
+                continue
+            line = re.sub(r"^(?:[-*]\s+|\d+\.\s+)", "", line).strip()
+            line = line[:200]
+            if len(line) < 2 or line in seen:
+                continue
+            seen.add(line)
+            out.append(line)
+            if len(out) >= 500:
+                return out
+    return out
 
 
 # ---- 长期记忆读写（桌面设置面板 / MemoryUpdate 工具，2026-11）----

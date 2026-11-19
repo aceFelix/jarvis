@@ -32,6 +32,7 @@ from agent.core.memory.profile_store import (
     PROFILE_CATEGORIES,
     ProfileEntry,
     ProfileStore,
+    profile_content_similarity,
 )
 
 #: 单条事实的字数上限（硬闸：超过直接拒绝，不截断）
@@ -112,6 +113,7 @@ def build_extract_prompt(dialog_text: str) -> str:
 判断口径：**这条 5 年后还成立吗？它描述的是“人”还是“事/系统”？**
 描述事或系统的一律不记。拿不准就不记——画像宁少勿滥；
 细碎事实属于长期记忆（MEMORY.md），不进画像。
+**用户明确说“记住/以后都/别忘了”的内容归长期记忆，不在画像重复记。**
 
 ## 类别（category 只能取以下值）
 {cats}
@@ -123,7 +125,8 @@ def build_extract_prompt(dialog_text: str) -> str:
 4. 这一阶段**不要判断是否与已有画像重复**，那是下一步的事
 5. **只写用户明确陈述的内容**：禁止推测（“可能/也许/大概/或许/应该是”），也不要替用户
    补因果（如由“查贵阳天气”推断“可能要出差”）——不确定就不记
-6. 没有值得记的就返回空数组
+6. 用户明确要求记住的内容属于长期记忆（MEMORY.md），**不再提炼为画像**
+7. 没有值得记的就返回空数组
 
 ## 本次对话
 {dialog_text}
@@ -357,6 +360,7 @@ def apply_decisions(
     store: ProfileStore,
     session_id: str,
     report: Any,
+    memory_lines: list[str] | None = None,
 ) -> None:
     """第④段：落盘。
 
@@ -369,9 +373,29 @@ def apply_decisions(
     - **episodic（P2c）**：带 `expire_days` 的临时事项 → 入库时算好 `expire_at`，
       同时追写事件轨 `events.jsonl`（画像库回答“是谁”，事件轨回答“何时何事”）
     计数全部记在 report 上（added/updated/merged/deleted/noop）。
+
+    `memory_lines` 非空时先做**跨记忆去重**：新内容与 MEMORY.md 条目相似度
+    ≥0.85 → 跳过不写（`memory_md_skip`）；0.6–0.85 → 只计 `conflict`，
+    仍写入画像（不自动改 MEMORY.md）。
     """
     def _bump(name: str) -> None:
         setattr(report, name, int(getattr(report, name, 0) or 0) + 1)
+
+    def _memory_md_duplicate(content: str) -> bool:
+        """跨记忆闸：与长期记忆重复→跳过；相近但不相同→计 conflict。"""
+        if not memory_lines:
+            return False
+        best = 0.0
+        for line in memory_lines:
+            best = max(best, profile_content_similarity(content, line))
+            if best >= 0.85:
+                break
+        if best >= 0.85:
+            _bump("memory_md_skip")
+            return True
+        if best >= 0.6:
+            _bump("conflict")
+        return False
 
     now = time.time()
 
@@ -421,11 +445,15 @@ def apply_decisions(
                 _bump("deleted")
             continue
         if d.op == "add":
+            if _memory_md_duplicate(d.content):
+                continue
             kept, merged = store.merge_or_add(_new_entry(d))
             _record_event(kept)
             _bump("merged" if merged else "added")
             continue
         if d.op == "update":
+            if _memory_md_duplicate(d.content):
+                continue
             # target 不存在（幻觉/已失效）→ 当 add 处理，仍走存储层查重闸
             target = store.get(d.target_id) if d.target_id else None
             if target is not None:

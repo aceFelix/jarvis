@@ -192,6 +192,35 @@ def recent_events(limit: int = 5, *, now: float | None = None) -> list[ProfileEv
     return alive[-limit:]
 
 
+def clear_events() -> int:
+    """整轨清空（`/memory clear` 调用），返回被删掉的记录条数。
+
+    为什么必须连同事件轨一起清：`/memory clear` 的语义是“把画像忘干净”，而
+    事件轨同属画像派生数据。只清 `profile.json` 会留下“已清空但 /memory events
+    还能看到旧行程”的不一致。
+
+    实现上**删文件**而不是写空文件：空文件与“从未写过”在语义上没区别，留着
+    反而让下一次 `append_event` 的目录检查多此一举。
+
+    与 `append_event` 共用进程锁与跨进程文件锁；文件不存在 / IO 失败都静默
+    返回 0（事件轨是旁路，不能拖挂清空操作）。
+
+    @author aceFelix
+    """
+    path = events_path()
+    if not path.is_file():
+        return 0
+    removed = len(load_events())
+    try:
+        with _write_lock:
+            with file_lock(_lock_file()):
+                path.unlink(missing_ok=True)
+        return removed
+    except Exception as e:  # noqa: BLE001 - 旁路日志，失败不影响清空画像
+        diag_warn(_COMPONENT, f"事件清空失败: {type(e).__name__}: {e}")
+        return 0
+
+
 def prune_events(
     retention_days: int = DEFAULT_RETENTION_DAYS, *, now: float | None = None
 ) -> int:

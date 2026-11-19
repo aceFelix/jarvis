@@ -176,6 +176,54 @@ class TestSpeculationGate:
         assert decisions[0].content == "居住在杭州"
 
 
+class TestMemoryBoundary:
+    """P6a：画像写入前先过 MEMORY.md 去重，但绝不改写 MEMORY.md。"""
+
+    def _report_with_counters(self) -> SimpleNamespace:
+        r = _report()
+        r.memory_md_skip = 0
+        r.conflict = 0
+        return r
+
+    def test_add_skipped_when_duplicate_of_memory_md(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        report = self._report_with_counters()
+        PR.apply_decisions(
+            [PR.Decision("add", "用户喜欢简短回答", "preference", 0.9)],
+            store, "s1", report, memory_lines=["用户喜欢简短回答"],
+        )
+        assert store.entries() == []
+        assert report.memory_md_skip == 1
+
+    def test_update_skipped_when_duplicate_of_memory_md(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        old = ProfileEntry.new("喜欢简短回答", "preference", 0.8)
+        store.upsert(old)
+        report = self._report_with_counters()
+        PR.apply_decisions(
+            [PR.Decision("update", "用户喜欢简短回答", "preference", 0.9, target_id=old.id)],
+            store, "s1", report, memory_lines=["用户喜欢简短回答"],
+        )
+        # 跳过写入，旧条目仍有效（不能被误标失效）
+        assert report.memory_md_skip == 1
+        assert store.get(old.id) is not None
+
+    def test_nonmatching_still_added(self, tmp_path: Path) -> None:
+        store = _store(tmp_path)
+        report = self._report_with_counters()
+        PR.apply_decisions(
+            [PR.Decision("add", "习惯凌晨两点睡", "schedule", 0.85)],
+            store, "s1", report, memory_lines=["用户喜欢简短回答"],
+        )
+        assert len(store.entries()) == 1
+        assert report.memory_md_skip == 0
+
+    def test_extract_prompt_declares_memory_boundary(self) -> None:
+        prompt = PR.build_extract_prompt("用户: 记住我喜欢简短回答")
+        assert "MEMORY.md" in prompt
+        assert "不再提炼为画像" in prompt
+
+
 class TestValidateCandidate:
     def test_valid(self) -> None:
         c = PR.validate_candidate({"content": " 习惯深夜工作 ", "category": "schedule",

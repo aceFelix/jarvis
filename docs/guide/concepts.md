@@ -98,9 +98,11 @@ Jarvis 支持多层记忆持久化：
 - **长期记忆**：`~/.jarvis/MEMORY.md`（用户级）+ `<workdir>/.jarvis/MEMORY.md`（项目级），启动时注入系统提示
 - **画像记忆**：会话结束后自动用 LLM 提炼你的偏好/习惯/背景（如"习惯熬夜""主力 GLM"），
   存 `~/.jarvis/memory/profile.json`，下次会话限额注入系统提示——Jarvis 越用越懂你。
+  **常驻人设卡（P6）**：把全量条目蒸馏成 600–800 tokens 的“你是怎样一个人”，每次会话都在，
+  只在正常退出时重建；冲突时以长期记忆 `MEMORY.md` 为准。
   后台异步提炼（只喂**增量**：水位台账记“已提炼到第几条”；默认**每 7 条新消息**提炼一次，成功不按时间节流，可用 `profile_refine_min_delta` 调，不影响响应速度）+ 退出/切会话/新建时把最后一段收干（`profile_refine_on_exit`，退出最多等 15 秒）+ `/memory refine` 手动立即提炼 + 每日凌晨维护（过时记忆**只降权不删除**：权重低的进休眠、不再注入，再提一次即复活）。
   写入带确定性查重：同一条事实反复提炼会被归并到已有条目（置信取大），不会记很多遍；历史积压的重复可用 `/memory dedup yes` 一次性整理。
-  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory dedup` 归并重复 / `/memory refine` 立即提炼 / `/memory events` 查看临时事项事件轨。
+  `/memory` 查看 / `/memory add` 手动添加 / `/memory del` 删除 / `/memory clear yes` 全部清空（含人设卡与事件轨） / `/memory dedup` 归并重复 / `/memory refine` 立即提炼 / `/memory persona [rebuild]` 查看或重建人设卡 / `/memory events` 查看临时事项事件轨。
   临时事项（如“下周三面试”）会进事件轨（`events.jsonl`）并带到期时间，默认不占对话预算。
   画像**只记关于你的稳定信息**（身份、性格、爱好、作息、愿望、心思），不记助手的工作流程、
   项目的技术实现（框架/端口/路径）、环境状态；一次性事件不进画像（进事件轨，不占画像预算）——

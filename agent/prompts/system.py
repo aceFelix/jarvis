@@ -452,29 +452,61 @@ def _profile_section(settings: object | None) -> str:
             sections.append(kg_section)
 
         if settings is not None and getattr(settings, "profile_enabled", False):
-            from agent.core.memory.profile_store import ProfileStore
+            from agent.core.memory.profile_store import CATEGORY_LABELS, ProfileStore
 
-            limit = int(getattr(settings, "profile_inject_token_limit", 300))
-            # 核心预算：常驻只放少量条目，其余靠 RecallProfile 按需检索
-            core_max = int(getattr(settings, "profile_inject_core_max", 12) or 0)
-            # P1c 注入侧：主题优先（空列表＝纯按置信度）+ 预算口径（默认 pseudo 兼容旧行为）
-            prefer = list(getattr(settings, "profile_inject_prefer_topics", []) or [])
-            mode = str(getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo")
             store = ProfileStore()
-            local = store.render_for_prompt(
-                token_limit=limit, prefer_topics=prefer, mode=mode, max_entries=core_max
-            )
-            if local:
-                sections.append(local)
-            # P5：只要“库里还有没列出的条目”（休眠/超出核心预算）就提示按需检索；
-            # 小库全量列出时不推销工具。
-            injected = sum(1 for line in local.splitlines() if line.startswith("- "))
-            omitted = max(0, len(store.entries()) - injected)
-            if local and omitted > 0:
-                sections.append(
-                    f"（画像库中还有 {omitted} 条未在此列出（较早/较少提及或超出核心预算）；"
-                    "用户问到具体个人细节而这里没有时，可调用 RecallProfile 工具按关键词检索。）"
+            persona_used = False
+            # P6：常驻人设卡。KG 画像存在时不重复注入（KG 已承担常驻画像）。
+            if getattr(settings, "profile_persona_enabled", True) and not kg_section:
+                try:
+                    from agent.core.memory import profile_persona
+
+                    persona = profile_persona.load_persona()
+                except Exception:
+                    persona = None
+                if persona is not None:
+                    card = profile_persona.render_persona(persona)
+                    if card:
+                        sections.append(card)
+                        dynamic = sorted(
+                            store.active_entries(), key=lambda e: e.updated_at, reverse=True
+                        )[: profile_persona.DYNAMIC_MAX]
+                        if dynamic:
+                            lines = ["## 最近变化"]
+                            for e in dynamic:
+                                label = CATEGORY_LABELS.get(e.category, e.category)
+                                lines.append(f"- [{label}] {e.content}")
+                            sections.append("\n".join(lines))
+                        total = len(store.entries())
+                        sections.append(
+                            f"（画像库共 {total} 条；人设卡为常驻摘要。更早/更细的用 RecallProfile："
+                            "具体事实用 query；问“你了解我多少”用 mode=\"list\" 分页读全库。）"
+                        )
+                        persona_used = True
+
+            if not persona_used:
+                limit = int(getattr(settings, "profile_inject_token_limit", 300))
+                # 核心预算：常驻只放少量条目，其余靠 RecallProfile 按需检索
+                core_max = int(getattr(settings, "profile_inject_core_max", 12) or 0)
+                # P1c 注入侧：主题优先（空列表＝纯按置信度）+ 预算口径（默认 pseudo 兼容旧行为）
+                prefer = list(getattr(settings, "profile_inject_prefer_topics", []) or [])
+                mode = str(getattr(settings, "profile_inject_token_budget_mode", "pseudo") or "pseudo")
+                local = store.render_for_prompt(
+                    token_limit=limit, prefer_topics=prefer, mode=mode, max_entries=core_max
                 )
+                if local:
+                    sections.append(local)
+                    sections.append("（画像为自动观察；若与长期记忆冲突，以长期记忆为准。）")
+                # P5：只要“库里还有没列出的条目”（休眠/超出核心预算）就提示按需检索；
+                # 小库全量列出时不推销工具。
+                injected = sum(1 for line in local.splitlines() if line.startswith("- "))
+                omitted = max(0, len(store.entries()) - injected)
+                if local and omitted > 0:
+                    sections.append(
+                        f"（画像库中还有 {omitted} 条未在此列出（较早/较少提及或超出核心预算）；"
+                        "用户问到具体个人细节而这里没有时，可调用 RecallProfile 工具按关键词检索。"
+                        "问“你了解我多少”时用 mode=\"list\" 分页读完全库。）"
+                    )
         _PROFILE_CACHE = "\n\n".join(sections)
     except Exception:
         pass  # 画像注入失败不影响启动
