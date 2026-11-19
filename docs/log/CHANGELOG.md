@@ -19,6 +19,15 @@
 
 ## [Unreleased]
 
+### 修复（npm 发布鉴权配置，2026-11-19）
+
+- 2.6.0 的 npm 发布 404 根因是 `NPM_TOKEN` 失效（registry 上包与 scope 均正常，
+  2.5.4 仍在）；补发走 Actions 的 **Re-run failed jobs** 即可，tag 固化的是旧 workflow。
+- 删除 `publish-npm` 步骤里冗余的 `~/.npmrc` 写入：认证由 setup-node(`registry-url`)
+  生成的 `NPM_CONFIG_USERCONFIG` 临时文件负责，写默认路径既不生效又误导排查。
+- `npm/package.json` 的 `repository.url` 补 `git+` 前缀，消除 `npm pkg fix` 警告。
+- 从下一次发版起生效；不影响已发布的 2.6.0。
+
 ## [2.6.0] — 2026-11-19
 
 这一版把画像记忆从“能记事实”推进到“一直懂我”：提炼触发收敛为每 7 条 + 终态、

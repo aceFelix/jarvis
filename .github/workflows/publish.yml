@@ -158,10 +158,11 @@ jobs:
 
       - name: Publish to npm
         working-directory: ./npm
-        run: |
-          # 配置 npm token（来自 GitHub Secret）
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-          npm publish --access public
+        # 认证由 setup-node(registry-url) 生成的 NPM_CONFIG_USERCONFIG 临时 .npmrc 负责，
+        # 它读取本步骤注入的 NODE_AUTH_TOKEN；不要再往 ~/.npmrc 写一遍——
+        # 那个默认路径在本 job 里不生效，只会误导排查（2026-11-19）。
+        # 2.6.0 发布 404 的根因是 NPM_TOKEN 失效，不是这里的写法。
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

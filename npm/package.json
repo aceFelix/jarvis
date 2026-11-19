@@ -15,7 +15,7 @@
   "homepage": "https://github.com/aceFelix/jarvis",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aceFelix/jarvis.git",
+    "url": "git+https://github.com/aceFelix/jarvis.git",
     "directory": "jarvis"
   },
   "license": "Apache-2.0",
