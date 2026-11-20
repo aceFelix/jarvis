@@ -9,7 +9,7 @@
 
 | 系列 | 收录版本 | 位置 |
 |---|---|---|
-| 2.6.x | 2.6.0 | 本文件 |
+| 2.6.x | 2.6.0 — 2.6.1 | 本文文件 |
 | 2.5.x | 2.5.0 – 2.5.4 | [changelog/v2.5.md](changelog/v2.5.md) |
 | 2.4.x | 2.4.0 | [changelog/v2.4.md](changelog/v2.4.md) |
 | 2.3.x | 2.3.0 – 2.3.5 | [changelog/v2.3.md](changelog/v2.3.md) |
@@ -19,6 +19,37 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [2.6.1] — 2026-11-20
+
+这一版集中修“目录不对就无法使用”的一类问题：从系统目录/只读目录启动不再崩溃或卡死，
+并引入默认工作区；同时补齐 cmd 下的终端降级、人设卡失败的可观测性，以及 npm 发布
+鉴权配置。
+
+### 修复（系统目录启动崩溃与首轮卡死，2026-11-20）
+
+- **检查点**：workdir 命中系统目录/盘根时禁用文件回滚并首屏提示；`git` 子进程改用
+  Popen + 进程树终止，超时真正生效；超时后本会话停用；REPL 改为后台建卡，不再阻塞
+  发送（`--workdir` 与普通项目目录不受影响）。
+- **会话记忆**：workdir 不可写时回退到 `~/.jarvis/memory/projects/<名-哈希>`，启动
+  不再 traceback；两处都不可用才按“无记忆”处理。
+- **默认工作区**：显式指定 > 安全 cwd > `~/.jarvis/workspace`（自动创建）；修复
+  `workdir` 漏在 TOML 白名单外导致配置写了不生效。
+- 复盘：`docs/fixlogs/checkpoint-systemdir-block-fix.md`、
+  `docs/fixlogs/default-workspace-fallback-fix.md`、
+  `docs/fixlogs/workdir-unwritable-session-memory-crash-fix.md`。
+
+### 修复（终端展示与可观测性，2026-11-20）
+
+- 命令输出复用 REPL 的 120 列封顶 Console（修掉 `_global_console` 幽灵引用）；
+- legacy 控制台（cmd）改用 ASCII 表格/面板边框与 `[!]/[x]/[?]/[提醒]` 标记；
+- 人设卡失败分支带具体原因，失败后 10 分钟退避，不再每次退出重复告警；
+- `jarvis --init` 生成全注释的 `settings.toml` 骨架并打印配置指引。
+- 复盘：`docs/fixlogs/terminal-ui-cmd-render-and-mintty-resize-fix.md`、
+  `docs/fixlogs/profile-persona-build-silent-failure-fix.md`、
+  `docs/fixlogs/init-settings-toml-absent-fix.md`。
+
 ### 修复（npm 发布鉴权配置，2026-11-19）
 
 - 2.6.0 的 npm 发布 404 根因是 `NPM_TOKEN` 失效（registry 上包与 scope 均正常，
@@ -26,7 +57,11 @@
 - 删除 `publish-npm` 步骤里冗余的 `~/.npmrc` 写入：认证由 setup-node(`registry-url`)
   生成的 `NPM_CONFIG_USERCONFIG` 临时文件负责，写默认路径既不生效又误导排查。
 - `npm/package.json` 的 `repository.url` 补 `git+` 前缀，消除 `npm pkg fix` 警告。
-- 从下一次发版起生效；不影响已发布的 2.6.0。
+
+### 修复（CI 跨平台断言，2026-11-20）
+
+- Windows 路径判定用例在 Linux CI 上跳过；盘根判定同时覆盖 POSIX `/`；
+- 会话记忆回退语义同步既有用例（两处都不可写才返回 None）。
 
 ## [2.6.0] — 2026-11-19
 
