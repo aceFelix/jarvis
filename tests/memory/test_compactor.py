@@ -427,10 +427,21 @@ class TestUpdateSessionMemory:
         assert "完整摘要省略" in content
         assert path is not None
 
-    def test_failure_returns_none(self, tmp_path) -> None:
-        """workdir 是一个文件路径时，_session_memory_path 创建目录失败 → 返回 None。"""
+    def test_failure_returns_none(self, tmp_path, monkeypatch) -> None:
+        """两个候选位置都不可写 → 返回 None（不再抛异常）。
+
+        行为变更（2026-11-20）：workdir 不可写时先回退到用户级
+        ``~/.jarvis/memory/projects/...``；只有两处都失败才放弃。
+        """
         blocker = tmp_path / "not-a-dir"
         blocker.write_text("i am a file", encoding="utf-8")
+        # 回退目录也指向同一个文件 → 两个候选都建不出目录
+        monkeypatch.setattr(
+            "agent.core.memory.compactor._project_memory_dir", lambda _wd: str(blocker)
+        )
+        monkeypatch.setattr(
+            "agent.core.memory.compactor._SESSION_MEMORY_PATH_CACHE", {}
+        )
         result = CompactResult(
             new_messages=[], summary="摘要", pre_compact_tokens=1,
             post_compact_tokens=1, messages_summarized=1, messages_kept=1,

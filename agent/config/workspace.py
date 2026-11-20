@@ -58,7 +58,8 @@ def unsafe_reason(path: Path | str) -> str:
     @author aceFelix
     """
     norm = _norm(path)
-    if re.fullmatch(r"[a-z]:\\", norm):
+    # 盘根：Windows 是 `C:\\`，POSIX 是 `/`（两者都要判，否则 Linux 在根目录启动会中招）
+    if norm in ("/", "\\") or re.fullmatch(r"[a-z]:\\", norm):
         return "盘根目录会把整个磁盘当项目"
     home = Path.home()
     if norm == _norm(home):
