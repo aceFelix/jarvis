@@ -226,6 +226,18 @@ jarvis           # Chat away: natural language directly, "/" for command palette
 
 > Stages 8–11 (policy / perception / execution / experience) and the full capability list: [Blueprint](docs/blueprint/BLUEPRINT.md); execution-level detail: [docs/roadmap/](docs/roadmap/).
 
+## Contributing
+
+Issues and PRs are welcome — docs, tests and translations count too.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) first (dev setup, test commands, code conventions, PR rules)
+- **Bug reports**: use the issue template with `jarvis --version`, platform, repro steps and **redacted** logs
+- **Feature requests**: open an issue to align on direction first
+- **Code changes**: fork → branch → commit → PR; CI (syntax gate + full pytest + gitleaks + Markdown link check) must pass
+- **Security issues**: do not open a public issue; follow [SECURITY.md](SECURITY.md)
+
+By participating you agree to the [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## Disclaimer
 
 J.A.R.V.I.S. is still in **development and validation**; features are not yet fully stable. If you hit problems or rough edges, feedback is welcome at **13985465782@163.com**. Every piece of feedback drives improvement — thanks for your support and tolerance!

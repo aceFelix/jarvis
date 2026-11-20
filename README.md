@@ -231,6 +231,18 @@ jarvis           # 开聊：自然语言直接说，"/" 弹命令面板，Tab �
 > 阶段 8–11（运行时层 / 感知层 / 兑现层 / 体验补齐）与全部能力条目见 [蓝图文档](docs/blueprint/BLUEPRINT.md)，执行级细节见 [docs/roadmap/](docs/roadmap/)。
 > 阶段 12 / 13 的**编号口径**（本文与蓝图曾各指一件事）见蓝图 §9.4 说明。
 
+## 参与贡献
+
+欢迎提交 Issue 与 PR，文档、测试、翻译同样算贡献。
+
+- 动手前请先读 [CONTRIBUTING.md](CONTRIBUTING.md)（开发环境、测试命令、代码约定、PR 要求）
+- **报 Bug**：用 Issue 模板，附 `jarvis --version`、平台、复现步骤与**脱敏**日志
+- **提功能**：先开 Issue 讨论方向，避免白做
+- **改代码**：Fork → 分支 → 提交 → PR；CI（语法门禁 + 全量 pytest + gitleaks + Markdown 链接检查）必须绿
+- **安全漏洞**：不要开公开 Issue，按 [SECURITY.md](SECURITY.md) 私密上报
+
+参与即表示同意遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+
 ## 反馈声明
 
 J.A.R.V.I.S. 现阶段仍处于**开发与验证阶段**，功能尚未完全稳定。使用中如遇问题或体验不佳，欢迎反馈：**13985465782@163.com**。您的每一条反馈都是我改进的动力，感谢支持与包容！

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用文档（安装 / 命令 / 语音 / 权限）
+    url: https://github.com/aceFelix/jarvis/blob/master/USER_GUIDE.md
+    about: 使用类问题先看文档；报 Bug 请使用 Issue 模板
+  - name: 安全问题（私密上报）
+    url: https://github.com/aceFelix/jarvis/security/advisories/new
+    about: 漏洞请走私密通道，不要开公开 Issue
