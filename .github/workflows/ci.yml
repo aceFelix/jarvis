@@ -1,10 +1,18 @@
 name: CI
 
-# T-05: GitHub Actions CI — push/PR 时自动跑测试 + 语法检查
+# 结构（2026-11-20 调整：Windows 为主产品，Linux 保留跨平台兜底）
 #
-# 触发条件: push 到 main/master 或 PR
-# 测试矩阵: Python 3.11 / 3.12 / 3.13 / 3.14
-# 步骤: 安装依赖 → 语法检查 → pytest
+#   static        ubuntu，秒级：编译 + F821 + Markdown 死链 + 打包冒烟
+#   test-linux    PR 跑 3.13 全量；push 主干跑 3.11–3.14 全量
+#   test-windows  PR 与主干都跑全量（真实主战场，绝不用子集）
+#
+# 覆盖口径：**PR 阶段功能覆盖 100%**（双平台全量），
+# 只缩减 Python 版本矩阵（版本兼容性放到合并后验证）。
+#
+# PR 墙钟 ≈ max(static, linux, windows)，三个 job 并行；
+# 矩阵的多版本并行不会叠加时间，只影响 runner 分钟消耗。
+#
+# 触发: push 到 main/master、PR、手动
 
 on:
   push:
@@ -14,14 +22,72 @@ on:
   # 允许手动触发
   workflow_dispatch:
 
+# 同一分支连续 push 时取消上一次 run：避免排队，PR 反馈更快
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: 静态门禁（秒级，三平台逻辑都靠它把关）
+  # ─────────────────────────────────────────────────────────────
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Syntax check (core modules)
+        run: |
+          # 编译检查 agent 包全部模块（含新增文件，无需维护硬编码列表）
+          python -m compileall -q agent/
+
+      - name: Undefined-name check (F821)
+        # 2026-11-05 实修两起 NameError 后加的闸：compileall 只查语法，不查"用了
+        # 从来没导入的名字"。那两起（/doctor 里的 Path、LSP 里的 uri_to_path）都是
+        # 重构丢导入 / 只写函数内局部导入，且全仓没有用例执行过那些函数体，
+        # 于是一直潜伏到用户在 REPL 里敲 /doctor 才炸。
+        # 只选 F821 一条：仓库还有上百条既存 lint 噪音，全量 ruff 会立刻把 CI 变成
+        # 红海，反而没人管——门禁要能长期绿着才有人看。
+        run: ruff check --select F821 agent/
+
+      - name: Markdown dead-link check
+        # 文档贡献也走门禁：本地链接与「本机存在但未入 git」的目标都会被抓到。
+        run: python scripts/check_md_links.py
+
+      - name: Install smoke (entry point + packaged rule file)
+        # 从干净临时目录跑，确保 import 到的是 pip 装进 site-packages 的那份（而非仓库
+        # 源码树），证明"装出来的包"入口能起、且随包带上了运行时规则库 cleaners.toml——
+        # 这类"漏打包"缺陷源码树里的单测永远测不到。
+        run: |
+          cd "$(mktemp -d)"
+          jarvis --help > /dev/null
+          python -c "import agent, pathlib; p = pathlib.Path(agent.__file__).parent / 'config' / 'cleaners.toml'; assert p.is_file(), 'cleaners.toml 未随包安装'; print('install-smoke OK', agent.__version__)"
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Linux 测试（跨平台逻辑兜底）
+  #   PR：只跑 3.13 全量，给快速反馈
+  #   push 主干：跑 3.11–3.14，覆盖 Python 版本边界
+  # ─────────────────────────────────────────────────────────────
+  test-linux:
+    name: Linux py${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.13"]') || fromJSON('["3.11","3.12","3.13","3.14"]') }}
 
     steps:
       - name: Checkout
@@ -38,33 +104,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev]"
 
-      - name: Syntax check (core modules)
-        run: |
-          # 编译检查 agent 包全部模块（含新增文件，无需维护硬编码列表）
-          python -m compileall -q agent/
+      - name: Run tests
+        run: pytest tests/ -q --tb=short
 
-      - name: Undefined-name check (F821)
-        # 2026-11-05 实修两起 NameError 后加的闸：compileall 只查语法，不查“用了
-        # 从来没导入的名字”。那两起（/doctor 里的 Path、LSP 里的 uri_to_path）都是
-        # 重构丢导入 / 只写函数内局部导入，且全仓没有用例执行过那些函数体，
-        # 于是一直潜伏到用户在 REPL 里敲 /doctor 才炸。
-        # 只选 F821 一条：仓库还有上百条既存 lint 噪音，全量 ruff 会立刻把 CI 变成
-        # 红海，反而没人管——门禁要能长期绿着才有人看。
-        run: ruff check --select F821 agent/
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Windows 测试（真实主战场）
+  #   PR：只跑 core + config（平台无关逻辑 + Windows 专属用例）
+  #   push 主干：跑全量
+  # ─────────────────────────────────────────────────────────────
+  test-windows:
+    name: Windows py3.13
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Syntax check (core modules)
+        run: python -m compileall -q agent/
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
-
-      - name: Install smoke (entry point + packaged rule file)
-        # 从干净临时目录跑，确保 import 到的是 pip 装进 site-packages 的那份（而非仓库
-        # 源码树），证明"装出来的包"入口能起、且随包带上了运行时规则库 cleaners.toml——
-        # 这类"漏打包"缺陷源码树里的单测永远测不到。
-        run: |
-          cd "$(mktemp -d)"
-          jarvis --help > /dev/null
-          python -c "import agent, pathlib; p = pathlib.Path(agent.__file__).parent / 'config' / 'cleaners.toml'; assert p.is_file(), 'cleaners.toml 未随包安装'; print('install-smoke OK', agent.__version__)"
-
-      - name: Test summary
-        if: always()
-        run: |
-          echo "✅ CI 完成 — 见上方 pytest 输出"
+        # PR 与主干都跑全量：宁可等 3–5 分钟，也不要“PR 绿、合并后才红”。
+        # 子集（如只跑 core+config）会放掉 tests/ui / tests/commands / tests/tools
+        # 等目录的回归，属于测试不完整，已否决（2026-11-20）。
+        run: pytest tests/ -q --tb=short
