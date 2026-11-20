@@ -59,17 +59,18 @@ def test_home_root_falls_back(home, monkeypatch):
     assert "主目录根" in W.consume_workdir_note()
 
 
+_NT_ONLY = pytest.mark.skipif(
+    os.name != "nt", reason="系统目录/盘符判定按 Windows 路径语义"
+)
+
+
+@_NT_ONLY
 def test_drive_root_falls_back(home, monkeypatch):
     """盘根不当项目：回退到默认工作区（Windows 路径语义）。"""
     monkeypatch.setattr(W.Path, "cwd", lambda: Path("C:\\"))
     resolved = W.resolve_workdir()
     assert resolved == home / ".jarvis" / "workspace"
     assert "盘根" in W.consume_workdir_note()
-
-
-_NT_ONLY = pytest.mark.skipif(
-    os.name != "nt", reason="系统目录/盘符判定按 Windows 路径语义"
-)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX 盘根用例")
