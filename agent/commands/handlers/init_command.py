@@ -169,6 +169,47 @@ async def _test_connection(vendor: dict, api_key: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+_SETTINGS_SCAFFOLD = """\
+# jarvis 用户配置（非模型域）
+# 由 `jarvis --init` 生成；所有项都可以省略，缺省即用内置默认值。
+# 模型 / API Key / 端点在同目录的 models.toml，不要写在这里。
+#
+# 查可改项：      /config list
+# 查某项说明：    /config explain <键>
+# 改一项并落盘：  /config set <键> <值>
+#
+# 需要手写时按 [section] 分组，例如：
+# [checkpoint]
+# enabled = true
+# timeout_seconds = 10
+#
+# 注意：同一个 [section] 不要重复出现，否则整份 TOML 解析失败，
+# jarvis 会告警并回退到内置默认值。
+"""
+
+
+def _ensure_settings_scaffold() -> Path | None:
+    """确保 ``~/.jarvis/settings.toml`` 存在（全注释骨架，不改变任何默认值）。
+
+    为什么要有它：模型域拆分（2026-09）后 ``--init`` 只写 ``models.toml``，
+    新装机器上的用户看不到任何配置文件，会误以为安装失败（2026-11-19 实测）。
+
+    只写注释、绝不写入运行期键：模板预设 ``last_model`` 曾破坏配置分层并让
+    两条 CI 用例变红（``example-template-last-model.md``）。已存在则原封不动。
+    @author aceFelix
+    """
+    path = Path.home() / ".jarvis" / "settings.toml"
+    if path.exists():
+        return path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_SETTINGS_SCAFFOLD, encoding="utf-8")
+        return path
+    except Exception:
+        # 旁路能力：写不出来只影响「看得见配置」，绝不能让 --init 失败
+        return None
+
+
 def _save_config(vendor: dict, api_key: str, model_type: str = "text") -> Path:
     """保存配置到 ~/.jarvis/models.toml（模型域专属文件）。
 
@@ -397,6 +438,14 @@ async def _handle_full_init(ctx: CommandContext) -> bool:
     # 6. 保存配置
     path = _save_config(vendor, api_key, model_type)
     ui._console.print(f"\n[green]✓ 配置已保存到 {path}[/green]")
+    # 模型域拆分后 --init 只写 models.toml；补一份全注释的 settings.toml 骨架，
+    # 否则用户在新机器上看不到任何配置文件，会误以为安装失败。@author aceFelix
+    settings_path = _ensure_settings_scaffold()
+    if settings_path is not None:
+        ui._console.print(f"[green]✓ 用户配置模板: {settings_path}[/green]")
+    ui._console.print(
+        "[dim]其余配置：/config list 看可改项 · /config explain <键> 看说明与改法[/dim]"
+    )
     ui._console.print(f"[dim]{_apply_to_session(ctx, vendor.get('default_model', ''))}[/dim]")
     ui._console.print("\n[bold cyan]现在运行 jarvis 即可开始使用！[/bold cyan]")
 

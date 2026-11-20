@@ -34,6 +34,7 @@ from agent.config.models_config import (
     user_config_paths,
 )
 from agent.config.settings_domains import apply_domain_tables
+from agent.config.workspace import resolve_workdir
 from agent.permissions.modes import PermissionMode, parse_mode
 
 
@@ -651,7 +652,10 @@ def load_settings(workdir: str | None = None) -> Settings:
     同层模型域文件 ``models.toml`` 紧随其后应用（模型域专属文件优先）；
     用户级同样先 settings.toml 后 models.toml，整体覆盖项目级。
     """
-    cwd = Path(workdir or os.getcwd()).resolve()
+    # workdir 三档解析：显式值原样；cwd 是普通项目目录就用它；系统目录/盘根/
+    # 主目录根回退到 ~/.jarvis/workspace（自动创建，2026-11-20）。
+    # @author aceFelix
+    cwd = resolve_workdir(workdir)
     # agent 包所在的项目根目录（用于回退查找配置）
     _pkg_root = Path(__file__).resolve().parent.parent.parent  # settings.py → config → agent → project_root
 
@@ -703,6 +707,11 @@ def load_settings(workdir: str | None = None) -> Settings:
     # 4. 环境变量
     from agent.config.env import apply_env_overrides
     s = apply_env_overrides(s)
+
+    # 配置里的 workdir 是显式值：展开 ~ 与相对路径，保证运行时工具拿到绝对路径。
+    # 顺序必须在 TOML/env 合并之后，否则又被初始 cwd 盖回去。@author aceFelix
+    if s.workdir:
+        s = s.with_overrides(workdir=str(Path(s.workdir).expanduser().resolve()))
 
     # 5. 权限文件默认路径
     # 查找顺序：workdir/configs → pkg_root/configs → pkg_root/agent/configs（发布版）
@@ -797,6 +806,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "dashscope_api_key",
         "max_tokens", "temperature",
         "max_iterations",
+        "workdir",  # 显式工作目录；此前漏在白名单外，写了不生效（2026-11-20 修）
         "permissions_file", "system_prompt_append",
         "debug", "verbose",
         "tts_model", "tts_voice", "tts_volume", "tts_speech_rate", "tts_pitch_rate",

@@ -11,9 +11,11 @@
 # 未拆分前写在 settings.toml 里的模型键仍会被加载（向后兼容）。
 
 # ---- 运行时 ----
-# workdir: 贾维斯默认工作目录。开发/文件操作/项目管理都在此目录下进行。
-# 可通过 --workdir 命令行参数临时覆盖。
-workdir = "./workspace"
+# workdir: 显式指定工作目录（绝对路径，或 ~ 开头）。留空/注释时：
+#   - 从普通项目目录启动（cd 到项目）→ 用当前目录；
+#   - 从系统目录/盘根/用户主目录根启动 → 自动用 ~/.jarvis/workspace。
+# 优先级：--workdir > 本键 > 当前目录 > 默认工作区（2026-11-20）。
+# workdir = "E:\\my-project"
 # permission_mode: default / plan / accept_edits / yolo
 permission_mode = "default"
 max_iterations = 50

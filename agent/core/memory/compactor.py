@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent.core.diag import diag_warn
 from agent.core.message import (
     ImageContent,
     Message,
@@ -472,12 +473,68 @@ def restore_recent_files(ctx) -> int:
 # 长对话自动将关键决策、错误修复、用户偏好持久化到 .jarvis/SESSION_MEMORY.md。
 # 每次压缩时触发更新——压缩摘要已有结构化内容，直接追加到记忆文件。
 
+_SESSION_MEMORY_FILENAME = "SESSION_MEMORY.md"
+
+
+def _project_memory_dir(workdir: str) -> str:
+    """用户级回退目录：``~/.jarvis/memory/projects/<可读名>-<哈希>``。"""
+    import hashlib
+    from pathlib import Path
+
+    resolved = os.path.normcase(os.path.normpath(os.path.abspath(workdir or os.getcwd())))
+    digest = hashlib.sha1(resolved.encode("utf-8", "replace")).hexdigest()[:12]
+    raw_name = os.path.basename(resolved.rstrip("\\/")) or "root"
+    safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in raw_name)[:32]
+    return str(Path.home() / ".jarvis" / "memory" / "projects" / f"{safe or 'root'}-{digest}")
+
+
+#: workdir → 已解析的记忆文件路径（空串 = 两个位置都不可写）。
+#: 缓存避免只读目录下每轮都重复抛/捕 PermissionError。@author aceFelix
+_SESSION_MEMORY_PATH_CACHE: dict[str, str] = {}
+_FALLBACK_NOTIFIED: set[str] = set()
+
+
 def _session_memory_path(workdir: str) -> str:
-    """返回项目级会话记忆文件路径。"""
-    import os
-    jarvis_dir = os.path.join(workdir, ".jarvis")
-    os.makedirs(jarvis_dir, exist_ok=True)
-    return os.path.join(jarvis_dir, "SESSION_MEMORY.md")
+    """返回会话记忆文件路径；不可写时回退到用户级，两者都不可用则返回空串。
+
+    为什么不能直接 ``makedirs(workdir/.jarvis)``：workdir 可能是
+    ``C:\\Program Files`` / ``C:\\Windows`` 这类只读目录，makedirs 抛
+    PermissionError 会把整个 REPL 打崩（2026-11-20 实机：启动即 traceback）。
+    会话记忆是旁路能力，绝不能决定能否启动。
+
+    为什么还要写探测：``makedirs(exist_ok=True)`` 在**已存在的只读目录**上不会
+    报错，只看它会把回退判成成功。@author aceFelix
+    """
+    cache_key = os.path.normcase(os.path.abspath(workdir or ""))
+    cached = _SESSION_MEMORY_PATH_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    candidates = [os.path.join(workdir, ".jarvis"), _project_memory_dir(workdir)]
+    for index, jarvis_dir in enumerate(candidates):
+        try:
+            os.makedirs(jarvis_dir, exist_ok=True)
+            probe = os.path.join(jarvis_dir, ".write_probe")
+            with open(probe, "a", encoding="utf-8"):
+                pass
+            try:
+                os.remove(probe)
+            except OSError:
+                pass
+        except (PermissionError, OSError):
+            continue
+        if index == 1 and workdir not in _FALLBACK_NOTIFIED:
+            _FALLBACK_NOTIFIED.add(workdir)
+            diag_warn(
+                "memory.session_memory",
+                f"工作目录不可写，会话记忆改存到 {jarvis_dir}",
+            )
+        chosen = os.path.join(jarvis_dir, _SESSION_MEMORY_FILENAME)
+        _SESSION_MEMORY_PATH_CACHE[cache_key] = chosen
+        return chosen
+
+    _SESSION_MEMORY_PATH_CACHE[cache_key] = ""
+    return ""
 
 
 _SESSION_MEMORY_HEADER = """# 会话自动记忆
@@ -501,6 +558,8 @@ def update_session_memory(workdir: str, compact_result: CompactResult) -> str | 
 
     try:
         mem_path = _session_memory_path(workdir)
+        if not mem_path:
+            return None
         import time
         timestamp = time.strftime("%Y-%m-%d %H:%M")
 
@@ -536,11 +595,10 @@ def load_session_memory(workdir: str, max_chars: int = 4000) -> str:
     难以重新获取的高价值段落的条目，再从最新条目往回补，而不是简单按时间
     截断尾部（尾部截断可能恰好丢掉最关键的早期决策）。
     """
-    import os
-    mem_path = _session_memory_path(workdir)
-    if not os.path.exists(mem_path):
-        return ""
     try:
+        mem_path = _session_memory_path(workdir)
+        if not mem_path or not os.path.exists(mem_path):
+            return ""
         with open(mem_path, "r", encoding="utf-8") as f:
             content = f.read()
         return _truncate_memory_by_importance(content, max_chars)

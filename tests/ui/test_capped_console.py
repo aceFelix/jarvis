@@ -56,3 +56,27 @@ def test_explicit_width_larger_than_cap_still_capped():
     buf = io.StringIO()
     console = _CappedConsole(file=buf, force_terminal=False, width=240)
     assert console.size.width == _MAX_RENDER_WIDTH
+
+
+def test_command_output_reuses_repl_console():
+    """命令输出层必须复用 REPL 的封顶 Console（回归）。
+
+    markdown_renderer 曾 import 一个不存在的 _global_console，且用
+    ``except Exception`` 吞掉 ImportError，于是 /doctor /cost 等每条命令
+    都 new 一个默认 Console，120 列封顶完全失效（2026-11-19 实修）。
+    """
+    from agent.ui import cli as cli_mod
+    from agent.ui.markdown_renderer import _get_console
+
+    cli_mod._global_console = None
+    try:
+        fallback = _get_console(None)
+        assert fallback is not None
+        assert not isinstance(fallback, _CappedConsole)
+
+        console = _CappedConsole(file=io.StringIO(), force_terminal=False)
+        cli_mod._global_console = console
+        assert _get_console(None) is console
+        assert getattr(_get_console(None), "legacy_windows", None) is not None
+    finally:
+        cli_mod._global_console = None

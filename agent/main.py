@@ -51,7 +51,7 @@ from agent.bootstrap import (
 from agent.bridge import get_bridge_server
 from agent.commands.router import CommandContext, dispatch_command
 from agent.config.settings import Settings, load_settings
-from agent.core.checkpoint import manager_from_settings
+from agent.core.checkpoint import BackgroundCheckpointRunner, manager_from_settings
 from agent.core.images import paste_clipboard_image
 from agent.core.message import Message
 from agent.core.orchestrator import ToolOrchestrator
@@ -108,6 +108,13 @@ async def repl(settings: Settings) -> int:
         boot_animation=settings.boot_animation,
         visual_options=VisualOptions.from_settings(settings),
     )
+    # 工作目录回退提示：从系统目录/盘根/主目录根启动时已改到默认工作区。
+    # 只打一次，避免每轮刷屏。@author aceFelix
+    from agent.config.workspace import consume_workdir_note
+
+    _wd_note = consume_workdir_note()
+    if _wd_note:
+        ui.info(f"[workdir] {_wd_note}（可用 --workdir 指定项目目录）")
 
     # 版本自检（Phase 1）：后台线程查 PyPI 最新版，非阻塞、24h 节流。
     # 检出更新时仅打印一行提示（/update 一键升级），不影响启动速度。
@@ -340,6 +347,13 @@ async def repl(settings: Settings) -> int:
     # @author aceFelix
     ckpt_mgr = manager_from_settings(settings, session_name=_session_name)
     ctx.extra["checkpoint_mgr"] = ckpt_mgr
+    # 能力收缩必须让用户知道：系统目录/盘根下禁用文件回滚。否则 /rewind 只回
+    # 对话，用户却以为文件也一起回退了（2026-11-19 system32 卡死的护栏）。
+    # @author aceFelix
+    _ckpt_reason = ckpt_mgr.disabled_reason
+    if _ckpt_reason:
+        ui.warn(f"文件检查点不可用：{_ckpt_reason}（对话回退仍可用；建议 --workdir 换普通目录）")
+    ckpt_runner = BackgroundCheckpointRunner(ckpt_mgr)
     # 副作用账本（W3.2）要靠会话名把记录归人可读的台账；本轮的检查点 cid 则在
     # 轮前补写进 extra，因为 cid 要到轮结束才挂到用户消息上，工具调用时还查不到。
     # @author aceFelix
@@ -518,13 +532,14 @@ async def repl(settings: Settings) -> int:
 
         # ---- 普通对话 ----
         try:
-            # 轮前检查点：记录工作区"发消息前"状态，绑定到本轮用户消息，
-            # 供 /rewind / 桌面撤回连带回滚文件。@author aceFelix
-            ckpt_id = ckpt_mgr.create(reason=stripped) if ckpt_mgr.available() else None
-            # 给本轮工具调用（副作用账本的本地写回滚口径）留一份 cid，轮末
-            # 再按既有逻辑挂到用户消息上。@author aceFelix
-            ctx.extra["checkpoint_cid"] = ckpt_id or ""
+            # 轮前检查点：记录工作区"发消息前"状态，供 /rewind 连带回滚文件。
+            # 后台执行、本轮不等——系统目录/大仓库下同步等待会让「发一条消息」
+            # 变成无限无响应。@author aceFelix
             _pre_msg_len = len(messages)
+            ckpt_runner.start(stripped)
+            # 本轮工具调用先按「无 cid」记账：cid 要轮末才收得到，拿不到时
+            # 副作用账本如实退化为不可撤销，不假装能撤。@author aceFelix
+            ctx.extra["checkpoint_cid"] = ""
 
             # 只取显式添加（Ctrl+V / /paste / /image）的待发送图片，
             # 不再发消息前自动读剪贴板。@author aceFelix
@@ -554,7 +569,10 @@ async def repl(settings: Settings) -> int:
                     ctx.ui = original_ui
                     broadcast_ui.finish()
                 # 无论本轮成败都绑定检查点（loop.run 已把用户消息 append
-                # 进 messages），出错轮次同样可撤回回滚。@author aceFelix
+                # 进 messages），出错轮次同样可撤回回滚。轮末最多等 2 秒收 cid：
+                # 后台未完成就保持空，/rewind 会如实说「没有关联检查点」。
+                # @author aceFelix
+                ckpt_id = ckpt_runner.collect(timeout=2.0)
                 if ckpt_id:
                     for _m in messages[_pre_msg_len:]:
                         if _m.role == "user":

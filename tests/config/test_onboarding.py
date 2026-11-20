@@ -248,7 +248,9 @@ class TestQuickSetup:
         self._drive(ui, online=["m1"], model="m1")
         # 只有 key 一次 ask_user（选模型走选择器，不是文本输入）
         assert ui.answers == []
-        assert "工作目录用当前目录" in ui.text
+        # 工作目录有安全默认值（cwd 或 ~/.jarvis/workspace），不占三问名额；
+        # 文案 2026-11-20 改为「工作目录：」，不再声称「用当前目录」。
+        assert "工作目录：" in ui.text
 
     def test_cancel_at_vendor_marks_declined(self, _isolated_home):
         from agent.commands.handlers import init_command

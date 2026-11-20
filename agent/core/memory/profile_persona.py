@@ -41,6 +41,15 @@ from agent.utils.filelock import ensure_dir, file_lock
 
 _COMPONENT = "memory.profile_persona"
 
+#: 失败后的最小重试间隔（秒）：输入指纹未变就不重复尝试，避免每次退出
+#: 都白等 15 秒并重复告警。
+#:
+#: 为什么用退避而不是「最少 N 条」硬门槛：1 条画像也可能产出 identity，
+#: 硬门槛会把「数据已够」的 3—4 条场景一并挡掉；真正的痛点是幂等失败被
+#: 反复重试，退避正对这个点（2026-11-19 实测：全新安装只有 1 条画像）。
+#: @author aceFelix
+RETRY_INTERVAL_S = 600.0
+
 PERSONA_FILE = "persona.json"
 STATE_FILE = "persona_state.json"
 
@@ -351,12 +360,14 @@ def parse_persona_output(
 ) -> Persona | None:
     """把模型输出校验/裁剪成 Persona；任何结构性错误返回 None（保留旧卡）。"""
     if not isinstance(data, dict):
+        diag_warn(_COMPONENT, "模型输出不是 JSON 对象")
         return None
     valid_ids = {e.id for e in entries}
     by_key: dict[str, list[PersonaBullet]] = {}
     dropped = 0
     raw_sections = data.get("sections")
     if not isinstance(raw_sections, list):
+        diag_warn(_COMPONENT, "模型输出缺少 sections 列表")
         return None
     for raw in raw_sections:
         if not isinstance(raw, dict):
@@ -394,7 +405,14 @@ def parse_persona_output(
             by_key.setdefault(key, []).extend(bullets)
 
     if not by_key.get("identity"):
-        return None  # 没有人设最核心的一段，视为失败
+        # 不写原因的话，上层只能报一句「构建失败」，用户无从行动（用户原话：
+        # 「起码要告诉我是啥原因吧」）。丢弃数能区分「模型跑偏」与「数据太少」。
+        # @author aceFelix
+        diag_warn(
+            _COMPONENT,
+            f"模型输出缺 identity 段（有效 id {len(valid_ids)} 个，丢弃 {dropped} 条）",
+        )
+        return None
 
     sections = [
         PersonaSection(key=key, title=SECTION_TITLES[key], bullets=by_key[key][:MAX_BULLETS_PER_SECTION])
@@ -412,6 +430,10 @@ def parse_persona_output(
     persona.token_count = _cost(render_persona(persona), _budget_mode(settings))
     _trim_to_limit(persona, settings)
     if persona.token_count > persona.token_limit:
+        diag_warn(
+            _COMPONENT,
+            f"人设卡 token 超限（{persona.token_count} > {persona.token_limit}），放弃本次结果",
+        )
         return None
     return persona
 
@@ -447,9 +469,11 @@ def build_persona(
     store = store or ProfileStore()
     entries = _sample_entries(store)
     if not entries:
+        diag_warn(_COMPONENT, "没有可用的画像条目，跳过人设卡生成")
         return None
     provider = provider or _build_refine_provider(settings)
     if provider is None:
+        diag_warn(_COMPONENT, "精炼模型不可用（provider=None），无法生成人设卡")
         return None
     model = getattr(settings, "profile_refine_model", "") or getattr(settings, "model", "")
     try:
@@ -502,10 +526,20 @@ def _worker(settings: Any, force: bool) -> None:
             return
         new = build_persona(settings, store=store, previous=persona)
         if new is None:
-            diag_warn(_COMPONENT, "人设卡构建失败，保留旧卡")
+            # 具体原因已由 build_persona / parse_persona_output 写到上一条日志；
+            # 这里只补状态与「有卡/无卡」的差异，不再说假话。@author aceFelix
             state = load_state()
             state["last_attempt_at"] = time.time()
+            state["last_fingerprint"] = list(_fingerprint(store))
             _write_json(state_path(), state)
+            if persona is not None:
+                diag_warn(_COMPONENT, "人设卡未更新（原因见上一条日志），保留旧卡")
+            else:
+                diag_warn(
+                    _COMPONENT,
+                    "本次未生成人设卡（原因见上一条日志）；"
+                    "画像有新增或稍后会自动重试",
+                )
             return
         _write_json(persona_path(), {
             "version": new.version,
@@ -548,9 +582,20 @@ def maybe_rebuild_async(
         return False
     try:
         store = ProfileStore()
-        if not store.entries():
+        entries = store.entries()
+        if not entries:
             return False
-        if not force and not _needs_build(store, load_persona()):
+        # 数据不足不是故障，也不靠硬门槛拦截：直接尝试，失败有退避兜底。
+        state = load_state()
+        persona = load_persona()
+        # 失败退避：输入指纹未变且在退避窗口内，不重复尝试（幂等失败不刷屏）。
+        # @author aceFelix
+        if not force and persona is None:
+            last = float(state.get("last_attempt_at", 0.0) or 0.0)
+            same_input = tuple(state.get("last_fingerprint") or ()) == _fingerprint(store)
+            if same_input and last and (time.time() - last) < RETRY_INTERVAL_S:
+                return False
+        if not force and not _needs_build(store, persona):
             return False
         if not _in_flight.acquire(blocking=False):
             return False

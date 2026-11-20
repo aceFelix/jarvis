@@ -150,4 +150,9 @@ def test_warn_error_plain_text_unaffected():
     ui.error("找不到配置文件")
     out = harness.text()
     assert "端口号无效: abc" in out and "找不到配置文件" in out
-    assert "⚠️" in out and "❌" in out
+    # 前缀标记按终端能力降级：legacy 控制台（cmd/conhost）下 emoji 会变成
+    # ?/空白占位，统一换 ASCII（2026-11-20 实修）。
+    if getattr(ui._console, "legacy_windows", False):
+        assert "[!]" in out and "[x]" in out
+    else:
+        assert "⚠️" in out and "❌" in out

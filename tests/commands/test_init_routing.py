@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -91,3 +92,26 @@ class TestInitSubcommandsAreRouted:
         assert router.COMMAND_HANDLERS.get(low) is None
         prefixes = [p for p, _h in router.PREFIX_HANDLERS if low.startswith(p)]
         assert "/init " not in prefixes
+
+
+class TestSettingsScaffold:
+    """初始化后必须有可见的 settings.toml（模型域拆分后的体验缺口）。
+
+    2026-11-19 实测：全新安装只写 models.toml，用户在 ~/.jarvis 里看不到
+    任何配置文件，误以为安装失败。骨架必须是全注释——预设 last_model 等
+    运行期键会破坏配置分层（example-template-last-model.md）。
+    @author aceFelix
+    """
+
+    def test_scaffold_created_once_and_all_comments(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        path = init_command._ensure_settings_scaffold()
+        assert path is not None and path.exists()
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            assert not stripped or stripped.startswith("#"), stripped
+        # 已存在：不覆盖、不改写
+        again = init_command._ensure_settings_scaffold()
+        assert again == path
+        assert path.read_text(encoding="utf-8") == text

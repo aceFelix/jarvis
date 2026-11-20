@@ -52,6 +52,12 @@ if _HAS_RICH:
                 return ConsoleDimensions(_MAX_RENDER_WIDTH, dims.height)
             return dims
 
+#: REPL 全局 Console（带 120 列封顶），供 markdown_renderer 等输出层复用。
+#: 为 None 表示尚无 RichCLI 实例（如 --doctor 单独入口），调用方自行兜底。
+#: 不设这里的话，命令输出会每次 new 一个默认 Console，120 列封顶失效。
+#: @author aceFelix
+_global_console: "Console | None" = None
+
 # prompt_toolkit（可选，用于 Tab 补全和 / 命令列表）
 try:
     from prompt_toolkit.history import InMemoryHistory
@@ -164,6 +170,11 @@ class RichCLI(UIProtocol):
         if _HAS_RICH:
             # 用封顶宽度的 Console：最大化启动后缩窗不会把已输出的宽行折行重排（作者：aceFelix）
             self._console = _CappedConsole()
+            # 让命令输出层复用同一个 Console：否则 markdown_renderer 每次
+            # new 一个默认 Console，封顶与终端能力判断全部失效（2026-11-19 实修）。
+            # @author aceFelix
+            global _global_console
+            _global_console = self._console
         else:
             self._console = None  # type: ignore[assignment]
         # 当前正在累积的助手文本（用于流式）
@@ -598,6 +609,21 @@ class RichCLI(UIProtocol):
             return "markdown"
         return None
 
+    def _mark(self, modern: str, plain: str) -> str:
+        """按终端能力选前缀标记。
+
+        cmd（conhost，``legacy_windows=True``）的编码/字体编不出 emoji，经
+        ``errors="replace"`` 会变成 ``?`` 或空白占位，看起来像「标记丢了」。
+        统一降级为 ASCII，保证 cmd 与 Git Bash 都能读。@author aceFelix
+        """
+        if self._console is not None and bool(
+            getattr(self._console, "legacy_windows", False)
+        ):
+            # escape：`[x]` 这类字母开头的方括号会被 Rich 当成样式标签吞掉
+            # （同 ask_user 方括号吞字问题）；`[!]`/`[?]`/`[提醒]` 不受影响。
+            return escape(plain)
+        return modern
+
     def info(self, text: str) -> None:
         self._end_assistant_line()
         if self._console:
@@ -622,7 +648,8 @@ class RichCLI(UIProtocol):
             self._end_assistant_line()
             if self._console:
                 # 前置换行：确保提醒另起一行，不与正在输入的行共用行底
-                self._console.print(f"\n⏰ {escape(text)}", style="bold cyan")
+                mark = self._mark("⏰ ", "[提醒] ")
+                self._console.print(f"\n{mark}{escape(text)}", style="bold cyan")
             else:
                 print(f"\n[提醒] {text}")
             session = getattr(self, "_pt_session", None)
@@ -640,7 +667,7 @@ class RichCLI(UIProtocol):
         @author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"⚠️  {escape(text)}", style="yellow")
+            self._console.print(f"{self._mark('⚠️  ', '[!] ')}{escape(text)}", style="yellow")
         else:
             print(f"[warn] {text}")
 
@@ -649,7 +676,7 @@ class RichCLI(UIProtocol):
         先 escape 防止 Rich 标记解析崩溃。@author aceFelix"""
         self._end_assistant_line()
         if self._console:
-            self._console.print(f"❌ {escape(text)}", style="bold red")
+            self._console.print(f"{self._mark('❌ ', '[x] ')}{escape(text)}", style="bold red")
         else:
             print(f"[error] {text}", file=sys.stderr)
 
@@ -670,7 +697,7 @@ class RichCLI(UIProtocol):
         if self._console:
             text = prompt[:-2] if prompt.endswith(": ") else prompt
             return Prompt.ask(
-                "[bold magenta]❓ " + escape(text) + "[/bold magenta]",
+                "[bold magenta]" + self._mark("❓ ", "[?] ") + escape(text) + "[/bold magenta]",
                 console=self._console,
             )
         return input(prompt + " ")

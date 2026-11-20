@@ -14,7 +14,12 @@ import shutil
 
 import pytest
 
-from agent.core.checkpoint import CheckpointManager, _workdir_key
+from agent.core.checkpoint import (
+    BackgroundCheckpointRunner,
+    CheckpointManager,
+    _unsafe_workdir_reason,
+    _workdir_key,
+)
 
 pytestmark = pytest.mark.skipif(
     shutil.which("git") is None, reason="环境缺少 git，检查点测试跳过"
@@ -154,3 +159,62 @@ def test_workdir_key_stable_and_distinct(tmp_path):
     assert k1 != _workdir_key(str(d2))
     # 目录名保留为可读前缀
     assert k1.startswith("Proj") or k1.startswith("proj")
+
+
+_NT_ONLY = pytest.mark.skipif(
+    os.name != "nt", reason="系统目录黑名单按 Windows 路径语义判定"
+)
+
+
+class TestWorkdirGuard:
+    """系统目录护栏：整树快照会卡死主循环，必须在创建前就拒绝。
+
+    2026-11-19 实机：workdir=C:\\Windows\\System32 下 git add -A 烧了 125s
+    CPU 仍未结束，REPL 同步等待导致输入后完全无响应。@author aceFelix
+    """
+
+    @_NT_ONLY
+    def test_system_dirs_are_unsafe(self):
+        for bad in (
+            r"C:\Windows",
+            r"C:\Windows\System32",
+            r"C:\Program Files\Demo",
+            r"C:\ProgramData",
+        ):
+            assert _unsafe_workdir_reason(bad)
+
+    @_NT_ONLY
+    def test_drive_root_is_unsafe(self):
+        assert _unsafe_workdir_reason("C:\\")
+
+    def test_normal_dir_is_safe(self, workdir):
+        assert _unsafe_workdir_reason(str(workdir)) == ""
+
+    @_NT_ONLY
+    def test_manager_unavailable_on_system_dir(self, tmp_path):
+        m = CheckpointManager(
+            r"C:\Windows\System32", "s1", base_dir=str(tmp_path / "store"),
+        )
+        assert m.available() is False
+        assert "系统目录" in m.disabled_reason
+        assert m.create() is None
+
+
+class TestBackgroundRunner:
+    """后台建卡：不可用不启动；可用时轮末能收到 cid（不阻塞主循环）。"""
+
+    def test_not_started_when_unavailable(self, tmp_path):
+        m = CheckpointManager(
+            str(tmp_path), "s1", enabled=False, base_dir=str(tmp_path / "store"),
+        )
+        runner = BackgroundCheckpointRunner(m)
+        assert runner.start("x") is False
+        assert runner.collect(timeout=0.1) == ""
+
+    def test_collects_cid_in_background(self, tmp_path, workdir):
+        m = CheckpointManager(
+            str(workdir), "s1", base_dir=str(tmp_path / "store"),
+        )
+        runner = BackgroundCheckpointRunner(m)
+        assert runner.start("hello") is True
+        assert runner.collect(timeout=10.0)

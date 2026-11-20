@@ -15,19 +15,31 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Sequence
+
+#: emoji 与变体选择符：cmd（cp936/legacy 字体）里会变成 ?/空白占位。
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
+
+
+def _plain_title(text: Any) -> str:
+    """legacy 终端下去掉 emoji，保留中文与文字（只用于标题，不改内容）。"""
+    return _EMOJI_RE.sub("", str(text or "")).strip()
 
 
 def _get_console(console: Any | None) -> Any | None:
     """获取 Rich Console 实例，None 表示不可用。"""
     if console is not None:
         return console
+    # 只捕获 ImportError：以前的 `except Exception` 会把「符号不存在」也吞掉，
+    # 于是命令输出静默绕过 120 列封顶（2026-11-19 实修：该符号当时根本没定义）。
+    # @author aceFelix
     try:
         from agent.ui.cli import _global_console  # type: ignore
-        if _global_console is not None:
-            return _global_console
-    except Exception:
-        pass
+    except ImportError:
+        _global_console = None
+    if _global_console is not None:
+        return _global_console
     try:
         from rich.console import Console
         return Console()
@@ -141,11 +153,26 @@ def render_table(
             print(" | ".join(str(c) for c in row))
         return
     try:
+        from rich import box as rich_box
         from rich.table import Table
-        table = Table(title=title, show_header=headers is not None, border_style="dim #4a5a6a")
+
+        # legacy 控制台（cmd/conhost）下制表符可能整行不可见；显式改用 ASCII
+        # 边框（+ - |），并把每一列改为单行省略，避免长路径把表格撑破。
+        # 非 legacy（Git Bash / Windows Terminal）保持原有圆角框与折行。
+        # @author aceFelix
+        plain = bool(getattr(c, "legacy_windows", False))
+        table = Table(
+            title=_plain_title(title) if plain else title,
+            show_header=headers is not None,
+            border_style="dim #4a5a6a",
+            box=rich_box.ASCII if plain else rich_box.ROUNDED,
+        )
         if headers:
             for h in headers:
-                table.add_column(str(h), overflow="fold")
+                if plain:
+                    table.add_column(str(h), overflow="ellipsis", no_wrap=True)
+                else:
+                    table.add_column(str(h), overflow="fold")
         for row in rows:
             table.add_row(*[str(cell) for cell in row])
         c.print(table)
@@ -173,10 +200,21 @@ def render_panel(
         print(content)
         return
     try:
-        from rich.panel import Panel
+        from rich import box as rich_box
         from rich.markdown import Markdown
-        # 内容当 Markdown 渲染（支持代码块、加粗等）
-        c.print(Panel(Markdown(content), title=title, title_align="left", border_style=style))
+        from rich.panel import Panel
+
+        # 内容当 Markdown 渲染（支持代码块、加粗等）；legacy 下换 ASCII 边框。
+        plain = bool(getattr(c, "legacy_windows", False))
+        c.print(
+            Panel(
+                Markdown(content),
+                title=_plain_title(title) if plain else title,
+                title_align="left",
+                border_style=style,
+                box=rich_box.ASCII if plain else rich_box.ROUNDED,
+            )
+        )
     except Exception:
         c.print(content)
 

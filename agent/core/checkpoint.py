@@ -44,7 +44,9 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,60 @@ _REF_PREFIX = "refs/jarvis/ckpt"
 _WORKDIR_KEY = "jarvis.workdir"
 
 _GIT_TIMEOUT = 10  # 单条 git 命令默认超时（秒）
+
+#: 不适合做整树快照的系统目录（normcase + normpath 后按前缀匹配）。
+#: 这些目录动辄数万文件、GB 级，且含大量受保护/被占用文件：一次 git add -A
+#: 会长时间占用 CPU，宿主若同步等待就表现为「输入后无响应」。@author aceFelix
+_UNSAFE_WORKDIR_PREFIXES = (
+    "c:\\windows",
+    "c:\\program files",
+    "c:\\program files (x86)",
+    "c:\\programdata",
+)
+
+
+def _unsafe_workdir_reason(workdir: str) -> str:
+    """判定工作目录是否不适合做文件检查点；返回人类可读原因，安全则空串。
+
+    只做字符串判定（绝不遍历目录统计文件数）：预检本身若去数文件，在系统
+    目录上同样会卡，等于把要防的问题又引回来一次。@author aceFelix
+    """
+    try:
+        raw = str(Path(workdir).resolve())
+    except Exception:
+        raw = str(workdir or "")
+    norm = os.path.normcase(os.path.normpath(raw))
+    if re.fullmatch(r"[a-z]:\\", norm):
+        return "盘根目录会快照整个磁盘"
+    for prefix in _UNSAFE_WORKDIR_PREFIXES:
+        if norm == prefix or norm.startswith(prefix + "\\"):
+            return f"系统目录 {raw} 含数万文件，整树快照会长时间占用磁盘"
+    return ""
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """终止整棵进程树（超时兜底）。
+
+    Windows 上只杀直接子进程会留下 git 派生的孙进程继续持有 stdout/stderr
+    管道；communicate() 等不到 EOF 就永远不返回——这正是「10 秒超时形同虚设」
+    的根因（2026-11-19 实机：system32 下 git 已烧 125s CPU 仍在跑）。
+    这里用 taskkill /T 按父子关系整树回收。@author aceFelix
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, timeout=10,
+            )
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 #: 任务级检查点的默认保留条数（每个工作目录，与消息级配额互不占）。
 #: 取 8 的理由：一个目标通常 2-4 步，8 条够回退两到三步又不致于把 .jarvis
@@ -148,12 +204,40 @@ class CheckpointManager:
         self._git_dir = self._store_dir / "git"
         self._manifest_path = self._store_dir / "manifest.json"
         self._initialized = False
+        # 并发保护：REPL 把 create 挪到后台线程后，可能与 restore / 下一轮 create
+        # 撞车（同一 shadow 仓库的 index 不是并发安全的）。@author aceFelix
+        self._lock = threading.Lock()
+        # 不可用原因（构造期判定，供宿主首屏如实提示）；超时后也会置位
+        self._disabled_reason = _unsafe_workdir_reason(self._workdir)
+        self._timed_out = False
 
     # ---- 可用性 ----
 
     def available(self) -> bool:
-        """文件检查点是否可用（启用且系统装有 git）。"""
-        return self._enabled and _git_available()
+        """文件检查点是否可用（启用、目录安全、未超时且系统装有 git）。"""
+        return (
+            self._enabled
+            and not self._disabled_reason
+            and not self._timed_out
+            and _git_available()
+        )
+
+    @property
+    def disabled_reason(self) -> str:
+        """不可用原因（空串表示可用）。
+
+        宿主必须把它打给用户（首屏一次即可）：文件回滚缺失是能力收缩，
+        静默降级会让用户以为 /rewind 还能连文件一起回退。@author aceFelix
+        """
+        if not self._enabled:
+            return "已在 [checkpoint] 中关闭（enabled = false）"
+        if self._disabled_reason:
+            return self._disabled_reason
+        if self._timed_out:
+            return "上一次快照超时，本会话已停用文件回滚"
+        if not _git_available():
+            return "未找到 git，无法生成文件快照"
+        return ""
 
     @property
     def workdir(self) -> str:
@@ -173,14 +257,42 @@ class CheckpointManager:
             "--work-tree", self._workdir,
             *args,
         ]
-        return subprocess.run(
-            cmd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=self._timeout,
-            check=check,
+        # 用 Popen 而不是 subprocess.run：run 的超时只杀直接子进程，孙进程仍
+        # 持有管道，communicate() 会继续阻塞（=超时失效）。@author aceFelix
+        proc = subprocess.Popen(
+            cmd,
+            # 绝不能继承父进程 stdin：MSYS2 git 会在交互式管道上挂死
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
             # cwd 锁定工作树：git add/clean 等命令按 cwd 解释相对路径，
             # 不能受 jarvis 进程启动目录影响
             cwd=self._workdir if Path(self._workdir).is_dir() else None,
+            start_new_session=(os.name != "nt"),
         )
+        try:
+            out, err = proc.communicate(timeout=self._timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            # 孙进程可能仍持管道：限时再收一次，收不到就丢弃，绝不无限等
+            try:
+                out, err = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                out, err = "", ""
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except Exception:
+                    pass
+            raise
+        result = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+        if check and proc.returncode != 0:
+            raise subprocess.CalledProcessError(
+                proc.returncode, cmd, out, err,
+            )
+        return result
 
     def _init_shadow_repo(self) -> bool:
         """在存储位置新建 shadow git 仓库并写基础配置。
@@ -283,36 +395,41 @@ class CheckpointManager:
 
         @author aceFelix
         """
-        if not self.available() or not self._ensure_init():
+        if not self.available():
             return None
-        try:
-            # add -A：把当前工作树全部变动刷进 index（尊重 exclude/.gitignore）
-            self._git("add", "-A")
-            tree = self._git("write-tree").stdout.strip()
-            if not tree:
+        with self._lock:
+            if not self._ensure_init():
                 return None
-            msg = f"jarvis checkpoint: {reason[:80]}" if reason else "jarvis checkpoint"
-            cid = self._git("commit-tree", tree, "-m", msg).stdout.strip()
-            if not cid:
+            try:
+                # add -A：把当前工作树全部变动刷进 index（尊重 exclude/.gitignore）
+                self._git("add", "-A")
+                tree = self._git("write-tree").stdout.strip()
+                if not tree:
+                    return None
+                msg = f"jarvis checkpoint: {reason[:80]}" if reason else "jarvis checkpoint"
+                cid = self._git("commit-tree", tree, "-m", msg).stdout.strip()
+                if not cid:
+                    return None
+                entries = self._load_manifest()
+                seq = int(entries[-1].get("seq", 0)) + 1 if entries else 1
+                ref = f"{_REF_PREFIX}{seq:05d}"
+                self._git("update-ref", ref, cid)
+                entries.append({
+                    "id": cid, "ref": ref, "seq": seq,
+                    "ts": time.time(), "reason": reason[:120], "kind": kind,
+                })
+                self._save_manifest(entries)
+                self._prune(entries)
+                logger.info(f"[Checkpoint] 已创建: {cid[:8]} ({reason[:40]})")
+                return cid
+            except subprocess.TimeoutExpired:
+                # 超时后整个会话不再重试：否则每轮都要再白等一次超时
+                self._timed_out = True
+                logger.warning("[Checkpoint] create 超时，本会话停用文件检查点")
                 return None
-            entries = self._load_manifest()
-            seq = int(entries[-1].get("seq", 0)) + 1 if entries else 1
-            ref = f"{_REF_PREFIX}{seq:05d}"
-            self._git("update-ref", ref, cid)
-            entries.append({
-                "id": cid, "ref": ref, "seq": seq,
-                "ts": time.time(), "reason": reason[:120], "kind": kind,
-            })
-            self._save_manifest(entries)
-            self._prune(entries)
-            logger.info(f"[Checkpoint] 已创建: {cid[:8]} ({reason[:40]})")
-            return cid
-        except subprocess.TimeoutExpired:
-            logger.warning("[Checkpoint] create 超时，跳过本次检查点")
-            return None
-        except Exception as e:
-            logger.warning(f"[Checkpoint] create 失败: {e}")
-            return None
+            except Exception as e:
+                logger.warning(f"[Checkpoint] create 失败: {e}")
+                return None
 
     def _prune(self, entries: list[dict[str, Any]]) -> None:
         """按 ``kind`` 分族各自守配额，超出者删 ref + gc 回收。
@@ -394,23 +511,24 @@ class CheckpointManager:
         """
         if not self.available():
             return False, "文件回滚不可用（未启用或缺少 git）"
-        if not self._ensure_init():
-            return False, "检查点仓库初始化失败"
         if not checkpoint_id:
             return False, "该消息没有关联检查点"
-        if not self.has_checkpoint(checkpoint_id):
-            return False, "检查点已被清理，无法回滚文件"
-        try:
-            self._git("read-tree", "-u", "--reset", checkpoint_id)
-            clean = self._git("clean", "-fd")
-            if clean.returncode != 0:
-                return False, f"清理新增文件失败: {clean.stderr.strip()[:120]}"
-            logger.info(f"[Checkpoint] 已回滚工作区到 {checkpoint_id[:8]}")
-            return True, "工作区已恢复到该消息发出之前"
-        except subprocess.TimeoutExpired:
-            return False, "回滚超时，请检查工作区是否有文件占用"
-        except Exception as e:
-            return False, f"回滚失败: {type(e).__name__}: {e}"
+        with self._lock:
+            if not self._ensure_init():
+                return False, "检查点仓库初始化失败"
+            if not self.has_checkpoint(checkpoint_id):
+                return False, "检查点已被清理，无法回滚文件"
+            try:
+                self._git("read-tree", "-u", "--reset", checkpoint_id)
+                clean = self._git("clean", "-fd")
+                if clean.returncode != 0:
+                    return False, f"清理新增文件失败: {clean.stderr.strip()[:120]}"
+                logger.info(f"[Checkpoint] 已回滚工作区到 {checkpoint_id[:8]}")
+                return True, "工作区已恢复到该消息发出之前"
+            except subprocess.TimeoutExpired:
+                return False, "回滚超时，请检查工作区是否有文件占用"
+            except Exception as e:
+                return False, f"回滚失败: {type(e).__name__}: {e}"
 
 
 def manager_from_settings(
@@ -445,3 +563,59 @@ def manager_from_settings(
             getattr(settings, "tasks_checkpoint_max", _TASK_MAX_DEFAULT) or _TASK_MAX_DEFAULT
         ),
     )
+
+
+class BackgroundCheckpointRunner:
+    """把「每轮对话前打检查点」挪出主循环：提交后台线程，本轮不等。
+
+    为什么要它：检查点只是「能不能连带回滚文件」的增强能力，绝不该决定
+    「能不能对话」。2026-11-19 实机：workdir 为 ``C:\\Windows\\System32``
+    时 ``git add -A`` 持续数分钟不返，REPL 同步等待导致输入后完全无响应。
+
+    取舍：本轮工具调用拿不到 cid（副作用账本降级为不可撤销），轮末最多
+    等 ``timeout`` 秒收 cid；拿不到就让 /rewind 如实回「该消息没有关联检查点」。
+    @author aceFelix
+    """
+
+    def __init__(self, manager: CheckpointManager) -> None:
+        self._mgr = manager
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._cid = ""
+
+    def start(self, reason: str) -> bool:
+        """启动本轮快照；不可用或上一轮未结束时返回 False（不排队）。"""
+        if not self._mgr.available():
+            return False
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._cid = ""
+            thread = threading.Thread(
+                target=self._run, args=(reason,),
+                name="turn-checkpoint", daemon=True,
+            )
+            self._thread = thread
+            thread.start()
+            return True
+
+    def _run(self, reason: str) -> None:
+        try:
+            cid = self._mgr.create(reason=reason)
+        except Exception:
+            cid = None
+        with self._lock:
+            self._cid = cid or ""
+
+    def collect(self, timeout: float = 2.0) -> str:
+        """轮末收取 cid；超时返回空串。
+
+        注意：必须先取线程对象再释放锁，然后才 join——持锁 join 会与
+        ``_run`` 收尾时写 ``_cid`` 互等。@author aceFelix
+        """
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=max(0.0, float(timeout)))
+        with self._lock:
+            return self._cid

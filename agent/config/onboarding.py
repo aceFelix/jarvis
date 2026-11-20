@@ -451,7 +451,7 @@ async def run_quick_setup(ui: Any, settings: "Settings | None" = None, *,
     else:
         ui._console.print("[dim]重启 jarvis 后生效[/dim]")
     ui._console.print(
-        f"\n[dim]工作目录用当前目录：{workdir}\n"
+        f"\n[dim]工作目录：{workdir}\n"
         "要换：jarvis --workdir <路径>；要换模型：/models[/dim]"
     )
     # 语音没配时把“怎么补”留在一屏可见的地方：否则用户只会在 /voice 里看到
