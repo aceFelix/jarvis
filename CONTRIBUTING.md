@@ -140,8 +140,8 @@ chore(ci): 缓存 pip 下载目录
 ## 7. 分支与 PR
 
 ```bash
-git checkout main
-git fetch upstream && git pull --ff-only upstream main   # 有 upstream 时
+git checkout master
+git fetch upstream && git pull --ff-only upstream master   # 有 upstream 时
 git checkout -b fix/checkpoint-systemdir
 
 # 改代码 + 测试
@@ -192,7 +192,7 @@ git remote set-url --add --push github https://gitcode.com/acefelix/jarvis.git
 4. `python -m build --sdist --wheel` 并校验产物元数据；
 5. 打 tag `vX.Y.Z` 并推送 → 触发 `.github/workflows/publish.yml`
    （PyPI → npm → GitHub Release）；
-6. 发布成功后把 `release/vX.Y.Z` 合并回 `main`。
+6. 发布成功后把 `release/vX.Y.Z` 合并回 `master`。
 
 > **tag 一旦触发发布就不能重发**（PyPI / npm 版本不可覆盖），
 > 所以上述第 3、4 步必须在打 tag 前完成。
