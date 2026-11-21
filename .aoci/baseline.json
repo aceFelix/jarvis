@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-21T18:03:26Z",
+  "updated_at": "2026-11-21T18:25:45Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -335,9 +335,9 @@
     },
     "agent/commands/handlers/init_command.py": {
       "role": "index",
-      "sha256": "e10555b2765bada2d08b7d478bbe74cd1a9e15ed89547eaeec3bfeff255f80ed",
-      "size": 17759,
-      "normalized_sha256": "e10555b2765bada2d08b7d478bbe74cd1a9e15ed89547eaeec3bfeff255f80ed"
+      "sha256": "896083891be69d1fce19b45b06d61f131781cc7f04b11c7938672b7809e9d549",
+      "size": 19851,
+      "normalized_sha256": "896083891be69d1fce19b45b06d61f131781cc7f04b11c7938672b7809e9d549"
     },
     "agent/commands/handlers/media_commands.py": {
       "role": "index",
@@ -389,9 +389,9 @@
     },
     "agent/commands/handlers/session_commands.py": {
       "role": "index",
-      "sha256": "3d3b9e77283d1042a98f7fec60d7e06acf64114f1f6eaf3cda718ad4f9593cea",
-      "size": 15039,
-      "normalized_sha256": "3d3b9e77283d1042a98f7fec60d7e06acf64114f1f6eaf3cda718ad4f9593cea"
+      "sha256": "e08134c00114f38162fb5d4f64e46faa0de4d1dd8c0fd62291b3a4af151115a9",
+      "size": 22444,
+      "normalized_sha256": "e08134c00114f38162fb5d4f64e46faa0de4d1dd8c0fd62291b3a4af151115a9"
     },
     "agent/commands/handlers/skill_commands.py": {
       "role": "index",
@@ -455,9 +455,9 @@
     },
     "agent/config/catalog.py": {
       "role": "index",
-      "sha256": "23846f892194aac8702a8b128c38084b4d640d7e3d90533f1b2727e2b3a054e3",
-      "size": 45200,
-      "normalized_sha256": "68a5bb3db7d84c30d46cfd4cb175066b44dfdb2ee079fe72c3c38bb2f44268e6"
+      "sha256": "9a57bfeb1caaf0aeb490c3d65af561473567b3fe739215051bfd53f0a05df6e7",
+      "size": 44432,
+      "normalized_sha256": "9a57bfeb1caaf0aeb490c3d65af561473567b3fe739215051bfd53f0a05df6e7"
     },
     "agent/config/cleaners.toml": {
       "role": "index",
@@ -545,9 +545,9 @@
     },
     "agent/config/onboarding.py": {
       "role": "index",
-      "sha256": "efbbfa9b5605f2f18778cb1ee95e68469a95d58ceea584c335cda13fe0c4130c",
-      "size": 22533,
-      "normalized_sha256": "efbbfa9b5605f2f18778cb1ee95e68469a95d58ceea584c335cda13fe0c4130c"
+      "sha256": "660c09768ce80da4ea6208db972fcae490a93d8567279b3ed8da463872601512",
+      "size": 22518,
+      "normalized_sha256": "660c09768ce80da4ea6208db972fcae490a93d8567279b3ed8da463872601512"
     },
     "agent/config/percept_settings.py": {
       "role": "index",
@@ -569,15 +569,15 @@
     },
     "agent/config/settings.py": {
       "role": "index",
-      "sha256": "e4c478d6be90f971004961168ade7a76a3528c16e7e8eb5c6b0e8003fcc4b87f",
-      "size": 51712,
-      "normalized_sha256": "3bf820c2caacf534736f04317762903784d09b2f1b717e903319fc377077edf9"
+      "sha256": "27ef5c92571cc3c12ae89e9c26791a0b198035124063206ef9f4e4b4c4e401fd",
+      "size": 53053,
+      "normalized_sha256": "27ef5c92571cc3c12ae89e9c26791a0b198035124063206ef9f4e4b4c4e401fd"
     },
     "agent/config/settings_domains.py": {
       "role": "index",
-      "sha256": "811e2c4fe1267be42f492b9799937ab0cf76eb59e10ae25f276a11d269311bb0",
-      "size": 21712,
-      "normalized_sha256": "811e2c4fe1267be42f492b9799937ab0cf76eb59e10ae25f276a11d269311bb0"
+      "sha256": "71dfd3c0547104fdfda348071607aed3e4c5ff148492a513061dc0529597482d",
+      "size": 22912,
+      "normalized_sha256": "71dfd3c0547104fdfda348071607aed3e4c5ff148492a513061dc0529597482d"
     },
     "agent/config/toml_writer.py": {
       "role": "index",
@@ -617,9 +617,9 @@
     },
     "agent/configs/settings.example.toml": {
       "role": "index",
-      "sha256": "3257bdd4626e124355b45dc573a62d315ed82d459f32a0ee866b242c15669d9e",
-      "size": 31466,
-      "normalized_sha256": "2014002155d455192b574f580232c849979754cc3c027f468f2d20ffd047a581"
+      "sha256": "f502cebdf4a144e32c4025a0f0cbc2e7f7b0ba83062b92f543b050a65538b7c6",
+      "size": 32281,
+      "normalized_sha256": "f502cebdf4a144e32c4025a0f0cbc2e7f7b0ba83062b92f543b050a65538b7c6"
     },
     "agent/core/__init__.py": {
       "role": "index",
@@ -665,15 +665,15 @@
     },
     "agent/core/checkpoint.py": {
       "role": "index",
-      "sha256": "dc503e8c459826d9a4bd6693c5e14911772250d78885f3713a8df4c176981b1b",
-      "size": 19533,
-      "normalized_sha256": "dc503e8c459826d9a4bd6693c5e14911772250d78885f3713a8df4c176981b1b"
+      "sha256": "291bae3bd224a6cd16e073eb07981e98d1428ce0d87a64794eeb8c9dfbc52637",
+      "size": 26844,
+      "normalized_sha256": "291bae3bd224a6cd16e073eb07981e98d1428ce0d87a64794eeb8c9dfbc52637"
     },
     "agent/core/context.py": {
       "role": "index",
-      "sha256": "554027d25afe58a2d9c602d7cda68b4acf07e57501930ff564db633b63d057e3",
-      "size": 5138,
-      "normalized_sha256": "554027d25afe58a2d9c602d7cda68b4acf07e57501930ff564db633b63d057e3"
+      "sha256": "d67d98412e0b203a88c4796ccf383330a92b9dc6ebb546bee5b4af3affa4ff5b",
+      "size": 5142,
+      "normalized_sha256": "d67d98412e0b203a88c4796ccf383330a92b9dc6ebb546bee5b4af3affa4ff5b"
     },
     "agent/core/daemon/__init__.py": {
       "role": "index",
@@ -694,9 +694,9 @@
     },
     "agent/core/daemon/cli_reminder.py": {
       "role": "index",
-      "sha256": "d9a93e41f567773557f5d1150b13a7eafb1ace013fe145cbf11c59befcc97b26",
-      "size": 8916,
-      "normalized_sha256": "9d62bb346709d59ca5364187bfa99dd028e72e48cf17862576455f056ff519f3"
+      "sha256": "1b78f8f446f46f3d489c4e24705409b630b03c388157ba1d5d037ab4edae89af",
+      "size": 8732,
+      "normalized_sha256": "1b78f8f446f46f3d489c4e24705409b630b03c388157ba1d5d037ab4edae89af"
     },
     "agent/core/daemon/deadline.py": {
       "role": "index",
@@ -2396,9 +2396,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "6d11b5956024d97826a0cbba1ccfee58c3f1c0ce2ce1462dfcb177df428f7eae",
-      "size": 226806,
-      "normalized_sha256": "6d11b5956024d97826a0cbba1ccfee58c3f1c0ce2ce1462dfcb177df428f7eae"
+      "sha256": "c52e1216b51f35807eba583c1fd7d9767586815fb3b65e63e773f2d7cf3e0f42",
+      "size": 227093,
+      "normalized_sha256": "c52e1216b51f35807eba583c1fd7d9767586815fb3b65e63e773f2d7cf3e0f42"
     },
     "aoci.meta.txt": {
       "role": "index",
