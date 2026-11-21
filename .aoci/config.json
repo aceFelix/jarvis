@@ -126,6 +126,39 @@
         "created_by": "aoci-init",
         "order": 106,
         "enabled": true
+      },
+      {
+        "rule_id": "exclude-fixlogs",
+        "action": "exclude",
+        "pattern": "docs/fixlogs/**",
+        "pattern_kind": "glob",
+        "reason": "历史复盘文档不参与代码认知索引，聚焦运行时代码与架构文档",
+        "source": "user",
+        "created_by": "qoder-agent",
+        "order": 0,
+        "enabled": true
+      },
+      {
+        "rule_id": "exclude-plans",
+        "action": "exclude",
+        "pattern": "docs/plans/**",
+        "pattern_kind": "glob",
+        "reason": "历史执行计划不参与代码认知索引",
+        "source": "user",
+        "created_by": "qoder-agent",
+        "order": 0,
+        "enabled": true
+      },
+      {
+        "rule_id": "exclude-roadmap",
+        "action": "exclude",
+        "pattern": "docs/roadmap/**",
+        "pattern_kind": "glob",
+        "reason": "路线图快照不参与代码认知索引",
+        "source": "user",
+        "created_by": "qoder-agent",
+        "order": 0,
+        "enabled": true
       }
     ]
   },
