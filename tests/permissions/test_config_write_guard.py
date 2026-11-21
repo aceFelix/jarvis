@@ -47,7 +47,10 @@ def _ctx(tmp_path: Path, perm_file: str = "") -> Any:
         extra={},
         settings=SimpleNamespace(
             permissions_file=perm_file,
-            permissions_yolo_guard_roots=["c:\\"],
+            # 显式空数组 = 真取消受保护根（不是“用默认 c:\\”）。写死 c:\\ 会让
+            # Windows runner 上的 tmp_path 命中目标域，把普通编辑升成 ASK，
+            # 与本类用例要验证的 config_write_guard 无关（2026-11-21 Windows CI 实修）。
+            permissions_yolo_guard_roots=[],
             permissions_yolo_hard_deny=[],
         ),
     )

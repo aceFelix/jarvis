@@ -149,7 +149,13 @@ def test_notify_reminder_prints_without_pt_session():
     ui.notify_reminder("提醒：面试")
 
     out = buf.getvalue()
-    assert "面试" in out and "⏰" in out
+    assert "面试" in out
+    # 前缀标记按终端能力选：cmd（legacy_windows）下 emoji 会变 ?/空白，
+    # 统一降级为 [提醒]（2026-11-20 实修；Windows CI 断言 2026-11-21 同步）。
+    if getattr(ui._console, "legacy_windows", False):
+        assert "[提醒]" in out
+    else:
+        assert "⏰" in out
 
 
 def test_notify_reminder_invalidates_prompt_app():
