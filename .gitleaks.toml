@@ -58,12 +58,8 @@ paths = [
     '''agent/configs/settings\.example\.toml''',
     # 文档目录（占位符示例）
     '''config-docs/.*\.md''',
-    '''deepseek-docs/.*\.md''',
-    '''dashscope-docs/.*\.md''',
-    '''zai-docs/.*\.md''',
-    '''kimi-docs/.*\.md''',
-    '''minimax-docs/.*\.md''',
-    '''mimo-docs/.*\.md''',
+    # 厂商模型文档快照已统一收到 model-docs/ 下
+    '''model-docs/.*\.md''',
     # 架构文档
     '''docs/architecture/.*\.md''',
 ]

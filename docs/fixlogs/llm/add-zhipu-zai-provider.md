@@ -26,7 +26,7 @@
 ### 第二阶段：调研智谱官方 SDK
 
 **操作**：
-- 阅读项目文档 `zai-docs/智谱官方Python SDK.md`。
+- 阅读项目文档 `model-docs/zai/智谱官方Python SDK.md`。
 - 发现智谱提供 `zai.ZhipuAiClient`，其 `chat.completions.create()` 接口与 OpenAI 完全兼容：
   - 支持流式 `stream=True`
   - 支持 `thinking={"type": "enabled/disabled"}`

@@ -88,7 +88,7 @@ def test_links_in_code_samples_not_judged(tmp_path, checker):
 def test_skip_dirs_excluded(tmp_path, checker):
     """产物目录与厂商文档快照目录内的死链不报告（避免外部抓取件误报）。"""
     root = _make_repo(tmp_path)
-    for sub in ("build", ".venv", "dashscope-docs"):
+    for sub in ("build", ".venv", "model-docs"):
         d = root / sub
         d.mkdir()
         (d / "x.md").write_text("[失效](nope.md)", encoding="utf-8")

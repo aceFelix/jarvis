@@ -98,7 +98,7 @@ def default_instructions(tools_mode: str = "builtin") -> str:
     RealtimeTalk 终端路径与桌面全双工路径（workbench engine
     `_handle_start_talk_duplex` 直接构造父类 RealtimeEngine）共用此回退，
     保证两条路径人设一致——桌面路径若不传 instructions，DashScope 实时
-    模型会回落自带默认人设（自称"小云"，见 dashscope-docs 示例）。
+    模型会回落自带默认人设（自称"小云"，见 model-docs/dashscope 示例）。
     默认 tools_mode 与 settings.realtime_tools_mode 同步为 "builtin"
     （2026-10-09 误改 "all" 导致实时语音不可用后回退，勿再改）。
 

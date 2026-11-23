@@ -11,7 +11,7 @@
 
 | 厂商 | 信息源 | 核实状态 |
 |---|---|---|
-| DashScope（现状） | 本地 `dashscope-docs/` 客户端事件 + 服务端事件全文 | ✅ 完整 |
+| DashScope（现状） | 本地 `model-docs/dashscope/` 客户端事件 + 服务端事件全文 | ✅ 完整 |
 | StepFun 阶跃星辰 | `platform.stepfun.com/docs/zh/api-reference/realtime/chat` 全文 1096 行 | ✅ 完整（FC 事件名除外） |
 | Azure Voice Live | `learn.microsoft.com/.../voice-live-api-reference-2026-06-01-preview` 全文 3810 行 | ✅ 完整 |
 | Azure GPT-Live | `learn.microsoft.com/.../gpt-live-reference` | 🟡 部分（事件名已取，全表未展开） |

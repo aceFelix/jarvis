@@ -27,7 +27,7 @@
 
 ### 第二阶段：核对服务端契约（推翻第一版方案）
 
-通读 `dashscope-docs/阿里云实时语音对话实现文档.md` 后确认两件事：
+通读 `model-docs/dashscope/阿里云实时语音对话实现文档.md` 后确认两件事：
 
 1. `turn_detection.type = "smart_turn"` 下，`silence_duration_ms` / `vad_threshold` 等
    VAD 参数**一律无效**（官方文档原文：这些参数仅在 server_vad 模式下可调）

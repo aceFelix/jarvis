@@ -84,7 +84,7 @@
 ## 第二次实机修正（同日）：客户端自打断 + 麦克风缓冲积压
 
 再次实机复验仍是「第一轮正常、之后每次提问都 `⚠️ 回复被打断取消`」，对照官方文档
-（`dashscope-docs/阿里云实时语音对话实现文档.md`）定位到**两个客户端侧根因**。
+（`model-docs/dashscope/阿里云实时语音对话实现文档.md`）定位到**两个客户端侧根因**。
 
 ### 根因一：客户端在补发 `response.cancel`
 
@@ -201,7 +201,7 @@
 
 ### 真因：`input_audio_buffer.speech_stopped` 不在 DashScope 契约里
 
-对照官方文档（`dashscope-docs/阿里云实时语音对话实现文档.md`）：全文只在第 693、708 行
+对照官方文档（`model-docs/dashscope/阿里云实时语音对话实现文档.md`）：全文只在第 693、708 行
 出现 `input_audio_buffer.speech_started`，**从未定义 `speech_stopped`**。
 
 于是第三次修正的优先级逻辑成了死代码：

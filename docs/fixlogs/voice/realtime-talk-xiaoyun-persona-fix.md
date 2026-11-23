@@ -19,7 +19,7 @@
 1. **假设一：恢复会话带入旧人设**（截图里「小云」回复紧随「已恢复会话 Hello-Jarvis」）。
    检查 `~/.jarvis/sessions/Hello-jarvis.json`：只有两条干净消息
    （`Hello jarvis!` + 贾维斯式问候），**无「小云」字样** → 假设排除。
-2. **全仓搜「小云」**：仅命中 `dashscope-docs/` 阿里云参考文档（示例 prompt
+2. **全仓搜「小云」**：仅命中 `model-docs/dashscope/` 阿里云参考文档（示例 prompt
    「你的名字是小云」），运行时代码无该词 → 指向「模型自带默认人设」，即实时会话的
    `instructions` 为空。
 3. **追 instructions 传递链**：`RealtimeEngine.__init__` 默认 `instructions=""` 并原样进

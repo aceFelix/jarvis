@@ -22,10 +22,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# 厂商文档快照（外部站点抓取件）与依赖/构建产物目录不参与死链判定
+# 厂商文档快照（外部站点抓取件，收在 model-docs/ 下）与依赖/构建产物目录不参与死链判定
 SKIP_DIRS = {".venv", "node_modules", "build", "dist", ".git", "__pycache__",
-             "dashscope-docs", "kimi-docs", "minimax-docs", "mimo-docs",
-             "deepseek-docs", "zai-docs"}
+             "model-docs"}
 # 匹配 markdown 链接目标：[text](target)
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)")
 # 围栏代码块与行内代码：里面的 [text](target) 只是写法示例，不会被渲染成链接，

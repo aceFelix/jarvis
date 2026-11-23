@@ -40,8 +40,8 @@ MCP: 7/7 server 已连接，注册 87 个工具
 
 ### 第二阶段：核对服务端事件契约
 
-对照 `dashscope-docs/阿里云实时语音对话实现文档.md` 与
-`dashscope-docs/阿里云FunctionCalling实现.md`：
+对照 `model-docs/dashscope/阿里云实时语音对话实现文档.md` 与
+`model-docs/dashscope/阿里云FunctionCalling实现.md`：
 
 - 官方协议中**响应结束的权威事件是 `response.done`**：两份文档的完整事件序列
   均以 `response.done` 结尾，FunctionCalling 文档里的处理函数也叫
