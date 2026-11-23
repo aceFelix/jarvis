@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-23T06:07:06Z",
+  "updated_at": "2026-11-23T15:15:12Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     ".gitleaks.toml": {
       "role": "index",
-      "sha256": "812ec7824743c767630a9ffd9c9e46d7005672ce0b97b1701c6c05d05f86827a",
-      "size": 3408,
-      "normalized_sha256": "812ec7824743c767630a9ffd9c9e46d7005672ce0b97b1701c6c05d05f86827a"
+      "sha256": "6849c487fb53350e7da7d13b38b99aae70deab583fa6f767a9ffe9d6c1d726c0",
+      "size": 3320,
+      "normalized_sha256": "6849c487fb53350e7da7d13b38b99aae70deab583fa6f767a9ffe9d6c1d726c0"
     },
     "AGENTS.md": {
       "role": "index",
@@ -2276,9 +2276,9 @@
     },
     "agent/voice/realtime_talk.py": {
       "role": "index",
-      "sha256": "62d74eecc9d20e1d12f5e4b042864be9ebee36a13580b2ba1176eab78078151c",
-      "size": 12028,
-      "normalized_sha256": "62d74eecc9d20e1d12f5e4b042864be9ebee36a13580b2ba1176eab78078151c"
+      "sha256": "59dc78eafcefb820f509c612c97208794393e51ca843cacb7f8f959514c7886f",
+      "size": 12034,
+      "normalized_sha256": "59dc78eafcefb820f509c612c97208794393e51ca843cacb7f8f959514c7886f"
     },
     "agent/voice/realtime_tools.py": {
       "role": "index",
@@ -2396,9 +2396,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "51af22e3ede4165b6744a75e61b4992fd2f47fe7d113d747a0ddff099d765ff6",
-      "size": 235771,
-      "normalized_sha256": "51af22e3ede4165b6744a75e61b4992fd2f47fe7d113d747a0ddff099d765ff6"
+      "sha256": "f1b136cd9a4546a4965131ca7c50bab41b70b9365e7d070e242e782ea6555a9f",
+      "size": 236377,
+      "normalized_sha256": "f1b136cd9a4546a4965131ca7c50bab41b70b9365e7d070e242e782ea6555a9f"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2892,9 +2892,9 @@
     },
     "docs/research/voice-provider-matrix.md": {
       "role": "index",
-      "sha256": "62c1cbd1e9dbb8265dbcf4ffaf5a54f303051ad8bb5e56ee85dd9a345bf2a6ff",
-      "size": 13188,
-      "normalized_sha256": "62c1cbd1e9dbb8265dbcf4ffaf5a54f303051ad8bb5e56ee85dd9a345bf2a6ff"
+      "sha256": "ff6261dc7203ebe5f52e356263580166617abeca449fdd3ffcc3850d5768fbd2",
+      "size": 13194,
+      "normalized_sha256": "ff6261dc7203ebe5f52e356263580166617abeca449fdd3ffcc3850d5768fbd2"
     },
     "docs/test/TEST_CHECKLIST-system-maintenance.md": {
       "role": "index",
@@ -2968,6 +2968,156 @@
       "size": 7170,
       "normalized_sha256": "4d1a062ae45ebc2b1691e7dd5cba935353e658497bbf3dc4d6af1556e94001d4"
     },
+    "model-docs/README.md": {
+      "role": "index",
+      "sha256": "40962f2677015bf602fdcd38d0b846c4ec15d80fe406f448835bc6d3c21585cc",
+      "size": 1851,
+      "normalized_sha256": "2829dabda87cc3646d5f1ec142d7794ce6aa77200789665b035fe45361ca1b89"
+    },
+    "model-docs/dashscope/AOQ 接入.md": {
+      "role": "index",
+      "sha256": "362c3b9c298898e1b1fdf80cd23d6ed205cc494345616e0fa24dd2d4fe53355f",
+      "size": 14973,
+      "normalized_sha256": "d3b5a7b3f3798e329d0ca5a980bd2a66e019f0926ad1cca25858eacb3ec9b4ad"
+    },
+    "model-docs/dashscope/DashScope SDK.md": {
+      "role": "index",
+      "sha256": "e860adccb897527fa735ae63fd396d2faf3a740d7ce6a527f4bf60569b7521cf",
+      "size": 110447,
+      "normalized_sha256": "80cc4c2b13e976decc675f2692b92f38f2f58861be66bb8e586ada2f4ce19c7e"
+    },
+    "model-docs/dashscope/Qwen-Audio 实时语音对话客户端事件.md": {
+      "role": "index",
+      "sha256": "caa629bc8e06801075c2cea52022629f4ca2748ea0154c062a828d1599824e68",
+      "size": 15307,
+      "normalized_sha256": "9e35440a9c55671e2de594c9a840699353333101ecd391d381bbcc6bc781e290"
+    },
+    "model-docs/dashscope/Qwen-Audio 实时语音对话服务端事件.md": {
+      "role": "index",
+      "sha256": "8f423f613d2eb5618fb3b04250d002fbe37b0991d49065a97fbd4bb70330d163",
+      "size": 28113,
+      "normalized_sha256": "d455e30e9847b909985e86d0f7636b031df73d267eb96a4de1e31843324b067e"
+    },
+    "model-docs/dashscope/Realtime API 概述.md": {
+      "role": "index",
+      "sha256": "c4887ed55c9b4a67e8d366104802ea4f20d54230f595cdcc3c5514da04ec9ca5",
+      "size": 6076,
+      "normalized_sha256": "0e70abfc5652dacab145af15efa514ac205449dcedf87c8ae5191994a16a308e"
+    },
+    "model-docs/dashscope/WebRTC 接入.md": {
+      "role": "index",
+      "sha256": "c37c0d69bf41e457852cbbd760910580fcdaf586d3e25f755066c994acd16eeb",
+      "size": 24083,
+      "normalized_sha256": "4428d32abce60721f4aabeaedc1df66c02dcf6498c8124ed67c3deae995b7e97"
+    },
+    "model-docs/dashscope/WebSocket 接入指南.md": {
+      "role": "index",
+      "sha256": "90ae5f1c6fc60f4d0b89c5ca2a6e6aba429d3a8e714c12b4b1070b20d17d3bae",
+      "size": 13070,
+      "normalized_sha256": "90b863bb3b390fa543470218b2cd2331d2af979568c70a3c602c3d611964f05b"
+    },
+    "model-docs/dashscope/上下文缓存.md": {
+      "role": "index",
+      "sha256": "b1ac6b2a122950db0352c4498cb89e15ee5d12e9a9bda6e002b4e1468985b9fe",
+      "size": 60345,
+      "normalized_sha256": "1a04bfbb49922e495b368d28756c3bd18c78f73d3636b022799f0a6d62ab8fc5"
+    },
+    "model-docs/dashscope/阿里云FunctionCalling实现.md": {
+      "role": "index",
+      "sha256": "983485809e928cc6f9b40b23c3cc1acaa21448ebbf083a6d3c3dd4edf09f0cfd",
+      "size": 180536,
+      "normalized_sha256": "1e84746c23eeef9da2e89c14d26e8798474ac21d6195ef1d09f8da8b4a0678b1"
+    },
+    "model-docs/dashscope/阿里云TTS和STT模型介绍.md": {
+      "role": "index",
+      "sha256": "dc8078644c183c6f7086ac35f05f8c776c7f7070c4da83f9ebdc2d3e1725db0f",
+      "size": 332,
+      "normalized_sha256": "063e5709c727c7290197cc3be91b25628a04dfc09582f9d270ab5ed7b6cd6281"
+    },
+    "model-docs/dashscope/阿里云实时语音对话实现文档.md": {
+      "role": "index",
+      "sha256": "b4f20a2ba2d44c3f1d6330c5dc076d1c0000097fc9aae7d670f4c22dc65cb519",
+      "size": 29908,
+      "normalized_sha256": "d97cd4d822a80161d6316662f8ee0b59905c8386d6ab9fc1c177f449428209a4"
+    },
+    "model-docs/dashscope/阿里云实时语音对话模型介绍.md": {
+      "role": "index",
+      "sha256": "a41361a4095493520de79a7b64e5a6dbfbc9741d3443012cb3b16739be4ef1fe",
+      "size": 384,
+      "normalized_sha256": "84fca0dbe7efbba1413f771f6e47c81ab275a1876a4cde1e398c56455c0cca42"
+    },
+    "model-docs/deepseek/deepseek思考模式.md": {
+      "role": "index",
+      "sha256": "466389d3945618618e7688186bbe8ae6f6a273c1946c0295243f334e4b480ed4",
+      "size": 10866,
+      "normalized_sha256": "684d1101b6c93ce391064982d7fdc8d7e464dea2c8da63669b3d981c91feb0a8"
+    },
+    "model-docs/deepseek/deepseek缓存与命中规则.md": {
+      "role": "index",
+      "sha256": "9dc352e01653a713a8787f73c7259b92393c3ce913b6b11eaaa69a3e037ebf60",
+      "size": 4629,
+      "normalized_sha256": "7ab78384dafcc3b268116b2a92bbcde2501d803aed74b2dee17ba2e41660ba40"
+    },
+    "model-docs/kimi/kimi系列模型思考模式.md": {
+      "role": "index",
+      "sha256": "b03d91c0eb240647b34ec41ada7c6e58807fca72b246ede6d5a24fb267a7a5ae",
+      "size": 24237,
+      "normalized_sha256": "11e92b63a29291df85a861d11c5f264da196ae03fc4718baf6484f31f5b326f7"
+    },
+    "model-docs/mimo/xiaomi mimo系列模型深度思考实现.md": {
+      "role": "index",
+      "sha256": "b6960fc8953ca588754b1f248f59b59b9e77dca952e6309ca7103a5791b4cd9f",
+      "size": 18533,
+      "normalized_sha256": "aede5874da341dbeb766b3387e822e73c8a3c0dfd57a62d107ed1dd84f07bd7a"
+    },
+    "model-docs/minimax/minimax系列模型anthropic sdk接入.md": {
+      "role": "index",
+      "sha256": "7a6ec63885e16759c068dcd2ed0a20127e877bfe49b6515c3ba33a463acd2479",
+      "size": 11545,
+      "normalized_sha256": "5a90efd8209530b0a9f8797f0033d005e7aa971f487ee2e57ccd7f5e58d3c0de"
+    },
+    "model-docs/minimax/minimax系列模型openai sdk接入.md": {
+      "role": "index",
+      "sha256": "9037468dfb9b4b946930995298b63e70b57cdff8e2ae37c7640537247667b3df",
+      "size": 11259,
+      "normalized_sha256": "38d067f304ea3d81a7c0b1e6ceea8b13b70220486f97f096b52fbe03acb51246"
+    },
+    "model-docs/minimax/minimax系列模型官方sdk.md": {
+      "role": "index",
+      "sha256": "fc128aef283044b96cfce67dd4be2467b36314d53656cbef129f5d02bc7ba9db",
+      "size": 7170,
+      "normalized_sha256": "4d1a062ae45ebc2b1691e7dd5cba935353e658497bbf3dc4d6af1556e94001d4"
+    },
+    "model-docs/zai/GLM-4.6v-Flash多模态免费模型.md": {
+      "role": "index",
+      "sha256": "538fae96a4f27d9a6f4ae7711c796ecb381e018b997e16d2b89b4ee1e4d8c80d",
+      "size": 50911,
+      "normalized_sha256": "bcbdc0af8bc201847519ab3189aeabc24696561e732c390cd854b6ab2d2fc04c"
+    },
+    "model-docs/zai/GLM系列模型思考模式.md": {
+      "role": "index",
+      "sha256": "4c0a4a154b412dd76542b940a05ec139a1570e71c353ba071c1093127a8d0210",
+      "size": 6546,
+      "normalized_sha256": "2cfdcb0c4f5924432d0ed5a5215108131a365c6037f473a9cdfcb15b9143d508"
+    },
+    "model-docs/zai/GLM系列模型深度思考.md": {
+      "role": "index",
+      "sha256": "e2097a3ba2533ff08e3c17b0d4c678110bdec52792702aeffd7ffbf412ee00d7",
+      "size": 9930,
+      "normalized_sha256": "c6edd0e70dcd95fdef44175ca4ec855da496795e74852efa0b3c7c34821a2347"
+    },
+    "model-docs/zai/上下文缓存.md": {
+      "role": "index",
+      "sha256": "11ee256aabe325299cc17d4b2499720c4c37d8f44d4b461dc2ceac1a7c087cda",
+      "size": 16985,
+      "normalized_sha256": "a9a6ae9c5d0254902b14f68701eaa23ce8c19a14b557e2b56d3406dd1581d01f"
+    },
+    "model-docs/zai/智谱官方Python SDK.md": {
+      "role": "index",
+      "sha256": "a469f40125e77f0e416fb92a10f740cb4f453c76b5365ab3bc0b8c1102ce51ed",
+      "size": 22450,
+      "normalized_sha256": "4b493e225eed4e949050f52a6a83619023eb7b100c5e400e34fca3780ab625d2"
+    },
     "npm/README.md": {
       "role": "index",
       "sha256": "ddf75ae01c9d361fbabb5ddf59b879a058236c32c734e5b65d9c1737f438385a",
@@ -3018,9 +3168,9 @@
     },
     "scripts/check_md_links.py": {
       "role": "index",
-      "sha256": "1ac6c7866b353d3ecc5ae95e0076e20fa747cb68bd1792b1a5f0a2209af67227",
-      "size": 9461,
-      "normalized_sha256": "1ac6c7866b353d3ecc5ae95e0076e20fa747cb68bd1792b1a5f0a2209af67227"
+      "sha256": "e85d76e8991e2a0fdaa7df18e60ccbdccf72da344f4fb31b989fb9bc2462e26f",
+      "size": 9398,
+      "normalized_sha256": "e85d76e8991e2a0fdaa7df18e60ccbdccf72da344f4fb31b989fb9bc2462e26f"
     },
     "scripts/fix_refine_to_deepseek.py": {
       "role": "index",
@@ -4270,9 +4420,9 @@
     },
     "tests/test_md_link_checker.py": {
       "role": "observe",
-      "sha256": "68c19c7d0d7dfbc2d1f9837a88e45751c20e54e9c7012e0565a71ff8a165e597",
-      "size": 10226,
-      "normalized_sha256": "68c19c7d0d7dfbc2d1f9837a88e45751c20e54e9c7012e0565a71ff8a165e597"
+      "sha256": "60184765519da588224d4dca14949bd0d6d9b8ed97fd91676886f860ddab0e21",
+      "size": 10222,
+      "normalized_sha256": "60184765519da588224d4dca14949bd0d6d9b8ed97fd91676886f860ddab0e21"
     },
     "tests/test_openai_tool_images.py": {
       "role": "observe",

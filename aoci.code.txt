@@ -3,7 +3,7 @@
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/===
 .gitattributes[FV6T]: F:Forces LF line endings on text files at checkout so the working tree stays byte-identical across platforms | R:- | A:* text=auto eol=lf | S:AOCI baselines raw bytes, so without eol=lf a Windows autocrlf rewrite would mark the entire tree stale
 .gitignore[FV6T]: F:Repository ignore rules: build artifacts, virtualenvs, private model configs, IDE files, runtime output, PowerShell cache and sandbox capability-SID cache | R:- | A:- | S:configs/*.toml hold plaintext api_key, sandbox-cli/ holds machine SIDs, PowerShell cache is machine-local: none may ever be committed
-.gitleaks.toml[FS6S]: F:Gitleaks configuration extending the default rules with JARVIS vendor API-key patterns and an allowlist for placeholders and test mocks | R:code:.github/workflows/gitleaks.yml | A:[allowlist] | S:Extends the default ruleset via useDefault and allowlists test and doc directories so placeholder keys never fail the security scan
+.gitleaks.toml[FS6T]: F:Gitleaks 配置：在默认规则上叠加 JARVIS 厂商 Key 模式，并把占位符、测试与 model-docs/ 厂商文档快照列入 allowlist。 | R:code:.github/workflows/gitleaks.yml | A:[allowlist] | S:extends via useDefault；allowlist 现按 model-docs/ 整目录排除厂商文档（旧 *-docs 目录已不存在）。
 AGENTS.md[SG6S]: F:Repository agent instructions：AOCI 托管认知块的全文，外加项目自定的三条交付纪律（合入 master 后重跑 check、接手他人提交先 check、行数跨档时同一轮把 E 改对）。 | R:- | A:aoci:begin | S:托管块 aoci:begin…aoci:end 由 AOCI 生成，改在块内会被覆写，自定内容只能写块外；三条纪律都来自 2026-11-05 的真实漏项：漏刷索引与攒着不改的 E 标签。
 LICENSE[SZ4M]: F:Apache License 2.0 granting free use, modification and commercial distribution with attribution to aceFelix, plus an express patent grant | R:- | A:- | S:-
 MANIFEST.in[FV4T]: F:Setuptools manifest listing the files shipped in the source distribution: LICENSE, README and package config templates | R:- | A:include agent/configs/*.toml | S:Root configs/ stays private; only the agent/configs templates are packaged as package-data
@@ -406,24 +406,6 @@ models.example.toml[FC4T]: F:模型域配置模板：provider、api_format、las
 permissions.yaml[FS5T]: F:Permission rule table: pattern, value and source entries mapping tool calls to allow, deny or ask, with fnmatch wildcards in the tool spec. | R:- | A:- | S:Priority enterprise>user>project>session, deny beats ask in a layer, hardcoded dangerous rules always win; spec-carrying allow relaxes tool ASK, bare tool name does not.
 settings.example.toml[FC5L]: F:settings.toml 的全量注释模板：从模型、语音到权限、策略（含 notify_budget 与提醒降级通道）、感知、W3 actions/tasks 与 maintenance 的每个可选键。 | R:code:configs/models.example.toml,code:agent/config/settings.py,code:agent/config/percept_settings.py,code:agent/core/policy/budget.py | A:- | S:新字段要同步白名单与文档；模型键已拆到 models.example.toml；两份 example 须同改否则丢开关；[monitor] 与 [daemon] 已无 enabled/high_cpu_duration 与 hotkey*，旧配置残留被静默忽略。
 
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/dashscope-docs/===
-AOQ 接入.md[SN4M]: F:Reference notes: connecting to Realtime API through the AOQ client SDK, from credentials and media direction to event exchange and release. | R:- | A:- | S:AOQ splits media and model events into separate tracks and is not supported in browsers.
-DashScope SDK.md[SN4M]: F:Reference notes: calling Qwen models through the DashScope SDK, with request endpoints, base_url settings and input and output parameter examples. | R:- | A:- | S:Beijing and Singapore now use workspace-scoped MaaS domains, and the old dashscope.aliyuncs.com hosts still work.
-Qwen-Audio 实时语音对话客户端事件.md[SN5T]: F:Reference notes: the client events of the Qwen-Audio Realtime API, chiefly session.update with its session fields, tools and turn detection. | R:- | A:- | S:turn_detection, voice and the audio format can only be changed before the first audio, while the session is IDLE.
-Qwen-Audio 实时语音对话服务端事件.md[SN5M]: F:Reference notes: the server events of the Qwen-Audio Realtime API, covering error, session and response events and their payload fields. | R:- | A:- | S:Client errors keep the connection open while server_error terminates it, and an error names the event that failed.
-Realtime API 概述.md[SN5T]: F:Reference notes: choosing between the AOQ, WebRTC and WebSocket transports of the Realtime API by latency, weak-network and integration cost. | R:- | A:- | S:Only WebRTC and WebSocket work in a browser; AOQ trades browser support for the best weak-network behaviour.
-WebRTC 接入.md[SN4L]: F:Reference notes: connecting to the Realtime API over WebRTC, from auth and SDP exchange to media tracks and DataChannel event exchange. | R:- | A:- | S:Media travels on tracks while events travel on the DataChannel, and Bailian ships no dedicated WebRTC SDK.
-WebSocket 接入指南.md[SN5S]: F:Reference notes: the Qwen-Audio Realtime WebSocket protocol, its endpoint and request flow, and the voice-activity and streaming features it enables. | R:- | A:- | S:Beijing and Singapore now use workspace-scoped MaaS domains instead of the shared dashscope hosts.
-上下文缓存.md[SN4L]: F:Reference notes: DashScope context caching, comparing explicit caches created by the caller with automatic implicit prefix caching, pricing and hit rules. | R:- | A:- | S:Explicit caches live 5 minutes and bill 125% to create but 10% on a hit; implicit caching cannot be disabled.
-阿里云FunctionCalling实现.md[SN4L]: F:Reference notes: how DashScope Function Calling works across request and tool-result rounds, with tool schemas, streaming callbacks and worked examples. | R:- | A:- | S:-
-阿里云TTS和STT模型介绍.md[SG2T]: F:Short note listing the console links of the TTS and STT models used by voice mode: cosyvoice-v3-flash and fun-asr-realtime. | R:- | A:- | S:-
-阿里云实时语音对话实现文档.md[SN5L]: F:Reference notes: implementing Qwen-Audio realtime voice over the WebSocket duplex protocol, covering interaction modes, Function Calling and context management. | R:- | A:- | S:Three interaction modes exist: server_vad, smart_turn and push-to-talk, and only smart_turn ignores filler words.
-阿里云实时语音对话模型介绍.md[SN2T]: F:Short note listing the console links of the Qwen-Audio realtime models: qwen-audio-3.0-realtime-flash and qwen-audio-3.0-realtime-plus. | R:- | A:- | S:-
-
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/deepseek-docs/===
-deepseek思考模式.md[SN4M]: F:Reference notes: DeepSeek thinking mode, listing the switch and reasoning-effort parameters for the OpenAI, Anthropic and Responses formats. | R:- | A:- | S:The switch and the effort level use different parameter names per API format, and effort none turns thinking off.
-deepseek缓存与命中规则.md[SP4T]: F:Reference notes: the DeepSeek disk context cache, how cached prefixes are built and billed, and which requests count as hits. | R:- | A:- | S:The disk cache is on by default for every user and cannot be disabled from the client.
-
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/architecture/===
 00-索引.md[SG5T]: F:架构详解系列的索引：20 章清单与编号、测试与使用指南，以及每章讲什么。 | R:code:docs/architecture/19-系统维护层.md,code:docs/architecture/20-能力自检与自我修复.md | A:- | S:每章摘要写当前行为，退役要一并改写；篇数要与两份 README 文档地图同步（现 20 篇）；摘要里的数字是手抄。
 01-总体架构.md[SG6M]: F:架构总览：系统定位、核心设计目标、模块地图与 J.A.R.V.I.S 的主数据流。 | R:code:agent/core/actions/journal.py,code:agent/core/tasks/spine_ops.py,code:agent/prompts/text_blocks.py | A:- | S:本地优先、工具驱动、终端原生；GUI 宿主在独立的 jarvis-desktop 仓，本仓入口只有 repl 与 --serve。目录树、CMD_ 条数与启动顺序都是手抄快照，代码一动就得同步。
@@ -456,17 +438,6 @@ w3-testing.md[SQ6M]: F:W3 兑现层实机走查清单（Windows）：§0.5 一�
 config-self-service-testing.md[SQ6M]: F:自配置层实机走查清单：真源表 63 项（207 字段）、模型与终端入口、三类分级、五档 apply_mode、配置问答与撤销验证，含 8.18/8.19 跨厂商往返。 | R:code:agent/config/config_specs.py,code:docs/architecture/12-配置系统.md,code:agent/config/catalog.py | A:- | S:判据是实跑回执原话；数字随真源表变（63/207/62 可代改）；8.18 报 404 先看 traceback 的请求 URL；8.19 自建网关不得判成厂商变更。
 TEST_CHECKLIST-system-maintenance.md[TG5S]: F:系统维护层实机走查分册（T-397–T-433，37 项）：/disk 只读诊断、/clean 隔离区与还原、/health 杀软与扫描、七区块体检、工具契约，附四条不经模型的一键自检命令与 139 例单测清单。 | R:code:docs/test/TEST_CHECKLIST.md,code:docs/architecture/19-系统维护层.md,code:docs/roadmap/butler/PLAN-system-maintenance.md | A:- | S:系统维护层 37 项人工走查（T-397–T-433）：隔离区闭环、protect 跳过记原因、未启用时只读仍可用、第三方杀软接管不得误报、提权失败如实标注、自动清理只清 auto_ok。
 
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/kimi-docs/===
-kimi系列模型思考模式.md[SN4L]: F:Vendor note: the Kimi model thinking modes, how reasoning is enabled and what the API returns for each mode. | R:- | A:- | S:A vendor thinking mode is an API detail, so it must be mapped per provider rather than reused blindly.
-
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/mimo-docs/===
-xiaomi mimo系列模型深度思考实现.md[SN4L]: F:Vendor note: the Xiaomi MiMo deep-thinking implementation, where the model reasons before answering and when to use it. | R:- | A:- | S:Deep thinking suits complex reasoning and code tasks, and the request flag differs per vendor.
-
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/minimax-docs/===
-minimax系列模型anthropic sdk接入.md[SN4M]: F:Vendor note: connecting the MiniMax models through the Anthropic SDK, with the endpoint and request shape. | R:- | A:- | S:Anthropic-compatible access needs its own payload mapping, so thinking fields must be converted.
-minimax系列模型openai sdk接入.md[SN4M]: F:Vendor note: connecting the MiniMax models through the OpenAI SDK, with the base URL and request shape. | R:- | A:- | S:OpenAI-compatible access still differs per vendor, so the base URL and extra fields must be set.
-minimax系列模型官方sdk.md[SN4S]: F:Vendor note: the official MiniMax Python SDK, its client setup and how a chat request is issued. | R:- | A:- | S:The official SDK hides the transport details, so a provider using it keeps its own client path.
-
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/npm/===
 README.md[SV4S]: F:npm wrapper readme: the @acefelix/jarvis package page mirroring the GitHub product README for the npm registry. | R:code:npm/package.json | A:- | S:Product-README mirror, not the maintainer guide; tool count is now 70+ (100+ with MCP/harness).
 install.js[XV4M]: F:postinstall script: detects a Python interpreter and installs the jarvis-agent package, preferring uv and offering extras. | R:- | A:- | S:Non-TTY CI installs [all] silently; the realtime window menu option is gone with pywebview retired.
@@ -484,16 +455,9 @@ fix_user_settings_memory_dup.py[XR4T]: F:One-off script that merges the duplicat
 migrate_cli_anything_harnesses.py[XE4S]: F:Migration script that converts the official CLI-Anything harnesses into the Jarvis harness format. | R:- | A:- | S:A one-off migration must be rerunnable, so it reads the old layout and writes the new one idempotently.
 smoke_profile_bridge.py[XQ4T]: F:End-to-end smoke test that connects the real MCP server and verifies the knowledge-graph profile injection path. | R:- | A:- | S:A smoke test needs the real service, since the bridge path fails only against live credentials.
 smoke_refine_provider.py[XQ4T]: F:Smoke test for the profile refine provider chain, checking key resolution and a real one-line refine call. | R:- | A:- | S:Key resolution prefers the environment, so the smoke test must exercise the real resolution order.
-check_md_links.py[XQ5M]: F:CI gate script: scans all repo markdown for dead local file links and links whose targets are not tracked by git. | R:code:tests/test_md_link_checker.py,code:docs/fixlogs/ci-release/md-link-checker-linux-ci-fix.md | A:- | S:Absolute file:/// links are relocated by repo-root directory name so Windows and Linux CI agree; paths that cannot land in this repo are skipped, never reported.
+check_md_links.py[XQ5M]: F:CI 门禁脚本：扇描全仓 Markdown 的本地死链，并报告「本机存在但未入 git」的链接；厂商文档快照（model-docs/）与产物目录整目录跳过。 | R:code:tests/test_md_link_checker.py,code:docs/fixlogs/ci-release/md-link-checker-linux-ci-fix.md | A:- | S:file:/// 绝对路径按仓根目录名重定位，Windows 与 Linux CI 结论一致；落不到本仓的路径一律跳过不误报；跳过规则按路径段生效，新增快照目录要同时改 SKIP_DIRS 与单测样例。
 smoke_w3_spine.py[TG6L]: F:W3 兑现层一键实机走查脚本：真命令处理器、真工具、真编排器、真 WS 服务器与客户端，把三个入口、延时窗口、绕道硬拦和两条 RPC 共 40 项跑完并逐行打结论。 | R:code:agent/core/tasks/spine_ops.py,code:agent/serve/rpc_tasks.py,code:agent/core/orchestrator.py,code:tests/test_w3_smoke_script.py,code:docs/test/w3-testing.md | A:- | S:台账与账本靠 configure_* 钉到临时目录，改成真实 ~/.jarvis 就会撤掉用户待发的动作；窗口段在到点前撤回，证明不了到点真执行，别把 40/40 当完整验收。
 livecheck_w3.py[TW7M]: F:W3 实机自检：起 serve 用真 LLM 跑穿到点自动执行 + 副作用入账 + 按目标撤销，十二项判据逐行打结论 | R:code:agent/serve/server.py,code:agent/core/tasks/driver.py,code:agent/core/tasks/spawn.py,code:agent/core/actions/journal.py,code:docs/test/w3-testing.md,code:scripts/smoke_w3_spine.py | A:child, observe, parent, wait_handshake, report, CHECKS | S:父/子双模式，凭据只读环境变量、台账与账本钉临时目录，不落盘用户配置；判据与时间线必须落文件（终端管道会二次编码）；退出前按 run_dir 前缀清掉自己建的检查点仓库。
-
-===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/zai-docs/===
-GLM-4.6v-Flash多模态免费模型.md[SN4L]: F:Vendor note: the GLM-4.6V-Flash multimodal free model, its vision input support and how to call it. | R:- | A:- | S:A free multimodal model can carry image input, so its message format differs from the text models.
-GLM系列模型思考模式.md[SN4S]: F:Vendor note: the GLM thinking-mode switch, how to enable or disable reasoning and what the response contains. | R:- | A:- | S:Zhipu thinking is toggled through the request, and reasoning is returned on a separate channel.
-GLM系列模型深度思考.md[SN4M]: F:Vendor note: the GLM deep-thinking mode, when the model reasons before answering and how to request it. | R:- | A:- | S:Deep thinking raises accuracy on hard tasks at a latency cost, so it should be opt-in per request.
-上下文缓存.md[SP4L]: F:Vendor note: Zhipu context caching, how a request marks reusable context and how cache hits reduce cost. | R:- | A:- | S:Cache hits must be accounted separately from fresh tokens, or the cost figures are wrong.
-智谱官方Python SDK.md[SN4L]: F:Vendor note: the official Zhipu Python SDK, its client setup, chat call and thinking and tool options. | R:- | A:- | S:The official SDK carries its own option names, so a provider using it must map thinking flags itself.
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/guide/===
 commands.md[SG5M]: F:指南：REPL 命令参考，覆盖对话、模型、权限、会话（列出创建/更新时间）、记忆、语音、图片、插件、任务、协作与系统维护，含 caps 与 /repair。 | R:code:agent/ui/slash_completer.py,code:agent/commands/router.py,code:docs/guide/installation.md | A:- | S:唯一命令清单，须与 slash_completer/router 同步；/sessions 与 /load 标创建/更新时间；维护三命令标清只读与可撤销。
@@ -616,3 +580,42 @@ v2.2.md[SV3T]: F:2.2.x 系列历史更新日志分册：2.2.5 收录 W2 感知�
 v2.3.md[SV4L]: F:2.3.x 系列历史日志：画像记忆重复入库修复、/memory dedup、模型切换与厂商 5xx 分类修复、发布契约测试等。 | R:code:docs/log/CHANGELOG.md,code:docs/architecture/09-记忆与压缩.md | A:- | S:已发布段落冻结；2.3.5 记了厂商 5xx 被误当网络问题的根因，排查同类先读它。
 v2.4.md[SV4S]: F:2.4.x 系列历史日志：桌面多 Agent 协作、能力自检层与调用前能力门、/repair 自我修复、模型能力面。 | R:code:docs/log/CHANGELOG.md,code:docs/architecture/20-能力自检与自我修复.md | A:- | S:能力自检与视觉三值在这一版落地；/repair 与 --doctor 不同源的问题在此记录。
 v2.5.md[SV4L]: F:2.5.x 系列历史日志：/cost 真实计价与用量口径修复、爬虫浏览器降级与拓扑、发版后安装态验收。 | R:code:docs/log/CHANGELOG.md,code:docs/architecture/03-LLMProvider层.md | A:- | S:用量口径修复的结论：未命中 token 已在 provider 归一化时算好，不要再按协议二次推断。
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/===
+README.md[SG5T]: F:模型厂商文档快照目录索引：六个厂商目录（deepseek / dashscope / kimi / mimo / minimax / zai）的内容说明与维护约定。 | R:code:scripts/check_md_links.py,code:.gitleaks.toml | A:- | S:厂商文档是抓取件、以官网为准；新增厂商建 model-docs/<厂商>/；整个目录不参与死链检查并排除密钥扇描。
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/dashscope/===
+AOQ 接入.md[SN4M]: F:Reference notes: connecting to Realtime API through the AOQ client SDK, from credentials and media direction to event exchange and release. | R:- | A:- | S:AOQ splits media and model events into separate tracks and is not supported in browsers.
+DashScope SDK.md[SN4M]: F:Reference notes: calling Qwen models through the DashScope SDK, with request endpoints, base_url settings and input and output parameter examples. | R:- | A:- | S:Beijing and Singapore now use workspace-scoped MaaS domains, and the old dashscope.aliyuncs.com hosts still work.
+Qwen-Audio 实时语音对话客户端事件.md[SN5T]: F:Reference notes: the client events of the Qwen-Audio Realtime API, chiefly session.update with its session fields, tools and turn detection. | R:- | A:- | S:turn_detection, voice and the audio format can only be changed before the first audio, while the session is IDLE.
+Qwen-Audio 实时语音对话服务端事件.md[SN5M]: F:Reference notes: the server events of the Qwen-Audio Realtime API, covering error, session and response events and their payload fields. | R:- | A:- | S:Client errors keep the connection open while server_error terminates it, and an error names the event that failed.
+Realtime API 概述.md[SN5T]: F:Reference notes: choosing between the AOQ, WebRTC and WebSocket transports of the Realtime API by latency, weak-network and integration cost. | R:- | A:- | S:Only WebRTC and WebSocket work in a browser; AOQ trades browser support for the best weak-network behaviour.
+WebRTC 接入.md[SN4L]: F:Reference notes: connecting to the Realtime API over WebRTC, from auth and SDP exchange to media tracks and DataChannel event exchange. | R:- | A:- | S:Media travels on tracks while events travel on the DataChannel, and Bailian ships no dedicated WebRTC SDK.
+WebSocket 接入指南.md[SN5S]: F:Reference notes: the Qwen-Audio Realtime WebSocket protocol, its endpoint and request flow, and the voice-activity and streaming features it enables. | R:- | A:- | S:Beijing and Singapore now use workspace-scoped MaaS domains instead of the shared dashscope hosts.
+上下文缓存.md[SN4L]: F:Reference notes: DashScope context caching, comparing explicit caches created by the caller with automatic implicit prefix caching, pricing and hit rules. | R:- | A:- | S:Explicit caches live 5 minutes and bill 125% to create but 10% on a hit; implicit caching cannot be disabled.
+阿里云FunctionCalling实现.md[SN4L]: F:Reference notes: how DashScope Function Calling works across request and tool-result rounds, with tool schemas, streaming callbacks and worked examples. | R:- | A:- | S:-
+阿里云TTS和STT模型介绍.md[SG2T]: F:Short note listing the console links of the TTS and STT models used by voice mode: cosyvoice-v3-flash and fun-asr-realtime. | R:- | A:- | S:-
+阿里云实时语音对话实现文档.md[SN5L]: F:Reference notes: implementing Qwen-Audio realtime voice over the WebSocket duplex protocol, covering interaction modes, Function Calling and context management. | R:- | A:- | S:Three interaction modes exist: server_vad, smart_turn and push-to-talk, and only smart_turn ignores filler words.
+阿里云实时语音对话模型介绍.md[SN2T]: F:Short note listing the console links of the Qwen-Audio realtime models: qwen-audio-3.0-realtime-flash and qwen-audio-3.0-realtime-plus. | R:- | A:- | S:-
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/deepseek/===
+deepseek思考模式.md[SN4M]: F:Reference notes: DeepSeek thinking mode, listing the switch and reasoning-effort parameters for the OpenAI, Anthropic and Responses formats. | R:- | A:- | S:The switch and the effort level use different parameter names per API format, and effort none turns thinking off.
+deepseek缓存与命中规则.md[SP4T]: F:Reference notes: the DeepSeek disk context cache, how cached prefixes are built and billed, and which requests count as hits. | R:- | A:- | S:The disk cache is on by default for every user and cannot be disabled from the client.
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/kimi/===
+kimi系列模型思考模式.md[SN4L]: F:Vendor note: the Kimi model thinking modes, how reasoning is enabled and what the API returns for each mode. | R:- | A:- | S:A vendor thinking mode is an API detail, so it must be mapped per provider rather than reused blindly.
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/mimo/===
+xiaomi mimo系列模型深度思考实现.md[SN4L]: F:Vendor note: the Xiaomi MiMo deep-thinking implementation, where the model reasons before answering and when to use it. | R:- | A:- | S:Deep thinking suits complex reasoning and code tasks, and the request flag differs per vendor.
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/minimax/===
+minimax系列模型anthropic sdk接入.md[SN4M]: F:Vendor note: connecting the MiniMax models through the Anthropic SDK, with the endpoint and request shape. | R:- | A:- | S:Anthropic-compatible access needs its own payload mapping, so thinking fields must be converted.
+minimax系列模型openai sdk接入.md[SN4M]: F:Vendor note: connecting the MiniMax models through the OpenAI SDK, with the base URL and request shape. | R:- | A:- | S:OpenAI-compatible access still differs per vendor, so the base URL and extra fields must be set.
+minimax系列模型官方sdk.md[SN4S]: F:Vendor note: the official MiniMax Python SDK, its client setup and how a chat request is issued. | R:- | A:- | S:The official SDK hides the transport details, so a provider using it keeps its own client path.
+
+===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/model-docs/zai/===
+GLM-4.6v-Flash多模态免费模型.md[SN4L]: F:Vendor note: the GLM-4.6V-Flash multimodal free model, its vision input support and how to call it. | R:- | A:- | S:A free multimodal model can carry image input, so its message format differs from the text models.
+GLM系列模型思考模式.md[SN4S]: F:Vendor note: the GLM thinking-mode switch, how to enable or disable reasoning and what the response contains. | R:- | A:- | S:Zhipu thinking is toggled through the request, and reasoning is returned on a separate channel.
+GLM系列模型深度思考.md[SN4M]: F:Vendor note: the GLM deep-thinking mode, when the model reasons before answering and how to request it. | R:- | A:- | S:Deep thinking raises accuracy on hard tasks at a latency cost, so it should be opt-in per request.
+上下文缓存.md[SP4L]: F:Vendor note: Zhipu context caching, how a request marks reusable context and how cache hits reduce cost. | R:- | A:- | S:Cache hits must be accounted separately from fresh tokens, or the cost figures are wrong.
+智谱官方Python SDK.md[SN4L]: F:Vendor note: the official Zhipu Python SDK, its client setup, chat call and thinking and tool options. | R:- | A:- | S:The official SDK carries its own option names, so a provider using it must map thinking flags itself.
