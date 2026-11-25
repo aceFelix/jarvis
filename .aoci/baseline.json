@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-23T15:15:12Z",
+  "updated_at": "2026-11-25T08:39:50Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -95,15 +95,15 @@
     },
     "README.en.md": {
       "role": "index",
-      "sha256": "b92f04cd0773a1c4d3d718ce270ff815f69e559639448ed139e8ebb306cd5d63",
+      "sha256": "205d19d2442f70bcc8f845176896425e0f9c88d2c7f2f6e819cf1b77bba9c3c4",
       "size": 25974,
-      "normalized_sha256": "b92f04cd0773a1c4d3d718ce270ff815f69e559639448ed139e8ebb306cd5d63"
+      "normalized_sha256": "205d19d2442f70bcc8f845176896425e0f9c88d2c7f2f6e819cf1b77bba9c3c4"
     },
     "README.md": {
       "role": "index",
-      "sha256": "6e927dbe8433241626cc810642ffc66d2f019e5e4ef762fc457c42c5d17fa5a7",
+      "sha256": "a152085ae7107273205bc3094f303e2591db0925807096c5bdbd7e2d3d5db1f8",
       "size": 26758,
-      "normalized_sha256": "6e927dbe8433241626cc810642ffc66d2f019e5e4ef762fc457c42c5d17fa5a7"
+      "normalized_sha256": "a152085ae7107273205bc3094f303e2591db0925807096c5bdbd7e2d3d5db1f8"
     },
     "SECURITY.md": {
       "role": "index",
@@ -431,9 +431,9 @@
     },
     "agent/commands/handlers/voice_commands.py": {
       "role": "index",
-      "sha256": "a33ad24884783ec4e1217ed83047c9d46a9b07c91f6c91c31a47ab01f7c0bde7",
-      "size": 22116,
-      "normalized_sha256": "a33ad24884783ec4e1217ed83047c9d46a9b07c91f6c91c31a47ab01f7c0bde7"
+      "sha256": "bef406f546e03b3167091eb84ef1369f4e40839802111f13a26dd8845b41d71f",
+      "size": 23202,
+      "normalized_sha256": "bef406f546e03b3167091eb84ef1369f4e40839802111f13a26dd8845b41d71f"
     },
     "agent/commands/handlers/wechat_commands.py": {
       "role": "index",
@@ -455,9 +455,9 @@
     },
     "agent/config/catalog.py": {
       "role": "index",
-      "sha256": "9a57bfeb1caaf0aeb490c3d65af561473567b3fe739215051bfd53f0a05df6e7",
-      "size": 44432,
-      "normalized_sha256": "9a57bfeb1caaf0aeb490c3d65af561473567b3fe739215051bfd53f0a05df6e7"
+      "sha256": "ed9b0b65583a1dd12e0da4f7bbdb7537e0076b0dfb8fcc3d5722378210a36d34",
+      "size": 44572,
+      "normalized_sha256": "ed9b0b65583a1dd12e0da4f7bbdb7537e0076b0dfb8fcc3d5722378210a36d34"
     },
     "agent/config/cleaners.toml": {
       "role": "index",
@@ -485,9 +485,9 @@
     },
     "agent/config/config_specs.py": {
       "role": "index",
-      "sha256": "5ea1224fe1ddce4dd56157a46991afea6caa6d3bff2e6801f091e383a3b6b53f",
-      "size": 45424,
-      "normalized_sha256": "3a29b5f8e2cc95465f4bd9a1a060a4196770580502c4039f6e8891e402c57a41"
+      "sha256": "cfab6dd5a97e43f92273d4b7361b6710a829a3d8e4cfe6793297a38edf2f4696",
+      "size": 45094,
+      "normalized_sha256": "cfab6dd5a97e43f92273d4b7361b6710a829a3d8e4cfe6793297a38edf2f4696"
     },
     "agent/config/config_specs_llm.py": {
       "role": "index",
@@ -569,15 +569,15 @@
     },
     "agent/config/settings.py": {
       "role": "index",
-      "sha256": "27ef5c92571cc3c12ae89e9c26791a0b198035124063206ef9f4e4b4c4e401fd",
-      "size": 53053,
-      "normalized_sha256": "27ef5c92571cc3c12ae89e9c26791a0b198035124063206ef9f4e4b4c4e401fd"
+      "sha256": "ea299d52d5ac7f39eaec7769f9fb8b3e48ab2c42f119e9bb0ca2476ab5c74631",
+      "size": 53222,
+      "normalized_sha256": "ea299d52d5ac7f39eaec7769f9fb8b3e48ab2c42f119e9bb0ca2476ab5c74631"
     },
     "agent/config/settings_domains.py": {
       "role": "index",
-      "sha256": "71dfd3c0547104fdfda348071607aed3e4c5ff148492a513061dc0529597482d",
-      "size": 22912,
-      "normalized_sha256": "71dfd3c0547104fdfda348071607aed3e4c5ff148492a513061dc0529597482d"
+      "sha256": "2b69367632ba68091791305eb90f15733c4f2b6d3d5dc8fe51eacd6d29f831c0",
+      "size": 23106,
+      "normalized_sha256": "2b69367632ba68091791305eb90f15733c4f2b6d3d5dc8fe51eacd6d29f831c0"
     },
     "agent/config/toml_writer.py": {
       "role": "index",
@@ -593,9 +593,9 @@
     },
     "agent/config/voice_key.py": {
       "role": "index",
-      "sha256": "590ee2dea552cae144a4630a17a962a69fb535437ff13b1d307b2d0a759d91bf",
-      "size": 11225,
-      "normalized_sha256": "cb9140fb52dca360572b429d7dae84ac2402cf1b8efbd8e461d38ec49d548c5c"
+      "sha256": "91380ac7fdc47bbcaa2a2456c4ffb708eea813f4bb2a9c0d9367ad62b1a5ebc9",
+      "size": 11535,
+      "normalized_sha256": "91380ac7fdc47bbcaa2a2456c4ffb708eea813f4bb2a9c0d9367ad62b1a5ebc9"
     },
     "agent/config/workspace.py": {
       "role": "index",
@@ -617,9 +617,9 @@
     },
     "agent/configs/settings.example.toml": {
       "role": "index",
-      "sha256": "f502cebdf4a144e32c4025a0f0cbc2e7f7b0ba83062b92f543b050a65538b7c6",
-      "size": 32281,
-      "normalized_sha256": "f502cebdf4a144e32c4025a0f0cbc2e7f7b0ba83062b92f543b050a65538b7c6"
+      "sha256": "f19fbdd7831ba3a9091a84f55a5fe8e327693b46a17f447307eb00ae17d1b936",
+      "size": 32537,
+      "normalized_sha256": "f19fbdd7831ba3a9091a84f55a5fe8e327693b46a17f447307eb00ae17d1b936"
     },
     "agent/core/__init__.py": {
       "role": "index",
@@ -1508,9 +1508,9 @@
     },
     "agent/serve/engine/engine_talk.py": {
       "role": "index",
-      "sha256": "11f2c8b8d06fc03c33ea6ded0f369f2d6591e62d0be7b0871c03d782a4884065",
-      "size": 10631,
-      "normalized_sha256": "11f2c8b8d06fc03c33ea6ded0f369f2d6591e62d0be7b0871c03d782a4884065"
+      "sha256": "f00a8bc658838e5c39c76716ad9eb3efc5bd813ce005b6fbcdaf1f21caa64782",
+      "size": 11090,
+      "normalized_sha256": "f00a8bc658838e5c39c76716ad9eb3efc5bd813ce005b6fbcdaf1f21caa64782"
     },
     "agent/serve/engine/engine_voice.py": {
       "role": "index",
@@ -2204,9 +2204,9 @@
     },
     "agent/voice/aec.py": {
       "role": "index",
-      "sha256": "0af4a5dc0ff15344cc25993b63ae900bbe674e6fd08130442bf98f3782c927ae",
-      "size": 5839,
-      "normalized_sha256": "0af4a5dc0ff15344cc25993b63ae900bbe674e6fd08130442bf98f3782c927ae"
+      "sha256": "48385386fd88ffe0c6d9ec9cd52bc0fa7cfdb4b406e72137224aebe7c53d7477",
+      "size": 6238,
+      "normalized_sha256": "48385386fd88ffe0c6d9ec9cd52bc0fa7cfdb4b406e72137224aebe7c53d7477"
     },
     "agent/voice/audio.py": {
       "role": "index",
@@ -2228,9 +2228,9 @@
     },
     "agent/voice/realtime_audio.py": {
       "role": "index",
-      "sha256": "9ad7d336896dd0afd57b287bea0f892a5c697d54cd8546f770a26f315af749a6",
-      "size": 10914,
-      "normalized_sha256": "9ad7d336896dd0afd57b287bea0f892a5c697d54cd8546f770a26f315af749a6"
+      "sha256": "f344d9d6ccf2c44343efeb97bebbd03919b85bd4fb63fbf88b52ee9f0625dc78",
+      "size": 11668,
+      "normalized_sha256": "f344d9d6ccf2c44343efeb97bebbd03919b85bd4fb63fbf88b52ee9f0625dc78"
     },
     "agent/voice/realtime_bridge_audio.py": {
       "role": "index",
@@ -2246,9 +2246,9 @@
     },
     "agent/voice/realtime_engine.py": {
       "role": "index",
-      "sha256": "0c7be2d1dce0de72209e3660e413f5f9e4bd3f4e10a417dd7d8e6f3aab103e7b",
-      "size": 24055,
-      "normalized_sha256": "0c7be2d1dce0de72209e3660e413f5f9e4bd3f4e10a417dd7d8e6f3aab103e7b"
+      "sha256": "a787395928406235298774520e58d863bfa219fe687f3e4c4c2f6c09ad491def",
+      "size": 30297,
+      "normalized_sha256": "a787395928406235298774520e58d863bfa219fe687f3e4c4c2f6c09ad491def"
     },
     "agent/voice/realtime_events.py": {
       "role": "index",
@@ -2264,9 +2264,9 @@
     },
     "agent/voice/realtime_recv.py": {
       "role": "index",
-      "sha256": "e01d877744882caa0ab3c1f3dcd87cf0d2654a0aa4637cc239626f8d619424c5",
-      "size": 19914,
-      "normalized_sha256": "e01d877744882caa0ab3c1f3dcd87cf0d2654a0aa4637cc239626f8d619424c5"
+      "sha256": "0180154c9e5ec64555a7333d1a92c289697b8cfcadd4c6e3ed1507d6b2c6cf82",
+      "size": 22692,
+      "normalized_sha256": "0180154c9e5ec64555a7333d1a92c289697b8cfcadd4c6e3ed1507d6b2c6cf82"
     },
     "agent/voice/realtime_rescue.py": {
       "role": "index",
@@ -2276,15 +2276,15 @@
     },
     "agent/voice/realtime_talk.py": {
       "role": "index",
-      "sha256": "59dc78eafcefb820f509c612c97208794393e51ca843cacb7f8f959514c7886f",
-      "size": 12034,
-      "normalized_sha256": "59dc78eafcefb820f509c612c97208794393e51ca843cacb7f8f959514c7886f"
+      "sha256": "9ba3d21d4be897cabd011ca3f6f8bb24f9c4afdd06cabf768b136b35f47a082d",
+      "size": 16169,
+      "normalized_sha256": "9ba3d21d4be897cabd011ca3f6f8bb24f9c4afdd06cabf768b136b35f47a082d"
     },
     "agent/voice/realtime_tools.py": {
       "role": "index",
-      "sha256": "be753021d3338abddce646a0974ccae39baad9dceacdea739f800a759ef5308d",
-      "size": 11727,
-      "normalized_sha256": "be753021d3338abddce646a0974ccae39baad9dceacdea739f800a759ef5308d"
+      "sha256": "887392b4ebc59a54c6576dd4e320a24a881d401ccd0accc7c672443ab70f346d",
+      "size": 12479,
+      "normalized_sha256": "887392b4ebc59a54c6576dd4e320a24a881d401ccd0accc7c672443ab70f346d"
     },
     "agent/voice/repl_adapter.py": {
       "role": "index",
@@ -2300,9 +2300,9 @@
     },
     "agent/voice/stt/__init__.py": {
       "role": "index",
-      "sha256": "5bef01e9764bbc113f29af88ec80e661d591ac1e030808756d59732f3fbcbaf7",
-      "size": 3147,
-      "normalized_sha256": "0a9288136800b791d566ccf86399e1fd8ef3a6515b18b41a396b301f67656614"
+      "sha256": "5a437c3026118938bc289f4703dd0efc8215056160bda9cf8fdac17d48f4c473",
+      "size": 3187,
+      "normalized_sha256": "5a437c3026118938bc289f4703dd0efc8215056160bda9cf8fdac17d48f4c473"
     },
     "agent/voice/stt/common.py": {
       "role": "index",
@@ -2358,6 +2358,12 @@
       "size": 41122,
       "normalized_sha256": "077b0d69394d4822bbfb895fde2418d26ed608356e502b163b004607271b6396"
     },
+    "agent/voice/voice_providers.py": {
+      "role": "index",
+      "sha256": "970047e363cabd5286d5bc3d8cb2d8d89bf485b107022e2287810d3a4276cef1",
+      "size": 10788,
+      "normalized_sha256": "970047e363cabd5286d5bc3d8cb2d8d89bf485b107022e2287810d3a4276cef1"
+    },
     "agent/voice/voice_state.py": {
       "role": "index",
       "sha256": "5710da12a7f6e43ade6bed561ed5b2cb56fa7a6c6f0f585f1502473f73302366",
@@ -2396,9 +2402,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "f1b136cd9a4546a4965131ca7c50bab41b70b9365e7d070e242e782ea6555a9f",
-      "size": 236377,
-      "normalized_sha256": "f1b136cd9a4546a4965131ca7c50bab41b70b9365e7d070e242e782ea6555a9f"
+      "sha256": "c586f6e4f8d47b126f90675830270a2b7c9cbfae5a4ea1e0b51736f8fc8caae8",
+      "size": 246090,
+      "normalized_sha256": "c586f6e4f8d47b126f90675830270a2b7c9cbfae5a4ea1e0b51736f8fc8caae8"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2550,9 +2556,9 @@
     },
     "config-docs/configuration.md": {
       "role": "index",
-      "sha256": "ed1bbe02bfde507e7d6c8cd781f16b515d3e57e5071bb0fdc0d341c9eabedd2e",
-      "size": 44298,
-      "normalized_sha256": "ed1bbe02bfde507e7d6c8cd781f16b515d3e57e5071bb0fdc0d341c9eabedd2e"
+      "sha256": "2e7d82093ddd3e0a55f8effef105f4743697293a6377089bea237ae4338977ff",
+      "size": 44338,
+      "normalized_sha256": "2e7d82093ddd3e0a55f8effef105f4743697293a6377089bea237ae4338977ff"
     },
     "config-docs/providers.md": {
       "role": "index",
@@ -2568,9 +2574,9 @@
     },
     "config-docs/voice-setup.md": {
       "role": "index",
-      "sha256": "2b50a82b4577c8644a28a2758e6e51504100a3d8c5ad5dfaea8512e810c380d3",
-      "size": 22845,
-      "normalized_sha256": "2b50a82b4577c8644a28a2758e6e51504100a3d8c5ad5dfaea8512e810c380d3"
+      "sha256": "21c3a04e947863a7fa52788551e1fa17d26c02e4e9de6adf9eff84f979e67cef",
+      "size": 23629,
+      "normalized_sha256": "21c3a04e947863a7fa52788551e1fa17d26c02e4e9de6adf9eff84f979e67cef"
     },
     "configs/models.example.toml": {
       "role": "index",
@@ -2586,9 +2592,9 @@
     },
     "configs/settings.example.toml": {
       "role": "index",
-      "sha256": "7c4c4c3ce53fb7157b3c79e7b1c7a0722956393c12f6dcafbfc65eddab38b0b2",
-      "size": 29907,
-      "normalized_sha256": "7c4c4c3ce53fb7157b3c79e7b1c7a0722956393c12f6dcafbfc65eddab38b0b2"
+      "sha256": "ce115203fcc57e7fe144a293a0e2114b95dccb4d8c47d529b206f8504f5d6d36",
+      "size": 30118,
+      "normalized_sha256": "ce115203fcc57e7fe144a293a0e2114b95dccb4d8c47d529b206f8504f5d6d36"
     },
     "dashscope-docs/AOQ 接入.md": {
       "role": "index",
@@ -2712,9 +2718,9 @@
     },
     "docs/architecture/06-语音系统.md": {
       "role": "index",
-      "sha256": "df64c6bba2603906e9f262baf0466951aaf94dd0f5e574b64d4dfc0bf736c931",
-      "size": 61674,
-      "normalized_sha256": "df64c6bba2603906e9f262baf0466951aaf94dd0f5e574b64d4dfc0bf736c931"
+      "sha256": "c6acd94ee4af63381e66682bdb1cae79dfe430a6dee660551c624f2aaef88cc0",
+      "size": 64898,
+      "normalized_sha256": "c6acd94ee4af63381e66682bdb1cae79dfe430a6dee660551c624f2aaef88cc0"
     },
     "docs/architecture/07-UI层.md": {
       "role": "index",
@@ -2748,9 +2754,9 @@
     },
     "docs/architecture/12-配置系统.md": {
       "role": "index",
-      "sha256": "e39587bbd114c8da336b33a8a689cd62c828885457c22876310ee5921ba8459f",
-      "size": 68834,
-      "normalized_sha256": "e39587bbd114c8da336b33a8a689cd62c828885457c22876310ee5921ba8459f"
+      "sha256": "36308cdbd8ba319cb2fe4d218df14bfa1117eac127012dae3496f3c6edf9fe74",
+      "size": 68708,
+      "normalized_sha256": "36308cdbd8ba319cb2fe4d218df14bfa1117eac127012dae3496f3c6edf9fe74"
     },
     "docs/architecture/13-安全沙箱.md": {
       "role": "index",
@@ -2808,9 +2814,9 @@
     },
     "docs/guide/commands.md": {
       "role": "index",
-      "sha256": "addf543f61321d83af0be1f82f15d16f2784e087b34f33db70919e441daaac34",
-      "size": 17443,
-      "normalized_sha256": "addf543f61321d83af0be1f82f15d16f2784e087b34f33db70919e441daaac34"
+      "sha256": "faa3d07ccc28f1fd5804513b9cc877d6eee43dbcb99d6222bf71dc5c3020e69b",
+      "size": 17491,
+      "normalized_sha256": "faa3d07ccc28f1fd5804513b9cc877d6eee43dbcb99d6222bf71dc5c3020e69b"
     },
     "docs/guide/concepts.md": {
       "role": "index",
@@ -2844,15 +2850,15 @@
     },
     "docs/guide/voice.md": {
       "role": "index",
-      "sha256": "c14ecba4233a800a04cd85cd7ea73ea0c6d72b96a2f76e4c6bba9ea2bc5f3bb2",
-      "size": 8892,
-      "normalized_sha256": "c14ecba4233a800a04cd85cd7ea73ea0c6d72b96a2f76e4c6bba9ea2bc5f3bb2"
+      "sha256": "216ed3b694202666f7ab23a4b586f648e47964293e6fce3d645ea0ddc61b3f29",
+      "size": 8974,
+      "normalized_sha256": "216ed3b694202666f7ab23a4b586f648e47964293e6fce3d645ea0ddc61b3f29"
     },
     "docs/log/CHANGELOG.md": {
       "role": "index",
-      "sha256": "b658201a10e0450f848485c21ce2d5ae22ecf6d95fc5cfdcf880f271fc3a8a2f",
-      "size": 39509,
-      "normalized_sha256": "b658201a10e0450f848485c21ce2d5ae22ecf6d95fc5cfdcf880f271fc3a8a2f"
+      "sha256": "c8e54f9f6d877948066225d8b69d6c66c3b3599fa1605d81b1be1a5b758f7cdc",
+      "size": 42560,
+      "normalized_sha256": "c8e54f9f6d877948066225d8b69d6c66c3b3599fa1605d81b1be1a5b758f7cdc"
     },
     "docs/log/changelog/v2.2.md": {
       "role": "index",
@@ -2916,9 +2922,9 @@
     },
     "docs/test/config-self-service-testing.md": {
       "role": "index",
-      "sha256": "6814e3d3db1d80a056d874b00bdc06c824a20ed39ddbeee3b2950bbcec6e38a8",
-      "size": 26244,
-      "normalized_sha256": "6814e3d3db1d80a056d874b00bdc06c824a20ed39ddbeee3b2950bbcec6e38a8"
+      "sha256": "878f30be5d00b50f3c759c46bb00aa9d851b1cb685414f3a9488bce28f3400e0",
+      "size": 26289,
+      "normalized_sha256": "878f30be5d00b50f3c759c46bb00aa9d851b1cb685414f3a9488bce28f3400e0"
     },
     "docs/test/email-testing.md": {
       "role": "index",
@@ -3022,6 +3028,258 @@
       "size": 60345,
       "normalized_sha256": "1a04bfbb49922e495b368d28756c3bd18c78f73d3636b022799f0a6d62ab8fc5"
     },
+    "model-docs/dashscope/模型/全模态/全模态概述.md": {
+      "role": "index",
+      "sha256": "d1fd9bc0b53fdb742c588cfddd264545db5d99d112e5b56c324db394943e45cf",
+      "size": 47621,
+      "normalized_sha256": "d1fd9bc0b53fdb742c588cfddd264545db5d99d112e5b56c324db394943e45cf"
+    },
+    "model-docs/dashscope/模型/全模态/实时Qwen-Omni-Realtime.md": {
+      "role": "index",
+      "sha256": "c16b865c512c525c9414f7c08a11876ea802cfce97236762f432f45733523b12",
+      "size": 207626,
+      "normalized_sha256": "c16b865c512c525c9414f7c08a11876ea802cfce97236762f432f45733523b12"
+    },
+    "model-docs/dashscope/模型/全模态/非实时Qwen-Omni.md": {
+      "role": "index",
+      "sha256": "781fe92b6ec314f1254d8a0ff05666fca7fd85f87c7321fa8f4cd9bfb599a332",
+      "size": 187999,
+      "normalized_sha256": "781fe92b6ec314f1254d8a0ff05666fca7fd85f87c7321fa8f4cd9bfb599a332"
+    },
+    "model-docs/dashscope/模型/全模态/音色列表.md": {
+      "role": "index",
+      "sha256": "1116267062fc78d4e2e55a8449a4e8b8766401ce1db4ac24e62ec59e39c1727e",
+      "size": 81651,
+      "normalized_sha256": "1116267062fc78d4e2e55a8449a4e8b8766401ce1db4ac24e62ec59e39c1727e"
+    },
+    "model-docs/dashscope/模型/语音/语音合成/CosyVoice音色列表.md": {
+      "role": "index",
+      "sha256": "2a65b1f0d93d50d2559cf7256d1cfde72bf4574d524360773639572af6ad33e0",
+      "size": 181786,
+      "normalized_sha256": "2a65b1f0d93d50d2559cf7256d1cfde72bf4574d524360773639572af6ad33e0"
+    },
+    "model-docs/dashscope/模型/语音/语音合成/Qwen-Audio-TTS音色列表.md": {
+      "role": "index",
+      "sha256": "82aecc8c9fc3ea728723dcae388d459addb0055507b0dbcfb85b36093f012a4f",
+      "size": 167759,
+      "normalized_sha256": "82aecc8c9fc3ea728723dcae388d459addb0055507b0dbcfb85b36093f012a4f"
+    },
+    "model-docs/dashscope/模型/语音/语音合成/Qwen-TTS音色列表.md": {
+      "role": "index",
+      "sha256": "6e341f73f79c4845d8f7613927dfe725c74a063ace71f3c908d446cd2cebc588",
+      "size": 69238,
+      "normalized_sha256": "6e341f73f79c4845d8f7613927dfe725c74a063ace71f3c908d446cd2cebc588"
+    },
+    "model-docs/dashscope/模型/语音/语音合成/实时语音合成.md": {
+      "role": "index",
+      "sha256": "216a88112a1fb573b2b800413ab18b5b28d82e755647aeb54c7c53b60c6ae3b8",
+      "size": 33834,
+      "normalized_sha256": "216a88112a1fb573b2b800413ab18b5b28d82e755647aeb54c7c53b60c6ae3b8"
+    },
+    "model-docs/dashscope/模型/语音/语音合成/非实时语音合成.md": {
+      "role": "index",
+      "sha256": "8ea4b5ed9b810866dbdb9ea76b034fa00c5289d57dc594848e9ae7646698a237",
+      "size": 26191,
+      "normalized_sha256": "8ea4b5ed9b810866dbdb9ea76b034fa00c5289d57dc594848e9ae7646698a237"
+    },
+    "model-docs/dashscope/模型/语音/语音识别/实时语音识别.md": {
+      "role": "index",
+      "sha256": "a8c7f526a1cd9f0ff9e4db086530539f73b1054bb8858008f7b4a1254a2b947a",
+      "size": 25061,
+      "normalized_sha256": "a8c7f526a1cd9f0ff9e4db086530539f73b1054bb8858008f7b4a1254a2b947a"
+    },
+    "model-docs/dashscope/模型/语音/语音识别/提升识别准确率.md": {
+      "role": "index",
+      "sha256": "1ee22dad57540418e2f2a225ea41c04a9e18537bf6460f8646684bf6a489ed9e",
+      "size": 48761,
+      "normalized_sha256": "1ee22dad57540418e2f2a225ea41c04a9e18537bf6460f8646684bf6a489ed9e"
+    },
+    "model-docs/dashscope/模型/语音/语音识别/语音识别最佳实践.md": {
+      "role": "index",
+      "sha256": "30be2cff8f6730429aea579e12dc3231ab488b27e155c8b036707b8e68840a7d",
+      "size": 26767,
+      "normalized_sha256": "30be2cff8f6730429aea579e12dc3231ab488b27e155c8b036707b8e68840a7d"
+    },
+    "model-docs/dashscope/模型/语音/语音识别/语音识别概述.md": {
+      "role": "index",
+      "sha256": "0234531bbbb81512bffa902d9f1b65293491651d13f37d5bad60138def36c97f",
+      "size": 16795,
+      "normalized_sha256": "0234531bbbb81512bffa902d9f1b65293491651d13f37d5bad60138def36c97f"
+    },
+    "model-docs/dashscope/模型/语音/语音识别/非实时语音识别.md": {
+      "role": "index",
+      "sha256": "ccc388b9b5906087602756b9f4bdf77a61c8545611389d847f9d989c9d97c0d0",
+      "size": 26443,
+      "normalized_sha256": "ccc388b9b5906087602756b9f4bdf77a61c8545611389d847f9d989c9d97c0d0"
+    },
+    "model-docs/dashscope/模型/语音/语音转语音/Qwen-Audio-Live.md": {
+      "role": "index",
+      "sha256": "eb7d14dbd380c38afa031180b95b9a85f561dfa5335dc33755c00ca7dc93b310",
+      "size": 37301,
+      "normalized_sha256": "eb7d14dbd380c38afa031180b95b9a85f561dfa5335dc33755c00ca7dc93b310"
+    },
+    "model-docs/dashscope/模型/语音/语音转语音/Qwen-Audio-Realtime.md": {
+      "role": "index",
+      "sha256": "0dee567f55ec9030e32b4b6e9d248c1b01f0b85bd62f7cd658ebd76204b5febb",
+      "size": 80164,
+      "normalized_sha256": "0dee567f55ec9030e32b4b6e9d248c1b01f0b85bd62f7cd658ebd76204b5febb"
+    },
+    "model-docs/dashscope/模型/语音/语音转语音/语音转语音概述.md": {
+      "role": "index",
+      "sha256": "c90f97a8740b7428555eb0c57e46c3929aad7bbf03f4030ad7819e9bb04891d6",
+      "size": 46832,
+      "normalized_sha256": "c90f97a8740b7428555eb0c57e46c3929aad7bbf03f4030ad7819e9bb04891d6"
+    },
+    "model-docs/dashscope/模型/语音/阿里云TTS和STT模型介绍.md": {
+      "role": "index",
+      "sha256": "063e5709c727c7290197cc3be91b25628a04dfc09582f9d270ab5ed7b6cd6281",
+      "size": 322,
+      "normalized_sha256": "063e5709c727c7290197cc3be91b25628a04dfc09582f9d270ab5ed7b6cd6281"
+    },
+    "model-docs/dashscope/模型/语音/阿里云实时语音对话模型介绍.md": {
+      "role": "index",
+      "sha256": "84fca0dbe7efbba1413f771f6e47c81ab275a1876a4cde1e398c56455c0cca42",
+      "size": 378,
+      "normalized_sha256": "84fca0dbe7efbba1413f771f6e47c81ab275a1876a4cde1e398c56455c0cca42"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/AOQ 接入.md": {
+      "role": "index",
+      "sha256": "d3b5a7b3f3798e329d0ca5a980bd2a66e019f0926ad1cca25858eacb3ec9b4ad",
+      "size": 14761,
+      "normalized_sha256": "d3b5a7b3f3798e329d0ca5a980bd2a66e019f0926ad1cca25858eacb3ec9b4ad"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/Qwen-Audio 实时语音对话客户端事件.md": {
+      "role": "index",
+      "sha256": "9e35440a9c55671e2de594c9a840699353333101ecd391d381bbcc6bc781e290",
+      "size": 15226,
+      "normalized_sha256": "9e35440a9c55671e2de594c9a840699353333101ecd391d381bbcc6bc781e290"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/Qwen-Audio 实时语音对话服务端事件.md": {
+      "role": "index",
+      "sha256": "d455e30e9847b909985e86d0f7636b031df73d267eb96a4de1e31843324b067e",
+      "size": 27887,
+      "normalized_sha256": "d455e30e9847b909985e86d0f7636b031df73d267eb96a4de1e31843324b067e"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/Realtime API 概述.md": {
+      "role": "index",
+      "sha256": "0e70abfc5652dacab145af15efa514ac205449dcedf87c8ae5191994a16a308e",
+      "size": 6025,
+      "normalized_sha256": "0e70abfc5652dacab145af15efa514ac205449dcedf87c8ae5191994a16a308e"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/WebRTC 接入.md": {
+      "role": "index",
+      "sha256": "4428d32abce60721f4aabeaedc1df66c02dcf6498c8124ed67c3deae995b7e97",
+      "size": 23601,
+      "normalized_sha256": "4428d32abce60721f4aabeaedc1df66c02dcf6498c8124ed67c3deae995b7e97"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/WebSocket 接入指南.md": {
+      "role": "index",
+      "sha256": "90b863bb3b390fa543470218b2cd2331d2af979568c70a3c602c3d611964f05b",
+      "size": 12887,
+      "normalized_sha256": "90b863bb3b390fa543470218b2cd2331d2af979568c70a3c602c3d611964f05b"
+    },
+    "model-docs/dashscope/模型API/音视频（实时）/阿里云实时语音对话实现文档.md": {
+      "role": "index",
+      "sha256": "d97cd4d822a80161d6316662f8ee0b59905c8386d6ab9fc1c177f449428209a4",
+      "size": 29186,
+      "normalized_sha256": "d97cd4d822a80161d6316662f8ee0b59905c8386d6ab9fc1c177f449428209a4"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成CosyVoice HTTP API参考.md": {
+      "role": "index",
+      "sha256": "fe6b88675bca610a422a18f5ea9b0d7deae4fa2f0c3e54915bd5f88624276454",
+      "size": 17937,
+      "normalized_sha256": "fe6b88675bca610a422a18f5ea9b0d7deae4fa2f0c3e54915bd5f88624276454"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成CosyVoice Java SDK参考.md": {
+      "role": "index",
+      "sha256": "ad456fa1ea5975dab24e6892f3872920ee51bd3ab324e2f6d3e0069bea26b4fb",
+      "size": 41297,
+      "normalized_sha256": "ad456fa1ea5975dab24e6892f3872920ee51bd3ab324e2f6d3e0069bea26b4fb"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成CosyVoice Python SDK参考.md": {
+      "role": "index",
+      "sha256": "b72232d50e9f2aa633c9df291f1f91d6c9ad1a3f5ecb45a961ca6c604a91b146",
+      "size": 20409,
+      "normalized_sha256": "b72232d50e9f2aa633c9df291f1f91d6c9ad1a3f5ecb45a961ca6c604a91b146"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成Qwen-Audio-TTS HTTP API参考.md": {
+      "role": "index",
+      "sha256": "5176c1bf798b8772ab749dd593509afd53a16d593de15872972d9f8086ddc858",
+      "size": 20022,
+      "normalized_sha256": "5176c1bf798b8772ab749dd593509afd53a16d593de15872972d9f8086ddc858"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成Qwen-Audio-TTS Java SDK参考.md": {
+      "role": "index",
+      "sha256": "320d41d801691e3b551ed9233ba5d1f47b7c3a581f7689df0a6a3de61ce206b9",
+      "size": 43007,
+      "normalized_sha256": "320d41d801691e3b551ed9233ba5d1f47b7c3a581f7689df0a6a3de61ce206b9"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音合成/非实时语音合成Qwen-Audio-TTS Python SDK参考.md": {
+      "role": "index",
+      "sha256": "f9d05917c7ad60b0da5946f41fbbac2f0fd5f4f7f61ffd7fe263e0a3b0fa0f8d",
+      "size": 21271,
+      "normalized_sha256": "f9d05917c7ad60b0da5946f41fbbac2f0fd5f4f7f61ffd7fe263e0a3b0fa0f8d"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/Qwen-Audio-ASR-Filetrans Node.js SDK.md": {
+      "role": "index",
+      "sha256": "cbcad062f8dbbf7e7eb2072b0c606cacf4e070ae6b656b0e2484d5884ea2a428",
+      "size": 13948,
+      "normalized_sha256": "cbcad062f8dbbf7e7eb2072b0c606cacf4e070ae6b656b0e2484d5884ea2a428"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/Qwen-Audio-ASR-Filetrans非实时语音识别Android SDK.md": {
+      "role": "index",
+      "sha256": "ca8de2512e34a0c0ff927a2c26f8d50603e2d0c3c4310eff567e6664161e7dbb",
+      "size": 33193,
+      "normalized_sha256": "ca8de2512e34a0c0ff927a2c26f8d50603e2d0c3c4310eff567e6664161e7dbb"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/Qwen-Audio-ASR-Filetrans非实时语音识别HTTP API参考.md": {
+      "role": "index",
+      "sha256": "db95ab745a6a8f2b2a6416c70121cb29b357c2c442713a5858a7251b17c451fa",
+      "size": 31989,
+      "normalized_sha256": "db95ab745a6a8f2b2a6416c70121cb29b357c2c442713a5858a7251b17c451fa"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/Qwen-Audio-ASR-Filetrans非实时语音识别Java SDK.md": {
+      "role": "index",
+      "sha256": "9577e568da443e6fc0f1831880e3e71b31f4bf004d1d5ae8c76ee1eb75a61c6f",
+      "size": 47289,
+      "normalized_sha256": "9577e568da443e6fc0f1831880e3e71b31f4bf004d1d5ae8c76ee1eb75a61c6f"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/Qwen-Audio-ASR-Filetrans非实时语音识别Python SDK.md": {
+      "role": "index",
+      "sha256": "fee69b2785a0c96d0066b6b5cc7f9f879670d80bc105c25a6da5cc8bcf0597e0",
+      "size": 41211,
+      "normalized_sha256": "fee69b2785a0c96d0066b6b5cc7f9f879670d80bc105c25a6da5cc8bcf0597e0"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/定制热词HTTP API参考.md": {
+      "role": "index",
+      "sha256": "1b0d04c002aeff2ea892b1517a4747c0921e1922bd4749e39081404a4fdc1e71",
+      "size": 22619,
+      "normalized_sha256": "1b0d04c002aeff2ea892b1517a4747c0921e1922bd4749e39081404a4fdc1e71"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/定制热词Java SDK参考.md": {
+      "role": "index",
+      "sha256": "1bcc3a6c4f7a1d52cd8c1215acddd9e3eee261327738840e64eec1cf2fbb2a59",
+      "size": 25896,
+      "normalized_sha256": "1bcc3a6c4f7a1d52cd8c1215acddd9e3eee261327738840e64eec1cf2fbb2a59"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/定制热词Python SDK参考.md": {
+      "role": "index",
+      "sha256": "d10e0b5acd0d3d7f4ef1c9b4eb829d73527c8713a7465e86d4cd2639cf242dcc",
+      "size": 18175,
+      "normalized_sha256": "d10e0b5acd0d3d7f4ef1c9b4eb829d73527c8713a7465e86d4cd2639cf242dcc"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/非实时语音识别（Qwen-Audio-ASR）Android SDK.md": {
+      "role": "index",
+      "sha256": "c79a2460993856937a6c699a135fc6e2c0a5b4f761564d67e6c200088364f3ef",
+      "size": 33532,
+      "normalized_sha256": "c79a2460993856937a6c699a135fc6e2c0a5b4f761564d67e6c200088364f3ef"
+    },
+    "model-docs/dashscope/模型API/音视频（非实时）/语音识别/非实时语音识别（Qwen-Audio-ASR）HTTP API.md": {
+      "role": "index",
+      "sha256": "da0b78be6b32e73628ce09f1079886bb8cfe3720fd6d3fb7f165bd860a7937df",
+      "size": 32878,
+      "normalized_sha256": "da0b78be6b32e73628ce09f1079886bb8cfe3720fd6d3fb7f165bd860a7937df"
+    },
     "model-docs/dashscope/阿里云FunctionCalling实现.md": {
       "role": "index",
       "sha256": "983485809e928cc6f9b40b23c3cc1acaa21448ebbf083a6d3c3dd4edf09f0cfd",
@@ -3088,6 +3346,12 @@
       "size": 7170,
       "normalized_sha256": "4d1a062ae45ebc2b1691e7dd5cba935353e658497bbf3dc4d6af1556e94001d4"
     },
+    "model-docs/zai/API定价.md": {
+      "role": "index",
+      "sha256": "615f8993915c2aea98f5ed05b401a7701dc0381db7325553fadd680e71bec70b",
+      "size": 11488,
+      "normalized_sha256": "615f8993915c2aea98f5ed05b401a7701dc0381db7325553fadd680e71bec70b"
+    },
     "model-docs/zai/GLM-4.6v-Flash多模态免费模型.md": {
       "role": "index",
       "sha256": "538fae96a4f27d9a6f4ae7711c796ecb381e018b997e16d2b89b4ee1e4d8c80d",
@@ -3112,11 +3376,47 @@
       "size": 16985,
       "normalized_sha256": "a9a6ae9c5d0254902b14f68701eaa23ce8c19a14b557e2b56d3406dd1581d01f"
     },
+    "model-docs/zai/实时API/音视频通话.md": {
+      "role": "index",
+      "sha256": "a8e54e9c9fa30fe1628803d0365c2e7a256275bd9b6466c7a2352730d2c3cb09",
+      "size": 46299,
+      "normalized_sha256": "a8e54e9c9fa30fe1628803d0365c2e7a256275bd9b6466c7a2352730d2c3cb09"
+    },
     "model-docs/zai/智谱官方Python SDK.md": {
       "role": "index",
       "sha256": "a469f40125e77f0e416fb92a10f740cb4f453c76b5365ab3bc0b8c1102ce51ed",
       "size": 22450,
       "normalized_sha256": "4b493e225eed4e949050f52a6a83619023eb7b100c5e400e34fca3780ab625d2"
+    },
+    "model-docs/zai/语音与音色/删除音色.md": {
+      "role": "index",
+      "sha256": "321c2b93e6a8decbb3a088181ce33e57c57aca33b0255114427bfdaedc55c104",
+      "size": 4232,
+      "normalized_sha256": "321c2b93e6a8decbb3a088181ce33e57c57aca33b0255114427bfdaedc55c104"
+    },
+    "model-docs/zai/语音与音色/文本转语音.md": {
+      "role": "index",
+      "sha256": "fe86be78170aa73ba08cf96824f4d8aecf1149fb6d6e7879866da00a358affad",
+      "size": 6719,
+      "normalized_sha256": "fe86be78170aa73ba08cf96824f4d8aecf1149fb6d6e7879866da00a358affad"
+    },
+    "model-docs/zai/语音与音色/语音转文本.md": {
+      "role": "index",
+      "sha256": "8c496eed38c3ae9c46ab9ef26f5ad6c4391575bdb4fb901b5f9873ca1025a767",
+      "size": 7533,
+      "normalized_sha256": "8c496eed38c3ae9c46ab9ef26f5ad6c4391575bdb4fb901b5f9873ca1025a767"
+    },
+    "model-docs/zai/语音与音色/音色列表.md": {
+      "role": "index",
+      "sha256": "6f4265279bc9a503647c997940da710cbed1dd5ee499f583d7cb3583490d9d4d",
+      "size": 4919,
+      "normalized_sha256": "6f4265279bc9a503647c997940da710cbed1dd5ee499f583d7cb3583490d9d4d"
+    },
+    "model-docs/zai/语音与音色/音色复刻.md": {
+      "role": "index",
+      "sha256": "aff0c3fe8a28b072c14d31f5b4f47b90107901aca3444539b936ca4984ad2cc5",
+      "size": 5757,
+      "normalized_sha256": "aff0c3fe8a28b072c14d31f5b4f47b90107901aca3444539b936ca4984ad2cc5"
     },
     "npm/README.md": {
       "role": "index",
@@ -4807,6 +5107,12 @@
       "size": 5066,
       "normalized_sha256": "e71cf5e146288af66a4d5ca385eec442589600724fcff83a8cdd5136f0325e3e"
     },
+    "tests/voice/test_realtime_end_guard.py": {
+      "role": "observe",
+      "sha256": "f7321cea2201274c19327978d6b03d426020d24810201d594c6b529a1e9631cf",
+      "size": 2096,
+      "normalized_sha256": "f7321cea2201274c19327978d6b03d426020d24810201d594c6b529a1e9631cf"
+    },
     "tests/voice/test_realtime_observability.py": {
       "role": "observe",
       "sha256": "913eeab18165581328bc260bbee0f3b34e338b34aa8862bfa5a138c94e62eb56",
@@ -4815,9 +5121,9 @@
     },
     "tests/voice/test_realtime_response_lifecycle.py": {
       "role": "observe",
-      "sha256": "d460c881fe7748c4cd0708ecb62e41c0f1e57fe9b171d4bf5f35a88a214feb6e",
-      "size": 32444,
-      "normalized_sha256": "d460c881fe7748c4cd0708ecb62e41c0f1e57fe9b171d4bf5f35a88a214feb6e"
+      "sha256": "4a3bc8dcaeb0db6cc3820a7301894d08e10423a0e108fe3d844896f37a2e2f4f",
+      "size": 37952,
+      "normalized_sha256": "4a3bc8dcaeb0db6cc3820a7301894d08e10423a0e108fe3d844896f37a2e2f4f"
     },
     "tests/voice/test_realtime_stability.py": {
       "role": "observe",
@@ -4827,9 +5133,9 @@
     },
     "tests/voice/test_stt_package.py": {
       "role": "observe",
-      "sha256": "c735d918cc0981a257738cb1702a566a044ecf27e387c861a9dd4e2797055cdc",
-      "size": 10386,
-      "normalized_sha256": "befd355e165f49065b0859cddbebf44e5cc6ad81140559600e32b9878e62e54d"
+      "sha256": "2d5938a88be6dd56e7bc593b3af457f945b46075176ee43a135618f2452b73cc",
+      "size": 10299,
+      "normalized_sha256": "2d5938a88be6dd56e7bc593b3af457f945b46075176ee43a135618f2452b73cc"
     },
     "tests/voice/test_stt_qwen_session.py": {
       "role": "observe",
@@ -4839,15 +5145,21 @@
     },
     "tests/voice/test_talk_history.py": {
       "role": "observe",
-      "sha256": "b6c04ec42af150d2df4f0707fe3028c64999b4eb572ed98cb1565fed8b4965d6",
-      "size": 8029,
-      "normalized_sha256": "b6c04ec42af150d2df4f0707fe3028c64999b4eb572ed98cb1565fed8b4965d6"
+      "sha256": "5a45c5b9c0a9307ef93bb4fbb1e0a66793a6a791ea74ad1ed84e01bc60666b08",
+      "size": 8039,
+      "normalized_sha256": "5a45c5b9c0a9307ef93bb4fbb1e0a66793a6a791ea74ad1ed84e01bc60666b08"
     },
     "tests/voice/test_talk_terminal.py": {
       "role": "observe",
-      "sha256": "a73b69f4e35e5378bafcdbdf7f8995d74cf2474a52a0fc17f77a4bd22ccfbc6b",
-      "size": 6903,
-      "normalized_sha256": "98acf5d6593fe1a2a4d3cc3ff516acb3efb75655a12702a46ac622aa8298a7b1"
+      "sha256": "23cbae21a8597d2338e2d45843c32566b5249779f34b67d757eb3616b36bcd6a",
+      "size": 6714,
+      "normalized_sha256": "23cbae21a8597d2338e2d45843c32566b5249779f34b67d757eb3616b36bcd6a"
+    },
+    "tests/voice/test_terminal_speaker.py": {
+      "role": "observe",
+      "sha256": "b507406ac46207b77ad313483e4e3fa7495507560272337ede719b453db22da8",
+      "size": 1757,
+      "normalized_sha256": "b507406ac46207b77ad313483e4e3fa7495507560272337ede719b453db22da8"
     },
     "tests/voice/test_tts_playback_drain.py": {
       "role": "observe",
@@ -4902,6 +5214,12 @@
       "sha256": "3dc5fa84378cef201b7cd4df14c3e671f551302975577cc2f87a98534be00fb8",
       "size": 8162,
       "normalized_sha256": "3dc5fa84378cef201b7cd4df14c3e671f551302975577cc2f87a98534be00fb8"
+    },
+    "tests/voice/test_voice_providers.py": {
+      "role": "observe",
+      "sha256": "a3b059035a985f4b301fed58ad07cfa1c299ca8f3b48c1ad60e04cde44f8f09f",
+      "size": 5368,
+      "normalized_sha256": "a3b059035a985f4b301fed58ad07cfa1c299ca8f3b48c1ad60e04cde44f8f09f"
     },
     "tests/voice/test_voice_standby_display.py": {
       "role": "observe",
