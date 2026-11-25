@@ -22,6 +22,15 @@ from typing import Any, Callable
 from agent.voice.audio import get_pyaudio
 from agent.voice.realtime_audio import _rms
 
+try:
+    import pyaudio
+except ImportError:
+    pyaudio = None
+
+# PyAudio 的 paInt16 常量（枚举值 8）。CI 等无 pyaudio 环境里模块为 None，
+# 但单测用假设备构造仍需要格式值；运行期真实开流时 pyaudio 必然存在。
+_PA_INT16 = getattr(pyaudio, "paInt16", 8)
+
 _RATE = 16000
 _FRAMES = 1600          # 100ms/帧
 _THRESHOLD = 0.08       # AEC 后 RMS 门槛（-22dBFS），高于残余回声
@@ -111,9 +120,8 @@ class VoiceBargeWatcher:
     def _run(self) -> None:
         try:
             pa = get_pyaudio()
-            import pyaudio
             self._stream = pa.open(
-                format=pyaudio.paInt16,
+                format=_PA_INT16,
                 channels=1,
                 rate=_RATE,
                 input=True,

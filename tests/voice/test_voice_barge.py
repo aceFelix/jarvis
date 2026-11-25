@@ -106,3 +106,26 @@ class TestVoiceBarge:
         assert voice_barge._active is w
         w.stop()
         assert voice_barge._active is None
+
+    def test_runs_without_pyaudio_module(self, monkeypatch, no_aec):
+        """CI runner 未装 pyaudio：模块导入不能依赖真实 pyaudio 常量。"""
+        import importlib
+        import sys
+
+        monkeypatch.setitem(sys.modules, "pyaudio", None)
+        vb = importlib.reload(voice_barge)
+        assert vb._PA_INT16 == 8
+
+        stream = _FakeStream([_HIGH, _HIGH])
+        monkeypatch.setattr(vb, "get_pyaudio", lambda: _FakePa(stream))
+        hits = []
+        w = vb.VoiceBargeWatcher(
+            lambda: hits.append(1), warmup=0.0, min_frames=2, threshold=0.5
+        )
+        w.start()
+        for _ in range(100):
+            if hits:
+                break
+            time.sleep(0.01)
+        w.stop()
+        assert hits == [1]
