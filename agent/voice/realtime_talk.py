@@ -45,6 +45,11 @@ try:
 except ImportError:
     pyaudio = None
 
+# PyAudio 的 paInt16 常量（枚举值 8）。CI 等无 pyaudio 环境里模块为 None，
+# 但 _TerminalSpeaker 的单测用假设备构造，仍需要一个格式值；
+# 运行期真实打开设备时 pyaudio 必然存在，结果与 paInt16 一致。
+_PA_INT16 = getattr(pyaudio, "paInt16", 8)
+
 # 常量再导出：保持重构前 realtime_talk 的模块级公共面（测试与外部调用方
 # 以 rt_mod.CHUNK_BYTES / rt_mod.ECHO_GUARD_RMS 等方式引用，行为不变）
 from .realtime_const import (  # noqa: F401
@@ -140,7 +145,7 @@ class _TerminalSpeaker:
 
     def _open(self) -> Any:
         return self._pa.open(
-            format=pyaudio.paInt16, channels=1, rate=OUTPUT_RATE, output=True
+            format=_PA_INT16, channels=1, rate=OUTPUT_RATE, output=True
         )
 
     def write(self, pcm: bytes) -> None:
@@ -247,7 +252,7 @@ class RealtimeTalk(RealtimeEngine):
         self._pya = pyaudio.PyAudio()
         try:
             mic = self._pya.open(
-                format=pyaudio.paInt16, channels=1, rate=INPUT_RATE, input=True
+                format=_PA_INT16, channels=1, rate=INPUT_RATE, input=True
             )
         except Exception as e:
             ui.error(f"音频设备初始化失败: {e}")
