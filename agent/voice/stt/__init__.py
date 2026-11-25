@@ -62,27 +62,35 @@ __all__ = ["QwenASR", "create_stt"]
 def create_stt(
     *,
     api_key: str | None = None,
-    model: str = "qwen3-asr-flash-realtime",
+    model: str = "",
     language: str = "zh",
     hotwords: str = "",
+    vendor: str = "dashscope",
 ) -> "QwenASR":
     """创建 STT 后端实例。
 
-    现在只有一个后端实现，因此不再按 model 名前缀分派：model 原样透传给
-    QwenASR，需填 DashScope 的 qwen 实时识别模型名（如
-    qwen3-asr-flash-realtime）。若填 paraformer / fun-asr 之类，会在建连
-    阶段被服务端拒绝，从而及早暴露配置错误。
+    阶段一只有一个后端实现（DashScope Qwen3-ASR），但选择已经过
+    ``voice_providers`` 表：vendor/model 的默认值来自注册表，未知厂商
+    fail-closed 抛 ``VoiceProviderError``，不会静默回落到 DashScope。
 
     Args:
-        api_key: DashScope API Key，留空则回退到 DASHSCOPE_API_KEY 环境变量。
-        model: 实时识别模型名（透传）。
+        api_key: 语音厂商 API Key；留空则由调用方另行解析（本工厂不读环境）。
+        model: 实时识别模型名；留空取该厂商 STT 首选模型。
         language: 识别语言，透传给服务端 transcription_params。
-        hotwords: 热词语料（``、``分隔），随 session.update 作为上下文增强下发，
-            让识别模型倾向于输出这些词。留空即不启用。
+        hotwords: 热词语料（``、``分隔），随 session.update 作为上下文增强下发。
+        vendor: 语音厂商（阶段一仅 dashscope）。
 
     Returns:
         QwenASR 实例，提供阻塞式 listen() 录音识别。
 
     @author aceFelix
     """
-    return QwenASR(api_key=api_key, model=model, language=language, hotwords=hotwords)
+    from agent.voice.voice_providers import provider_for
+
+    meta = provider_for(vendor, kind="stt")
+    return QwenASR(
+        api_key=api_key,
+        model=model or meta.stt_models[0],
+        language=language,
+        hotwords=hotwords,
+    )

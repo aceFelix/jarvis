@@ -40,6 +40,9 @@ FLAT_DOMAINS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("silence_seconds", "stt_silence_seconds"),
     )),
     ("voice", (
+        # 厂商选择（阶段一仅 dashscope）；细分能力可被 voice_stt_vendor /
+        # voice_tts_vendor 覆盖（当前未开放在配置层）
+        ("vendor", "voice_vendor"),
         ("barge_in", "voice_barge_in"),
         ("barge_in_key", "voice_barge_in_key"),
         # 静默待机秒数（2026-11-09）@author aceFelix

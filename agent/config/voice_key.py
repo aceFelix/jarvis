@@ -127,14 +127,19 @@ def default_is_dashscope(settings: Any) -> bool:
     )
 
 
-def source(settings: Any) -> str:
+def source(settings: Any, *, vendor: str = "dashscope") -> str:
     """返回 key 的**来源**：``configured`` / ``env`` / ``llm`` / 空串（未配置）。
 
     单独暴露来源是为了让报错能说清"这个 key 是哪来的"——排查语音不出声时，
     用户最需要知道的恰恰是"它到底用的哪个 key"，而不是笼统的"连接失败"。
 
+    参数 ``vendor``：阶段一只有 dashscope 的 key 解析；其它厂返回空串，
+    由 ``voice_providers.provider_for`` 先行 fail-closed（不会静默拿错 key）。
+
     @author aceFelix
     """
+    if str(vendor or "").strip().lower() not in ("", "dashscope"):
+        return ""
     configured = _text(getattr(settings, "dashscope_api_key", "")) if settings else ""
     if configured:
         return "configured"
@@ -147,12 +152,15 @@ def source(settings: Any) -> str:
     return ""
 
 
-def resolve(settings: Any) -> str:
-    """取出本次语音会话该用的 DashScope API Key（取不到返回空串）。
+def resolve(settings: Any, *, vendor: str = "dashscope") -> str:
+    """取出本次语音会话该用的语音厂商 API Key（取不到返回空串）。
+
+    ``vendor`` 目前只支持 dashscope；其它厂商返回空串（fail-closed 由
+    ``voice_providers`` 先拦，不会静默拿 DashScope 的 key 充数）。
 
     @author aceFelix
     """
-    kind = source(settings)
+    kind = source(settings, vendor=vendor)
     if kind == "configured":
         return _text(settings.dashscope_api_key)
     if kind == "env":
@@ -164,12 +172,12 @@ def resolve(settings: Any) -> str:
     return ""
 
 
-def is_configured(settings: Any) -> bool:
+def is_configured(settings: Any, *, vendor: str = "dashscope") -> bool:
     """语音能力是否已有可用 key（引导据此决定要不要问）。
 
     @author aceFelix
     """
-    return bool(resolve(settings))
+    return bool(resolve(settings, vendor=vendor))
 
 
 def describe(settings: Any) -> str:

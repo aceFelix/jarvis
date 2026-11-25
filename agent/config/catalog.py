@@ -192,7 +192,7 @@ FIELD_DOCS: dict[str, str] = {
     "realtime_ws_url": "实时语音的 WebSocket 地址（走官方默认即可）",
     "realtime_event_log": "记录实时语音事件流水；排查断句 / 不出声问题时打开",
     "realtime_echo_suppress_with_aec": "回声抑制：开启后扬声器里自己的声音不会被当成你在说话",
-    "realtime_half_duplex": "半双工：AI 说话期间不拾音，避免外放回声把对话卡成哑巴；戴耳机可关",
+    "realtime_half_duplex": "半双工轮替：开着时 AI 说话期间不拾音（防外放回声自打断）；默认关=全双工，可随时插话打断",
     "realtime_rescue": "响应救援：服务端迟迟不答时客户端补发一次请求，防「永远不回复」",
     "realtime_silence_ms": "服务端判停静音时长（毫秒）；越短响应越快、但短停顿会误触发，对话建议 400~800",
     "realtime_turn_detection": "断句方式：server_vad 按静音判停（免提稳）；smart_turn 按语义判停（耳机用）",
@@ -203,6 +203,7 @@ FIELD_DOCS: dict[str, str] = {
     "tts_model": "播报用的语音合成模型（v3-flash 快，v3-plus 好听）",
     "tts_voice": "播报音色",
     "stt_model": "语音识别模型；填错会在建连阶段直接报错",
+    "voice_vendor": "语音厂商（阶段一仅 dashscope）；STT/TTS 的细分覆盖键为后续预留",
     "boot_animation": "启动时的方舟反应炉动画；终端太窄或非 TTY 时自动跳过",
     "visual_cockpit": "任务驾驶舱：独立 HUD 窗口在首次任务时弹出，任务结束保留结果不关闭；window 打开、off 关闭（[ui] 为历史别名，[visualization] task_cockpit 优先）",
     # 多任务浮窗（C3-lite，2026-11-08）@author aceFelix

@@ -292,6 +292,32 @@ class TestEchoGuard:
         assert rt._response_gen == 1
         assert rt._events.echo_guard_hits == 0
 
+    async def test_aec_active_never_guards_low_level(self, _stub_tools) -> None:
+        """有 AEC 时不看电平：文档要求 speech_started 一律停播/切轮。
+
+        锁定 2026-11-24 外放插话失效的根因：旧实现用一个绝对电平门槛，
+        AEC 已把回声消掉时仍会把轻声插话当成回声吞掉。
+        """
+        rt = self._rt(half_duplex=False)
+        rt._aec = object()  # AEC 可用
+        ui = FakeTalkUI()
+        rt._ai_speaking = True
+        rt._response_active = True
+        rt._last_mic_rms = rt_mod.ECHO_GUARD_RMS * 0.1  # 远低于旧门槛
+        rt._spk = SimpleNamespace(
+            write=lambda _data: None,
+            stop_stream=lambda: None,
+            start_stream=lambda: None,
+        )
+
+        await rt._recv_events(
+            FakeWS([{"type": "input_audio_buffer.speech_started"}]), ui
+        )
+
+        assert rt._events.echo_guard_hits == 0
+        assert rt._response_gen == 1
+        assert rt._ai_speaking is False
+
     async def test_guard_not_applied_when_ai_idle(self, _stub_tools) -> None:
         """AI 未说话时低电平不触发保护（新一轮语音的 speech_started 不受影响）。"""
         rt = self._rt()
@@ -651,6 +677,138 @@ class TestHalfDuplex:
         for msg in ws.sent:
             payload = base64.b64decode(msg["audio"])
             assert any(payload), "未静音时不得替换为静音帧"
+
+
+class TestLocalBarge:
+    """本地 VAD 前置打断：关流重开 + 补发 cancel，且有收敛窗/双帧门。"""
+
+    @staticmethod
+    def _rt():
+        rt = rt_mod.RealtimeTalk("sk-test", half_duplex=False)
+        rt._running = True
+        calls = {"abort": 0, "stop": 0}
+
+        class _Spk:
+            def write(self, _pcm):
+                pass
+
+            def abort(self):
+                calls["abort"] += 1
+
+            def stop_stream(self):
+                calls["stop"] += 1
+
+            def start_stream(self):
+                pass
+
+        rt._spk = _Spk()
+        rt._aec = SimpleNamespace(feed_reference=lambda _b: None)
+        return rt, calls
+
+    async def test_two_hits_abort_stream_and_send_cancel(self, _stub_tools):
+        rt, calls = self._rt()
+        rt._ai_speaking = True
+        rt._response_active = True
+        rt._response_audio_started_at = 0.0  # 跳过 500ms 收敛窗
+        ws = FakeWS([])
+
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.5)
+        assert calls["abort"] == 0  # 单帧不算
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.5)
+
+        assert calls["abort"] == 1
+        assert rt._ai_speaking is False
+        assert [e.get("type") for e in ws.sent] == ["response.cancel"]
+
+    async def test_warmup_and_low_level_do_not_abort(self, _stub_tools):
+        import time as _t
+
+        rt, calls = self._rt()
+        rt._ai_speaking = True
+        rt._response_active = True
+        rt._response_audio_started_at = _t.monotonic()  # AEC 收敛窗内
+        ws = FakeWS([])
+
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.9)
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.9)
+        assert calls["abort"] == 0 and ws.sent == []
+
+        rt._response_audio_started_at = 0.0
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.001)  # 低于门槛
+        await rt._maybe_local_barge(ws, FakeTalkUI(), 0.001)
+        assert calls["abort"] == 0 and ws.sent == []
+
+
+class TestDiscardGate:
+    """打断后的音频闸门：本轮后续帧一律不播，直到下一轮 response.created。"""
+
+    async def test_audio_after_barge_is_dropped_until_next_response(self, _stub_tools):
+        import base64 as _b64
+
+        rt = rt_mod.RealtimeTalk("sk-test", half_duplex=False)
+        rt._running = True
+        written: list[bytes] = []
+        rt._spk = SimpleNamespace(
+            write=lambda pcm: written.append(bytes(pcm)),
+            stop_stream=lambda: None,
+            start_stream=lambda: None,
+        )
+        rt._aec = None
+        rt._ai_speaking = True
+        rt._abort_playback()  # 本地/服务端打断都会置闸门
+        assert rt._discard_audio is True
+
+        delta = _b64.b64encode(b"\x00\x00" * 320).decode()
+        await rt._recv_events(
+            FakeWS([{"type": "response.audio.delta", "delta": delta}]), FakeTalkUI()
+        )
+        assert written == []  # 打断后到达的同一轮音频不播
+
+        await rt._recv_events(FakeWS([{"type": "response.created"}]), FakeTalkUI())
+        assert rt._discard_audio is False  # 下一轮解闸
+
+        await rt._recv_events(
+            FakeWS([{"type": "response.audio.delta", "delta": delta}]), FakeTalkUI()
+        )
+        assert len(written) == 1
+
+
+class TestCancelWarningThrottle:
+    """碎片式对话会连续多次 turn_detected 取消，事件链不能逐条刷屏。"""
+
+    @staticmethod
+    def _rt():
+        rt = rt_mod.RealtimeTalk("sk-test", half_duplex=False)
+        rt._running = True
+        rt._spk = SimpleNamespace(
+            write=lambda _data: None,
+            stop_stream=lambda: None,
+            start_stream=lambda: None,
+        )
+        return rt
+
+    @staticmethod
+    def _cancel():
+        return {
+            "type": "response.done",
+            "response": {
+                "status": "cancelled",
+                "status_details": {"type": "cancelled", "reason": "turn_detected"},
+            },
+        }
+
+    async def test_second_cancel_within_window_skips_event_chain(self, _stub_tools) -> None:
+        rt = self._rt()
+        ui = FakeTalkUI()
+        # 预置一条事件，让第一次取消能生成事件链
+        rt._events.observe("response.created", {"type": "response.created"})
+
+        await rt._recv_events(FakeWS([self._cancel()]), ui)
+        await rt._recv_events(FakeWS([self._cancel()]), ui)
+
+        joined = "\n".join(ui.infos)
+        assert joined.count("事件链回溯") == 1
+        assert "同类打断 20s 内不再展开" in joined
 
 
 class TestRescueV2:

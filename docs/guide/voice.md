@@ -60,14 +60,15 @@ Jarvis 提供两套独立的语音系统：
 
 - **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
   轮次；`turn_detection = "smart_turn"` 可切语义判停（支持环境音转写/声纹增强）
-- **半双工轮替（终端默认）**：AI 说话期间静音麦克风（发静音帧维持送流），外放稳定多轮；
-  戴耳机设 `half_duplex = false` 恢复随口打断
+- **终端默认全双工（可插话打断）**：AI 说话期间照常上传（经 AEC 处理），开口即打断；
+  打断时停流再启 + 丢弃后续分片，~300ms 静音（不等整段说完）；
+  外放回声大时设 `half_duplex = true` 切回半双工轮替
 - **桌面端真全双工（jarvis-desktop）**：浏览器 `getUserMedia` 系统级 AEC 消除回声，音频经
   serve 协议（`talk.audio` 上行 / `talk_audio` 下行）桥接，说话即打断，无需配置
 - **响应救援（rescue）**：服务端吞轮（取消后不补答/建响应超时）时客户端补发
   `response.create` 兜底，防"说了话永远不回复"
 - **AEC 回声消除（终端可选）**：基于 WebRTC AEC3（`aec-audio-processing`），未安装时靠
-  半双工静音从源头防回声
+  回声保护与增益衰减兜底（外放不稳可切半双工）
 - **Function Calling**：默认 `tools_mode = "builtin"`——只注册 get_current_time /
   end_conversation 两个工具，低延迟优先。
   **注意**：`"all"`（装配 ToolRegistry 全部 + MCP，实测 294 个 schema）会让响应创建
@@ -103,7 +104,7 @@ model = "qwen-audio-3.0-realtime-flash"
 voice = "longanqian"
 event_log = false               # 事件时间线日志（写 ~/.jarvis/logs/diag.log），默认关
 echo_suppress_with_aec = true   # AI 说话时压低麦克风抑制回声（仅戴耳机时才建议关）
-half_duplex = true      # 半双工：AI 说话时静音麦克风；戴耳机想随口打断设为 false（桌面全双工路径不受影响）
+half_duplex = false     # 默认全双工：AI 说话时也能插话打断；外放回声大设 true
 rescue = true           # 响应救援：吞轮时补发 response.create（默认开）
 turn_detection = "server_vad"   # 轮次检测：server_vad（默认）/ smart_turn
 silence_ms = 500        # server_vad 判停静音时长（毫秒，200~6000）

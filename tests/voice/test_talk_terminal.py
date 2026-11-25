@@ -107,14 +107,14 @@ async def test_talk_passes_echo_suppress_off(monkeypatch):
 
 
 async def test_talk_passes_half_duplex_default(monkeypatch):
-    """半双工默认透传为 True——免提外放唯一可靠的多轮方案。"""
+    """默认全双工（False）——实时对话要能随时插话打断。"""
     monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
 
     await _realtime_talk(ui, settings)
 
-    assert _FakeRealtimeTalk.last_config["half_duplex"] is True
+    assert _FakeRealtimeTalk.last_config["half_duplex"] is False
 
 
 async def test_talk_passes_half_duplex_off(monkeypatch):

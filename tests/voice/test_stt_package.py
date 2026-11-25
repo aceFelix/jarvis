@@ -165,14 +165,16 @@ class TestCreateSttFactory:
         assert Settings().stt_model == stt.model
 
     def test_signature_has_no_backend_selector(self) -> None:
-        """工厂签名保留 api_key / model / language / hotwords 四个关键字。
+        """工厂签名：api_key / model / language / hotwords + vendor。
 
-        重点是**没有** backend / engine 这类后端选择器（已单一后端）；
+        重点是**没有** backend / engine 这类实现选择器（已单一实现）；
+        ``vendor`` 只是查表键（阶段一仅 dashscope），实现仍由注册表决定。
         hotwords 是发给识别模型的上下文增强语料（唤醒词热词）。
         """
         params = inspect.signature(stt_pkg.create_stt).parameters
-        assert set(params) == {"api_key", "model", "language", "hotwords"}
+        assert set(params) == {"api_key", "model", "language", "hotwords", "vendor"}
         assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values())
+        assert params["vendor"].default == "dashscope"
 
 
 class TestQwenListenSignature:

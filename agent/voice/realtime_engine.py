@@ -38,6 +38,9 @@ from typing import Any
 
 from .realtime_audio import (
     ECHO_SUPPRESS_FACTOR,
+    LOCAL_BARGE_COOLDOWN_SECONDS,
+    LOCAL_BARGE_RMS,
+    LOCAL_BARGE_WARMUP_SECONDS,
     _attenuate_pcm,
     _rms,
     mic_muted,
@@ -173,6 +176,11 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         # 良性 error，连接不受影响）。救援时置 _rescue_hold，防止用户即时声响
         # 在响应创建的关键窗口被当成新轮次（见 RESCUE_HOLD_SECONDS）。
         self._rescue = rescue
+        # 取消提示节流：连续语音碎片会导致多轮 turn_detected 取消，事件链
+        # 每次 24 个节点，逐条刷屏会盖住用户真正输入。20s 窗口内只详细
+        # 展开一次，其余只给一行短提示。
+        self._cancel_warn_at: float = 0.0
+        self._cancel_burst: int = 0
         self._rescue_at: float | None = None
         self._rescue_hold = False
         self._last_rescue_ts: float = 0.0
@@ -204,6 +212,20 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         self._tool_alias_map: dict[str, str] = {}
         self._registry_tool_map: dict[str, Any] = {}
         self._mcp_client: Any = None
+        # 本地 VAD 打断冷却：避免连续高电平帧重复关流/补发 response.cancel
+        self._last_local_barge_ts: float = 0.0
+        # 本地 VAD 防误触发：① 首次出声后 500ms 内不判（AEC 收敛窗口）；
+        # ② 需要连续 2 帧超阈（~200ms），单帧尖噪不算插话。
+        self._response_audio_started_at: float = 0.0
+        self._local_barge_hits: int = 0
+        # 最近一轮用户转写：end_conversation 的意图门（防模型把“停一下”当退下）
+        self._last_user_text: str = ""
+        # 打断后的音频闸门：置 True 后丢弃所有音频帧，直到下一轮 response.created。
+        # 2026-11-25 实机：服务端 TTS 会提前发送后续帧，打断后这些帧的代数已经
+        # 变成新值，照样会被写进扬声器——表现为“叫他停，他还是把整段说完”。
+        self._discard_audio = False
+        # 本地 VAD 电平采样节流（排查回声/调试阈值用，2s 一条）
+        self._last_level_log_ts: float = 0.0
 
     @property
     def running(self) -> bool:
@@ -222,6 +244,100 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         """注入音频传输对象（鸭子类型：read / write / stop/start_stream）。"""
         self._mic = mic
         self._spk = spk
+
+    def _abort_playback(self) -> None:
+        """立即停止本地播放并丢弃设备缓冲（打断专用）。
+
+        终端适配器的音箱对象提供 ``abort()``（关流重开，真正丢弃 PortAudio
+        缓冲）；其它适配器（桌面桥）退回原来的 stop/start。
+
+        正常播放路径不受影响：不排队、不预缓冲。
+
+        @author aceFelix
+        """
+        abort = getattr(self._spk, "abort", None)
+        # 丢弃本轮后续到达的音频，直到下一轮 response.created
+        self._discard_audio = True
+        if abort is not None:
+            try:
+                abort()
+                return
+            except Exception:
+                pass
+        if self._spk:
+            try:
+                self._spk.stop_stream()
+                self._spk.start_stream()
+            except Exception:
+                pass
+
+    async def _maybe_local_barge(self, ws: Any, ui: Any, level: float) -> None:
+        """本地 VAD 前置打断：电平超阈就立即关流静音，不等服务端往返。
+
+        只对 **AEC 处理后、增益压低前** 的麦克风电平做判定（压低会把用户真实
+        插话一起压小）。AEC 不可用时不启用，避免外放回声把 AI 自己打断。
+
+        Args:
+            ws: 当前 WebSocket（响应进行中时补发 response.cancel）。
+            level: AEC 处理后的 RMS。
+
+        @author aceFelix
+        """
+        if (
+            self._half_duplex
+            or self._aec is None
+            or not self._ai_speaking
+        ):
+            self._local_barge_hits = 0
+            return
+        now = _t.monotonic()
+        # 电平采样（2s 一条，无论高低）：排查“VAD 是不是根本没收到人声”
+        if now - self._last_level_log_ts > 2.0:
+            self._last_level_log_ts = now
+            try:
+                from agent.core import diag
+
+                diag.diag_log(
+                    "realtime",
+                    f"local vad sample level={level:.3f} "
+                    f"threshold={LOCAL_BARGE_RMS:.2f}",
+                )
+            except Exception:
+                pass
+        # AEC 收敛窗口：避免 AI 刚开口时把残余回声当插话（实机首句被截断的根因）
+        if now - self._response_audio_started_at < LOCAL_BARGE_WARMUP_SECONDS:
+            self._local_barge_hits = 0
+            return
+        if level < LOCAL_BARGE_RMS:
+            self._local_barge_hits = 0
+            return
+        # 连续 2 帧超阈才算真实插话（单帧为敲击/尖噪/回声跳变）
+        self._local_barge_hits += 1
+        if self._local_barge_hits < 2:
+            return
+        self._local_barge_hits = 0
+        if now - self._last_local_barge_ts < LOCAL_BARGE_COOLDOWN_SECONDS:
+            return
+        self._last_local_barge_ts = now
+        try:
+            from agent.core import diag
+
+            diag.diag_log("realtime", f"local barge fired level={level:.3f}")
+        except Exception:
+            pass
+        # 先让本地立即静音：停流再启（不 close，避免与录音线程并发崩）
+        self._abort_playback()
+        self._response_gen += 1
+        self._ai_speaking = False
+        ui.on_ai_speaking(False)
+        ui.on_status("listening")
+        # 服务端已自行发现（speech_started 已到）时不必再补 cancel
+        if self._response_active and not self._user_speaking_server:
+            try:
+                await ws.send(json.dumps({"type": "response.cancel"}))
+                self._events.note_client("response.cancel", "local_barge_in")
+            except Exception:
+                pass
 
     def set_tools(
         self,
@@ -365,7 +481,6 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
                 continue
             try:
                 data = await asyncio.to_thread(self._mic.read, CHUNK_BYTES, False)
-
                 # 半双工：AI 说话期间及等待窗口内不上传麦克风。必须放在 read
                 # 之后——静音时若连读都不读，音频驱动缓冲会积压旧数据，恢复上传
                 # 时首批送出的就是 AI 说话期间的回声，等于没静音。
@@ -403,6 +518,9 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
                         if not data:
                             await asyncio.sleep(SEND_INTERVAL)
                             continue
+                        # 本地 VAD 前置打断：用 AEC 后、增益压低前的电平判定
+                        # （压低会把用户真实插话一起压小，必须在此之前取值）
+                        await self._maybe_local_barge(ws, ui, _rms(data))
 
                     # 二次回声抑制：AI 说话期间压低麦克风增益，减少残余回声被
                     # 服务端重新识别为用户语音。衰减后实时电平用于回声保护判定。
@@ -470,6 +588,23 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         """
         self._graceful_stop_at = _t.monotonic() + 4.0  # 4秒宽限期
 
+    #: 允许结束/退出的用户说法。只说“停一下/等一下/暂停/安静”不算。
+    _END_INTENT_WORDS = (
+        "退下", "结束对话", "结束聊天", "退出语音", "退出对话",
+        "再见", "拜拜", "没事了", "不聊了", "关闭对话",
+    )
+
+    def _allow_end_conversation(self) -> bool:
+        """end_conversation 的意图门：最近一轮用户话里必须含明确结束语。
+
+        2026-11-25 实机：用户说“停一下”被打断流程吞掉，模型却主动调
+        `end_conversation` 直接退出语音。工具层不能只靠模型自律，这里做硬门。
+
+        @author aceFelix
+        """
+        text = (self._last_user_text or "").strip()
+        return any(word in text for word in self._END_INTENT_WORDS)
+
     async def _execute_tool(self, name: str, args: dict[str, Any], ui: Any) -> str:
         """执行 Function Calling 工具（实现见 realtime_tools.execute_tool）。
 
@@ -485,6 +620,7 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
             workdir=self._workdir,
             ui=ui,
             on_end_conversation=self._request_graceful_stop,
+            allow_end=self._allow_end_conversation,
             tool_alias_map=self._tool_alias_map,
         )
 

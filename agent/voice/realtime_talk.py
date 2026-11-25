@@ -31,11 +31,14 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 
 from .realtime_engine import RealtimeEngine
 from .realtime_mcp import load_mcp_tools_async as mcp_load_tools
 from .realtime_tools import BUILTIN_TOOLS, build_all_tools
+# 默认端点/音色/模型统一由注册表提供（阶段一只搬 dashscope，行为不变）
+from .voice_providers import DASHSCOPE_QWEN_AUDIO
 
 try:
     import pyaudio
@@ -64,10 +67,11 @@ from .realtime_audio import (  # noqa: F401
 )
 
 # ---- 默认配置（可被 settings.toml [realtime_talk] 覆盖） ----
-# DashScope 实时语音/多模态公共 WebSocket 端点。
+# 数值统一从 voice_providers 的 dashscope 条目搬运（阶段一行为零变化）。
 # 如需业务空间专属域名，在 settings.toml [realtime_talk] 中覆盖 ws_url。
-DEFAULT_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-DEFAULT_VOICE = "longanqian"
+DEFAULT_WS_URL = DASHSCOPE_QWEN_AUDIO.ws_url
+DEFAULT_VOICE = DASHSCOPE_QWEN_AUDIO.default_voice
+DEFAULT_MODEL = DASHSCOPE_QWEN_AUDIO.realtime_models[0]
 DEFAULT_SILENCE_MS = 500
 DEFAULT_VAD_THRESHOLD = 0.5
 
@@ -77,6 +81,9 @@ _INSTRUCTIONS_BUILTIN = (
     "\n用户询问当前时间、日期、星期几时，先调用 get_current_time 工具获取"
     "实时信息，再用自然口语回答。"
     "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
+    "\n用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”时，只是要求停止播报或等待，"
+    "直接回应并继续听，绝不能调用 end_conversation；只有明确说退下/结束对话/再见/"
+    "拜拜/没事了才结束。普通回答结束后也绝不调用 end_conversation。"
 )
 
 # 全量工具模式（tools_mode="all"）的系统指令：覆盖注册表 + MCP 工具面
@@ -89,6 +96,9 @@ _INSTRUCTIONS_ALL = (
     "先用 Location 工具自动定位获取所在城市；只有定位失败时才询问先生所在地，"
     "不要自行假设任何城市。"
     "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
+    "\n用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”时，只是要求停止播报或等待，"
+    "直接回应并继续听，绝不能调用 end_conversation；只有明确说退下/结束对话/再见/"
+    "拜拜/没事了才结束。普通回答结束后也绝不调用 end_conversation。"
 )
 
 
@@ -107,6 +117,72 @@ def default_instructions(tools_mode: str = "builtin") -> str:
     return _INSTRUCTIONS_ALL if tools_mode == "all" else _INSTRUCTIONS_BUILTIN
 
 
+class _TerminalSpeaker:
+    """可中断的 PyAudio 输出包装（终端专用）。
+
+    正常路径与原来完全一致：直接 `write`，不排队、不预缓冲，保证播放连续。
+    打断时只做 `stop_stream()/start_stream()`：**绝不 close 输出流**——
+    2026-11-25 实机 `close()+open()` 与另一线程的麦克风 `read()` 并发，
+    在 Windows 上直接 Segmentation fault（PortAudio 非线程安全）。
+
+    残余缓冲靠“接收端分片写（≤ 40ms/片）+ 写前代数检查”压到最小：
+    打断后最多再播一片。
+
+    @author aceFelix
+    """
+
+    def __init__(self, pa: Any) -> None:
+        self._pa = pa
+        self._stream = self._open()
+        # 同一输出流的 write/abort 可能来自不同任务（recv 写、send 侧本地 VAD 打断），
+        # PortAudio 非线程安全，必须串行化。锁只包输出流，不阻塞麦克风 read。
+        self._lock = threading.Lock()
+
+    def _open(self) -> Any:
+        return self._pa.open(
+            format=pyaudio.paInt16, channels=1, rate=OUTPUT_RATE, output=True
+        )
+
+    def write(self, pcm: bytes) -> None:
+        stream = self._stream
+        if stream is not None:
+            with self._lock:
+                stream.write(pcm)
+
+    def abort(self) -> None:
+        """打断：停流再启（不销毁流对象，避免与录音线程并发导致崩溃）。"""
+        stream = self._stream
+        if stream is None:
+            return
+        with self._lock:
+            try:
+                stream.stop_stream()
+                stream.start_stream()
+            except Exception:
+                pass
+
+    # ---- 兼容旧鸭子接口（看门狗/收尾/单测替身）----
+    def stop_stream(self) -> None:
+        if self._stream is not None:
+            with self._lock:
+                self._stream.stop_stream()
+
+    def start_stream(self) -> None:
+        if self._stream is not None:
+            with self._lock:
+                self._stream.start_stream()
+
+    def close(self) -> None:
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            with self._lock:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+
+
 class RealtimeTalk(RealtimeEngine):
     """实时双工语音对话（终端 PyAudio 适配器）。
 
@@ -118,7 +194,7 @@ class RealtimeTalk(RealtimeEngine):
         self,
         api_key: str,
         *,
-        model: str = "qwen-audio-3.0-realtime-flash",
+        model: str = DEFAULT_MODEL,
         voice: str = DEFAULT_VOICE,
         instructions: str = "",
         ws_url: str = DEFAULT_WS_URL,
@@ -155,6 +231,10 @@ class RealtimeTalk(RealtimeEngine):
         )
         self._pya: Any = None
 
+    def _make_speaker(self) -> "_TerminalSpeaker":
+        """构造终端输出流包装（支持打断时关流重开）。"""
+        return _TerminalSpeaker(self._pya)
+
     async def run(self, ui) -> None:
         """启动实时对话（终端路径）。ESC 退出。"""
 
@@ -169,14 +249,22 @@ class RealtimeTalk(RealtimeEngine):
             mic = self._pya.open(
                 format=pyaudio.paInt16, channels=1, rate=INPUT_RATE, input=True
             )
-            spk = self._pya.open(
-                format=pyaudio.paInt16, channels=1, rate=OUTPUT_RATE, output=True
-            )
         except Exception as e:
             ui.error(f"音频设备初始化失败: {e}")
             self._cleanup()
             return
-        self.attach_audio(mic, spk)
+        self.attach_audio(mic, self._make_speaker())
+
+        # 麦克风互斥：/voice 与 /talk、以及两个 /talk 不能同时跑。
+        # 2026-11-25 实机：两个引擎同时开麦/放音，互相把对方的声音当插话，
+        # 表现为双份 local barge、声音混乱。没有锁时只能靠用户自己避。
+        from agent.voice.voice_state import acquire_voice_lock, release_voice_lock
+
+        lock_ok, lock_info = acquire_voice_lock()
+        if not lock_ok:
+            ui.error(f"麦克风被其他语音会话占用：{lock_info}")
+            self._cleanup()
+            return
 
         mode = "半双工轮替·AI 说完你再说" if self._half_duplex else "全双工·说话打断"
         ui.info("=" * 56)
@@ -220,6 +308,7 @@ class RealtimeTalk(RealtimeEngine):
         try:
             await self.run_session(ui, extra_tasks=[self._esc_watcher(ui)])
         finally:
+            release_voice_lock()
             self._cleanup()
             ui.info("\n已退出实时语音对话")
 
