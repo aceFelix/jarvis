@@ -420,13 +420,28 @@ async def _voice_loop_round(
             pass
 
     def _poll_interrupt() -> None:
-        while not round_done.is_set():
-            # stop_event（voice.stop）也走 barge-in：播报中立即停 TTS，让工作
-            # 线程里的 finish() 提前返回，避免宿主 wait_for 超时硬取消残留音频
-            if interrupt_event.is_set() or stop_event.is_set():
-                _on_barge()
-                return
-            round_done.wait(_INTERRUPT_POLL_SEC)
+        # 语音 barge-in（/voice 版 /talk 本地 VAD）：推理+播报期间听麦克风，
+        # 命中即 _on_barge。生命周期与本_poll 线程一致（round_done 置位即停），
+        # 不与 stt.listen() 录音并发；单实例 PyAudio + AEC，默认开。
+        watcher = None
+        if getattr(settings, "voice_barge_in", True):
+            try:
+                from agent.voice.voice_barge import VoiceBargeWatcher
+                watcher = VoiceBargeWatcher(on_barge=_on_barge)
+                watcher.start()
+            except Exception:
+                watcher = None
+        try:
+            while not round_done.is_set():
+                # stop_event（voice.stop）也走 barge-in：播报中立即停 TTS，让工作
+                # 线程里的 finish() 提前返回，避免宿主 wait_for 超时硬取消残留音频
+                if interrupt_event.is_set() or stop_event.is_set():
+                    _on_barge()
+                    return
+                round_done.wait(_INTERRUPT_POLL_SEC)
+        finally:
+            if watcher is not None:
+                watcher.stop()
 
     poll_thread = threading.Thread(target=_poll_interrupt, daemon=True)
     poll_thread.start()

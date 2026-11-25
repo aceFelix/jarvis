@@ -58,6 +58,10 @@
   `response.created` 才解闸。
 - 退出体验：说“退下/再见”等结束语时，Jarvis 先播一句告别再退出；工具调用轮
   不算告别，`_end_response` 等下一条非工具回复播完才结束会话（宽限 8s）。
+- /voice 语音打断默认开：新增 voice_barge.VoiceBargeWatcher（AEC+本地 VAD、
+  单实例 PyAudio、不 terminate），播报/推理中开口即停；TTS 播放 PCM 作 AEC 参考；
+  移除死代码 _VoiceBargeInDetector，旧 _BargeInWatcher 改单实例不 terminate；
+  interrupt_words 关键词打断由开口打断取代（字段保留兼容）。
 - **回退**：首版「有界播放队列 + 独立 writer」实机导致断续/混乱（`underrun #1/#20/#100`、
   双引擎 `local vad level=0.500`），已删除 `agent/voice/realtime_playback.py` 及对应单测。
   设计与教训见 `docs/plans/voice/realtime-barge-in.md`。

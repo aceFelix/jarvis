@@ -46,17 +46,10 @@ class EngineVoiceMixin:
         adapter = ServeVoiceAdapter(self._emitter)
         self._voice_interrupt = threading.Event()
         self._voice_stop = threading.Event()
-        # 麦克风 barge-in（双通道之一）：TTS 播报中检测用户开口自动打断
+        # 麦克风 barge-in 现由 voice_loop 内部的 VoiceBargeWatcher 统一负责
+        # （单实例 PyAudio + AEC，默认开）；此处不再另起 _BargeInWatcher，
+        # 避免双麦克风流。桌面壳按钮仍走 interrupt_voice 置位同一 event。
         self._voice_mic_watcher = None
-        if getattr(s, "voice_barge_in", False):
-            try:
-                from agent.voice.barge_in import _BargeInWatcher
-                w = _BargeInWatcher(lambda: self._voice_interrupt.set())
-                if getattr(w, "available", True):
-                    w.start()
-                    self._voice_mic_watcher = w
-            except Exception:
-                self._voice_mic_watcher = None
 
         async def _voice_main() -> None:
             try:

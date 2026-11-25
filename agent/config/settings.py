@@ -117,10 +117,11 @@ class Settings:
     # 语音模式最长录音时间（/voice 模式），超时自动提交。默认 5 分钟
     voice_max_seconds: float = 300.0
     # 语音模式选项（阶段三第四刀）
-    # 语音打断（麦克风通道）：TTS 播报期间由 _BargeInWatcher 监听用户开口自动打断。
-    # 默认关闭：watcher 会开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows
-    # 上可能 segfault（见 configs/settings.example.toml 同名说明），环境稳定后再开。
-    voice_barge_in: bool = False
+    # 语音打断（麦克风通道）：TTS 播报/推理期间由 voice_barge.VoiceBargeWatcher
+    # 监听用户开口自动打断（AEC + 本地 VAD，单实例 PyAudio，不 terminate）。
+    # 2026-11-25 默认开：旧 _BargeInWatcher 多实例 segfault 已用单实例+AEC 解决；
+    # 手动空格/按钮打断不受影响。外放误触发时可关。
+    voice_barge_in: bool = True
     # barge_in_key（键盘打断）默认启用：TTS 播报期间用 keyboard 库全局钩子监听空格，
     # 按下立即停止播报并切回聆听。不占 PyAudio，无 segfault 风险，daemon 无窗口也能捕获。
     voice_barge_in_key: bool = True
@@ -129,6 +130,8 @@ class Settings:
     voice_idle_standby_seconds: float = 10.0
     # 唤醒 / 退下 / 打断三张词表（[voice] wake_words / exit_words / interrupt_words）。
     # 留空 = 用 voice_config.py 里的内置词表，所以老配置不受影响。
+    # interrupt_words 旧关键词打断已由 voice_barge 开口打断取代，字段保留兼容
+    # 旧配置但不再生效（2026-11-25）。
     # 唤醒词除字面匹配外还参与**拼音同音**匹配：配「贾维斯」即可命中「加维思」
     # 「贾伟斯」「假维斯」等近音写法（详见 agent/voice/wake_words.py）。
     voice_wake_words: tuple[str, ...] = ()
