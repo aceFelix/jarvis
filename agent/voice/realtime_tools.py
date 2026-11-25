@@ -38,7 +38,7 @@ BUILTIN_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "end_conversation",
-            "description": "结束当前对话并退出。仅当用户明确说出\"退下\"、\"贾维斯退下\"、\"结束对话\"、\"再见\"、\"拜拜\"、\"没事了\"等表示结束意图的话时才调用。不要在一次普通回答结束后调用此工具。",
+            "description": "结束当前对话并退出。仅在用户明确告别（退下、结束对话、再见、拜拜、没事了）时调用。用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”只是要求停止播报或等待，绝不能调用本工具；普通回答结束后也绝不调用。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -186,6 +186,7 @@ async def execute_tool(
     workdir: str,
     ui: Any,
     on_end_conversation: Callable[[], None] | None = None,
+    allow_end: Callable[[], bool] | None = None,
     tool_alias_map: dict[str, str] | None = None,
 ) -> str:
     """执行 Function Calling 工具，返回 JSON 格式的结果字符串。
@@ -207,6 +208,8 @@ async def execute_tool(
         ui: UI 适配器，透传给工具用于交互反馈。
         on_end_conversation: end_conversation 触发时的回调，由会话层设置
             优雅停止宽限期（工具层不直接持有会话状态）。
+        allow_end: end_conversation 的意图门。返回 False 时拒绝执行，并把
+            原因作为工具结果回给模型（防模型把“停一下”当“退下”）。
         tool_alias_map: sanitize_tools_for_realtime 产出的别名→原名映射，
             模型以别名调用时先还原再分派（通常为 None，无清洗时零开销）。
 
@@ -217,6 +220,16 @@ async def execute_tool(
     if name in builtin_names:
         # end_conversation 需要停止会话循环（等待告别语音播放后再停）
         if name == "end_conversation":
+            if allow_end is not None and not allow_end():
+                return json.dumps(
+                    {
+                        "result": (
+                            "未结束对话：用户没有明确说退下/结束对话/再见。"
+                            "请继续对话；如果用户只是想暂停播报，直接回应并等待。"
+                        )
+                    },
+                    ensure_ascii=False,
+                )
             if on_end_conversation is not None:
                 on_end_conversation()
             return json.dumps({"result": "好的，我先退下了。需要时随时叫我。"}, ensure_ascii=False)

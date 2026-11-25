@@ -132,7 +132,7 @@ class TestRealtimeTalkPersistence:
         import agent.config.voice_key as vk
         import agent.voice.realtime_talk as rt_mod
 
-        monkeypatch.setattr(vk, "resolve", lambda _settings: "key")
+        monkeypatch.setattr(vk, "resolve", lambda _settings, **_: "key")
 
         class _FakeTalk:
             def __init__(self, **_kwargs) -> None:
@@ -180,7 +180,7 @@ class TestRealtimeTalkPersistence:
         import agent.config.voice_key as vk
         import agent.voice.realtime_talk as rt_mod
 
-        monkeypatch.setattr(vk, "resolve", lambda _settings: "key")
+        monkeypatch.setattr(vk, "resolve", lambda _settings, **_: "key")
         seen: dict = {}
 
         class _FakeTalk:

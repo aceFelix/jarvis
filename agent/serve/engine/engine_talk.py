@@ -39,26 +39,32 @@ class EngineTalkMixin:
             await self._handle_start_talk_duplex()
             return
         s = self._settings
-        api_key = (
-            s.dashscope_api_key
-            or os.environ.get("DASHSCOPE_API_KEY", "")
-            or s.api_key
-            or os.environ.get("OPENAI_API_KEY", "")
-        )
+        from agent.config import voice_key as vk
+        from agent.voice import voice_providers as vp
+
+        vendor = vp.resolve_vendor(s)
+        try:
+            meta = vp.provider_for(vendor, kind="realtime")
+        except vp.VoiceProviderError as e:
+            self._emitter.emit("error", str(e))
+            return
+        api_key = vk.resolve(s, vendor=vendor)
         if not api_key:
-            self._emitter.emit("error", "未配置 DashScope API Key，无法启动实时语音")
+            self._emitter.emit(
+                "error", f"未配置 {vp.vendor_label(vendor)} 语音 Key，无法启动实时语音"
+            )
             return
         try:
-            from agent.voice.realtime_talk import DEFAULT_WS_URL, RealtimeTalk
+            from agent.voice.realtime_talk import RealtimeTalk
         except ImportError as e:
             self._emitter.emit("error", f"实时语音模块不可用: {e}")
             return
 
         rt = RealtimeTalk(
             api_key=api_key,
-            model=getattr(s, "realtime_model", "qwen-audio-3.0-realtime-flash"),
-            voice=getattr(s, "realtime_voice", "longanqian"),
-            ws_url=getattr(s, "realtime_ws_url", "") or DEFAULT_WS_URL,
+            model=getattr(s, "realtime_model", "") or meta.realtime_models[0],
+            voice=getattr(s, "realtime_voice", "") or meta.default_voice,
+            ws_url=getattr(s, "realtime_ws_url", "") or meta.ws_url,
             workdir=getattr(s, "workdir", "") or os.getcwd(),
             # 事件时间线日志开关（[realtime_talk] event_log，默认关）
             event_log=bool(getattr(s, "realtime_event_log", False)),
@@ -67,8 +73,8 @@ class EngineTalkMixin:
             echo_suppress_with_aec=bool(
                 getattr(s, "realtime_echo_suppress_with_aec", True)
             ),
-            # 半双工（默认开）：AI 说话期间不上传麦克风，规避外放回声卡住下一轮
-            half_duplex=bool(getattr(s, "realtime_half_duplex", True)),
+            # 半双工（默认关=全双工）：开着时 AI 说话期间不上传麦克风，规避外放回声卡住下一轮
+            half_duplex=bool(getattr(s, "realtime_half_duplex", False)),
             # 响应救援/轮次检测/工具模式（对齐 /talk 命令，2026-09-28 重构新增）
             rescue=bool(getattr(s, "realtime_rescue", True)),
             turn_detection=getattr(s, "realtime_turn_detection", "server_vad"),
@@ -110,18 +116,24 @@ class EngineTalkMixin:
         from agent.voice.realtime_bridge_audio import BridgeMic, BridgeSpk
         from agent.voice.realtime_engine import RealtimeEngine
         from agent.voice.realtime_mcp import load_mcp_tools_async as mcp_load_tools
-        from agent.voice.realtime_talk import DEFAULT_WS_URL, default_instructions
+        from agent.voice.realtime_talk import default_instructions
         from agent.voice.realtime_tools import BUILTIN_TOOLS, build_all_tools
 
         s = self._settings
-        api_key = (
-            s.dashscope_api_key
-            or os.environ.get("DASHSCOPE_API_KEY", "")
-            or s.api_key
-            or os.environ.get("OPENAI_API_KEY", "")
-        )
+        from agent.config import voice_key as vk
+        from agent.voice import voice_providers as vp
+
+        vendor = vp.resolve_vendor(s)
+        try:
+            meta = vp.provider_for(vendor, kind="realtime")
+        except vp.VoiceProviderError as e:
+            self._emitter.emit("error", str(e))
+            return
+        api_key = vk.resolve(s, vendor=vendor)
         if not api_key:
-            self._emitter.emit("error", "未配置 DashScope API Key，无法启动实时语音")
+            self._emitter.emit(
+                "error", f"未配置 {vp.vendor_label(vendor)} 语音 Key，无法启动实时语音"
+            )
             return
 
         mic = BridgeMic()
@@ -139,15 +151,15 @@ class EngineTalkMixin:
         spk = BridgeSpk(on_chunk=_emit_audio, on_flush=_emit_flush)
         engine = RealtimeEngine(
             api_key,
-            model=getattr(s, "realtime_model", "qwen-audio-3.0-realtime-flash"),
-            voice=getattr(s, "realtime_voice", "longanqian"),
+            model=getattr(s, "realtime_model", "") or meta.realtime_models[0],
+            voice=getattr(s, "realtime_voice", "") or meta.default_voice,
             # 贾维斯人设指令（与 RealtimeTalk 终端路径同口径回退）：此路径直接
             # 构造父类 RealtimeEngine，无子类的默认话术回退，不传会得到空
             # instructions → DashScope 实时模型回落自带默认人设（自称"小云"）。
             instructions=default_instructions(
                 getattr(s, "realtime_tools_mode", "builtin")
             ),
-            ws_url=getattr(s, "realtime_ws_url", "") or DEFAULT_WS_URL,
+            ws_url=getattr(s, "realtime_ws_url", "") or meta.ws_url,
             turn_detection=getattr(s, "realtime_turn_detection", "server_vad"),
             silence_duration_ms=int(getattr(s, "realtime_silence_ms", 500)),
             workdir=getattr(s, "workdir", "") or os.getcwd(),

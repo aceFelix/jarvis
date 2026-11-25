@@ -64,6 +64,9 @@ max_seconds = 15         # 单次录音最长秒数（防卡死，客户端兜�
 silence_seconds = 2    # 服务端 VAD 连续静音多少秒视为说完
 
 [voice]
+# vendor: 语音厂商（阶段一仅 dashscope）。它是默认值；将来 STT/TTS 可用
+# voice_stt_vendor / voice_tts_vendor 细分覆盖（当前未开放为配置项）。
+vendor = "dashscope"
 # barge_in: 语音打断——播报中开口说话自动打断。
 # 默认关闭——watcher 开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows 上会 segfault。
 barge_in = false
@@ -98,10 +101,10 @@ event_log = false
 # 残留会被服务端重新识别为用户语音→触发打断→取消本轮回复，表现为“AI 永远不开口”。
 # 仅在佩戴耳机（无扬声器回声）时才建议关闭，让插话语音保持正常增益。
 echo_suppress_with_aec = true
-# half_duplex: 半双工（默认 true）——AI 说话期间不上传麦克风，说完后留 0.6s 回声尾迹
-# 静默期再恢复拾取，是免提外放能连续多轮的关键（否则回声会让 AI 永远不开下一轮）。
-# 戴耳机想随口打断时设为 false（全双工）。
-half_duplex = true
+# half_duplex: 半双工轮替（默认 false = 全双工）——默认允许在 AI 说话时随时插话打断。
+# 开启（true）后 AI 说话期间不上传麦克风、改发静音帧，用「说完你再说」换外放稳定性；
+# 外放回声大导致 AI 被自己打断、或反复提示「回复被打断取消」时，再设回 true。
+half_duplex = false
 # rescue: 响应救援（默认 true）——用户轮次已提交但服务端迟迟不创建响应、或响应被
 # turn_detected 取消后不再补答时，客户端在 1.2~1.8s 后补发一次 response.create
 # （官方允许"等待用户下一轮输入时"手动触发），兜底防"贾维斯永远不回复"。

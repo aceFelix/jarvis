@@ -135,6 +135,10 @@ class Settings:
     voice_exit_words: tuple[str, ...] = ()
     voice_interrupt_words: tuple[str, ...] = ()
 
+    # 语音厂商（阶段一仅 dashscope）。只是默认值：未来可用
+    # voice_stt_vendor / voice_tts_vendor 做细粒度覆盖（见 voice_providers.py）。
+    voice_vendor: str = "dashscope"
+
     # 实时双工语音对话（/talk）
     # endpoint 默认使用 DashScope 公共域名；如使用业务空间专属域名，在此覆盖
     realtime_ws_url: str = ""
@@ -149,11 +153,10 @@ class Settings:
     # 触发打断并取消本轮回复——关掉后表现为“AI 永远不开口”。
     # 仅在佩戴耳机（无扬声器回声）时才建议关闭。
     realtime_echo_suppress_with_aec: bool = True
-    # 半双工开关（默认 True）：AI 说话期间不上传麦克风，说完后留一段回声尾迹
-    # 静默期再恢复拾取。免提外放 + 软件 AEC 下可靠多轮的唯一方案（否则回声会
-    # 让 smart_turn 误判“用户仍在说话”→ AI 永远不开下一轮）；戴耳机想随口
-    # 打断时设为 False 切回全双工。
-    realtime_half_duplex: bool = True
+    # 半双工开关（默认 False = 全双工）：实时对话默认允许随时插话打断。
+    # 开启（True）后 AI 说话期间不上传麦克风、改发静音帧，用「说完你再说」
+    # 换外放稳定性；外放回声大导致 AI 被自己打断时，再把它设为 True。
+    realtime_half_duplex: bool = False
     # 响应救援（默认 True）：用户轮次已提交但服务端迟迟不创建响应、或响应被
     # turn_detected 取消后不再补答时，客户端在 1.2~1.8s 后补发一次
     # response.create（官方允许"等待用户下一轮输入时"手动触发）。兜底防
@@ -811,6 +814,7 @@ def _apply_toml(s: Settings, data: dict) -> Settings:
         "debug", "verbose",
         "tts_model", "tts_voice", "tts_volume", "tts_speech_rate", "tts_pitch_rate",
         "stt_model", "stt_max_seconds", "stt_silence_seconds",
+        "voice_vendor",
         "voice_max_seconds",
         "realtime_ws_url", "realtime_model", "realtime_voice", "realtime_event_log",
         "realtime_echo_suppress_with_aec",

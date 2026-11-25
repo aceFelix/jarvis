@@ -33,6 +33,11 @@ from .realtime_const import (
 )
 
 
+# 播放分片：40ms @24kHz/16bit/单声道 = 1920 字节。分片写 + 每片前检查打断
+# 代数，打断最多多播一片；不排队、不换线程，保持原播放连续性。
+_WRITE_CHUNK_BYTES = 1920
+
+
 class RealtimeRecvMixin:
     """服务端事件接收与分发的方法组（原样搬自 RealtimeEngine，行为不变）。"""
 
@@ -74,8 +79,16 @@ class RealtimeRecvMixin:
                 # AI 语音 → 直接播放（与官方示例一致）
                 delta = event.get("delta", "")
                 if delta:
+                    # 打断后丢弃本轮后续音频：服务端已提前发送的帧代数已更新，
+                    # 只靠 gen 检查拦不住；直到下一轮 response.created 才解闸。
+                    if self._discard_audio:
+                        continue
+                    # 捕获接收时刻的打断代数：解码/写设备前若被打断，直接丢弃
+                    gen_at_decode = self._response_gen
                     if not self._ai_speaking:
                         self._ai_speaking = True
+                        # 首次出声时刻：本地 VAD 用它跳过 AEC 收敛窗口
+                        self._response_audio_started_at = _t.monotonic()
                         ui.on_ai_speaking(True)
                         ui.on_status("speaking")
                     # 记录当前回复开始时间，用于防御性超时检测
@@ -101,16 +114,23 @@ class RealtimeRecvMixin:
                             self._aec.feed_reference(audio)
                         except Exception:
                             pass
-                    # 打断保护：捕获当前代数，写入前检查是否已被用户打断
-                    gen = self._response_gen
-                    await asyncio.to_thread(self._spk.write, audio)
-                    if gen != self._response_gen:
-                        # 用户已打断，跳过本次回复的剩余音频
+                    # 打断保护：分片写（≤40ms/片），每片前检查代数。
+                    # 不排队、不换线程，保持连续；打断最多多播一片。
+                    # 2026-11-25：不在此处 close 输出流（与录音线程并发会 segfault）。
+                    if gen_at_decode != self._response_gen:
                         continue
+                    for start in range(0, len(audio), _WRITE_CHUNK_BYTES):
+                        if gen_at_decode != self._response_gen:
+                            break
+                        await asyncio.to_thread(
+                            self._spk.write, audio[start:start + _WRITE_CHUNK_BYTES]
+                        )
 
             elif t == "response.created":
                 # 一次新的服务端响应开始 → 标记为活动响应，供打断判定使用
                 self._response_active = True
+                # 新一轮开始：解除打断后的音频闸门
+                self._discard_audio = False
                 # 响应已创建：撤销救援并释放救援保持
                 self._rescue_at = None
                 self._rescue_hold = False
@@ -144,13 +164,32 @@ class RealtimeRecvMixin:
                 if status == "cancelled":
                     self._events.note_cancelled()
                     reason_text = f"（原因: {cancel_reason}）" if cancel_reason else ""
-                    ui.info(f"⚠️ 回复被打断取消{reason_text}（如反复出现，"
-                            "多为回声残留或会话状态异常，请降低音量或检查扬声器外放）")
-                    hint = self._events.cancel_hint()
-                    if hint:
-                        ui.info(f"   事件链回溯（新→旧）: {hint}")
-                    # 终端的链会随会话滚走，同步落盘一份（不依赖 event_log 开关）
-                    self._events.dump_cancel_diag()
+                    # 客户端主动打断（本地 VAD / 用户插话）不是回声故障，
+                    # 按良性事件提示，不展开回声建议与事件链。
+                    if "client_cancelled" in cancel_reason:
+                        ui.info("⏹ 已按你的插话停止本轮播报")
+                        self._events.dump_cancel_diag()
+                    else:
+                        # 节流：碎片式对话会连续触发多次取消，事件链每回 24 个节点，
+                        # 逐条展开会把用户真正的输入顶走。20s 内只详细播一次。
+                        now = _t.monotonic()
+                        if now - self._cancel_warn_at > 20.0:
+                            self._cancel_burst = 0
+                        self._cancel_burst += 1
+                        ui.info(f"⚠️ 回复被打断取消{reason_text}")
+                        if self._cancel_burst == 1:
+                            self._cancel_warn_at = now
+                            ui.info(
+                                "   如反复出现，多为回声残留或会话状态异常："
+                                "戴耳机、降低音量，或 /config set realtime_half_duplex true"
+                            )
+                            hint = self._events.cancel_hint()
+                            if hint:
+                                ui.info(f"   事件链回溯（新→旧）: {hint}")
+                        else:
+                            ui.info("   （同类打断 20s 内不再展开事件链，细节仍落盘 diag.log）")
+                        # 终端的链会随会话滚走，同步落盘一份（不依赖 event_log 开关）
+                        self._events.dump_cancel_diag()
                 # 工具轮：output 全部是 function_call（一轮响应也可能同时含普通
                 # 消息与函数调用，故必须"全为"才判定为工具轮）
                 output = resp_obj.get("output") or []
@@ -186,11 +225,16 @@ class RealtimeRecvMixin:
                 if self._half_duplex and had_active_response:
                     self._events.note_echo_guard()
                     continue
-                # 回声保护：AI 正在说话、但衰减后麦克风实时电平仍很低，
-                # 说明本次 speech_started 大概率是扬声器回声被服务端 VAD 误触发
-                # （而非用户真实插话），忽略它、不取消回复，避免 AI 被自己
-                # 的回声打断。用户真实插话需说够响使电平超过门限才能打断。
-                if self._ai_speaking and self._last_mic_rms < ECHO_GUARD_RMS:
+                # 回声保护（**仅在 AEC 不可用时**）：文档要求收到 speech_started
+                # 就立即清播放缓冲；有 AEC 时回声已由 AEC3 处理，不得再用电平
+                # 门槛吞掉真实插话（2026-11-24：外放下轻声插话被误判为回声的根因）。
+                # 无 AEC 时保留门槛：AI 说话中且麦克风电平很低，判为回声误触发，
+                # 避免 AI 被自己打断；真实插话需说够响才能通过。
+                if (
+                    self._aec is None
+                    and self._ai_speaking
+                    and self._last_mic_rms < ECHO_GUARD_RMS
+                ):
                     self._events.note_echo_guard()
                     continue
                 # 用户开始说话（全双工模式）：服务端会自动取消当前响应
@@ -204,13 +248,9 @@ class RealtimeRecvMixin:
                 ui.on_ai_speaking(False)
                 ui.on_user_speaking(True)
                 ui.on_status("listening")
-                # 清空扬声器缓冲区
-                if self._spk:
-                    try:
-                        self._spk.stop_stream()
-                        self._spk.start_stream()
-                    except Exception:
-                        pass
+                # 清空播放：终端关流重开（真正丢弃设备缓冲）；
+                # 桌面桥退回 stop/start。
+                self._abort_playback()
 
             elif t == "input_audio_buffer.speech_stopped":
                 ui.on_user_speaking(False)
@@ -241,6 +281,8 @@ class RealtimeRecvMixin:
                 transcript = event.get("transcript", "")
                 stripped = transcript.strip()
                 if stripped:
+                    # 记下最近一轮用户话：end_conversation 的意图门用它判断
+                    self._last_user_text = stripped
                     self._events.note_user_turn()
                     # 统一交给 UI 协议中的 on_user_transcript 显示，
                     # 不再额外调用 info()，避免 Webview 实现中气泡重复。

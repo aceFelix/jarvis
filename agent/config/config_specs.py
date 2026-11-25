@@ -538,6 +538,14 @@ _BASE_SPECS: tuple[ConfigSpec, ...] = (
         "开了后每日简报多一段「今日日程」（读 Outlook 或 ICS）；感知源那份开关另有其人",
         tier=TIER_AUTO, apply_mode=APPLY_RESTART, default=False,
     ),
+    # 实时语音的打断开关：默认全双工（能随时插话）；外放回声大时改回半双工。
+    # 值在每次 /talk 启动时读取，下一次会话生效，故 apply=live。
+    ConfigSpec(
+        "realtime_half_duplex", "realtime_talk", "half_duplex", "realtime_half_duplex", "bool",
+        "半双工轮替",
+        "开着时 AI 说话期间不拾音（说完你再说）；关掉后全双工，可随时插话打断",
+        tier=TIER_CONFIRM, apply_mode=APPLY_LIVE, default=False,
+    ),
     # 注意：``enable_tool_self_healing`` 不在此表——它不在 ``settings_domains`` 的
     # 任何映射里（``[tools]`` 段只有上面两项），``save_value`` 找不到落盘位置。
     # 它确实在 ``bootstrap.py`` 启动时被读、真生效，所以也不能当死配置标——

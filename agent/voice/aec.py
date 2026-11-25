@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import struct
+import threading
 from typing import Optional
 
 try:
@@ -103,6 +104,9 @@ class EchoCanceller:
         self._mic_buf = bytearray()
         # 统计计数，便于调试
         self._frame_count = 0
+        # APM 非线程安全：feed_reference 在播放线程、process_mic 在麦克风线程，
+        # 播放队列改造后两路真正并发，必须串行化（2026-11-25）。
+        self._lock = threading.Lock()
 
     def feed_reference(self, playback_audio: bytes) -> None:
         """喂入扬声器播放的音频（24kHz 16bit mono）作为远端参考。
@@ -113,17 +117,18 @@ class EchoCanceller:
         """
         if not playback_audio:
             return
-        # 24kHz → 16kHz 重采样
-        ref_16k = _resample_24k_to_16k(playback_audio)
-        self._ref_buf.extend(ref_16k)
-        # 按 10ms 帧送入 APM
-        while len(self._ref_buf) >= _FRAME_BYTES:
-            frame = bytes(self._ref_buf[:_FRAME_BYTES])
-            del self._ref_buf[:_FRAME_BYTES]
-            try:
-                self._apm.process_reverse_stream(frame)
-            except Exception:
-                pass
+        with self._lock:
+            # 24kHz → 16kHz 重采样
+            ref_16k = _resample_24k_to_16k(playback_audio)
+            self._ref_buf.extend(ref_16k)
+            # 按 10ms 帧送入 APM
+            while len(self._ref_buf) >= _FRAME_BYTES:
+                frame = bytes(self._ref_buf[:_FRAME_BYTES])
+                del self._ref_buf[:_FRAME_BYTES]
+                try:
+                    self._apm.process_reverse_stream(frame)
+                except Exception:
+                    pass
 
     def process_mic(self, mic_data: bytes) -> bytes:
         """处理麦克风音频（16kHz 16bit mono），返回消回声后的音频。
@@ -134,22 +139,23 @@ class EchoCanceller:
         """
         if not mic_data:
             return b""
-        self._mic_buf.extend(mic_data)
-        out = bytearray()
-        while len(self._mic_buf) >= _FRAME_BYTES:
-            frame = bytes(self._mic_buf[:_FRAME_BYTES])
-            del self._mic_buf[:_FRAME_BYTES]
-            try:
-                processed = self._apm.process_stream(frame)
-                if processed:
-                    out.extend(processed)
-                else:
+        with self._lock:
+            self._mic_buf.extend(mic_data)
+            out = bytearray()
+            while len(self._mic_buf) >= _FRAME_BYTES:
+                frame = bytes(self._mic_buf[:_FRAME_BYTES])
+                del self._mic_buf[:_FRAME_BYTES]
+                try:
+                    processed = self._apm.process_stream(frame)
+                    if processed:
+                        out.extend(processed)
+                    else:
+                        out.extend(frame)
+                    self._frame_count += 1
+                except Exception:
+                    # APM 处理失败时回退原始数据，避免音频中断
                     out.extend(frame)
-                self._frame_count += 1
-            except Exception:
-                # APM 处理失败时回退原始数据，避免音频中断
-                out.extend(frame)
-        return bytes(out)
+            return bytes(out)
 
     def has_voice(self) -> bool:
         """查询最近一帧是否检测到人声（需 enable_vad=True 才有效）。"""

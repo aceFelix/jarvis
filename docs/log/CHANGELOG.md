@@ -19,7 +19,46 @@
 
 ## [Unreleased]
 
-（暂无）
+### 变更（语音厂商解耦阶段一，2026-11-24）
+
+- 新增 `agent/voice/voice_providers.py` 厂商注册表与 `[voice] vendor`（默认 `dashscope`）：
+  `/talk` 的端点/音色/模型、`/voice` 的识别后端改为查表；DashScope 取值原样搬运，
+  行为不变；未知厂商与 `verified=false` 条目 fail-closed，不静默回落。
+- `/listen` 改用统一 `voice_key` 解析（原先直接用主 LLM key，换成非 DashScope 模型时会拿错 key）。
+- 同轮同步配置问答口径：262 项可问，72 项可代改（29 直接改 / 43 先确认）。
+
+### 变更（实时语音默认全双工，2026-11-24）
+
+- `/talk` 默认改为全双工：AI 说话期间麦克风照常上传（经 AEC 处理），开口即打断；
+  外放回声大导致 AI 被自己打断时，把 `[realtime_talk] half_duplex = true` 切回半双工轮替。
+- `realtime_half_duplex` 进配置真源表：可 `/config set realtime_half_duplex true|false`。
+
+### 修复（实时语音插话被回声保护吞掉，2026-11-24）
+
+- 有 AEC 时不再用 RMS 门槛过滤 `speech_started`：按官方文档一律停播/切轮；仅 AEC
+  不可用时保留回声保护（旧实现会在 AEC 已消回声时仍把轻声插话当回声忽略）。
+- 连续 `turn_detected` 取消的提示做 20 秒节流：首条展开事件链，其余只给一行短提示
+  （事件链仍完整落盘 `diag.log`）。
+
+### 变更（实时语音真打断：停流再启，2026-11-25）
+
+- 终端 `/talk` 正常播放恢复直写（与改造前一致，保证连续）；`audio.delta` 按 40ms
+  分片写、每片前检查打断代数，打断后剩余分片直接丢弃。
+- 打断时 `_TerminalSpeaker.abort()` 只做 `stop_stream/start_stream`，**绝不 close**——
+  实机 `close()+open()` 与录音线程并发直接 Segmentation fault（PortAudio 非线程安全）。
+- 本地 VAD 前置：门槛 0.08、首帧出声满 500ms、连续 2 帧才触发；AEC 不可用或半双工
+  时不启用；AEC 参考信号回到 recv 入队时喂。
+- `/talk` 启动增加 `voice_state` 麦克风互斥：两个 `/talk`、或 `/talk` 与 `/voice`
+  不能同时开麦（实机双引擎互相打断的根因）。
+- 修复打断仍失效与误退出：本地 VAD 门槛 0.08 → 0.04（0.08 收不到“停一下”），
+  `local vad sample` 改为不论高低每 2s 采样；`end_conversation` 增加退出意图门
+  （最近一轮转写必须含退下/结束/再见等，否则拒绝执行），说“停一下”不再退出语音。
+- 修复“叫他停还是把整段说完”：打断时置 `_discard_audio` 闸门，同一轮后续到达的
+  音频帧一律不播（这些帧携带新代数，单靠 gen 检查拦不住），直到下一轮
+  `response.created` 才解闸。
+- **回退**：首版「有界播放队列 + 独立 writer」实机导致断续/混乱（`underrun #1/#20/#100`、
+  双引擎 `local vad level=0.500`），已删除 `agent/voice/realtime_playback.py` 及对应单测。
+  设计与教训见 `docs/plans/voice/realtime-barge-in.md`。
 
 ## [2.6.1] — 2026-11-20
 

@@ -60,9 +60,25 @@ def _listen(ui, settings, loop, ctx) -> None:
         ui.error(f"语音模块不可用: {e}")
         return
 
+    # 语音厂商与密钥统一经 voice_providers + voice_key 解析（阶段一仅 dashscope）。
+    # 旧实现用 settings.api_key：LLM 换成 DeepSeek 时会拿别家 key 连阿里云。
+    from agent.config import voice_key as vk
+    from agent.voice import voice_providers as vp
+
+    vendor = vp.resolve_vendor(settings, kind="stt")
+    try:
+        meta = vp.provider_for(vendor, kind="stt")
+    except vp.VoiceProviderError as e:
+        ui.error(str(e))
+        return
+    api_key = vk.resolve(settings, vendor=vendor)
+    if not api_key:
+        ui.error(vk.missing_hint(settings))
+        return
     stt = create_stt(
-        api_key=settings.api_key,
-        model=settings.stt_model,
+        api_key=api_key,
+        model=getattr(settings, "stt_model", "") or meta.stt_models[0],
+        vendor=vendor,
     )
     ui.info(
         f"正在聆听...（模型 {settings.stt_model}，最多 {settings.stt_max_seconds}s，"
@@ -195,8 +211,15 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
     # 又写了另一份、并且写错了（只认环境变量 + 无条件回退主 LLM key，拿别家
     # key 硬连 DashScope 必被 1007 Access denied 秒拒）。现在三处共用一个实现。
     from agent.config import voice_key as vk
+    from agent.voice import voice_providers as vp
 
-    api_key = vk.resolve(settings)
+    vendor = vp.resolve_vendor(settings)
+    try:
+        meta = vp.provider_for(vendor, kind="realtime")
+    except vp.VoiceProviderError as e:
+        ui.error(str(e))
+        return
+    api_key = vk.resolve(settings, vendor=vendor)
     if not api_key:
         # fail-fast：不启动引擎，直接给中文指引（否则用户只能看到英文 1007）
         ui.error(
@@ -207,16 +230,16 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
         return
 
     try:
-        from agent.voice.realtime_talk import RealtimeTalk, DEFAULT_WS_URL
+        from agent.voice.realtime_talk import RealtimeTalk
     except ImportError as e:
         ui.error(f"实时语音模块不可用: {e}")
         return
 
     config = {
         "api_key": api_key,
-        "model": getattr(settings, "realtime_model", "qwen-audio-3.0-realtime-flash"),
-        "voice": getattr(settings, "realtime_voice", "longanqian"),
-        "ws_url": getattr(settings, "realtime_ws_url", "") or DEFAULT_WS_URL,
+        "model": getattr(settings, "realtime_model", "") or meta.realtime_models[0],
+        "voice": getattr(settings, "realtime_voice", "") or meta.default_voice,
+        "ws_url": getattr(settings, "realtime_ws_url", "") or meta.ws_url,
         "workdir": getattr(settings, "workdir", "") or os.getcwd(),
         # 事件时间线日志开关（[realtime_talk] event_log，默认关）
         "event_log": bool(getattr(settings, "realtime_event_log", False)),
@@ -225,12 +248,15 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
         "echo_suppress_with_aec": bool(
             getattr(settings, "realtime_echo_suppress_with_aec", True)
         ),
-        # 半双工（默认开）：AI 说话期间不上传麦克风，规避外放回声卡住下一轮
-        "half_duplex": bool(getattr(settings, "realtime_half_duplex", True)),
+        # 半双工（默认关=全双工）：开着时 AI 说话期间不上传麦克风，规避外放回声卡住下一轮
+        "half_duplex": bool(getattr(settings, "realtime_half_duplex", False)),
         # 响应救援（默认开）：turn_detected 取消/无响应时补发 response.create
         "rescue": bool(getattr(settings, "realtime_rescue", True)),
         # 轮次检测（默认 server_vad 官方免提推荐；smart_turn 仅安静环境/耳机）
-        "turn_detection": getattr(settings, "realtime_turn_detection", "server_vad"),
+        # 能力门：厂商不支持的取值直接报错，不静默替换（见 voice_providers）
+        "turn_detection": vp.validate_turn_detection(
+            meta, getattr(settings, "realtime_turn_detection", "server_vad")
+        ),
         "silence_duration_ms": int(getattr(settings, "realtime_silence_ms", 500)),
         # 工具模式（默认 builtin 仅内置两工具，低延迟优先；all 为注册表+MCP
         # 全量，实测 294 schema 会导致服务端不建响应，勿轻易切）

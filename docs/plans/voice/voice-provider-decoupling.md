@@ -1,10 +1,10 @@
 # 语音能力厂商解耦 · 阶段一（`/talk` 全双工 + `/voice` 半双工）
 
-> 状态：**S1 调研完成，停在「等你拍板首批接入名单」的关卡**（建议 StepFun 一家）
-> 起因：README 跨平台能力矩阵里实时语音那一行——「（三平台均需 DashScope Key）」（README.md L178）：
+> 状态：**S1 完成；2026-11-24 拍板——先只做 DashScope 解耦并验证稳定性，第二厂商暂缓**
+> 起因：README 跨平台能力矩阵里实时语音那一行——「（三平台均需 DashScope Key）」（README.md L180）：
 > 语音是唯一还绑死单厂商的能力面
 > S1 交付物：[research/voice-provider-matrix.md](../../research/voice-provider-matrix.md)（厂商协议同构度矩阵，含逐条核实状态）
-> 本阶段**不动 TTS**（理由见第 8 节）
+> 本阶段**只搬 DashScope，行为零变化**；TTS 多厂商实现不动（理由见第 8 节）
 
 ---
 
@@ -17,7 +17,39 @@
 | 密钥解析 `agent/config/voice_key.py` | 三级优先里「回退主 LLM key」的条件是厂商常量 | 逻辑绑厂商 | 低 |
 | 播报 TTS `tts.py`(576) / `stream_tts.py`(493) | 直接继承 SDK 抽象基类，硬编码 22050Hz，两条合成路径并存 | **Inference 协议**（`run-task`/`task-started`/`continue-task`/`finish-task`），与 realtime 事件体系无关 | 高 → 本阶段不碰 |
 
+### 本阶段解耦范围（两套系统分别动哪一段）
+
+> 一句话：**只解「听」与「实时会话」，不解「说」（TTS）。**
+
+| 系统 | 本阶段动 | 本阶段不动 |
+|---|---|---|
+| `/talk` 全双工 | 会话协议元数据：`ws_url`、鉴权方式、模型名、音色名、`turn_detection` 能力、`session.update` 语义 → 从常量改为查表 | 状态机、响应救援、看门狗、AEC、音频 IO 鸭子类型接口 |
+| `/voice` 半双工 | **只动 STT 后端选择**：`create_stt()` 由无条件 QwenASR 改为按 `(vendor, model)` 查表；采样率/端点/模型名参数化 | **TTS 合成（CosyVoice）不动**；唤醒词、静默待机、打断、落库均与厂商无关，不动 |
+| 两套共用 | `voice_key` 解析去厂商硬编码（预留 `voice_stt_vendor` / `voice_tts_vendor` 覆盖位） | `voice_events` 事件协议、`realtime_const` 阈值、serve/桌面契约 |
+
+阶段一完成后的实际能力：`/talk` 可换**同构度 ≥90%** 的厂商；`/voice` 只有「听」能换，「说」仍是 DashScope——这正是第 1.1 节说的「混用」，允许且已预留解析位。
+
 **抽象形态复用仓库已验证的范式**：[agent/llm/provider_registry.py](../../../agent/llm/provider_registry.py) 的「表驱动 + 能力元数据」（13 项注册，新增厂商只加一行）。目标是把语音侧已存在的**隐式契约显式化**，而不是重写状态机——`realtime_engine.py` 的状态机逻辑零改动。
+
+---
+
+## 1.1 先回答：STT 与 TTS 能不能用不同厂商
+
+**能，但只限于半双工 `/voice`；全双工 `/talk` 在同一会话内不能混。**
+
+| 场景 | 能否混用 | 原因 |
+|---|---|---|
+| `/voice` 半双工 | **可以** | 识别与合成是两次独立调用，中间隔着 LLM；没有协议层耦合 |
+| `/talk` 全双工 | **不可以** | 识别是 realtime 会话的副产品（`input_audio_transcription`），播报音频也由同一会话产生；换厂商等于换整套会话协议 |
+| A 厂识别 → LLM → B 厂合成 | 可以，但属于 `/voice` 形态 | 会失去双工的打断体验，不属本阶段 |
+
+跨厂商混用时必须处理三件事：
+
+1. **音频格式桥接**：识别侧只吃 16kHz 单声道，播报侧是 22.05kHz；中间不能假设同源；
+2. **密钥与计费独立**：STT 与 TTS 可能各用一家 key，`voice_key` 不能再只解析一个 `dashscope_api_key`；
+3. **时序不变**：TTS 播报期间仍必须能被 STT/按键打断，换厂商不得把打断链路弄丢。
+
+因此**配置语义**定为：`voice_vendor` 只是默认值，解析顺序为「更细粒度覆盖（`voice_stt_vendor` / `voice_tts_vendor`）> `voice_vendor` > `dashscope`」。阶段一不对外暴露两个细粒度键，只在 resolver 里预留——以后加第二个 TTS 厂商时不需要再改 `voice_vendor` 的含义。
 
 ---
 
@@ -79,6 +111,8 @@ VoiceProviderMeta:
 | C（需事件映射层） | 豆包端到端、Azure GPT-Live、智谱 GLM-Realtime | 只留 meta 字段，不写代码 |
 | 基线未核实 | **OpenAI Realtime** | 留条目 + `verified=false`；官方文档本次直连 403，未一手核实前不得启用 |
 
+> **2026-11-24 拍板**：阶段一只做 DashScope 解耦并验证稳定性，本表与「建议首批 StepFun」整体保留为**二期名单**；S3（第二厂商）顺延，前置核实清单不删除。入选门槛与档位不变。
+
 ### 为什么首批建议 StepFun
 
 1. 协议文档最完整可得（客户端事件全文已拿到），是三家里唯一拿到全量一手规范的；
@@ -105,6 +139,7 @@ VoiceProviderMeta:
 | `agent/config/voice_key.py` | `resolve(settings, vendor="dashscope")`；保留三级优先，把「回退主 LLM key」的条件从厂商常量改为 `主 LLM 厂商 == 语音厂商` |
 | `agent/voice/stt/__init__.py` | `create_stt()` 由「无条件返回 QwenASR」改为按 `(vendor, model 前缀)` 查表分派 |
 | `agent/voice/stt/qwen.py` | 采样率、端点、模型名从入参/meta 取，去掉模块级常量依赖 |
+| `agent/commands/handlers/voice_commands.py` | `/listen` 与 `/talk` 改走 `voice_key` + `voice_providers`；`/listen` 不再用主 LLM key；`turn_detection` 过能力门 |
 | `agent/config/settings.py` + 目录 | 新增 `voice_vendor`（默认 `dashscope`，老用户零迁移）；`dashscope_api_key` **保留继续生效**并标注 deprecated |
 | `agent/config/catalog.py` | `dashscope_api_key`「实时语音专用的 DashScope 密钥」与 `realtime_talk`「DashScope 双向流」两条描述改写为厂商中立 |
 
@@ -135,6 +170,7 @@ VoiceProviderMeta:
 
 ## 8. 明确不做（本阶段）
 
+- **第二厂商接入**：本阶段只搬 DashScope，StepFun / 百度千帆 / Azure / OpenAI 均不写代码、不实机；S1 矩阵保留作二期名单；
 - **TTS 多厂商**：含 `_PlaybackCallback` 与 SDK `ResultCallback` 解绑、`tts.py`(576) 与 `stream_tts.py`(493) 两条合成路径合并、`VOICE_CATALOG` 分厂商 —— 独立立项（阶段二）；
 - 需要事件映射层的厂商（豆包、Azure GPT-Live、智谱）；
 - WebRTC / AOQ 通道；
@@ -159,14 +195,24 @@ VoiceProviderMeta:
 ## 10. 交付顺序与当前进度
 
 ```
-S1 调研 ──► 你拍板首批名单 ──► S4-1/2 回放测落地 ──► S2 抽象层（搬运 dashscope，行为不变）──► S3 第二厂商 ──► 文档与 CHANGELOG
- ✅ 完成         ⏳ 等你                      ⬜                              ⬜                          ⬜              ⬜
+S1 调研 ─► 拍板（DashScope-only）─► S4-1 帧序采集 ─► S2 抽象（搬 dashscope）─► S4-2 回放回归 + 实机走查 ─► 稳定性签收 ─► （二期）第二厂商
+ ✅ 完成            ✅ 2026-11-24                ⬜ 下一步                  🟡 代码已落地·待验证              ⬜                          ⬜                      ⏸ 暂缓
 ```
 
 - [x] **S1** 厂商协议同构度矩阵（含核实状态分级、门槛判定、四个设计发现、本地路线评估、S3 前置核实清单）
-- [ ] **关卡**：首批名单拍板（建议 StepFun）
-- [ ] **S3 前置核实**（接入前逐条实机确认，不可跳过）：StepFun 的 function calling 结果事件名（jarvis 依赖 `response.function_call_arguments.done`，名字不同则工具链静默失效）、`threshold` 的 0–5000 换算、无 `smart_turn` 时 `server_vad` 的打断表现、纯识别模型是否存在、音色能否中途更新
-- [ ] **S4-1/2** 帧序采集 + 回放测
-- [ ] **S2** 抽象层（先搬运、后切换）
-- [ ] **S3** 第二厂商接入 + 走查清单
-- [ ] 文档与对外数字同步
+- [x] **拍板**：先只做 DashScope 解耦；第二厂商（StepFun 等）暂缓到解耦验证通过之后
+- [ ] **S4-1 帧序采集**：从 diag 日志与 `realtime_events.py` 时间线导出至少两轮真实会话（打断、救援、`response.done[cancelled]`、error），落 `tests/fixtures/voice/*.jsonl`
+- [ ] **S2 抽象层**：新建 `voice_providers.py`，**先原样搬运 dashscope 条目**（`DEFAULT_WS_URL`、`DEFAULT_VOICE="longanqian"`、`smart_turn`/`server_vad`、两个模型名）；`voice_vendor` 默认 `dashscope`，老用户零迁移；状态机零改动
+  - 2026-11-24 已落地：`agent/voice/voice_providers.py`（`(vendor, series)` 注册表 + fail-closed 解析）、`[voice] vendor`（Settings/领域映射/目录/两份示例 TOML）、`realtime_talk` 默认值改从 meta 取、`create_stt` 按表分派、`engine_talk`/`voice_commands` 去厂商硬编码；新增 `tests/voice/test_voice_providers.py` 15 例；`tests/commands + tests/voice + tests/config` 共 1093 passed。回放/实机验证尚未做。
+- [ ] **S4-2 回归**：回放测断言客户端动作序列与基线一致；`/voice`、`/talk` 各三条主路径实机走查
+- [ ] **稳定性签收**：DashScope 解耦后行为不变、失败路径文案不回归；签收通过才解冻第二厂商
+- [ ] **文档与对外数字同步**
+
+### 本阶段完成定义（DoD）
+
+1. 未接第二厂商，但 `voice_providers.py` 已存在且 `dashscope` 条目是从现有常量搬运、非重写；
+2. 无 `voice_vendor` 的老配置按 `dashscope` 运行，Key 报错文案与 SDK 缺失提示与改造前一致；
+3. 回放测逐项一致（帧、UI 事件、静音窗口、救援时刻），且用例不依赖 key / 麦克风 / 端口；
+4. `/voice` 与 `/talk` 实机主路径全部通过；
+5. 解耦后 DashScope 连续使用无新增故障，才进入二期选型。
+

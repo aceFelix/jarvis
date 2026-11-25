@@ -55,8 +55,8 @@ LLM 可以是任何一家）。选 DeepSeek / OpenAI 的用户不配它就只能
 终端里也能直接改（与让模型改走**同一条写入路径**，只是入口不同）：
 
 ```
-/config list                              列出 62 项能替你改的配置（协议键 / 当前值 / 要不要确认）
-/config explain 自动清理                    查全部 207 项的说明、当前值与改法（与问它同一份东西）
+/config list                              列出 72 项能替你改的配置（协议键 / 当前值 / 要不要确认）
+/config explain 自动清理                    查全部 262 项的说明、当前值与改法（与问它同一份东西）
 /config explain --overview                按段看有哪些配置，哪几项能代改
 /config set tts_volume 30                 可直接改的项当场改并落盘
 /config set daily_max 20                  需确认的项先给预览（原值 → 新值 + 为什么要问）
@@ -99,9 +99,9 @@ LLM 可以是任何一家）。选 DeepSeek / OpenAI 的用户不配它就只能
 
 ### 不知道叫什么？问就行
 
-207 个配置项里，**62 项**它能替你改（29 项直接改、33 项先确认）；**1 项**它碰都
-不碰（禁改：沙箱与凭据那类护栏）；其余 **144 项**它知道存在、能说清在哪个文件哪个段，
-只是不代你动手。这 144 项你照样可以问——**不需要先知道字段名**，说功能就行：
+262 个配置项里，**72 项**它能替你改（29 项直接改、43 项先确认）；**2 项**它碰都
+不碰（禁改：沙箱与凭据那类护栏）；其余 **188 项**它知道存在、能说清在哪个文件哪个段，
+只是不代你动手。这 188 项你照样可以问——**不需要先知道字段名**，说功能就行：
 
 ```
 你：CPU 阈值太高了想调低点
@@ -113,7 +113,7 @@ LLM 可以是任何一家）。选 DeepSeek / OpenAI 的用户不配它就只能
     已装插件会不会被用上还看 [skills] enable，两道开关各管一段。
 
 你：都有哪些配置
-它：共 207 项，分布在 30 个段——tts 文字转语音（5 项，2 项可代改）/ monitor
+它：共 262 项，分布在 32 个段——tts 文字转语音（5 项，2 项可代改）/ monitor
     系统资源监控（7 项，7 项可代改）……
 ```
 
@@ -295,7 +295,7 @@ enable_thinking = true
 |---|---|---|
 | `realtime_model` | `"qwen-audio-3.0-realtime-flash"` | Realtime 模型 |
 | `realtime_voice` | `"longanqian"` | 实时语音音色 |
-| `realtime_half_duplex`（`[realtime_talk].half_duplex`） | `true` | 半双工：AI 说话期静音麦克风，外放稳定多轮；戴耳机设 false |
+| `realtime_half_duplex`（`[realtime_talk].half_duplex`） | `false` | 半双工轮替（默认关 = 全双工，可随时插话打断）；外放回声大导致 AI 被自己打断时设 true |
 | `realtime_rescue`（`[realtime_talk].rescue`） | `true` | 响应救援：服务端吞轮时补发一次 `response.create`（三闸门防重复回答） |
 | `realtime_turn_detection`（`[realtime_talk].turn_detection`） | `"server_vad"` | 轮次检测：`server_vad`（默认，尾音延长当前轮）/ `smart_turn`（语义判停，尾音易被重检） |
 | `realtime_silence_ms`（`[realtime_talk].silence_ms`） | `500` | server_vad 判停静音时长（毫秒，200~6000） |
