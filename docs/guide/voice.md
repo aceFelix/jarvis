@@ -87,7 +87,7 @@ Jarvis 提供两套独立的语音系统：
 - **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
   工作台 `--gui` 已于 2026-10 退役，见
   [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md)）
-- 退出方式：ESC 键或说"退下"
+- 退出方式：ESC 键或说"退下"；说退下会先播一句告别再退出
 
 > **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，
 > 已包含在 `[voice]` 可选依赖组中；未安装时半双工静音兜底。架构与静音/救援策略详见

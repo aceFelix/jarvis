@@ -145,6 +145,9 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         self._response_active = False
         # 优雅停止：end_conversation 工具触发后等待告别语音播放完毕
         self._graceful_stop_at: float | None = None
+        # 等告别语音：end_conversation 触发后，工具调用轮不算告别，
+        # 必须等下一条非工具回复播完才退出（用户要求“先回复我才退下”）。
+        self._await_farewell = False
         # 防御性超时：记录当前回复首个 audio delta 时间，超时主动截断
         self._response_start_ts: float | None = None
         # 打断代数：每次用户打断时递增，用于丢弃旧回复的残余音频
@@ -585,8 +588,10 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         """end_conversation：设置优雅停止宽限期，等告别语音播完再退出。
 
         由工具层通过回调触发（工具层不直接持有会话状态）。
+        工具调用轮本身不是告别，_end_response 会等下一条非工具回复。
         """
-        self._graceful_stop_at = _t.monotonic() + 4.0  # 4秒宽限期
+        self._await_farewell = True
+        self._graceful_stop_at = _t.monotonic() + 8.0  # 8秒宽限期（含告别生成+播放）
 
     #: 允许结束/退出的用户说法。只说“停一下/等一下/暂停/安静”不算。
     _END_INTENT_WORDS = (

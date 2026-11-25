@@ -56,6 +56,8 @@
 - 修复“叫他停还是把整段说完”：打断时置 `_discard_audio` 闸门，同一轮后续到达的
   音频帧一律不播（这些帧携带新代数，单靠 gen 检查拦不住），直到下一轮
   `response.created` 才解闸。
+- 退出体验：说“退下/再见”等结束语时，Jarvis 先播一句告别再退出；工具调用轮
+  不算告别，`_end_response` 等下一条非工具回复播完才结束会话（宽限 8s）。
 - **回退**：首版「有界播放队列 + 独立 writer」实机导致断续/混乱（`underrun #1/#20/#100`、
   双引擎 `local vad level=0.500`），已删除 `agent/voice/realtime_playback.py` 及对应单测。
   设计与教训见 `docs/plans/voice/realtime-barge-in.md`。
