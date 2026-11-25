@@ -251,7 +251,7 @@ FIELD_DOCS: dict[str, str] = {
     "window_follow_subagents": "子代理执行时是否也跟随窗口；默认关，避免多个代理抢屏",
     "window_cleanup": "任务收尾清理：transient 关掉本轮中间产物的窗口（只碰自己开的、跳过未保存）；off 一律不关",
     "window_cleanup_unknown": "工具未声明窗口意图时的默认策略：keep 保留（保守，宁多留不误关）、transient 关掉本轮被操作过的新窗口",
-    "voice_barge_in": "语音打断：播报中开口说话就停——Windows 上两个 PyAudio 并发会崩，默认关",
+    "voice_barge_in": "语音打断：播报/推理中开口就停（AEC+本地 VAD，单实例 PyAudio）；默认开，外放误触发可关",
     "voice_barge_in_key": "键盘打断：播报中按空格停止；不占 PyAudio，无崩溃风险",
     # 2026-11-09 语音交互补强（aceFelix）
     "voice_idle_standby_seconds": "对话阶段静默待机秒数：连续多少秒没说话自动进入待机等唤醒；0=关闭",

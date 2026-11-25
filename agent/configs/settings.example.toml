@@ -67,9 +67,9 @@ silence_seconds = 2    # 服务端 VAD 连续静音多少秒视为说完
 # vendor: 语音厂商（阶段一仅 dashscope）。它是默认值；将来 STT/TTS 可用
 # voice_stt_vendor / voice_tts_vendor 细分覆盖（当前未开放为配置项）。
 vendor = "dashscope"
-# barge_in: 语音打断——播报中开口说话自动打断。
-# 默认关闭——watcher 开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows 上会 segfault。
-barge_in = false
+# barge_in: 语音打断——播报/推理中开口说话自动打断（AEC + 本地 VAD）。
+# 默认开：单实例 PyAudio + AEC，不再有多实例 segfault；外放误触发时可关。
+barge_in = true
 # barge_in_key: 键盘打断——播报中按 Space 空格立即停止播报，切回聆听。
 # 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。
 barge_in_key = true

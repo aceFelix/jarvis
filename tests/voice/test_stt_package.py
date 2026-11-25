@@ -214,11 +214,11 @@ class TestSettingsContract:
 
         assert Settings().stt_model == "qwen3-asr-flash-realtime"
 
-    def test_voice_barge_in_defaults_off(self) -> None:
-        """麦克风 barge-in 默认关闭：watcher 会开第二个 PyAudio 实例。"""
+    def test_voice_barge_in_defaults_on(self) -> None:
+        """麦克风 barge-in 默认开：单实例 PyAudio + AEC，无多实例 segfault。"""
         from agent.config.settings import Settings
 
-        assert Settings().voice_barge_in is False
+        assert Settings().voice_barge_in is True
         assert Settings().voice_barge_in_key is True  # 键盘通道无风险，仍默认开
 
     def test_silence_threshold_field_removed(self) -> None:

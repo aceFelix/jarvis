@@ -1,9 +1,8 @@
 """语音打断监听器 —— 在 TTS 播报 / LLM 推理期间检测用户打断信号。
 
-从 voice_loop 拆出。含三类监听器:
-- _BargeInWatcher: 麦克风能量（RMS）监听，超阈值持续一段时间视为开口
+从 voice_loop 拆出。含两类监听器:
+- _BargeInWatcher: 麦克风能量（RMS）监听（旧实现，现由 voice_barge 取代）
 - _KeyBargeInWatcher: 键盘空格轮询（当前主循环实际使用的）
-- _VoiceBargeInDetector: 短 STT 录音 + 打断词检测
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from typing import Any
 
 # 复用 stt 模块的 RMS 计算（Python 3.13 无 audioop）
 from agent.voice.stt import _rms
-from agent.voice.wake_words import matches, resolve_interrupt_words
 
 _BARGE_IN_THRESHOLD = 2500     # RMS 阈值，远高于 STT 的 500，避免 TTS 自回声触发
 _BARGE_IN_MIN_SPEAK = 0.4      # 持续发声多少秒视为用户开口（防瞬时噪音误触发）
@@ -53,11 +51,7 @@ class _BargeInWatcher:
                 self._stream.close()
         except Exception:
             pass
-        try:
-            if self._pa is not None:
-                self._pa.terminate()
-        except Exception:
-            pass
+        # 不 terminate：全局 PyAudio 实例由 audio.release_pyaudio 统一释放
         if self._thread is not None:
             self._thread.join(timeout=1.0)
 
@@ -68,7 +62,8 @@ class _BargeInWatcher:
     def _run(self) -> None:
         try:
             import pyaudio
-            self._pa = pyaudio.PyAudio()
+            from agent.voice.audio import get_pyaudio
+            self._pa = get_pyaudio()
             self._stream = self._pa.open(
                 format=pyaudio.paInt16,
                 channels=1,
@@ -160,45 +155,3 @@ class _KeyBargeInWatcher:
     @property
     def triggered(self) -> bool:
         return self._triggered
-
-
-class _VoiceBargeInDetector:
-    """语音打断检测器：TTS 播报期间开短 STT 录音，检测中断词。
-
-    为避免 Windows PyAudio 双实例 segfault，每次短录后立即释放 PyAudio。
-    若 PyAudio 冲突则静默放弃当次检测，连续无冲突检测到中断词则触发打断。
-    """
-
-    def __init__(self, stt: Any, on_barge, settings: Any = None) -> None:
-        self._stt = stt
-        self._on_barge = on_barge
-        self._stop = threading.Event()
-        # 打断词表同样可配（[voice] interrupt_words）；不传 settings 则用内置默认
-        self._words = resolve_interrupt_words(settings)
-
-    def run(self) -> None:
-        """在后台线程中循环短录，检测到中断词则回调。"""
-        import time
-        self._stop.clear()
-        # 初始延迟：避免和 TTS WS 同时建立连接触发 DashScope RST
-        time.sleep(1.0)
-        while not self._stop.is_set():
-            try:
-                result = self._stt.listen(
-                    max_seconds=1.5,
-                    silence_seconds=0.5,
-                    on_partial=lambda t: None,
-                    on_open=lambda: None,
-                )
-                text = (result.get("text") or "").strip()
-                if text and matches(text, self._words):
-                    self._on_barge()
-                    break
-            except Exception:
-                pass
-            # 节流：每 3 秒最多一次 STT 短录，防止 WS 连接风暴
-            if not self._stop.is_set():
-                time.sleep(3.0)
-
-    def stop(self) -> None:
-        self._stop.set()

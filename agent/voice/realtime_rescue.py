@@ -68,10 +68,15 @@ class RealtimeRescueMixin:
             self._mic_resume_at = _t.monotonic() + gap
         ui.on_ai_speaking(False)
         ui.on_status("standby")
-        # 优雅停止：告别语音播放完毕，立即结束会话
+        # 优雅停止：等告别语音播完再退出。工具调用轮不是告别，
+        # 必须等下一条非工具回复（模型基于工具结果说的告别）播完。
         if self._graceful_stop_at is not None:
+            if is_tool_turn:
+                return
+            self._await_farewell = False
+            self._graceful_stop_at = None
             self._running = False
-            ui.info("🛑 end_conversation 优雅停止触发，会话即将结束")
+            ui.info("🛑 告别已播完，会话结束")
 
     # ------------------------------------------------------------------
     # 响应救援与看门狗

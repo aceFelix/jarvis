@@ -143,6 +143,12 @@ class _PlaybackCallback:
                 except Exception:
                     pass
         try:
+            # 把实际播放的 PCM 喂给 /voice barge-in 的 AEC 参考（无 watcher 时空操作）
+            from agent.voice import voice_barge
+            voice_barge.feed_playback(data)
+        except Exception:
+            pass
+        try:
             stream.write(data)
         except Exception as e:
             self._error = f"TTS 写入扬声器失败: {type(e).__name__}: {e}"

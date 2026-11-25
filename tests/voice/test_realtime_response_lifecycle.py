@@ -773,6 +773,25 @@ class TestDiscardGate:
         assert len(written) == 1
 
 
+class TestFarewellStop:
+    """end_conversation 后必须等告别语音播完才退出（先回复再退下）。"""
+
+    def test_tool_turn_waits_for_farewell_response(self):
+        rt = rt_mod.RealtimeTalk("sk-test")
+        rt._running = True
+        rt._request_graceful_stop()
+
+        # 工具调用轮结束 ≠ 告别，不能退出
+        rt._end_response(FakeTalkUI(), is_tool_turn=True)
+        assert rt._running is True
+        assert rt._graceful_stop_at is not None
+
+        # 下一条非工具回复（告别）播完才退出
+        rt._end_response(FakeTalkUI(), is_tool_turn=False)
+        assert rt._running is False
+        assert rt._graceful_stop_at is None
+
+
 class TestCancelWarningThrottle:
     """碎片式对话会连续多次 turn_detected 取消，事件链不能逐条刷屏。"""
 

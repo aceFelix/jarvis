@@ -61,9 +61,9 @@ silence_seconds = 1.5    # 服务端 VAD 连续静音多少秒视为说完
 # vendor: 语音厂商（阶段一仅 dashscope）。它是默认值；将来 STT/TTS 可用
 # voice_stt_vendor / voice_tts_vendor 细分覆盖（当前未开放为配置项）。
 vendor = "dashscope"
-# barge_in: 语音打断——播报中开口说话自动打断。
-# 默认关闭——watcher 开第二个 PyAudio 实例，与 TTS 的 PyAudio 并发在 Windows 上会 segfault。
-barge_in = false
+# barge_in: 语音打断——播报/推理中开口说话自动打断（AEC + 本地 VAD）。
+# 默认开：单实例 PyAudio + AEC，不再有多实例 segfault；外放误触发时可关。
+barge_in = true
 # barge_in_key: 键盘打断——播报中按 ESC 立即停止播报，切回聆听。
 # 默认启用，不占 PyAudio，无崩溃风险，daemon 无窗口也能全局捕获。想换键改 voice_loop.py _KeyBargeInWatcher 默认 key。
 barge_in_key = true
@@ -80,7 +80,7 @@ barge_in_key = true
 #   拼音容错依赖 pypinyin（pip install "jarvis-agent[voice]" 已含）；没装则只做字面匹配。
 # wake_words = ["贾维斯", "Jarvis"]
 # exit_words = ["退下", "拜拜"]        # 让它退下/待机
-# interrupt_words = ["闭嘴", "停"]     # 播报期间打断（需 barge_in = true）
+# interrupt_words = ["闭嘴", "停"]     # 旧关键词打断，已由开口打断取代（保留兼容，不再生效）
 
 [realtime_talk]
 # /talk 实时双工语音（DashScope qwen-audio-3.0-realtime-flash）。
