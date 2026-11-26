@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-26T08:20:45Z",
+  "updated_at": "2026-11-26T08:31:45Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -4873,6 +4873,12 @@
       "sha256": "9c2ad12910e4a8cec950a4b53a7ec7655d252fc373c746c497995f092cf4b237",
       "size": 11609,
       "normalized_sha256": "e6451dd7a86c54340dc6c98726d3d6ebecae101078d58cc9f3583b4b8314621f"
+    },
+    "tests/test_audio_layering_guard.py": {
+      "role": "observe",
+      "sha256": "ff13b02ec67b79782313c86b40d09e5e7c284e56d61562d60b53069c08070ced",
+      "size": 2759,
+      "normalized_sha256": "07d354919f182698024fef03b104c3984bbc7d35e80869091df0642030c1c006"
     },
     "tests/test_cli_reminder.py": {
       "role": "observe",
