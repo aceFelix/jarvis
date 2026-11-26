@@ -688,6 +688,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 语音能力厂商解耦（阶段一计划） | [plans/voice/voice-provider-decoupling.md](../plans/voice/voice-provider-decoupling.md) |
 | 能力自检与自我修复（升级计划） | [plans/config/capability-selfcheck.md](../plans/config/capability-selfcheck.md) |
 | 语音厂商协议同构度矩阵（S1 调研） | [research/voice-provider-matrix.md](../research/voice-provider-matrix.md) |
+| 语音前台与全职 Agent 协作方案对比（调研） | [research/voice-agent-collaboration-options.md](../research/voice-agent-collaboration-options.md) |
 | 架构设计（19 篇） | [architecture/00-索引.md](../architecture/00-索引.md) |
 | 全部路线图 | [roadmap/](../roadmap/) |
 

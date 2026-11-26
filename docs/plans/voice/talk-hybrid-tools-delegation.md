@@ -3,7 +3,8 @@
 > 状态：**待审核，未实施**（2026-11-26）
 > 作者：aceFelix　审阅：用户
 > 关联：[talk-voice-layering.md](talk-voice-layering.md)、
-> [roadmap/voice/PLAN-future-realtime-voice-upgrade.md](../../roadmap/voice/PLAN-future-realtime-voice-upgrade.md)
+> [roadmap/voice/PLAN-future-realtime-voice-upgrade.md](../../roadmap/voice/PLAN-future-realtime-voice-upgrade.md)、
+> 方案对比调研 [research/voice-agent-collaboration-options.md](../../research/voice-agent-collaboration-options.md)
 
 ## 1. 背景与结论
 
