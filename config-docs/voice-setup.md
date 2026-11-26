@@ -145,6 +145,12 @@ max_seconds = 15.0       # 单次录音最长秒数（客户端兜底超时）
 silence_seconds = 1.5    # 服务端 VAD 连续静音多少秒视为说完
 ```
 
+> **人设不在配置里**：`/talk` 的角色是「星期五（Friday）」——贾维斯之外的第二位智能管家
+> （2026-11-26 起），硬编码在 `agent/voice/realtime_talk.py` 的 `_INSTRUCTIONS_BUILTIN` /
+> `_INSTRUCTIONS_ALL`，由 `default_instructions()` 按 `tools_mode` 选择，终端与桌面同口径。
+> 要改称呼/性格只能改这两份常量（身份段保持一致）；`[realtime_talk]` 没有 instructions 字段。
+> `/voice` 的称呼另由 `[voice] wake_words` 决定（默认仍是贾维斯）。
+
 ---
 
 ## AEC 回声消除

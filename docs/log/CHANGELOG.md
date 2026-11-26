@@ -19,7 +19,15 @@
 
 ## [Unreleased]
 
-（暂无未发布变更）
+### 变更（/talk 人设改为星期五，2026-11-26）
+
+- `/talk` 实时语音的默认人设由「贾维斯」改为**星期五（Friday）**——贾维斯之外的
+  第二位智能管家，被问身份时自称星期五；`builtin` 与 `all` 两种工具模式的身份段
+  逐字一致（切工具面不换人格），终端与桌面/serve 路径共用 `default_instructions()`。
+- 人设仍硬编码在 `agent/voice/realtime_talk.py`，**无配置项可改**；`/voice` 与文本模式
+  的人设/画像注入（`agent/prompts/system.py`）不受影响，`/voice` 唤醒词默认仍是贾维斯。
+- 新增 `tests/voice/test_talk_persona.py`（9 例）：身份段一致、回退生效、显式 instructions
+  优先、退出意图门与「先告别再退出」话术不丢。
 
 ## [2.6.2] — 2026-11-26
 

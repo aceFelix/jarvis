@@ -59,6 +59,10 @@ Jarvis 提供两套独立的语音系统：
 基于 DashScope 实时语音 WebSocket 服务（`qwen-audio-3.0-realtime-flash`），2026-09-28 重构为
 **传输无关引擎（`RealtimeEngine`）+ 终端/桌面双适配器**：
 
+- **人设：星期五（Friday）**（2026-11-26 起）：贾维斯（JARVIS）之外的第二位智能管家，
+  被问身份时自称星期五。人设硬编码在 `agent/voice/realtime_talk.py` 的
+  `default_instructions()`（终端与桌面同口径），**无配置项可改**；`/voice` 与文本模式
+  仍走 `agent/prompts/system.py` 的人设/画像注入，不受此影响
 - **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
   轮次；`turn_detection = "smart_turn"` 可切语义判停（支持环境音转写/声纹增强）
 - **终端默认全双工（可插话打断）**：AI 说话期间照常上传（经 AEC 处理），开口即打断；

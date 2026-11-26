@@ -153,8 +153,8 @@ class EngineTalkMixin:
             api_key,
             model=getattr(s, "realtime_model", "") or meta.realtime_models[0],
             voice=getattr(s, "realtime_voice", "") or meta.default_voice,
-            # 贾维斯人设指令（与 RealtimeTalk 终端路径同口径回退）：此路径直接
-            # 构造父类 RealtimeEngine，无子类的默认话术回退，不传会得到空
+            # 星期五人设指令（与 RealtimeTalk 终端路径同口径回退，2026-11-26 改）：
+            # 此路径直接构造父类 RealtimeEngine，无子类的默认话术回退，不传会得到空
             # instructions → DashScope 实时模型回落自带默认人设（自称"小云"）。
             instructions=default_instructions(
                 getattr(s, "realtime_tools_mode", "builtin")

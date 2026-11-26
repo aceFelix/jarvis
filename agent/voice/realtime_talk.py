@@ -81,8 +81,12 @@ DEFAULT_SILENCE_MS = 500
 DEFAULT_VAD_THRESHOLD = 0.5
 
 # 内置工具模式（默认）的系统指令：工具面收敛为时间查询，话术同步收敛
+# 人设：星期五（Friday）——贾维斯之外的第二位智能管家（2026-11-26 改，aceFelix）。
+# 两份指令的身份段必须保持一致，否则切 tools_mode 会换人格。
 _INSTRUCTIONS_BUILTIN = (
-    "你是贾维斯，先生的全能管家。用简洁自然的口语回复，不要输出思考过程。"
+    "你是星期五Friday（Female Replacement Intelligent Digital Assistant Youth），"
+    "先生的第二位智能管家，贾维斯（JARVIS）之外的另一位管家。"
+    "被问到身份时自称星期五，不要自称贾维斯。用简洁自然的口语回复，不要输出思考过程。"
     "\n用户询问当前时间、日期、星期几时，先调用 get_current_time 工具获取"
     "实时信息，再用自然口语回答。"
     "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
@@ -94,8 +98,10 @@ _INSTRUCTIONS_BUILTIN = (
 )
 
 # 全量工具模式（tools_mode="all"）的系统指令：覆盖注册表 + MCP 工具面
+# 身份段与 _INSTRUCTIONS_BUILTIN 同口径（星期五，2026-11-26 改，aceFelix）
 _INSTRUCTIONS_ALL = (
-    "你是贾维斯，先生的全能管家。用简洁自然的口语回复，不要输出思考过程。"
+    "你是星期五（Friday），先生的第二位智能管家，贾维斯（JARVIS）之外的另一位管家。"
+    "被问到身份时自称星期五，不要自称贾维斯。用简洁自然的口语回复，不要输出思考过程。"
     "\n\n你拥有丰富的工具集，涵盖文件读写、代码搜索、Bash命令、浏览器操作、"
     "GUI控制、MCP外部服务（天气/时间/票务等）、网页搜索等。"
     "根据用户意图自行判断该调用哪个工具，优先使用专用工具而非 WebSearch。"
@@ -112,7 +118,7 @@ _INSTRUCTIONS_ALL = (
 
 
 def default_instructions(tools_mode: str = "builtin") -> str:
-    """按工具模式返回默认系统指令（贾维斯人设）。
+    """按工具模式返回默认系统指令（星期五人设）。
 
     RealtimeTalk 终端路径与桌面全双工路径（workbench engine
     `_handle_start_talk_duplex` 直接构造父类 RealtimeEngine）共用此回退，
@@ -122,6 +128,7 @@ def default_instructions(tools_mode: str = "builtin") -> str:
     （2026-10-09 误改 "all" 导致实时语音不可用后回退，勿再改）。
 
     @author aceFelix
+    @updated 2026-11-26  # 人设由贾维斯改为星期五（第二位智能管家）
     """
     return _INSTRUCTIONS_ALL if tools_mode == "all" else _INSTRUCTIONS_BUILTIN
 
@@ -220,7 +227,7 @@ class RealtimeTalk(RealtimeEngine):
         tools_mode: str = "builtin",
     ) -> None:
         self._tools_mode = tools_mode
-        # 未显式传入 instructions 时按工具模式选择默认话术（贾维斯人设回退）
+        # 未显式传入 instructions 时按工具模式选择默认话术（星期五人设回退）
         if not instructions:
             instructions = default_instructions(tools_mode)
         super().__init__(
