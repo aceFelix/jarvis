@@ -19,8 +19,8 @@ import threading
 import time
 from typing import Any, Callable
 
-from agent.voice.audio import get_pyaudio
-from agent.voice.realtime_audio import _rms
+from agent.audio.device import get_pyaudio
+from agent.audio.dsp import rms as _rms
 
 try:
     import pyaudio
@@ -131,7 +131,7 @@ class VoiceBargeWatcher:
             # 麦克风不可用：barge-in 静默降级，手动打断仍可用
             return
         try:
-            from agent.voice.aec import EchoCanceller, is_available
+            from agent.audio.aec import EchoCanceller, is_available
             if is_available():
                 self._aec = EchoCanceller()
         except Exception:

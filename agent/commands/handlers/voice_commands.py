@@ -63,7 +63,7 @@ def _listen(ui, settings, loop, ctx) -> None:
     # 语音厂商与密钥统一经 voice_providers + voice_key 解析（阶段一仅 dashscope）。
     # 旧实现用 settings.api_key：LLM 换成 DeepSeek 时会拿别家 key 连阿里云。
     from agent.config import voice_key as vk
-    from agent.voice import voice_providers as vp
+    from agent.audio import providers as vp
 
     vendor = vp.resolve_vendor(settings, kind="stt")
     try:
@@ -211,7 +211,7 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
     # 又写了另一份、并且写错了（只认环境变量 + 无条件回退主 LLM key，拿别家
     # key 硬连 DashScope 必被 1007 Access denied 秒拒）。现在三处共用一个实现。
     from agent.config import voice_key as vk
-    from agent.voice import voice_providers as vp
+    from agent.audio import providers as vp
 
     vendor = vp.resolve_vendor(settings)
     try:

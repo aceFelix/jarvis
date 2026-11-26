@@ -191,7 +191,7 @@ class TestVoiceLoopStopDuringListen:
 
         import agent.voice as voice_pkg
         import agent.voice.tts as tts_mod
-        import agent.voice.voice_state as voice_state
+        import agent.audio.mic_lock as voice_state
         import agent.voice.voice_loop  # noqa: F401
         from agent.voice.voice_loop import voice_loop
 

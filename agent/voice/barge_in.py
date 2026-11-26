@@ -62,7 +62,7 @@ class _BargeInWatcher:
     def _run(self) -> None:
         try:
             import pyaudio
-            from agent.voice.audio import get_pyaudio
+            from agent.audio.device import get_pyaudio
             self._pa = get_pyaudio()
             self._stream = self._pa.open(
                 format=pyaudio.paInt16,

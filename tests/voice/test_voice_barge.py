@@ -44,7 +44,7 @@ _HIGH = b"\xff\x7f" * 1600
 
 @pytest.fixture
 def no_aec(monkeypatch):
-    import agent.voice.aec as aec_mod
+    import agent.audio.aec as aec_mod
     monkeypatch.setattr(aec_mod, "is_available", lambda: False)
 
 

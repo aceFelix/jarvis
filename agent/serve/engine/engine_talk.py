@@ -40,7 +40,7 @@ class EngineTalkMixin:
             return
         s = self._settings
         from agent.config import voice_key as vk
-        from agent.voice import voice_providers as vp
+        from agent.audio import providers as vp
 
         vendor = vp.resolve_vendor(s)
         try:
@@ -121,7 +121,7 @@ class EngineTalkMixin:
 
         s = self._settings
         from agent.config import voice_key as vk
-        from agent.voice import voice_providers as vp
+        from agent.audio import providers as vp
 
         vendor = vp.resolve_vendor(s)
         try:

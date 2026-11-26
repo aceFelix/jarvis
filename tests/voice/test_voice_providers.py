@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.voice import voice_providers as vp
+from agent.audio import providers as vp
 
 
 class TestRegistryInvariants:

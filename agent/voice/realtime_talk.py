@@ -38,7 +38,7 @@ from .realtime_engine import RealtimeEngine
 from .realtime_mcp import load_mcp_tools_async as mcp_load_tools
 from .realtime_tools import BUILTIN_TOOLS, build_all_tools
 # 默认端点/音色/模型统一由注册表提供（阶段一只搬 dashscope，行为不变）
-from .voice_providers import DASHSCOPE_QWEN_AUDIO
+from agent.audio.providers import DASHSCOPE_QWEN_AUDIO
 
 try:
     import pyaudio
@@ -275,7 +275,7 @@ class RealtimeTalk(RealtimeEngine):
         # 麦克风互斥：/voice 与 /talk、以及两个 /talk 不能同时跑。
         # 2026-11-25 实机：两个引擎同时开麦/放音，互相把对方的声音当插话，
         # 表现为双份 local barge、声音混乱。没有锁时只能靠用户自己避。
-        from agent.voice.voice_state import acquire_voice_lock, release_voice_lock
+        from agent.audio.mic_lock import acquire_voice_lock, release_voice_lock
 
         lock_ok, lock_info = acquire_voice_lock()
         if not lock_ok:

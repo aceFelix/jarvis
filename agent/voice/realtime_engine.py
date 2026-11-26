@@ -72,7 +72,7 @@ except ImportError:
 
 # 回声消除（AEC）：消除扬声器回声，防止 AI 自言自语，同时保留打断能力
 try:
-    from .aec import EchoCanceller, is_available as _aec_available
+    from agent.audio.aec import EchoCanceller, is_available as _aec_available
     _HAS_AEC = _aec_available()
 except ImportError:
     _HAS_AEC = False
