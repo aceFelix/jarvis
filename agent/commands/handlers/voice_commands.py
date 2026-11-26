@@ -230,7 +230,7 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
         return
 
     try:
-        from agent.voice.realtime_talk import RealtimeTalk
+        from agent.talk.realtime_talk import RealtimeTalk
     except ImportError as e:
         ui.error(f"实时语音模块不可用: {e}")
         return
@@ -272,7 +272,7 @@ async def _realtime_talk(ui, settings, cmd_ctx=None) -> None:
     if cmd_ctx is not None:
         from agent.core.message import Message
         from agent.session_manager import advance_session
-        from agent.voice.talk_history import TalkHistoryRecorder
+        from agent.talk.talk_history import TalkHistoryRecorder
 
         persist_queue = asyncio.Queue()
 

@@ -5,7 +5,7 @@
 ``feed_talk_audio`` 把渲染进程送来的音频块喂给引擎、``_handle_stop_talk`` 收尾。
 
 这里只做编排：音频设备与 UI 装配在桌面壳/适配器侧，协议状态机在
-``agent.voice.realtime_engine``（及其拆出的 recv / rescue 模块）。
+``agent.talk.realtime_engine``（及其拆出的 recv / rescue 模块）。
 
 拆分动机：engine.py 原 1252 行、单类 46 个方法，实时对话两个 start 分支合计约 170 行，
 与文本对话回合挤在同一个类里。方法体逐行原样搬迁，行为与拆分前一致。
@@ -55,7 +55,7 @@ class EngineTalkMixin:
             )
             return
         try:
-            from agent.voice.realtime_talk import RealtimeTalk
+            from agent.talk.realtime_talk import RealtimeTalk
         except ImportError as e:
             self._emitter.emit("error", f"实时语音模块不可用: {e}")
             return
@@ -113,11 +113,11 @@ class EngineTalkMixin:
         import os
 
         from agent.serve import protocol
-        from agent.voice.realtime_bridge_audio import BridgeMic, BridgeSpk
-        from agent.voice.realtime_engine import RealtimeEngine
-        from agent.voice.realtime_mcp import load_mcp_tools_async as mcp_load_tools
-        from agent.voice.realtime_talk import default_instructions
-        from agent.voice.realtime_tools import BUILTIN_TOOLS, build_all_tools
+        from agent.talk.realtime_bridge_audio import BridgeMic, BridgeSpk
+        from agent.talk.realtime_engine import RealtimeEngine
+        from agent.talk.realtime_mcp import load_mcp_tools_async as mcp_load_tools
+        from agent.talk.realtime_talk import default_instructions
+        from agent.talk.realtime_tools import BUILTIN_TOOLS, build_all_tools
 
         s = self._settings
         from agent.config import voice_key as vk

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.voice import realtime_talk as rt_mod
+from agent.talk import realtime_talk as rt_mod
 
 #: 身份锚点：只钉「自称星期五 + 英文名 Friday」，不钉具体措辞（全称/缩写可调整）
 _NAME = "你是星期五"

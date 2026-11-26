@@ -1,4 +1,4 @@
-"""tests/voice 共享 fixture。
+"""tests/talk 共享 fixture。
 
 实时语音相关测试文件（test_realtime_observability /
 test_realtime_response_lifecycle）共用同一套环境准备，集中在此避免重复定义。
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from agent.voice import realtime_events as ev
-from agent.voice import realtime_talk as rt_mod
-from tests.voice._fakes import FakeDiag
+from agent.talk import realtime_events as ev
+from agent.talk import realtime_talk as rt_mod
+from tests.talk._fakes import FakeDiag
 
 
 @pytest.fixture()

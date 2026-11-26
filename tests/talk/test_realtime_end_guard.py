@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.voice import realtime_talk as rt_mod
-from agent.voice.realtime_tools import execute_tool
+from agent.talk import realtime_talk as rt_mod
+from agent.talk.realtime_tools import execute_tool
 
 
 class TestEndIntentGate:

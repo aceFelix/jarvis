@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from agent.voice.talk_history import TalkHistoryRecorder
+from agent.talk.talk_history import TalkHistoryRecorder
 
 
 class StubUI:
@@ -130,7 +130,7 @@ class TestRealtimeTalkPersistence:
     def test_talk_turns_are_appended_and_persisted(self, monkeypatch) -> None:
         import agent.commands.handlers.voice_commands as vc
         import agent.config.voice_key as vk
-        import agent.voice.realtime_talk as rt_mod
+        import agent.talk.realtime_talk as rt_mod
 
         monkeypatch.setattr(vk, "resolve", lambda _settings, **_: "key")
 
@@ -178,7 +178,7 @@ class TestRealtimeTalkPersistence:
         """未传 cmd_ctx（旧调用点）：UI 原样传入，不落库、不报错。"""
         import agent.commands.handlers.voice_commands as vc
         import agent.config.voice_key as vk
-        import agent.voice.realtime_talk as rt_mod
+        import agent.talk.realtime_talk as rt_mod
 
         monkeypatch.setattr(vk, "resolve", lambda _settings, **_: "key")
         seen: dict = {}

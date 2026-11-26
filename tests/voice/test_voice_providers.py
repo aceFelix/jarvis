@@ -56,7 +56,7 @@ class TestCarriedOverConstants:
     """搬运等价：旧常量与注册表逐值一致（行为零变化）。"""
 
     def test_module_constants_come_from_registry(self):
-        from agent.voice import realtime_talk as rt
+        from agent.talk import realtime_talk as rt
 
         meta = vp.provider_for("dashscope", kind="realtime")
         assert rt.DEFAULT_WS_URL == meta.ws_url

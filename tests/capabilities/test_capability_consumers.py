@@ -426,7 +426,7 @@ class TestRealtimeGate:
     """语音路径自己拼调度，不经编排器，所以要单独确认门在这里也生效。"""
 
     async def test_blocked_tool_returns_structured_error_without_executing(self, monkeypatch):
-        from agent.voice import realtime_tools as rt
+        from agent.talk import realtime_tools as rt
 
         monkeypatch.setattr(probe_mod, "_probe_all_requirements", _drive_state(ReqState.MISSING))
         tool = SpyTool()
@@ -447,7 +447,7 @@ class TestRealtimeGate:
 
     async def test_probe_crash_does_not_block_voice_call(self, monkeypatch):
         import agent.capabilities as caps
-        from agent.voice import realtime_tools as rt
+        from agent.talk import realtime_tools as rt
 
         def _boom(_name: str) -> str:
             raise RuntimeError("capabilities 模块坏了")
