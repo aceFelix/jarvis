@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-26T09:28:07Z",
+  "updated_at": "2026-11-26T09:48:19Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -1706,9 +1706,9 @@
     },
     "agent/talk/realtime_engine.py": {
       "role": "index",
-      "sha256": "e3322b3912f6a3951aa41c8d20e5d48d2ff5de5687379a009e59aa1690b2da74",
-      "size": 30696,
-      "normalized_sha256": "e3322b3912f6a3951aa41c8d20e5d48d2ff5de5687379a009e59aa1690b2da74"
+      "sha256": "56085107bfd1a8e99df07a7e2193a1b17a495911442d6a23841bf9af5888b30a",
+      "size": 31014,
+      "normalized_sha256": "56085107bfd1a8e99df07a7e2193a1b17a495911442d6a23841bf9af5888b30a"
     },
     "agent/talk/realtime_events.py": {
       "role": "index",
@@ -1736,15 +1736,15 @@
     },
     "agent/talk/realtime_talk.py": {
       "role": "index",
-      "sha256": "599cf30ff81ad491d68082d3fa1ed228914d45d21b197dc259a09c7ea29c43c9",
-      "size": 17325,
-      "normalized_sha256": "599cf30ff81ad491d68082d3fa1ed228914d45d21b197dc259a09c7ea29c43c9"
+      "sha256": "c5069519340cd2af48e8f760854ae3c5d00c08f1a74c42dfbf2c6b93daf3d1cf",
+      "size": 17943,
+      "normalized_sha256": "c5069519340cd2af48e8f760854ae3c5d00c08f1a74c42dfbf2c6b93daf3d1cf"
     },
     "agent/talk/realtime_tools.py": {
       "role": "index",
-      "sha256": "a245e78d9bd63ddb3e4e1d9eaab5dde952a0fbe64a2e99bf67a80f496b390cf1",
-      "size": 12590,
-      "normalized_sha256": "a245e78d9bd63ddb3e4e1d9eaab5dde952a0fbe64a2e99bf67a80f496b390cf1"
+      "sha256": "cc58934a7a7318fbfbff394c3321ba14ae56562dd96d6adb2edcdff3974fc3bf",
+      "size": 12565,
+      "normalized_sha256": "cc58934a7a7318fbfbff394c3321ba14ae56562dd96d6adb2edcdff3974fc3bf"
     },
     "agent/talk/talk_history.py": {
       "role": "index",
@@ -2126,9 +2126,9 @@
     },
     "agent/ui/cli.py": {
       "role": "index",
-      "sha256": "5392d9dd39c829fcc9efcb95262aa44e78cd2f9b761307774a92e075b9a5e312",
-      "size": 35525,
-      "normalized_sha256": "5392d9dd39c829fcc9efcb95262aa44e78cd2f9b761307774a92e075b9a5e312"
+      "sha256": "d69ebfa7743319d7d6ef445b5f52d44aadbdcaa394ad7cb3d0343d988f6f97ad",
+      "size": 35720,
+      "normalized_sha256": "d69ebfa7743319d7d6ef445b5f52d44aadbdcaa394ad7cb3d0343d988f6f97ad"
     },
     "agent/ui/cockpit.py": {
       "role": "index",
@@ -2516,9 +2516,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "4865026069552930b95ddd32820942a4a8186b03c5ce8a984a0b9d83f922fba2",
-      "size": 247867,
-      "normalized_sha256": "4865026069552930b95ddd32820942a4a8186b03c5ce8a984a0b9d83f922fba2"
+      "sha256": "b0721d139e8b6fc96583d9900ba49a65ae3d281ce8ed4d795823dfc504982c4c",
+      "size": 248112,
+      "normalized_sha256": "b0721d139e8b6fc96583d9900ba49a65ae3d281ce8ed4d795823dfc504982c4c"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2832,9 +2832,9 @@
     },
     "docs/architecture/06-语音系统.md": {
       "role": "index",
-      "sha256": "789e3be98a915a9cd196dcc8b02bcb2d91eb158d2c607680fcd4bb9d6963c834",
-      "size": 68433,
-      "normalized_sha256": "789e3be98a915a9cd196dcc8b02bcb2d91eb158d2c607680fcd4bb9d6963c834"
+      "sha256": "da12175794d494f3f2bd257e7193e2ceb4d4eef07ec84ab7e32856533f01883f",
+      "size": 69170,
+      "normalized_sha256": "da12175794d494f3f2bd257e7193e2ceb4d4eef07ec84ab7e32856533f01883f"
     },
     "docs/architecture/07-UI层.md": {
       "role": "index",
@@ -2964,15 +2964,15 @@
     },
     "docs/guide/voice.md": {
       "role": "index",
-      "sha256": "03f52dd4c146295adcaa879e4a5cc70023208c86ef602dcf47866dd921f10268",
-      "size": 9536,
-      "normalized_sha256": "03f52dd4c146295adcaa879e4a5cc70023208c86ef602dcf47866dd921f10268"
+      "sha256": "f83165742fe6d0178136ae5ec8322cc699365e326ad1c22a3342236e603511f5",
+      "size": 9716,
+      "normalized_sha256": "f83165742fe6d0178136ae5ec8322cc699365e326ad1c22a3342236e603511f5"
     },
     "docs/log/CHANGELOG.md": {
       "role": "index",
-      "sha256": "a8df721ff852913012de5d19e3901c4759b8d6ef4e543150d3192b8f6e0b422e",
-      "size": 46533,
-      "normalized_sha256": "a8df721ff852913012de5d19e3901c4759b8d6ef4e543150d3192b8f6e0b422e"
+      "sha256": "95ece97177c3ad318e63085c26c8927011cbf72de473ccd0076f1a58727a952b",
+      "size": 47541,
+      "normalized_sha256": "95ece97177c3ad318e63085c26c8927011cbf72de473ccd0076f1a58727a952b"
     },
     "docs/log/changelog/v2.2.md": {
       "role": "index",
@@ -4828,9 +4828,9 @@
     },
     "tests/talk/test_realtime_end_guard.py": {
       "role": "observe",
-      "sha256": "342504c2f00d82b2b4577a0ee86552e1f614fb0c1d8d631f52b357e54d0df818",
-      "size": 2094,
-      "normalized_sha256": "342504c2f00d82b2b4577a0ee86552e1f614fb0c1d8d631f52b357e54d0df818"
+      "sha256": "466849286226604177dc0e7ff7821c355f9275aef70aacffd4883239fc40f248",
+      "size": 2909,
+      "normalized_sha256": "466849286226604177dc0e7ff7821c355f9275aef70aacffd4883239fc40f248"
     },
     "tests/talk/test_realtime_observability.py": {
       "role": "observe",
@@ -4852,9 +4852,9 @@
     },
     "tests/talk/test_talk_persona.py": {
       "role": "observe",
-      "sha256": "4d37b874f745e3c8f736846c53a0d329a3c063739c5d922bdba8b74669c941aa",
-      "size": 3046,
-      "normalized_sha256": "055b292c559a76a40075cf56deb35945cb7db35a5fbd00b59f36305080e601b8"
+      "sha256": "d97007f077cd1e6e1ca9af2149f045db6983fe4c4e079e049b517fb7392e29ad",
+      "size": 3108,
+      "normalized_sha256": "503c2c1e8defa242e74f62657a9611b12faa30ef6c35b00f125da83185d72c31"
     },
     "tests/talk/test_talk_terminal.py": {
       "role": "observe",
@@ -5190,6 +5190,12 @@
       "sha256": "ec010619301d95f8f71cbd3f9f7762ac705310f5f4ec1773e1711f526b2e98c5",
       "size": 2655,
       "normalized_sha256": "ec010619301d95f8f71cbd3f9f7762ac705310f5f4ec1773e1711f526b2e98c5"
+    },
+    "tests/ui/test_cli_transcript_label.py": {
+      "role": "observe",
+      "sha256": "90944a99345376cf2efeaab1314198dcbdf4eee3c5e772d9b9a71257256cc076",
+      "size": 914,
+      "normalized_sha256": "5ad95535f0a072cb1043ffc19efec60e52cd8909073f0badb7aaa91c1ca11c17"
     },
     "tests/ui/test_cockpit.py": {
       "role": "observe",
