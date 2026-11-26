@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-26T05:01:30Z",
+  "updated_at": "2026-11-26T06:21:20Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -1508,9 +1508,9 @@
     },
     "agent/serve/engine/engine_talk.py": {
       "role": "index",
-      "sha256": "f00a8bc658838e5c39c76716ad9eb3efc5bd813ce005b6fbcdaf1f21caa64782",
-      "size": 11090,
-      "normalized_sha256": "f00a8bc658838e5c39c76716ad9eb3efc5bd813ce005b6fbcdaf1f21caa64782"
+      "sha256": "b29420ab28b8b50e54a4bb9c2219e72ae175130322ac363f1f204a553f7cd06b",
+      "size": 11107,
+      "normalized_sha256": "b29420ab28b8b50e54a4bb9c2219e72ae175130322ac363f1f204a553f7cd06b"
     },
     "agent/serve/engine/engine_voice.py": {
       "role": "index",
@@ -2276,9 +2276,9 @@
     },
     "agent/voice/realtime_talk.py": {
       "role": "index",
-      "sha256": "4c99f96325ecbe2edb1916b738102c4a55eb64350586b2490413424e26ff93c3",
-      "size": 16555,
-      "normalized_sha256": "4c99f96325ecbe2edb1916b738102c4a55eb64350586b2490413424e26ff93c3"
+      "sha256": "2de43825e7c69ced1223943b3265eac9d613a52d8bab43fadde610b5613ceddd",
+      "size": 17262,
+      "normalized_sha256": "2de43825e7c69ced1223943b3265eac9d613a52d8bab43fadde610b5613ceddd"
     },
     "agent/voice/realtime_tools.py": {
       "role": "index",
@@ -2408,9 +2408,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "90965cbabd8a54defb6048effe465cc04de2209d9104f18db6ef83a8ae0b1913",
-      "size": 246743,
-      "normalized_sha256": "90965cbabd8a54defb6048effe465cc04de2209d9104f18db6ef83a8ae0b1913"
+      "sha256": "03ba37cd3c875e1e847436d155572f22c2c6617b9f77d92e13786fa46417967d",
+      "size": 246896,
+      "normalized_sha256": "03ba37cd3c875e1e847436d155572f22c2c6617b9f77d92e13786fa46417967d"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2580,9 +2580,9 @@
     },
     "config-docs/voice-setup.md": {
       "role": "index",
-      "sha256": "de2a55ca2c1be8131737f5a209d259d6c3fd77c75535739d2336a53f2dfe9902",
-      "size": 23983,
-      "normalized_sha256": "de2a55ca2c1be8131737f5a209d259d6c3fd77c75535739d2336a53f2dfe9902"
+      "sha256": "b0780a1cec34435eb3edef23235554ee5c184f65ae91faafa174d773ff292a5e",
+      "size": 24521,
+      "normalized_sha256": "b0780a1cec34435eb3edef23235554ee5c184f65ae91faafa174d773ff292a5e"
     },
     "configs/models.example.toml": {
       "role": "index",
@@ -2724,9 +2724,9 @@
     },
     "docs/architecture/06-语音系统.md": {
       "role": "index",
-      "sha256": "c798cb7b69ca31db6cd588225bf82a212de3881c2f073c99480caa02a43407f4",
-      "size": 65428,
-      "normalized_sha256": "c798cb7b69ca31db6cd588225bf82a212de3881c2f073c99480caa02a43407f4"
+      "sha256": "8438d4b8489e6aa4c44e658d3fb94d6478744a4c82a994f207db7b50d0383cfd",
+      "size": 66916,
+      "normalized_sha256": "8438d4b8489e6aa4c44e658d3fb94d6478744a4c82a994f207db7b50d0383cfd"
     },
     "docs/architecture/07-UI层.md": {
       "role": "index",
@@ -2856,15 +2856,15 @@
     },
     "docs/guide/voice.md": {
       "role": "index",
-      "sha256": "26c42395fbdd5f5034822ce8a4af22f5c74422044f98d91cb01c55488a2903ed",
-      "size": 9150,
-      "normalized_sha256": "26c42395fbdd5f5034822ce8a4af22f5c74422044f98d91cb01c55488a2903ed"
+      "sha256": "bc6a35a234f1fe755f354bc70a3542cec32a5d1ce84819e7b0d8bfff97ec4485",
+      "size": 9538,
+      "normalized_sha256": "bc6a35a234f1fe755f354bc70a3542cec32a5d1ce84819e7b0d8bfff97ec4485"
     },
     "docs/log/CHANGELOG.md": {
       "role": "index",
-      "sha256": "3c7b68791f1eda00d177bb1bc50c3c7c1d1be154f55b998cfe3f5bbd3855ce19",
-      "size": 44380,
-      "normalized_sha256": "3c7b68791f1eda00d177bb1bc50c3c7c1d1be154f55b998cfe3f5bbd3855ce19"
+      "sha256": "ef4cb33f912c28e7d193e5707f83a5a972767dee2f3915f1dab6034d4425aa81",
+      "size": 45140,
+      "normalized_sha256": "ef4cb33f912c28e7d193e5707f83a5a972767dee2f3915f1dab6034d4425aa81"
     },
     "docs/log/changelog/v2.2.md": {
       "role": "index",
@@ -5155,6 +5155,12 @@
       "size": 8039,
       "normalized_sha256": "5a45c5b9c0a9307ef93bb4fbb1e0a66793a6a791ea74ad1ed84e01bc60666b08"
     },
+    "tests/voice/test_talk_persona.py": {
+      "role": "observe",
+      "sha256": "871543a01959452203ded93255a800bd67c515637d04701821b31b85a029d4d3",
+      "size": 2963,
+      "normalized_sha256": "40b60486a369cfc97e384da4ef55dc646793bb352b213b7f0e5ac877d9c9dac5"
+    },
     "tests/voice/test_talk_terminal.py": {
       "role": "observe",
       "sha256": "23cbae21a8597d2338e2d45843c32566b5249779f34b67d757eb3616b36bcd6a",
@@ -5193,8 +5199,8 @@
     },
     "tests/voice/test_voice_barge.py": {
       "role": "observe",
-      "sha256": "a0ed70e0e431f0007ce8614db5f83d31ae71128a9e3f75e210af822a950abd77",
-      "size": 3846,
+      "sha256": "7b14dca4d5880fe988d1dd9d9c1169f563b1532a57c235c52eb3141e9b437dd6",
+      "size": 3715,
       "normalized_sha256": "7b14dca4d5880fe988d1dd9d9c1169f563b1532a57c235c52eb3141e9b437dd6"
     },
     "tests/voice/test_voice_dependency_preflight.py": {
