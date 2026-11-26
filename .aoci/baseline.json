@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-26T09:48:19Z",
+  "updated_at": "2026-11-26T16:10:42Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -2516,9 +2516,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "b0721d139e8b6fc96583d9900ba49a65ae3d281ce8ed4d795823dfc504982c4c",
-      "size": 248112,
-      "normalized_sha256": "b0721d139e8b6fc96583d9900ba49a65ae3d281ce8ed4d795823dfc504982c4c"
+      "sha256": "cd45382a2800730c6d330136902b8f008847c8da8b25086cd611965deedc3262",
+      "size": 248651,
+      "normalized_sha256": "cd45382a2800730c6d330136902b8f008847c8da8b25086cd611965deedc3262"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -2922,9 +2922,9 @@
     },
     "docs/blueprint/BLUEPRINT.md": {
       "role": "index",
-      "sha256": "bea74cb0762f0491f74902b7ac400a761173298732984aa79c14cd30fcd176bd",
-      "size": 61073,
-      "normalized_sha256": "bea74cb0762f0491f74902b7ac400a761173298732984aa79c14cd30fcd176bd"
+      "sha256": "7ac5b0369383daeea9456b185fe9b15ed07c8f1a500d320029c97a17da174410",
+      "size": 61236,
+      "normalized_sha256": "7ac5b0369383daeea9456b185fe9b15ed07c8f1a500d320029c97a17da174410"
     },
     "docs/guide/commands.md": {
       "role": "index",
@@ -3009,6 +3009,12 @@
       "sha256": "6c616e6f07f7ea3f23e40440561ce88108066d71240e50ba9300fc6bdd84ffca",
       "size": 11537,
       "normalized_sha256": "6c616e6f07f7ea3f23e40440561ce88108066d71240e50ba9300fc6bdd84ffca"
+    },
+    "docs/research/voice-agent-collaboration-options.md": {
+      "role": "index",
+      "sha256": "a030959faaeab1ba4c3733d8e7fee56d7bd58fa0cefdb14d443b2bf8c4033efe",
+      "size": 10602,
+      "normalized_sha256": "170067163717706a677035f33663786a5c0b2e28afdf6e2b82895d44c51d62d7"
     },
     "docs/research/voice-provider-matrix.md": {
       "role": "index",
