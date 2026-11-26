@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T13:08:44Z",
-  "updated_at": "2026-11-26T06:21:20Z",
+  "updated_at": "2026-11-26T06:34:49Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -2276,9 +2276,9 @@
     },
     "agent/voice/realtime_talk.py": {
       "role": "index",
-      "sha256": "2de43825e7c69ced1223943b3265eac9d613a52d8bab43fadde610b5613ceddd",
-      "size": 17262,
-      "normalized_sha256": "2de43825e7c69ced1223943b3265eac9d613a52d8bab43fadde610b5613ceddd"
+      "sha256": "b5ee5bab9c74d3da3388f93d88fb31e69c1eb95e32330614bb3f5471927ee787",
+      "size": 17323,
+      "normalized_sha256": "b5ee5bab9c74d3da3388f93d88fb31e69c1eb95e32330614bb3f5471927ee787"
     },
     "agent/voice/realtime_tools.py": {
       "role": "index",
@@ -2408,9 +2408,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "03ba37cd3c875e1e847436d155572f22c2c6617b9f77d92e13786fa46417967d",
-      "size": 246896,
-      "normalized_sha256": "03ba37cd3c875e1e847436d155572f22c2c6617b9f77d92e13786fa46417967d"
+      "sha256": "8547b6085c010726f746ae331d7850b9bc5e6207f3afb75dbd52442553d76546",
+      "size": 246936,
+      "normalized_sha256": "8547b6085c010726f746ae331d7850b9bc5e6207f3afb75dbd52442553d76546"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -5157,9 +5157,9 @@
     },
     "tests/voice/test_talk_persona.py": {
       "role": "observe",
-      "sha256": "871543a01959452203ded93255a800bd67c515637d04701821b31b85a029d4d3",
-      "size": 2963,
-      "normalized_sha256": "40b60486a369cfc97e384da4ef55dc646793bb352b213b7f0e5ac877d9c9dac5"
+      "sha256": "582c825e34ca878caebac8837086b4fd4a48be190a8f55391866c7f512d7e1af",
+      "size": 3047,
+      "normalized_sha256": "4d8b91a4b08a88a4014bb9f64d1b14dafd0111cd436b650f965ac2e08f171cbf"
     },
     "tests/voice/test_talk_terminal.py": {
       "role": "observe",
