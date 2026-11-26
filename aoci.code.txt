@@ -10,8 +10,8 @@ MANIFEST.in[FV4T]: F:Setuptools manifest listing the files shipped in the source
 README.en.md[SG7M]: F:English README mirroring README.md: problem matrix, capability table, platform matrix, doc map, and a Contributing section. | R:code:README.md,code:CONTRIBUTING.md,code:docs/blueprint/BLUEPRINT.md | A:- | S:Must stay a mirror of README.md; section order and claims are kept in sync
 README.md[SG7M]: F:项目落地页：痛点对照、核心能力表、平台矩阵、文档地图，以及参与贡献入口（CONTRIBUTING/SECURITY/CODE_OF_CONDUCT）。 | R:code:README.en.md,code:CONTRIBUTING.md,code:docs/blueprint/BLUEPRINT.md | A:- | S:README 只镜像体例不写实现细节；中英两份章节顺序与主张须同步
 USER_GUIDE.md[SU5L]: F:终端用户人设化指南（新手第一站）：我是谁、快速上手、日常使用、命令速查、语音、电脑操作、桌面入口、权限模式、模型管理、多 Agent、CLI-Anything、插件技能、副作用撤销与任务脊柱、清理查毒体检、配置详解。 | R:code:README.md,code:docs/architecture/19-系统维护层.md | A:- | S:加命令须同步改正文；收尾只关中间产物；清理默认关但只读报告仍可用；--gui/--talk 已删除
-pyproject.toml[FV5S]: F:jarvis-agent 的项目清单：核心依赖（含 beautifulsoup4）、8 个可选 extras、console 入口、package-data、pytest 配置与 PyPI 元数据（版本 2.6.1）。 | R:code:npm/package.json,code:agent/__init__.py,code:packaging/jarvis-serve.spec | A:- | S:version 与 npm、__version__、uv.lock 四处一致；extras 的 ui/realtime 已删别补回；vision 必须带 paddlepaddle；核心含 beautifulsoup4，固定 html.parser 不引 lxml。
-uv.lock[FV4L]: F:uv 生成的锁文件：钉住 jarvis-agent 的已解析依赖版本与哈希。 | R:code:pyproject.toml | A:- | S:依赖变更后必须重新生成；自身版本行也要同步（现 2.6.1），否则发布契约测试失败。
+pyproject.toml[FV5S]: F:jarvis-agent 的项目清单：核心依赖（含 beautifulsoup4）、8 个可选 extras、console 入口、package-data、pytest 配置与 PyPI 元数据（版本 2.6.2）。 | R:code:npm/package.json,code:agent/__init__.py,code:packaging/jarvis-serve.spec | A:- | S:version 与 npm、__version__、uv.lock 四处一致；extras 的 ui/realtime 已删别补回；vision 必须带 paddlepaddle；核心含 beautifulsoup4，固定 html.parser 不引 lxml。
+uv.lock[FV4L]: F:uv 生成的锁文件：钉住 jarvis-agent 的已解析依赖版本与哈希。 | R:code:pyproject.toml | A:- | S:依赖变更后必须重新生成；自身版本行也要同步（现 2.6.2），否则发布契约测试失败。
 CODE_OF_CONDUCT.md[SG2T]: F:贡献者行为准则：承诺、期望行为、不可接受行为、适用范围与执行方式，改编自 Contributor Covenant 2.1。 | R:- | A:- | S:违规投诉走私下渠道处理，不在公开区讨论细节
 CONTRIBUTING.md[SG6M]: F:贡献指南：可贡献类型、开发环境、测试与 CI 门禁、代码约定、提交规范、Fork/PR 流程、双远程说明与维护者发布流程。 | R:code:README.md,code:SECURITY.md,code:CODE_OF_CONDUCT.md | A:- | S:版本号四处同步、配置项五处同步、新命令三处登记；tag 触发发布后不可重发，必须在打 tag 前跑完测试与构建
 SECURITY.md[SG6T]: F:安全策略：支持版本、漏洞私密上报（优先 GitHub Security Advisories）、报告内容清单与既有防线概览。 | R:code:CONTRIBUTING.md | A:- | S:禁止公开贴漏洞细节与真实密钥；修复发布前不公开；仅最新版本接收安全修复
@@ -22,7 +22,7 @@ gitleaks.yml[OS6T]: F:GitHub Actions secret-scanning workflow that runs Gitleaks
 publish.yml[OV7M]: F:Release workflow triggered by v* tags: runs tests, builds wheel and sdist, publishes to PyPI and npm, and creates a GitHub Release | R:code:.github/workflows/ci.yml | A:on.push.tags | S:Same F821 gate as ci.yml before the pytest step, so a known-broken package never reaches PyPI or npm; PyPI uses Trusted Publisher OIDC while npm needs NPM_TOKEN.
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/===
-__init__.py[CG4T]: F:agent 包的标记模块，导出版本号字符串。 | R:- | A:__version__ | S:四处同写版本号（pyproject / npm / 本文件 / uv.lock），由 test_release_contract.py 把关；当前 2.6.1
+__init__.py[CG4T]: F:agent 包的标记模块，导出版本号字符串。 | R:- | A:__version__ | S:四处同写版本号（pyproject / npm / 本文件 / uv.lock），由 test_release_contract.py 把关；当前 2.6.2
 bootstrap.py[AG6S]: F:装配工厂：从 Settings 构建 provider、checker、recovery、context 并装配副作用账本单例，供 main、daemon、query_loop、model_manager 共用。 | R:code:agent/llm/provider_registry.py,code:agent/llm/model_capability.py,code:agent/core/actions/__init__.py | A:_build_provider,_build_context,_model_type_for,init_actions,_build_checker,init_extension_switches | S:只在 TYPE_CHECKING 下导入 ToolRecoveryExecutor 供注解，运行时仍延迟导入（error_recovery 反过来依赖本模块）；新增厂商只往 PROVIDER_REGISTRY 加；model_type 默认 unknown。
 doctor.py[XO5L]: F:Dependency health check for jarvis --doctor: probes Python packages, system tools, browsers, WebView2 and config files, printing rich tables and a pass rate. | R:code:agent/main.py | A:run_doctor,_PKG_CHECKS | S:Probes packages with importlib.util.find_spec instead of importing, so missing native libs (pyaudio) emit no side-effect logs; exit code is 1 whenever any item fails.
 main.py[AG9L]: F:CLI 入口：解析参数、载配置、装配 provider/registry/checker/loop 与操作可见性，跑 REPL/doctor/init/serve；每轮文本对话统一交 advance_session 保存并生成标题。 | R:code:agent/bootstrap.py,code:agent/core/query_loop.py,code:agent/prompts/system.py,code:agent/session_manager.py,code:agent/llm/hotswap.py | A:main,parse_args,repl | S:提示词等 ToolSearch 注册完再拼；首启写完盘重新 load_settings；退出前收后台线程；终端入口必须注册 LLM 热重建回调，否则改 model 只落盘不生效。
@@ -443,7 +443,7 @@ TEST_CHECKLIST-system-maintenance.md[TG5S]: F:系统维护层实机走查分册�
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/npm/===
 README.md[SV4S]: F:npm wrapper readme: the @acefelix/jarvis package page mirroring the GitHub product README for the npm registry. | R:code:npm/package.json | A:- | S:Product-README mirror, not the maintainer guide; tool count is now 70+ (100+ with MCP/harness).
 install.js[XV4M]: F:postinstall script: detects a Python interpreter and installs the jarvis-agent package, preferring uv and offering extras. | R:- | A:- | S:Non-TTY CI installs [all] silently; the realtime window menu option is gone with pywebview retired.
-package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本 2.6.1、bin 入口与装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本须等于 pyproject 版本，否则 --version 与包版本不一致。
+package.json[FV4T]: F:@acefelix/jarvis 的包清单：名称、版本 2.6.2、bin 入口与装 Python 包的 postinstall 钩子。 | R:code:pyproject.toml,code:agent/__init__.py | A:- | S:npm 版本须等于 pyproject 版本，否则 --version 与包版本不一致。
 run.js[XV4S]: F:Launcher script: locates the installed jarvis entry point and forwards the command-line arguments to it. | R:- | A:- | S:A wrapper launcher must resolve the real entry point and pass arguments through unchanged.
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/packaging/===
@@ -567,7 +567,7 @@ memory_update.py[IC7T]: F:MemoryUpdate 工具：用户明确要求记住时，�
 recall_profile.py[ID6M]: F:画像按需检索工具（RecallProfile）：search 模式本地字面召回具体事实，list 模式按类别与权重分页列出全部有效条目，只读且延迟加载。 | R:code:agent/core/memory/profile_store.py,code:agent/core/tool.py,code:agent/core/result.py,code:agent/prompts/system.py | A:RecallProfileTool,validate_input,_list,call | S:只读且延迟加载；search 缺 query 必须拒并提示改 list；top_k 夹在 1–20、limit 1–50；休眠条目也要能检索到；画像库异常返回 is_error，不炸穿工具层。
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/docs/log/===
-CHANGELOG.md[SV5L]: F:版本更新日志：按语义化版本记录新增、修复与文档变更；2.6.1 与 Unreleased 收录语音厂商解耦、默认全双工、真打断、/voice 开口打断与告别后退出。 | R:code:README.md,code:docs/architecture/09-记忆与压缩.md,code:docs/guide/desktop.md,code:pyproject.toml | A:- | S:版本号四处（pyproject/__init__/npm/uv.lock）由 test_release_contract 把守；已发布段落带日期即冻结；新改动先记 Unreleased；历史分册在 docs/log/changelog/。
+CHANGELOG.md[SV5L]: F:版本更新日志：按语义化版本记录新增、修复与文档变更；2.6.2 收录语音厂商解耦、默认全双工、真打断、/voice 开口打断、告别后退出与无 pyaudio 修复。 | R:code:README.md,code:docs/architecture/09-记忆与压缩.md,code:docs/guide/desktop.md,code:pyproject.toml | A:- | S:版本号四处（pyproject/__init__/npm/uv.lock）由 test_release_contract 把守；已发布段落带日期即冻结；新改动先记 Unreleased；历史分册在 docs/log/changelog/。
 
 ===E:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/.github/ISSUE_TEMPLATE/===
 bug_report.md[SG3T]: F:Bug 报告 Issue 模板：环境（版本/平台/Python/安装方式/终端）、复现步骤、期望与实际、脱敏日志与自查清单。 | R:code:CONTRIBUTING.md | A:- | S:日志与配置必须先脱敏再贴；模板要求声明已搜过已有 Issue，否则重复问题会淹没真实缺陷
