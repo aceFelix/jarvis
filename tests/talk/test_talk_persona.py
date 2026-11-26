@@ -62,7 +62,9 @@ def test_explicit_instructions_win() -> None:
 
 @pytest.mark.parametrize("mode", ["builtin", "all"])
 def test_exit_gate_and_farewell_kept(mode: str) -> None:
-    """改人设不能丢掉退出意图门与「先告别再退出」约束（2026-11-25 交付的行为）。"""
+    """改人设不能丢掉退出约束，且要求自然表达而不是念规则（2026-11-26）。"""
     text = rt_mod.default_instructions(mode)
-    assert "绝不能调用 end_conversation" in text
+    assert "end_conversation" in text
+    assert "停一下" in text
+    assert "不要要求用户换一种说法" in text
     assert "告别" in text

@@ -61,8 +61,8 @@ Jarvis 提供两套独立的语音系统：
 
 - **人设：星期五（Friday）**（2026-11-26 起）：贾维斯（JARVIS）之外的第二位智能管家，
   被问身份时自称星期五。人设硬编码在 `agent/talk/realtime_talk.py` 的
-  `default_instructions()`（终端与桌面同口径），**无配置项可改**；`/voice` 与文本模式
-  仍走 `agent/prompts/system.py` 的人设/画像注入，不受此影响
+  `default_instructions()`（终端与桌面同口径），**无配置项可改**；终端转写标签同步为
+  `🤖 星期五:`。`/voice` 与文本模式仍走 `agent/prompts/system.py` 的人设/画像注入，不受此影响
 - **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
   轮次；`turn_detection = "smart_turn"` 可切语义判停（支持环境音转写/声纹增强）
 - **终端默认全双工（可插话打断）**：AI 说话期间照常上传（经 AEC 处理），开口即打断；
@@ -92,7 +92,8 @@ Jarvis 提供两套独立的语音系统：
 - **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
   工作台 `--gui` 已于 2026-10 退役，见
   [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md)）
-- 退出方式：ESC 键或说"退下"；说退下会先播一句告别再退出
+- 退出方式：ESC 键，或自然说“退下吧 / 不聊了 / 去忙吧 / 再见 / 拜拜 / 没事了”（说退下会先播一句告别再退出）；
+  只是“停一下 / 等一下 / 暂停”不会退出
 
 > **AEC 依赖**：终端回声消除依赖 `aec-audio-processing`（WebRTC AEC3 Python 绑定）和 `numpy`，
 > 已包含在 `[voice]` 可选依赖组中；未安装时半双工静音兜底。架构与静音/救援策略详见
