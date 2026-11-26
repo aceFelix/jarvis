@@ -144,6 +144,8 @@ Python 侧零新增 ASR、不抢麦克风；桌面 `on_status("standby")` 已映
 
 ## 关联现状文档
 
+- 工具混合（少量直带 + `delegate_task` 委派后台全量 Agent）：
+  [talk-hybrid-tools-delegation.md](../../plans/voice/talk-hybrid-tools-delegation.md)（草案）。
 - 稳定性升级（重连/抖动缓冲/客户端 VAD/淡出打断）见 [PLAN-p1-realtime-stability.md](PLAN-p1-realtime-stability.md)。
 - 半双工/回声/唤醒既有实现：`agent/voice/voice_loop.py`、`agent/voice/voice_config.py`。
 - 实时引擎与桌面桥接：`agent/talk/realtime_engine.py`、`agent/talk/realtime_bridge_audio.py`、
