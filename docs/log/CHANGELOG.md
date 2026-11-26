@@ -9,7 +9,7 @@
 
 | 系列 | 收录版本 | 位置 |
 |---|---|---|
-| 2.6.x | 2.6.0 — 2.6.1 | 本文文件 |
+| 2.6.x | 2.6.0 — 2.6.2 | 本文文件 |
 | 2.5.x | 2.5.0 – 2.5.4 | [changelog/v2.5.md](changelog/v2.5.md) |
 | 2.4.x | 2.4.0 | [changelog/v2.4.md](changelog/v2.4.md) |
 | 2.3.x | 2.3.0 – 2.3.5 | [changelog/v2.3.md](changelog/v2.3.md) |
@@ -18,6 +18,14 @@
 更早的版本记录见 GitHub Releases。
 
 ## [Unreleased]
+
+（暂无未发布变更）
+
+## [2.6.2] — 2026-11-26
+
+这一版把语音交互补齐成「能被打断、会好好告别」：语音厂商解耦为注册表、`/talk` 默认
+全双工并实现真打断（停流再启 + 音频闸门）、`/voice` 开口即停（AEC + 本地 VAD），
+说「退下」时先播一句告别再退出；同时修掉无 pyaudio 环境下打断看守静默失效的缺陷。
 
 ### 变更（语音厂商解耦阶段一，2026-11-24）
 
@@ -65,6 +73,17 @@
 - **回退**：首版「有界播放队列 + 独立 writer」实机导致断续/混乱（`underrun #1/#20/#100`、
   双引擎 `local vad level=0.500`），已删除 `agent/voice/realtime_playback.py` 及对应单测。
   设计与教训见 `docs/plans/voice/realtime-barge-in.md`。
+
+### 修复（无 pyaudio 环境打断看守静默失效，2026-11-25）
+
+- `VoiceBargeWatcher._run()` 为取 `paInt16` 而 `import pyaudio`，在未安装 pyaudio 的 CI
+  runner 上抛 ImportError 被外层 except 吞掉，看守从不启动、语音打断静默失效（本地装了
+  pyaudio 所以不复现）；改为模块级 `_PA_INT16 = getattr(pyaudio, "paInt16", 8)`。
+- 新增 `tests/voice/test_voice_barge.py::test_runs_without_pyaudio_module`：把
+  `sys.modules["pyaudio"]` 置 None 后 reload，断言常量兜底为 8 且看守仍能触发，锁死这类
+  「本地绿、CI 红」问题。
+- 配置口径：`[voice] barge_in` 代码默认改为 `true`，但用户/项目 `settings.toml` 里显式
+  写 `barge_in = false` 仍会覆盖默认（实测「打断不生效」的真正原因），需手动改为 `true`。
 
 ## [2.6.1] — 2026-11-20
 
