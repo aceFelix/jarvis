@@ -55,7 +55,7 @@ def _clean_env(monkeypatch):
 
 async def test_talk_runs_in_terminal(monkeypatch):
     """/talk 直接在终端运行 RealtimeTalk，配置正确透传，不再触碰窗口类。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
 
@@ -70,7 +70,7 @@ async def test_talk_runs_in_terminal(monkeypatch):
 
 async def test_talk_passes_event_log_switch(monkeypatch):
     """[realtime_talk] event_log 开启时透传给引擎（第 1 层可观测性开关）。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(
         dashscope_api_key="sk-test", api_key="", realtime_event_log=True,
@@ -83,7 +83,7 @@ async def test_talk_passes_event_log_switch(monkeypatch):
 
 async def test_talk_passes_echo_suppress_default(monkeypatch):
     """回声压低默认透传为 True——AEC 生效时也不能丢，否则回声会取消每一轮回复。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
 
@@ -94,7 +94,7 @@ async def test_talk_passes_echo_suppress_default(monkeypatch):
 
 async def test_talk_passes_echo_suppress_off(monkeypatch):
     """[realtime_talk] echo_suppress_with_aec = false 时透传关闭（耳机场景）。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(
         dashscope_api_key="sk-test", api_key="",
@@ -108,7 +108,7 @@ async def test_talk_passes_echo_suppress_off(monkeypatch):
 
 async def test_talk_passes_half_duplex_default(monkeypatch):
     """默认全双工（False）——实时对话要能随时插话打断。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(dashscope_api_key="sk-test", api_key="")
 
@@ -119,7 +119,7 @@ async def test_talk_passes_half_duplex_default(monkeypatch):
 
 async def test_talk_passes_half_duplex_off(monkeypatch):
     """[realtime_talk] half_duplex = false 时透传关闭（耳机全双工）。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(
         dashscope_api_key="sk-test", api_key="",
@@ -133,7 +133,7 @@ async def test_talk_passes_half_duplex_off(monkeypatch):
 
 async def test_talk_missing_key_errors(monkeypatch):
     """无任何 DashScope Key 时报错退出，不启动实时引擎。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(dashscope_api_key="", api_key="")
 
@@ -150,7 +150,7 @@ async def test_talk_never_borrows_other_vendor_key(monkeypatch):
     背景：旧回退链会拿别家 key 硬连，被服务端 1007 Access denied 秒拒，
     用户只能看到英文报错（2026-09-10 实测踩坑）。
     """
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(
         dashscope_api_key="", api_key="sk-deepseek-vendor", provider="deepseek",
@@ -165,7 +165,7 @@ async def test_talk_never_borrows_other_vendor_key(monkeypatch):
 
 async def test_talk_uses_api_key_when_provider_is_dashscope(monkeypatch):
     """provider 就是 dashscope 时，settings.api_key 本身即 DashScope key，可直用。"""
-    monkeypatch.setattr("agent.voice.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
+    monkeypatch.setattr("agent.talk.realtime_talk.RealtimeTalk", _FakeRealtimeTalk)
     ui = _FakeUI()
     settings = SimpleNamespace(
         dashscope_api_key="", api_key="sk-dashscope-native", provider="dashscope",

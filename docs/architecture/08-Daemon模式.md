@@ -22,7 +22,7 @@
 
 | 文件 | 职责 | 状态 |
 |---|---|---|
-| [voice/voice_state.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/voice/voice_state.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（由语音包持有） |
+| [audio/mic_lock.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/audio/mic_lock.py) | 跨进程语音互斥锁（心跳+TTL） | ✅ 在用（2026-11-26 下沉到 agent/audio，两条语音链路共用） |
 | [core/daemon/scheduler.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/scheduler.py) | 任务调度器 | ✅ 在用（2026-09 serve 宿主 ProactiveHub 装配；2026-10 终端 CliReminderHost 装配） |
 | [core/daemon/cli_reminder.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/cli_reminder.py) | 终端提醒宿主（启 Scheduler + 挂 schedule 工具 + 到期回调） | ✅ 在用（2026-10-14，`main.py` REPL/语音装配；2026-10-31 起顺手挂自动清理） |
 | [core/daemon/auto_clean_schedule.py](file:///e:/2.MyProjects/MyAgentChat/J.A.R.V.I.S/jarvis/agent/core/daemon/auto_clean_schedule.py) | 无人值守自动清理的调度宿主（每日 04:30 + 启动机会清理） | ✅ 在用（2026-10-31；挂 Scheduler 而非 ProactiveEngine，因为后者只有桌面路径有） |

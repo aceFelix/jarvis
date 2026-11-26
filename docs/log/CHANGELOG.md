@@ -19,7 +19,46 @@
 
 ## [Unreleased]
 
-（暂无未发布变更）
+### 优化（/talk 星期五体验：标签、自然退出、避免误挂断，2026-11-26）
+
+- 终端转写标签 `🤖 贾维斯:` → `🤖 星期五:`，与人设对齐（此前身份看起来自相矛盾）。
+- 退出自然化：用户说“退下吧 / 不聊了 / 去忙吧 / 再见 / 拜拜 / 没事了”即视为结束意图，
+  直接调用 `end_conversation` 并顺口告别，**不再要求用户换一种说法，也不复述规则**；
+  只有“停一下 / 等一下 / 暂停”才继续听；回答完一个问题不构成结束理由。
+- 意图门拒绝只返回 `{"result": "continue"}` 中性标记（旧实现返回规则句，会被模型原样念出）；
+  退出词表补入“去忙 / 先这样 / 晚安 / 走吧 / 结束吧 / 退出 / 关闭语音”。
+- 新增回归：自然退下说法放行、报时后自发调工具被拦、拒绝不念规则、终端标签为星期五。
+  复盘见 [talk-friday-naturalness-fix.md](../fixlogs/voice/talk-friday-naturalness-fix.md)。
+
+### 修复（/voice 聊完一轮后进程静默退出，2026-11-26）
+
+- `VoiceBargeWatcher.stop()` 原实现在主线程先 `close()` 输入流再 join 监听线程；
+  Windows PortAudio 在 read/close 并发时访问违例（0xC0000005），进程无 traceback
+  静默退回 shell（实机第 4 轮必现）。
+- 改为 stop 只置停止标志 + join（2s），流由监听线程在 `finally` 自行关闭；
+  `barge_in` 旧监听器同步修正。新增回归用例锁定「close 必须发生在监听线程内」。
+- 复盘见 [voice-barge-stop-close-race-fix.md](../fixlogs/voice/voice-barge-stop-close-race-fix.md)。
+
+### 变更（/talk 与 /voice 分层，2026-11-26）
+
+- `/talk` 的 11 个模块（`realtime_*` + `talk_history.py`）迁入同级 `agent/talk/`，
+  对应测试归位 `tests/talk/`；宿主 `engine_talk` / `voice_commands` 的 import 同步。
+- 两条链路共用的 PyAudio 单例、AEC、麦克风互斥、厂商注册表下沉到 `agent/audio/`；
+  归一化 RMS 统一到 `audio/dsp.py`，消除 `voice_barge` 借用 talk 模块的反向依赖。
+- 删除生产零引用的 `client_vad.py` 与其专属测试（14 例）；`stt/common.py` 的 int RMS
+  契约不同，保持不动。包内相对导入与对外 API 不变，只搬不改行为。
+- 分层图、依赖硬约束与文件映射见
+  [talk-voice-layering.md](../plans/voice/talk-voice-layering.md)。
+
+### 变更（/talk 人设改为星期五，2026-11-26）
+
+- `/talk` 实时语音的默认人设由「贾维斯」改为**星期五（Friday）**——贾维斯之外的
+  第二位智能管家，被问身份时自称星期五；`builtin` 与 `all` 两种工具模式的身份段
+  逐字一致（切工具面不换人格），终端与桌面/serve 路径共用 `default_instructions()`。
+- 人设仍硬编码在 `agent/talk/realtime_talk.py`，**无配置项可改**；`/voice` 与文本模式
+  的人设/画像注入（`agent/prompts/system.py`）不受影响，`/voice` 唤醒词默认仍是贾维斯。
+- 新增 `tests/talk/test_talk_persona.py`（9 例）：身份段一致、回退生效、显式 instructions
+  优先、退出意图门与「先告别再退出」话术不丢。
 
 ## [2.6.2] — 2026-11-26
 
@@ -29,7 +68,7 @@
 
 ### 变更（语音厂商解耦阶段一，2026-11-24）
 
-- 新增 `agent/voice/voice_providers.py` 厂商注册表与 `[voice] vendor`（默认 `dashscope`）：
+- 新增 `agent/audio/providers.py` 厂商注册表与 `[voice] vendor`（默认 `dashscope`）：
   `/talk` 的端点/音色/模型、`/voice` 的识别后端改为查表；DashScope 取值原样搬运，
   行为不变；未知厂商与 `verified=false` 条目 fail-closed，不静默回落。
 - `/listen` 改用统一 `voice_key` 解析（原先直接用主 LLM key，换成非 DashScope 模型时会拿错 key）。

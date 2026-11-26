@@ -46,7 +46,7 @@ MCP: 7/7 server 已连接，注册 87 个工具
 | **AEC 生效时取消 0.25 麦克风衰减** | **错误** | 回声回弹，打断每一轮 |
 
 取消衰减的理由是「AEC 已在物理层消除回声，再衰减只会压小用户插话」。但实测
-（见 `agent/voice/aec.py` 注释）WebRTC AEC3 在免提外放 + 非理想延迟对齐下
+（见 `agent/audio/aec.py` 注释）WebRTC AEC3 在免提外放 + 非理想延迟对齐下
 **只能消除部分回声**，约 15% 以上残留需要再降约 6 dB 才不触发服务端 VAD。
 
 完整故障链：
@@ -80,7 +80,7 @@ _response_active == True → 客户端发 response.cancel   ← 这次是真该�
 
 ### 1. 恢复二次压低为默认行为，改为配置可控
 
-`agent/voice/realtime_talk.py`：
+`agent/talk/realtime_talk.py`：
 
 ```python
 def _should_attenuate(self) -> bool:
@@ -135,7 +135,7 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 .\.venv\Scripts\python.exe -m pytest -q                # 2105 passed
 ```
 
-新增/调整回归用例（`tests/voice/test_realtime_response_lifecycle.py`）：
+新增/调整回归用例（`tests/talk/test_realtime_response_lifecycle.py`）：
 
 | 用例 | 断言 |
 |---|---|
@@ -149,13 +149,13 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 
 ### 顺带完成的结构整改
 
-`tests/voice/test_realtime_observability.py` 增删后达到 813 行，超出 800 行上限，
+`tests/talk/test_realtime_observability.py` 增删后达到 813 行，超出 800 行上限，
 按代码结构规范先行拆分：
 
-- `tests/voice/_fakes.py`：共享替身 `FakeDiag` / `FakeWS` / `FakeTalkUI`
+- `tests/talk/_fakes.py`：共享替身 `FakeDiag` / `FakeWS` / `FakeTalkUI`
   （沿用 `tests/daemon/_fakes.py` 的既有惯例）
-- `tests/voice/conftest.py`：共享 fixture `fake_diag` / `_stub_tools`
-- `tests/voice/test_realtime_response_lifecycle.py`：响应生命周期、自打断诊断、
+- `tests/talk/conftest.py`：共享 fixture `fake_diag` / `_stub_tools`
+- `tests/talk/test_realtime_response_lifecycle.py`：响应生命周期、自打断诊断、
   回声门控三组用例（234 行）
 - 原可观测性测试文件回落至 501 行
 
@@ -178,18 +178,18 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 
 | 文件 | 变更 |
 |---|---|
-| `agent/voice/realtime_talk.py` | `_should_attenuate()` 恢复默认压低；`echo_suppress_with_aec` 参数；`response.done` 读取 `status` 并提示/计数 cancelled |
-| `agent/voice/realtime_events.py` | `cancelled_responses` 计数、`note_cancelled()`；`report_lines()` 增加自打断诊断分支 |
+| `agent/talk/realtime_talk.py` | `_should_attenuate()` 恢复默认压低；`echo_suppress_with_aec` 参数；`response.done` 读取 `status` 并提示/计数 cancelled |
+| `agent/talk/realtime_events.py` | `cancelled_responses` 计数、`note_cancelled()`；`report_lines()` 增加自打断诊断分支 |
 | `agent/config/settings.py` | 新增 `realtime_echo_suppress_with_aec`（默认 true）及 TOML 映射 |
 | `configs/settings.example.toml` / `agent/configs/settings.example.toml` | 新增 `echo_suppress_with_aec` 示例与说明注释 |
 | `config-docs/voice-setup.md` | 新增「装了 AEC 为什么还要压低麦克风」小节 |
 | `docs/architecture/12-配置系统.md` | `[realtime_talk]` 映射表与字段说明 |
-| `tests/voice/test_talk_terminal.py` | 补 `echo_suppress_with_aec` 透传断言（默认开 / 显式关） |
+| `tests/talk/test_talk_terminal.py` | 补 `echo_suppress_with_aec` 透传断言（默认开 / 显式关） |
 | `agent/commands/handlers/voice_commands.py` | 透传 `echo_suppress_with_aec` |
 | `agent/serve/engine/engine.py` | 透传 `echo_suppress_with_aec` |
-| `tests/voice/_fakes.py` | 新建：共享测试替身 |
-| `tests/voice/conftest.py` | 新建：共享 fixture |
-| `tests/voice/test_realtime_response_lifecycle.py` | 新建：响应生命周期 / 自打断诊断 / 回声门控用例 |
-| `tests/voice/test_realtime_observability.py` | 移出上述用例与替身定义，回落至 501 行 |
+| `tests/talk/_fakes.py` | 新建：共享测试替身 |
+| `tests/talk/conftest.py` | 新建：共享 fixture |
+| `tests/talk/test_realtime_response_lifecycle.py` | 新建：响应生命周期 / 自打断诊断 / 回声门控用例 |
+| `tests/talk/test_realtime_observability.py` | 移出上述用例与替身定义，回落至 501 行 |
 | `docs/architecture/06-语音系统.md` | 修正「衰减与 AEC 互斥」错误说明，补配置项与自打断可见性 |
 | `README.md` / `README.en.md` | `[realtime_talk]` 配置示例补 `echo_suppress_with_aec` |

@@ -1,4 +1,4 @@
-"""巨类拆分的结构守卫（workbench engine.py / voice realtime_engine.py）。
+"""巨类拆分的结构守卫（workbench engine.py / talk realtime_engine.py）。
 
 两处巨类按职责拆成 mixin 模块后，最容易悄悄坏掉的是三件事：
 
@@ -22,10 +22,10 @@ from agent.serve.engine.engine_session import EngineSessionMixin
 from agent.serve.engine.engine_status import EngineStatusMixin
 from agent.serve.engine.engine_talk import EngineTalkMixin
 from agent.serve.engine.engine_voice import EngineVoiceMixin
-from agent.voice import realtime_const
-from agent.voice.realtime_engine import RealtimeEngine
-from agent.voice.realtime_recv import RealtimeRecvMixin
-from agent.voice.realtime_rescue import RealtimeRescueMixin
+from agent.talk import realtime_const
+from agent.talk.realtime_engine import RealtimeEngine
+from agent.talk.realtime_recv import RealtimeRecvMixin
+from agent.talk.realtime_rescue import RealtimeRescueMixin
 
 ENGINE_MIXINS = (EngineStatusMixin, EngineSessionMixin, EngineTalkMixin, EngineVoiceMixin)
 REALTIME_MIXINS = (RealtimeRecvMixin, RealtimeRescueMixin)
@@ -101,10 +101,10 @@ class TestRealtimeConstantsSingleSource:
     """阈值只此一份：各模块拿到的必须是 realtime_const 里的同一个对象。"""
 
     def test_modules_share_the_same_constant_objects(self) -> None:
-        from agent.voice import realtime_engine as engine_mod
-        from agent.voice import realtime_recv as recv_mod
-        from agent.voice import realtime_rescue as rescue_mod
-        from agent.voice import realtime_talk as talk_mod
+        from agent.talk import realtime_engine as engine_mod
+        from agent.talk import realtime_recv as recv_mod
+        from agent.talk import realtime_rescue as rescue_mod
+        from agent.talk import realtime_talk as talk_mod
 
         names = [n for n in vars(realtime_const) if n.isupper()]
         # 常量表本身也要钉住，防止被误删后本用例变成空转

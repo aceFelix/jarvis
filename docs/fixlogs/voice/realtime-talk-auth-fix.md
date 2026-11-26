@@ -184,7 +184,7 @@ def close_session(self) -> None:
 | `agent/config/settings.py` | `[realtime_talk].api_key` 映射到 `dashscope_api_key` |
 | `agent/main.py` | `_realtime_talk()` 使用 `set_config()` 传配置；父进程不再重复启动 RealtimeTalk |
 | `agent/ui/realtime_window/process.py` | `JSBridge.close_session()` 关闭窗口；窗口关闭时停止 RealtimeTalk |
-| `agent/voice/realtime_talk.py` | 临时 DEBUG 打印（已移除） |
+| `agent/talk/realtime_talk.py` | 临时 DEBUG 打印（已移除） |
 
 ---
 

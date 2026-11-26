@@ -1,15 +1,19 @@
 """实时语音的音频处理纯函数与可调常量。
 
-从 realtime_talk.py 拆出（拆分前主文件逼近 800 行上限）：RMS 计算、PCM 增益
-衰减等无状态纯函数，以及回声抑制 / 半双工相关系数。realtime_talk 通过 import
-引用，保持 `rt_mod.ECHO_GUARD_RMS` 等既有访问方式不变。
+从 realtime_talk.py 拆出（拆分前主文件逼近 800 行上限）：PCM 增益衰减等无状态
+纯函数，以及回声抑制 / 半双工相关系数。realtime_talk 通过 import 引用，保持
+`rt_mod.ECHO_GUARD_RMS` 等既有访问方式不变。
+
+归一化 RMS 已下沉到 agent/audio/dsp（/voice 的 voice_barge 也要用），这里只保留
+`_rms` 别名再导出，包内调用方无需改 import。
 
 @author aceFelix
+@updated 2026-11-26  # 分层：RMS 下沉 agent/audio/dsp
 """
 from __future__ import annotations
 
-import math
-import struct
+# 分层后统一从音频基础设施取 RMS；保留 _rms 别名供包内既有 import 使用
+from agent.audio.dsp import rms as _rms  # noqa: F401
 
 # AI 说话时麦克风衰减系数（0~1），防止 AEC 失效时扬声器回声被送回服务器导致自说自话。
 # 0.1：免提外放下 AEC3 仍会残留可触发服务端 VAD 的回声，需较深压低；
@@ -135,19 +139,6 @@ def should_attenuate(
     if has_aec and not echo_suppress_with_aec:
         return False
     return True
-
-
-def _rms(data: bytes) -> float:
-    """计算 16bit PCM 音频数据的 RMS 音量，返回 0.0 ~ 1.0。
-
-    @author aceFelix
-    """
-    count = len(data) // 2
-    if count == 0:
-        return 0.0
-    samples = struct.unpack(f"{count}h", data[: count * 2])
-    mean_square = sum(s * s for s in samples) / count
-    return min(1.0, math.sqrt(mean_square) / 32768.0)
 
 
 def voice_gap(

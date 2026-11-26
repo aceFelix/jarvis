@@ -85,7 +85,7 @@ def create_stt(
 
     @author aceFelix
     """
-    from agent.voice.voice_providers import provider_for
+    from agent.audio.providers import provider_for
 
     meta = provider_for(vendor, kind="stt")
     return QwenASR(

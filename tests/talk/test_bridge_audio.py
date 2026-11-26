@@ -10,7 +10,7 @@ import threading
 import time
 
 from agent.serve import protocol
-from agent.voice.realtime_bridge_audio import (
+from agent.talk.realtime_bridge_audio import (
     _MAX_BUFFER_BYTES,
     BridgeMic,
     BridgeSpk,
@@ -109,7 +109,7 @@ class TestDuplexEngineFlags:
     def test_use_aec_false_disables_python_aec(self) -> None:
         """全双工桥接：use_aec=False 不创建 Python 侧 AEC（浏览器已消除回声，
         双重消除会让语音发闷/丢字）。"""
-        from agent.voice.realtime_engine import RealtimeEngine
+        from agent.talk.realtime_engine import RealtimeEngine
 
         eng = RealtimeEngine(
             "sk-test", half_duplex=False, echo_suppress_with_aec=False, use_aec=False
@@ -118,7 +118,7 @@ class TestDuplexEngineFlags:
 
     def test_set_tools_sanitizes_names(self) -> None:
         """工具名清洗仍在引擎入口生效（set_tools 为唯一注册口）。"""
-        from agent.voice.realtime_engine import RealtimeEngine
+        from agent.talk.realtime_engine import RealtimeEngine
 
         eng = RealtimeEngine("sk-test")
         eng.set_tools(

@@ -12,7 +12,7 @@
 
 | 层 | 现在的绑定点 | 耦合形态 | 解耦成本 |
 |---|---|---|---|
-| 全双工对话 `agent/voice/realtime_*.py` | `realtime_talk.py` 的模块级 `DEFAULT_WS_URL` / `DEFAULT_VOICE`，`engine_talk.py` 写死「未配置 DashScope API Key」 | **OpenAI Realtime 同构事件流**，`ws_url` 已可配置 | 低（只需把常量换成查表） |
+| 全双工对话 `agent/talk/realtime_*.py` | `realtime_talk.py` 的模块级 `DEFAULT_WS_URL` / `DEFAULT_VOICE`，`engine_talk.py` 写死「未配置 DashScope API Key」 | **OpenAI Realtime 同构事件流**，`ws_url` 已可配置 | 低（只需把常量换成查表） |
 | 半双工识别 `agent/voice/stt/` | `create_stt()` 无条件返回 `QwenASR` | 已有工厂接缝 | 中 |
 | 密钥解析 `agent/config/voice_key.py` | 三级优先里「回退主 LLM key」的条件是厂商常量 | 逻辑绑厂商 | 低 |
 | 播报 TTS `tts.py`(576) / `stream_tts.py`(493) | 直接继承 SDK 抽象基类，硬编码 22050Hz，两条合成路径并存 | **Inference 协议**（`run-task`/`task-started`/`continue-task`/`finish-task`），与 realtime 事件体系无关 | 高 → 本阶段不碰 |
@@ -70,7 +70,7 @@
 3. **`session.update` 的更新语义本身是厂商差异**（稀疏更新 vs 每次提交完整配置）。jarvis 现有的一条硬经验是「配置必须在 IDLE 期一次性完成」，对要求完整提交的厂商，任何中途更新都得重放全量配置 → meta 需要 `session_update_semantic: sparse|full`，不能假设大家都稀疏。
 4. **TTS 走另一套协议，本表覆盖不到。** 阶段二解耦 TTS 时不能复用本注册表，需要独立的 inference 协议抽象。
 
-### 元数据字段（`agent/voice/voice_providers.py`，待建）
+### 元数据字段（`agent/audio/providers.py`，待建）
 
 ```python
 VOICE_REGISTRY: dict[tuple[str, str], VoiceProviderMeta]   # key = (vendor, series)
@@ -132,9 +132,9 @@ VoiceProviderMeta:
 
 | 文件 | 改动 |
 |---|---|
-| `agent/voice/voice_providers.py`（新建） | `VOICE_REGISTRY` + `VoiceProviderMeta`；搬运 dashscope 条目 |
-| `agent/voice/realtime_talk.py` | 不再直接引用模块级 `DEFAULT_WS_URL` / `DEFAULT_VOICE`，默认值改由 meta 提供 |
-| `agent/voice/realtime_engine.py` | 仅 `session.update` 组装处取 meta（`turn_detection.type`、`voice`、`modalities`）；**状态机逻辑零改动** |
+| `agent/audio/providers.py`（新建） | `VOICE_REGISTRY` + `VoiceProviderMeta`；搬运 dashscope 条目 |
+| `agent/talk/realtime_talk.py` | 不再直接引用模块级 `DEFAULT_WS_URL` / `DEFAULT_VOICE`，默认值改由 meta 提供 |
+| `agent/talk/realtime_engine.py` | 仅 `session.update` 组装处取 meta（`turn_detection.type`、`voice`、`modalities`）；**状态机逻辑零改动** |
 | `agent/serve/engine/engine_talk.py` | key 校验与报错文案去厂商硬编码；`model` 默认值取自 meta |
 | `agent/config/voice_key.py` | `resolve(settings, vendor="dashscope")`；保留三级优先，把「回退主 LLM key」的条件从厂商常量改为 `主 LLM 厂商 == 语音厂商` |
 | `agent/voice/stt/__init__.py` | `create_stt()` 由「无条件返回 QwenASR」改为按 `(vendor, model 前缀)` 查表分派 |
@@ -149,8 +149,8 @@ VoiceProviderMeta:
 
 ## 6. 测试（离线回放为基线）
 
-1. **帧序采集**：从 `~/.jarvis/logs/diag.log` 与 `realtime_events.py` 的时间线日志导出至少两轮真实会话（须含：打断、响应救援、`response.done[cancelled]`、error 分支），落 `tests/fixtures/voice/*.jsonl`。
-2. **`tests/voice/test_realtime_replay.py`**：假 WebSocket 逐帧喂入，断言客户端**动作序列**（发出的帧、UI 事件、静音窗口时刻、救援触发）与基线一致——这是「改抽象不改行为」的回归护栏。
+1. **帧序采集**：从 `~/.jarvis/logs/diag.log` 与 `realtime_events.py` 的时间线日志导出至少两轮真实会话（须含：打断、响应救援、`response.done[cancelled]`、error 分支），落 `tests/fixtures/talk/*.jsonl`。
+2. **`tests/talk/test_realtime_replay.py`**：假 WebSocket 逐帧喂入，断言客户端**动作序列**（发出的帧、UI 事件、静音窗口时刻、救援触发）与基线一致——这是「改抽象不改行为」的回归护栏。
 3. **能力门单测**：不支持 `smart_turn` 的厂商必须回落 `server_vad` **并告警**；缺 key 必须报「未配置 `<厂商>` 语音密钥」而非硬编码文案；`vad_threshold_range` 声明被正确使用（拿 -1~1 的值喂 0–5000 的厂商要报错而不是静默生效）。
 4. **注册表完整性测**：每条 meta 必填字段齐全、models 非空、音色命名空间存在、`turn_detection_supported` 非空、`verified=false` 的条目不得被 `/talk` 选中——与 [tests/test_release_contract.py](../../../tests/test_release_contract.py) 的「目录覆盖每个 `Settings` 字段」同一精神。
 5. **CI 约束**：新增用例不得依赖 key、麦克风或端口；厂商实机相关一律按现有 `_WINDOWS_ONLY` 同口径打平台/依赖门（不得出现「本地绿 CI 红」，也不得用整条 skip 换绿灯）。
@@ -201,9 +201,9 @@ S1 调研 ─► 拍板（DashScope-only）─► S4-1 帧序采集 ─► S2 �
 
 - [x] **S1** 厂商协议同构度矩阵（含核实状态分级、门槛判定、四个设计发现、本地路线评估、S3 前置核实清单）
 - [x] **拍板**：先只做 DashScope 解耦；第二厂商（StepFun 等）暂缓到解耦验证通过之后
-- [ ] **S4-1 帧序采集**：从 diag 日志与 `realtime_events.py` 时间线导出至少两轮真实会话（打断、救援、`response.done[cancelled]`、error），落 `tests/fixtures/voice/*.jsonl`
+- [ ] **S4-1 帧序采集**：从 diag 日志与 `realtime_events.py` 时间线导出至少两轮真实会话（打断、救援、`response.done[cancelled]`、error），落 `tests/fixtures/talk/*.jsonl`
 - [ ] **S2 抽象层**：新建 `voice_providers.py`，**先原样搬运 dashscope 条目**（`DEFAULT_WS_URL`、`DEFAULT_VOICE="longanqian"`、`smart_turn`/`server_vad`、两个模型名）；`voice_vendor` 默认 `dashscope`，老用户零迁移；状态机零改动
-  - 2026-11-24 已落地：`agent/voice/voice_providers.py`（`(vendor, series)` 注册表 + fail-closed 解析）、`[voice] vendor`（Settings/领域映射/目录/两份示例 TOML）、`realtime_talk` 默认值改从 meta 取、`create_stt` 按表分派、`engine_talk`/`voice_commands` 去厂商硬编码；新增 `tests/voice/test_voice_providers.py` 15 例；`tests/commands + tests/voice + tests/config` 共 1093 passed。回放/实机验证尚未做。
+  - 2026-11-24 已落地：`agent/audio/providers.py`（`(vendor, series)` 注册表 + fail-closed 解析）、`[voice] vendor`（Settings/领域映射/目录/两份示例 TOML）、`realtime_talk` 默认值改从 meta 取、`create_stt` 按表分派、`engine_talk`/`voice_commands` 去厂商硬编码；新增 `tests/voice/test_voice_providers.py` 15 例；`tests/commands + tests/voice + tests/config` 共 1093 passed。回放/实机验证尚未做。
 - [ ] **S4-2 回归**：回放测断言客户端动作序列与基线一致；`/voice`、`/talk` 各三条主路径实机走查
 - [ ] **稳定性签收**：DashScope 解耦后行为不变、失败路径文案不回归；签收通过才解冻第二厂商
 - [ ] **文档与对外数字同步**

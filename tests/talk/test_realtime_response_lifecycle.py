@@ -18,10 +18,10 @@ from __future__ import annotations
 import base64
 from types import SimpleNamespace
 
-from agent.voice import realtime_events as ev
-from agent.voice import realtime_talk as rt_mod
-from agent.voice.realtime_audio import voice_gap
-from tests.voice._fakes import FakeDiag, FakeTalkUI, FakeWS
+from agent.talk import realtime_events as ev
+from agent.talk import realtime_talk as rt_mod
+from agent.talk.realtime_audio import voice_gap
+from tests.talk._fakes import FakeDiag, FakeTalkUI, FakeWS
 
 
 class TestResponseLifecycle:
@@ -408,7 +408,7 @@ class TestHalfDuplex:
     def test_unmuted_when_response_hangs(self, _stub_tools) -> None:
         """响应状态悬挂超时后不再静音，避免麦克风永久哑掉。"""
         import time as _t
-        from agent.voice.realtime_audio import MIC_MUTE_MAX_SECONDS
+        from agent.talk.realtime_audio import MIC_MUTE_MAX_SECONDS
         rt = rt_mod.RealtimeTalk("sk-test")
         rt._response_active = True
         rt._ai_speaking = True
@@ -549,7 +549,7 @@ class TestHalfDuplex:
         被当成新用户语音并取消最终回复（表现为“问时间这类要调工具的提问没反应”）。
         """
         import time as _t
-        from agent.voice.realtime_audio import MIC_TAIL_SECONDS
+        from agent.talk.realtime_audio import MIC_TAIL_SECONDS
         rt = self._rt()
         ui = FakeTalkUI()
         ws = FakeWS([{
@@ -569,7 +569,7 @@ class TestHalfDuplex:
     async def test_normal_turn_keeps_short_tail(self, _stub_tools) -> None:
         """半双工：普通回复结束后只留短回声尾迹，不长时间静音。"""
         import time as _t
-        from agent.voice.realtime_audio import MIC_TAIL_SECONDS
+        from agent.talk.realtime_audio import MIC_TAIL_SECONDS
         rt = self._rt()
         ui = FakeTalkUI()
         ws = FakeWS([{
@@ -590,7 +590,7 @@ class TestHalfDuplex:
         会让服务端在响应刚创建的瞬间返回 response.done[cancelled]。判“说完”
         只用于复位界面指示，静音一律交给响应进行中的判定。
         """
-        from agent.voice.realtime_audio import SPEECH_GAP_SECONDS
+        from agent.talk.realtime_audio import SPEECH_GAP_SECONDS
         now = 100.0
         last, resume = voice_gap(
             0.001, now - SPEECH_GAP_SECONDS - 0.1, None, now, muted=False

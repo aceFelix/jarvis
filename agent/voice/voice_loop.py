@@ -736,7 +736,7 @@ async def voice_loop(
 
     # ---- 跨进程语音互斥锁 ----
     # 防止 REPL /voice 与 serve / 桌面壳语音同时开，导致麦克风冲突。
-    from agent.voice.voice_state import acquire_voice_lock, release_voice_lock
+    from agent.audio.mic_lock import acquire_voice_lock, release_voice_lock
     lock_ok, lock_info = acquire_voice_lock()
     if not lock_ok:
         events.on_error(f"🎙️ 语音模式已被另一个 jarvis 进程占用: {lock_info}")

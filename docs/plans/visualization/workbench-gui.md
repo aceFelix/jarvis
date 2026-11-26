@@ -57,7 +57,7 @@
 | `WebviewRealtimeTalkUI` 桥接 | /talk 已验证 | 中栏实时模式直接复用 |
 | `RealtimeTalk`（DashScope 全双工，AEC/打断/工具调用） | 稳定 | 左栏 /talk 模式后端 |
 | `voice_loop`（STT→LLM→TTS） | ✅ 已解耦（VoiceSessionEvents + 双适配器，2026-09） | /voice 模式后端（REPL + jarvis-desktop） |
-| `agent/voice/voice_state.py` 互斥锁 | 心跳+TTL 刚重写 | 模式切换时的麦克风独占仲裁 |
+| `agent/audio/mic_lock.py` 互斥锁 | 心跳+TTL 刚重写 | 模式切换时的麦克风独占仲裁 |
 | `agent/daemon/hotkey*.py` | 已保留 | 热键召唤窗口 |
 | `agent/core/daemon/`（调度/简报/监控/视觉/日历） | 休眠态 | 右栏指标 + 主动通知渠道重接线（2026-09 注：调度/简报/截止改由 serve 宿主 ProactiveHub 接线、经 jarvis-desktop 播报，非工作台右栏；监控/视觉/日历仍休眠，见 [proactive-desktop.md](../desktop/proactive-desktop.md)） |
 | QueryLoop + ToolRegistry | REPL 在用 | 中栏文本对话后端（复用，只换 UI 适配器） |

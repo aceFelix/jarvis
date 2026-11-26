@@ -739,8 +739,12 @@ class RichCLI(UIProtocol):
         self.info(f"\n🧑 你: {text}")
 
     def on_ai_transcript(self, text: str) -> None:
-        """AI 语音转录完成——在终端中显示为对话气泡样式。"""
-        self.info(f"\n🤖 贾维斯: {text}")
+        """AI 语音转录完成——在终端中显示为对话气泡样式。
+
+        标签与 /talk 人设对齐为「星期五」（2026-11-26）：原先写死「贾维斯」
+        会与实际自称冲突，用户容易搞混两条语音链路的身份。
+        """
+        self.info(f"\n🤖 星期五: {text}")
 
     def is_running(self) -> bool:
         """终端 UI 始终认为自己在运行。"""

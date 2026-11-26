@@ -49,7 +49,7 @@ MCP: 7/7 server 已连接，注册 87 个工具
 - 文档「打断处理」明确：`response.done` 返回 `status=cancelled` 表示被用户打断
 - 全文检索：**`response.audio.done` 并未定义在 DashScope 协议中**
 
-而 `agent/voice/realtime_talk.py` 的 `_recv_events` 只在等 `response.audio.done`。
+而 `agent/talk/realtime_talk.py` 的 `_recv_events` 只在等 `response.audio.done`。
 
 ### 第三阶段：定位连锁故障
 
@@ -180,8 +180,8 @@ AEC 是回声消除主方案，0.25 衰减是兜底。两者叠加时兜底反�
 
 | 文件 | 说明 |
 |---|---|
-| `agent/voice/realtime_talk.py` | 新增 `_end_response()` / `_response_active` / `_should_attenuate()`，接线 `response.done` 与 `response.created`（712 → 748 行） |
-| `tests/voice/test_realtime_observability.py` | 新增 `TestResponseLifecycle` / `TestEchoSuppressGate` 共 8 项；`_FakeWS` 支持记录出站消息 |
+| `agent/talk/realtime_talk.py` | 新增 `_end_response()` / `_response_active` / `_should_attenuate()`，接线 `response.done` 与 `response.created`（712 → 748 行） |
+| `tests/talk/test_realtime_observability.py` | 新增 `TestResponseLifecycle` / `TestEchoSuppressGate` 共 8 项；`_FakeWS` 支持记录出站消息 |
 | `docs/architecture/06-语音系统.md` | `_recv_events` 样例补响应生命周期；新增「响应生命周期与打断判定」小节 |
 
 ---
@@ -197,4 +197,4 @@ AEC 是回声消除主方案，0.25 衰减是兜底。两者叠加时兜底反�
 完整复盘见 [realtime-talk-echo-self-cancel-fix.md](realtime-talk-echo-self-cancel-fix.md)。
 
 另：本次新增的两个测试类已拆分到
-`tests/voice/test_realtime_response_lifecycle.py`（原文件超 800 行上限）。
+`tests/talk/test_realtime_response_lifecycle.py`（原文件超 800 行上限）。

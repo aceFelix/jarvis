@@ -46,35 +46,35 @@ class _BargeInWatcher:
 
     def stop(self) -> None:
         self._stop.set()
-        try:
-            if self._stream is not None:
-                self._stream.close()
-        except Exception:
-            pass
+        # 先 join 再让监听线程自己关流：read() 期间从外部 close 在 Windows
+        # PortAudio 上会直接访问违例（0xC0000005），进程静默退出（2026-11-26）。
         # 不 terminate：全局 PyAudio 实例由 audio.release_pyaudio 统一释放
         if self._thread is not None:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=2.0)
+            self._thread = None
 
     @property
     def triggered(self) -> bool:
         return self._triggered
 
     def _run(self) -> None:
+        stream = None
         try:
             import pyaudio
-            from agent.voice.audio import get_pyaudio
+            from agent.audio.device import get_pyaudio
             self._pa = get_pyaudio()
-            self._stream = self._pa.open(
+            stream = self._pa.open(
                 format=pyaudio.paInt16,
                 channels=1,
                 rate=_BARGE_IN_RATE,
                 input=True,
                 frames_per_buffer=_BARGE_IN_FRAMES,
             )
+            self._stream = stream
             speaking_since: float | None = None
             while not self._stop.is_set():
                 try:
-                    frame = self._stream.read(_BARGE_IN_FRAMES, exception_on_overflow=False)
+                    frame = stream.read(_BARGE_IN_FRAMES, exception_on_overflow=False)
                 except Exception:
                     break
                 rms = _rms(frame, 2)
@@ -94,6 +94,15 @@ class _BargeInWatcher:
         except Exception:
             # 麦克风监听失败静默处理，打断功能不可用但不影响对话
             pass
+        finally:
+            # 流只由本线程关闭，避免 read/close 并发导致 PortAudio 崩溃
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:
+                pass
+            if self._stream is stream:
+                self._stream = None
 
 
 class _KeyBargeInWatcher:

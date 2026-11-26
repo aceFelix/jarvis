@@ -38,7 +38,7 @@ BUILTIN_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "end_conversation",
-            "description": "结束当前对话并退出。仅在用户明确告别（退下、结束对话、再见、拜拜、没事了）时调用。用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”只是要求停止播报或等待，绝不能调用本工具；普通回答结束后也绝不调用。调用时必须同时用一句简短自然的口语向用户告别，会话会等这句告别播完再退出。",
+            "description": "结束当前对话并退出。用户表达离开意图（如“退下吧”“不聊了”“去忙吧”“再见”“拜拜”“没事了”）时调用，并同时用一句简短口语告别。用户只是要求停一下、等一下、暂停时不要调用；回答完一个问题后也不要调用。若返回 continue，说明用户并未要求结束：直接自然继续对话，不要解释原因或复述规则。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -221,15 +221,10 @@ async def execute_tool(
         # end_conversation 需要停止会话循环（等待告别语音播放后再停）
         if name == "end_conversation":
             if allow_end is not None and not allow_end():
-                return json.dumps(
-                    {
-                        "result": (
-                            "未结束对话：用户没有明确说退下/结束对话/再见。"
-                            "请继续对话；如果用户只是想暂停播报，直接回应并等待。"
-                        )
-                    },
-                    ensure_ascii=False,
-                )
+                # 只回中性标记，不回可被照念的规则句：旧实现把“用户没有明确说…”
+                # 作为工具结果，模型会把它原封不动念给用户（2026-11-26 实机），
+                # 表现成“教训用户该怎么说话”。
+                return json.dumps({"result": "continue"}, ensure_ascii=False)
             if on_end_conversation is not None:
                 on_end_conversation()
             return json.dumps({"result": "好的，我先退下了。需要时随时叫我。"}, ensure_ascii=False)

@@ -19,8 +19,8 @@
 | 4 | 操作可见性 | 2 | [visibility/](visibility/README.md) |
 | 5 | 配置与能力自检 | 2 | [config/](config/README.md) |
 | 6 | 文件操作 | 1 | [fileops/](fileops/README.md) |
-| 7 | 语音 | 1 | [voice/](voice/README.md) |
-| | **合计** | **21** | |
+| 7 | 语音 | 4 | [voice/](voice/README.md) |
+| | **合计** | **24** | |
 
 ---
 

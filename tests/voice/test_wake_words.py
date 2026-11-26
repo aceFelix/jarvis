@@ -37,7 +37,7 @@ import pytest
 
 import agent.voice as voice_pkg
 import agent.voice.stream_tts as stream_tts_module
-import agent.voice.voice_state as voice_state_module
+import agent.audio.mic_lock as voice_state_module
 import agent.voice.voice_loop  # noqa: F401  —— 包 __init__ 用同名函数遮蔽了模块属性
 from agent.voice import wake_words as ww
 from agent.voice.voice_events import STATE_DIALOG, STATE_STANDBY, CollectingVoiceEvents

@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.voice import realtime_talk as rt_mod
-from agent.voice.realtime_tools import execute_tool
+from agent.talk import realtime_talk as rt_mod
+from agent.talk.realtime_tools import execute_tool
 
 
 class TestEndIntentGate:
@@ -34,6 +34,19 @@ class TestEndIntentGate:
         rt._last_user_text = "没事了，再见"
         assert rt._allow_end_conversation() is True
 
+    def test_engine_allows_natural_leave_phrases(self):
+        """2026-11-26：口号里承诺的“去忙吧”等自然说法不能被硬门拒绝。"""
+        rt = rt_mod.RealtimeTalk("sk-test")
+        for text in ("好的好的退下吧", "去忙吧", "先这样吧", "晚安", "不聊了"):
+            rt._last_user_text = text
+            assert rt._allow_end_conversation() is True, text
+
+    def test_engine_denies_question_not_leave(self):
+        """回答完一个问题不等于结束：模型在报时后自发调工具应被拦下。"""
+        rt = rt_mod.RealtimeTalk("sk-test")
+        rt._last_user_text = "几点啦？Friday.\n对，对，你是你是星期五。"
+        assert rt._allow_end_conversation() is False
+
     @pytest.mark.asyncio
     async def test_tool_refuses_without_intent(self):
         called: list[int] = []
@@ -47,8 +60,8 @@ class TestEndIntentGate:
             allow_end=lambda: False,
         )
 
-        payload = json.loads(result)
-        assert "未结束对话" in payload["result"]
+        # 只回中性标记：旧实现回「用户没有明确说…」，模型会原样念给用户
+        assert json.loads(result) == {"result": "continue"}
         assert called == []  # 回调绝不触发
 
     @pytest.mark.asyncio

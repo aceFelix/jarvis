@@ -72,7 +72,7 @@ except ImportError:
 
 # 回声消除（AEC）：消除扬声器回声，防止 AI 自言自语，同时保留打断能力
 try:
-    from .aec import EchoCanceller, is_available as _aec_available
+    from agent.audio.aec import EchoCanceller, is_available as _aec_available
     _HAS_AEC = _aec_available()
 except ImportError:
     _HAS_AEC = False
@@ -594,9 +594,12 @@ class RealtimeEngine(RealtimeRecvMixin, RealtimeRescueMixin):
         self._graceful_stop_at = _t.monotonic() + 8.0  # 8秒宽限期（含告别生成+播放）
 
     #: 允许结束/退出的用户说法。只说“停一下/等一下/暂停/安静”不算。
+    #: 2026-11-26：补入口号里已承诺的“去忙吧”，以及“先这样”“晚安”等自然说法，
+    #: 避免用户按提示说了却被硬门拒绝、再被模型“教”该怎么说话。
     _END_INTENT_WORDS = (
-        "退下", "结束对话", "结束聊天", "退出语音", "退出对话",
-        "再见", "拜拜", "没事了", "不聊了", "关闭对话",
+        "退下", "结束对话", "结束聊天", "结束吧", "退出语音", "退出对话", "退出",
+        "再见", "拜拜", "没事了", "不聊了", "关闭对话", "关闭语音", "关掉语音",
+        "去忙", "先这样", "晚安", "走吧",
     )
 
     def _allow_end_conversation(self) -> bool:

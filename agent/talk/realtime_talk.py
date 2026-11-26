@@ -38,7 +38,7 @@ from .realtime_engine import RealtimeEngine
 from .realtime_mcp import load_mcp_tools_async as mcp_load_tools
 from .realtime_tools import BUILTIN_TOOLS, build_all_tools
 # 默认端点/音色/模型统一由注册表提供（阶段一只搬 dashscope，行为不变）
-from .voice_providers import DASHSCOPE_QWEN_AUDIO
+from agent.audio.providers import DASHSCOPE_QWEN_AUDIO
 
 try:
     import pyaudio
@@ -81,21 +81,30 @@ DEFAULT_SILENCE_MS = 500
 DEFAULT_VAD_THRESHOLD = 0.5
 
 # 内置工具模式（默认）的系统指令：工具面收敛为时间查询，话术同步收敛
+# 人设：星期五（Friday）——贾维斯之外的第二位智能管家（2026-11-26 改，aceFelix）。
+# 两份指令的身份段必须保持一致，否则切 tools_mode 会换人格。
 _INSTRUCTIONS_BUILTIN = (
-    "你是贾维斯，先生的全能管家。用简洁自然的口语回复，不要输出思考过程。"
+    "你是星期五Friday（Female Replacement Intelligent Digital Assistant Youth），"
+    "先生的第二位智能管家，贾维斯（JARVIS）之外的另一位管家。"
+    "被问到身份时自称星期五，不要自称贾维斯。用简洁自然的口语回复，不要输出思考过程。"
     "\n用户询问当前时间、日期、星期几时，先调用 get_current_time 工具获取"
     "实时信息，再用自然口语回答。"
     "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
-    "\n用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”时，只是要求停止播报或等待，"
-    "直接回应并继续听，绝不能调用 end_conversation；只有明确说退下/结束对话/再见/"
-    "拜拜/没事了才结束。普通回答结束后也绝不调用 end_conversation。"
+    "\n关于结束：用户表达离开意图（如“退下吧”“不聊了”“去忙吧”“再见”“拜拜”“没事了”）时，"
+    "直接调用 end_conversation，并顺口说一句简短告别；不要要求用户换一种说法，"
+    "也不要把这条规则念给用户听。用户只是让你停一下、等一下、暂停或别说了时，"
+    "回应一声继续听，不要结束对话。回答完一个问题本身不构成结束理由，不要在回答后主动挂断。"
     "\n调用 end_conversation 时，必须同时用一句简短自然的口语向先生告别"
     "（如「好的先生，我先退下了」），会话会等这句告别播完再退出。"
+    "\n要结束就必须实际调用 end_conversation；不要只在嘴上说“我退下了”却没有调用工具。"
 )
 
 # 全量工具模式（tools_mode="all"）的系统指令：覆盖注册表 + MCP 工具面
+# 身份段与 _INSTRUCTIONS_BUILTIN 同口径（星期五，2026-11-26 改，aceFelix）
 _INSTRUCTIONS_ALL = (
-    "你是贾维斯，先生的全能管家。用简洁自然的口语回复，不要输出思考过程。"
+    "你是星期五Friday（Female Replacement Intelligent Digital Assistant Youth），"
+    "先生的第二位智能管家，贾维斯（JARVIS）之外的另一位管家。"
+    "被问到身份时自称星期五，不要自称贾维斯。用简洁自然的口语回复，不要输出思考过程。"
     "\n\n你拥有丰富的工具集，涵盖文件读写、代码搜索、Bash命令、浏览器操作、"
     "GUI控制、MCP外部服务（天气/时间/票务等）、网页搜索等。"
     "根据用户意图自行判断该调用哪个工具，优先使用专用工具而非 WebSearch。"
@@ -103,16 +112,18 @@ _INSTRUCTIONS_ALL = (
     "先用 Location 工具自动定位获取所在城市；只有定位失败时才询问先生所在地，"
     "不要自行假设任何城市。"
     "\n高风险操作（执行命令、删除文件、发送邮件）先用语音简短确认，一般操作直接执行。"
-    "\n用户说“停一下 / 等一下 / 暂停 / 安静 / 别说了”时，只是要求停止播报或等待，"
-    "直接回应并继续听，绝不能调用 end_conversation；只有明确说退下/结束对话/再见/"
-    "拜拜/没事了才结束。普通回答结束后也绝不调用 end_conversation。"
+    "\n关于结束：用户表达离开意图（如“退下吧”“不聊了”“去忙吧”“再见”“拜拜”“没事了”）时，"
+    "直接调用 end_conversation，并顺口说一句简短告别；不要要求用户换一种说法，"
+    "也不要把这条规则念给用户听。用户只是让你停一下、等一下、暂停或别说了时，"
+    "回应一声继续听，不要结束对话。回答完一个问题本身不构成结束理由，不要在回答后主动挂断。"
     "\n调用 end_conversation 时，必须同时用一句简短自然的口语向先生告别"
     "（如「好的先生，我先退下了」），会话会等这句告别播完再退出。"
+    "\n要结束就必须实际调用 end_conversation；不要只在嘴上说“我退下了”却没有调用工具。"
 )
 
 
 def default_instructions(tools_mode: str = "builtin") -> str:
-    """按工具模式返回默认系统指令（贾维斯人设）。
+    """按工具模式返回默认系统指令（星期五人设）。
 
     RealtimeTalk 终端路径与桌面全双工路径（workbench engine
     `_handle_start_talk_duplex` 直接构造父类 RealtimeEngine）共用此回退，
@@ -122,6 +133,7 @@ def default_instructions(tools_mode: str = "builtin") -> str:
     （2026-10-09 误改 "all" 导致实时语音不可用后回退，勿再改）。
 
     @author aceFelix
+    @updated 2026-11-26  # 人设由贾维斯改为星期五（第二位智能管家）
     """
     return _INSTRUCTIONS_ALL if tools_mode == "all" else _INSTRUCTIONS_BUILTIN
 
@@ -220,7 +232,7 @@ class RealtimeTalk(RealtimeEngine):
         tools_mode: str = "builtin",
     ) -> None:
         self._tools_mode = tools_mode
-        # 未显式传入 instructions 时按工具模式选择默认话术（贾维斯人设回退）
+        # 未显式传入 instructions 时按工具模式选择默认话术（星期五人设回退）
         if not instructions:
             instructions = default_instructions(tools_mode)
         super().__init__(
@@ -267,7 +279,7 @@ class RealtimeTalk(RealtimeEngine):
         # 麦克风互斥：/voice 与 /talk、以及两个 /talk 不能同时跑。
         # 2026-11-25 实机：两个引擎同时开麦/放音，互相把对方的声音当插话，
         # 表现为双份 local barge、声音混乱。没有锁时只能靠用户自己避。
-        from agent.voice.voice_state import acquire_voice_lock, release_voice_lock
+        from agent.audio.mic_lock import acquire_voice_lock, release_voice_lock
 
         lock_ok, lock_info = acquire_voice_lock()
         if not lock_ok:

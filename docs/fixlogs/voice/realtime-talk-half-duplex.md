@@ -167,7 +167,7 @@
 
 ### 结构拆分
 
-`_init_mcp_tools` / `_load_mcp_tools_async` 移入新建的 `agent/voice/realtime_mcp.py`
+`_init_mcp_tools` / `_load_mcp_tools_async` 移入新建的 `agent/talk/realtime_mcp.py`
 （会话中途的 `session.update` 与本次故障时间线高度重合，独立成文件便于排查），
 主文件 794 → 766 行，为上述修正腾出空间。
 
@@ -382,12 +382,12 @@ segfault 风险）；`stt_model` 默认改 `qwen3-asr-flash-realtime`（`stt_sil
 
 ## 涉及文件与实现
 
-- `agent/voice/realtime_talk.py`：新增 `half_duplex` 参数、`_mic_muted()`、`_mic_resume_at`；
+- `agent/talk/realtime_talk.py`：新增 `half_duplex` 参数、`_mic_muted()`、`_mic_resume_at`；
   `_send_audio` 上传前静音门控；`_end_response` 设尾迹窗口；启动提示按模式显示"半双工轮替
   ·AI 说完你再说"或"说话打断"。**（第五次修正）** `speech_stopped` 分支不再写静音窗口
   （只复位界面指示）；本地语音活动跟踪仅用于复位指示，不参与静音决策。
 - 因主文件逼近 800 行上限，把 `_rms` / `_attenuate_pcm` 及 `ECHO_SUPPRESS_FACTOR` /
-  `ECHO_GUARD_RMS` / 新增 `MIC_TAIL_SECONDS` 抽到 `agent/voice/realtime_audio.py`（纯函数 +
+  `ECHO_GUARD_RMS` / 新增 `MIC_TAIL_SECONDS` 抽到 `agent/talk/realtime_audio.py`（纯函数 +
   常量），主文件 `from .realtime_audio import ...`，`rt_mod.ECHO_GUARD_RMS` 等访问方式不变。
 - 配置接线：`settings.py` 新增 `realtime_half_duplex`（字段 + 键列表 + `[realtime_talk]`
   TOML 映射 `half_duplex`）；`voice_commands.py`、`workbench/engine.py` 两个装配点透传。
@@ -400,7 +400,7 @@ python -m pytest tests/voice/ -q   # 195 passed
 python -m pytest -q                # 2136 passed
 ```
 
-新增 `TestHalfDuplex`（`tests/voice/test_realtime_response_lifecycle.py`）：AI 说话期静音、
+新增 `TestHalfDuplex`（`tests/talk/test_realtime_response_lifecycle.py`）：AI 说话期静音、
 **响应一开始就静音（锁死空窗期漏洞）**、响应悬挂超时后解除静音、尾迹窗口内静音、
 窗口过后恢复并清空、全双工从不静音、`_end_response` 设尾迹时刻、
 **响应期间忽略 speech_started（不发 cancel）**、响应结束后不阻断新提问、
@@ -414,7 +414,7 @@ python -m pytest -q                # 2136 passed
 的断言由“与输入逐字节相同”改为“不是全零静音帧”（启用 AEC 时 `process_mic` 会重写音频，
 原断言在 AEC 环境不可能成立，与本次改动无关）。
 
-`tests/voice/test_realtime_observability.py` 补 **7 项**：客户端指令与服务端事件共用时间线、
+`tests/talk/test_realtime_observability.py` 补 **7 项**：客户端指令与服务端事件共用时间线、
 关闭时指令不落盘但回溯可用、取消回溯按“新→旧”且**只收语义节点（音频帧被过滤）**、
 输出项节点带 `item.type`、**取消快照落盘与开关无关**、无事件时返回空串。
 
@@ -451,19 +451,19 @@ python -m pytest -q                # 2136 passed
 
 | 文件 | 变更 |
 |---|---|
-| `agent/voice/realtime_talk.py` | `half_duplex` 参数、`_mic_muted()`、`_mic_resume_at`/`_response_begin_ts`/`_last_voice_ts`；`_send_audio` 静音门控（置于 `mic.read` 之后）；`response.created` 记录响应起始时刻；**响应期间忽略 `speech_started`**；**工具轮保持静音**；**取消时打印事件链 + 快照落盘**；**说完时复位“正在说话”指示**；MCP 装配外移；`_end_response` 尾迹窗口；启动提示分流。**（第五次修正）** `speech_stopped` 分支改为只复位界面指示、不再写静音窗口；`voice_gap` 仅跟踪语音活动；静音只保留响应期与尾迹窗口 |
-| `agent/voice/realtime_audio.py` | 新建：`_rms`/`_attenuate_pcm`/`voice_gap()`/`silence_like()` + `ECHO_SUPPRESS_FACTOR`/`ECHO_GUARD_RMS`/`MIC_TAIL_SECONDS`/`MIC_MUTE_MAX_SECONDS`/`VOICE_RMS`/`SPEECH_GAP_SECONDS` + `mic_muted()` 静音判定 + `should_attenuate()` 增益压低判定。**（第五次修正）** 删去 `SPEECH_MUTE_SECONDS` 与判停抢先静音分支 |
-| `agent/voice/realtime_mcp.py` | 新建：MCP 工具装配（`init_mcp_tools` / `load_mcp_tools_async`），`session.update` 后写时间线 |
-| `agent/voice/realtime_events.py` | `note_client()` 客户端指令时间线、`recent` 事件链缓冲（24 条 + `_CHAIN_EVENTS` 白名单 + `_chain_label()`）、`cancel_hint()`、`dump_cancel_diag()` 取消快照落盘 |
+| `agent/talk/realtime_talk.py` | `half_duplex` 参数、`_mic_muted()`、`_mic_resume_at`/`_response_begin_ts`/`_last_voice_ts`；`_send_audio` 静音门控（置于 `mic.read` 之后）；`response.created` 记录响应起始时刻；**响应期间忽略 `speech_started`**；**工具轮保持静音**；**取消时打印事件链 + 快照落盘**；**说完时复位“正在说话”指示**；MCP 装配外移；`_end_response` 尾迹窗口；启动提示分流。**（第五次修正）** `speech_stopped` 分支改为只复位界面指示、不再写静音窗口；`voice_gap` 仅跟踪语音活动；静音只保留响应期与尾迹窗口 |
+| `agent/talk/realtime_audio.py` | 新建：`_rms`/`_attenuate_pcm`/`voice_gap()`/`silence_like()` + `ECHO_SUPPRESS_FACTOR`/`ECHO_GUARD_RMS`/`MIC_TAIL_SECONDS`/`MIC_MUTE_MAX_SECONDS`/`VOICE_RMS`/`SPEECH_GAP_SECONDS` + `mic_muted()` 静音判定 + `should_attenuate()` 增益压低判定。**（第五次修正）** 删去 `SPEECH_MUTE_SECONDS` 与判停抢先静音分支 |
+| `agent/talk/realtime_mcp.py` | 新建：MCP 工具装配（`init_mcp_tools` / `load_mcp_tools_async`），`session.update` 后写时间线 |
+| `agent/talk/realtime_events.py` | `note_client()` 客户端指令时间线、`recent` 事件链缓冲（24 条 + `_CHAIN_EVENTS` 白名单 + `_chain_label()`）、`cancel_hint()`、`dump_cancel_diag()` 取消快照落盘 |
 | `agent/config/settings.py` | `realtime_half_duplex` 字段 + 键列表 + TOML 映射 |
 | `agent/commands/handlers/voice_commands.py`、`agent/serve/engine/engine.py` | 透传 `half_duplex` |
-| `tests/voice/test_realtime_response_lifecycle.py` | 新增 `TestHalfDuplex`（**19 项**，含响应起始静音、悬挂保护、忽略 speech_started、工具轮静音、静音帧/真实音频、**本地语音活动跟踪 4 项**）；**（第五次修正）** 新增“`speech_stopped` 不得抢先静音”“非有效轮次清残留窗口”，未静音断言改为“不是全零静音帧”；原插话用例改为全双工 |
-| `tests/voice/test_realtime_observability.py` | 客户端指令时间线、取消回溯、链过滤与落盘断言（**7 项**） |
-| `tests/voice/test_talk_terminal.py` | `half_duplex` 透传断言（2 项） |
+| `tests/talk/test_realtime_response_lifecycle.py` | 新增 `TestHalfDuplex`（**19 项**，含响应起始静音、悬挂保护、忽略 speech_started、工具轮静音、静音帧/真实音频、**本地语音活动跟踪 4 项**）；**（第五次修正）** 新增“`speech_stopped` 不得抢先静音”“非有效轮次清残留窗口”，未静音断言改为“不是全零静音帧”；原插话用例改为全双工 |
+| `tests/talk/test_realtime_observability.py` | 客户端指令时间线、取消回溯、链过滤与落盘断言（**7 项**） |
+| `tests/talk/test_talk_terminal.py` | `half_duplex` 透传断言（2 项） |
 | `docs/architecture/06-语音系统.md`、`12-配置系统.md`、`config-docs/voice-setup.md`、`README.md`、`README.en.md`、两份 `settings.example.toml` | 半双工说明与配置同步；**（第五次修正）** `06-语音系统.md` 重写“禁止在 `response.created` 之前静音”一节与模块表，本 fixlog 补第五次修正节；**（第六次修正）** 根因翻案：06 重写为引擎+双适配器架构并新增“响应救援/桌面全双工桥接”两节，12/config-docs/README 补 `rescue`/`turn_detection`/`silence_ms`/`tools_mode` 四键，两份 `settings.example.toml` 同步 |
-| （第六次修正，2026-09-28）`agent/voice/realtime_engine.py` | 新建（915 行）：传输无关协议引擎——会话状态机/半双工静音/轮末静音窗（仅 smart_turn）/响应救援 `_response_rescue`/Function Calling；三条硬经验沉淀于 docstring |
-| `agent/voice/realtime_talk.py` | 改为终端适配器 `RealtimeTalk(RealtimeEngine)`：PyAudio 设备 + ESC watcher + 工具装配（`tools_mode` 分流，MCP 前置加载），常量再导出保持兼容 |
-| `agent/voice/realtime_bridge_audio.py` | 新建：`BridgeMic`（上行帧缓冲，超限丢最旧/欠载补静音）+ `BridgeSpk`（回调转发 + flush） |
+| （第六次修正，2026-09-28）`agent/talk/realtime_engine.py` | 新建（915 行）：传输无关协议引擎——会话状态机/半双工静音/轮末静音窗（仅 smart_turn）/响应救援 `_response_rescue`/Function Calling；三条硬经验沉淀于 docstring |
+| `agent/talk/realtime_talk.py` | 改为终端适配器 `RealtimeTalk(RealtimeEngine)`：PyAudio 设备 + ESC watcher + 工具装配（`tools_mode` 分流，MCP 前置加载），常量再导出保持兼容 |
+| `agent/talk/realtime_bridge_audio.py` | 新建：`BridgeMic`（上行帧缓冲，超限丢最旧/欠载补静音）+ `BridgeSpk`（回调转发 + flush） |
 | `agent/serve/protocol.py`、`agent/serve/server.py` | `talk.start` 加 `duplex?`；新指令 `talk.audio`（64KB 校验、fire-and-forget）与新事件 `talk_audio` |
 | `agent/serve/engine/engine.py` | `_handle_start_talk` 分发 + `_handle_start_talk_duplex`（Bridge 音频 + `half_duplex=False/use_aec=False`）+ `feed_talk_audio` 投递 |
 | `agent/config/settings.py` | 新增 `realtime_rescue/turn_detection/silence_ms/tools_mode`；`voice_barge_in` 默认 False；`stt_model` 默认 `qwen3-asr-flash-realtime`（删 `stt_silence_threshold`） |

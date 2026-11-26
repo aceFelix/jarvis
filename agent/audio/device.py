@@ -5,7 +5,7 @@ Windows 上 PortAudio 非线程安全，多个 PyAudio() 实例并发会 segfaul
 通过同一实例 open() 各自的 stream，互不冲突。
 
 用法:
-    from agent.voice.audio import get_pyaudio, release_pyaudio
+    from agent.audio.device import get_pyaudio, release_pyaudio
 
     pa = get_pyaudio()
     stream = pa.open(..., output=True)   # TTS 播放流

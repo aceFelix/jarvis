@@ -152,7 +152,7 @@ await asyncio.to_thread(self._spk.write, audio)  # 直接写入，无中间缓�
 
 ### 3. WebRTC AEC3 回声消除（核心修复）
 
-新增 `agent/voice/aec.py`，封装 WebRTC AudioProcessor：
+新增 `agent/audio/aec.py`，封装 WebRTC AudioProcessor：
 
 ```python
 class EchoCanceller:
@@ -224,8 +224,8 @@ except ImportError:
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/voice/aec.py` | 新增：WebRTC AEC3 回声消除封装，含 24k→16k 重采样、10ms 帧对齐 |
-| `agent/voice/realtime_talk.py` | 集成 AEC：recv 喂参考信号、send 过 AEC；回退 JitterBuffer/Pacing；切换 smart_turn |
+| `agent/audio/aec.py` | 新增：WebRTC AEC3 回声消除封装，含 24k→16k 重采样、10ms 帧对齐 |
+| `agent/talk/realtime_talk.py` | 集成 AEC：recv 喂参考信号、send 过 AEC；回退 JitterBuffer/Pacing；切换 smart_turn |
 | `pyproject.toml` | voice 依赖组新增 `aec-audio-processing` 和 `numpy` |
 | `README.md` | 更新实时双工 `/talk` 说明，补充 AEC 回声消除与 smart_turn 特性描述 |
 

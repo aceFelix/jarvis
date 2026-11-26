@@ -1,4 +1,4 @@
-"""agent.voice.voice_state 语音互斥锁单元测试。
+"""agent.audio.mic_lock 语音互斥锁单元测试。
 
 锁语义：心跳续约 + 时间戳过期判定（不依赖 os.kill 检活）。
 覆盖路径：
@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from agent.voice import voice_state
+from agent.audio import mic_lock as voice_state
 
 
 @pytest.fixture

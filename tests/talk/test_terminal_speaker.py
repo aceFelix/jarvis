@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from agent.voice.realtime_talk import _TerminalSpeaker
+from agent.talk.realtime_talk import _TerminalSpeaker
 
 
 class FakeStream:

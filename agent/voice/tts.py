@@ -99,7 +99,7 @@ class _PlaybackCallback:
     def on_open(self) -> None:
         """WebSocket 连接建立。初始化 pyaudio 播放流。"""
         try:
-            from agent.voice.audio import get_pyaudio
+            from agent.audio.device import get_pyaudio
             pa = get_pyaudio()
         except ImportError as e:
             self._error = f"pyaudio 未安装: {e}"

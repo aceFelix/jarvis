@@ -23,13 +23,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.voice import realtime_events as ev
-from agent.voice import realtime_talk as rt_mod
-from agent.voice import realtime_tools as tools_mod
-# 共享替身与 fixture（fake_diag / _stub_tools）已抽到 tests.voice._fakes 与 conftest
-from tests.voice._fakes import FakeDiag as _FakeDiag
-from tests.voice._fakes import FakeTalkUI as _FakeTalkUI
-from tests.voice._fakes import FakeWS as _FakeWS
+from agent.talk import realtime_events as ev
+from agent.talk import realtime_talk as rt_mod
+from agent.talk import realtime_tools as tools_mod
+# 共享替身与 fixture（fake_diag / _stub_tools）已抽到 tests.talk._fakes 与 conftest
+from tests.talk._fakes import FakeDiag as _FakeDiag
+from tests.talk._fakes import FakeTalkUI as _FakeTalkUI
+from tests.talk._fakes import FakeWS as _FakeWS
 
 
 # ---- 事件摘要 ----

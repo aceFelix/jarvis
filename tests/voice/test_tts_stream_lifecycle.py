@@ -129,8 +129,8 @@ class TestBargeInReleasesStream:
             def get_format_from_width(self, _w: int) -> int:  # noqa: ARG004
                 return 8
 
-        # on_open 内部是 `from agent.voice.audio import get_pyaudio`，patch 模块属性
-        monkeypatch.setattr("agent.voice.audio.get_pyaudio", lambda: _PA())
+        # on_open 内部是 `from agent.audio.device import get_pyaudio`，patch 模块属性
+        monkeypatch.setattr("agent.audio.device.get_pyaudio", lambda: _PA())
 
         round1 = _PlaybackCallback()
         round1.on_open()

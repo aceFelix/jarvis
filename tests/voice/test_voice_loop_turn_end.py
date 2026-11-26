@@ -67,7 +67,7 @@ def _run_voice_loop(monkeypatch, fake_round, on_turn_end) -> tuple[list, object]
 
     import agent.voice as voice_pkg
     import agent.voice.tts as tts_mod
-    import agent.voice.voice_state as voice_state
+    import agent.audio.mic_lock as voice_state
     # 包 __init__ 用同名函数重导出遮蔽了模块属性，需从 sys.modules 取模块本体
     import agent.voice.voice_loop  # noqa: F401
 
