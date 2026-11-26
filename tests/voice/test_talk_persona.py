@@ -19,15 +19,17 @@ import pytest
 
 from agent.voice import realtime_talk as rt_mod
 
-#: 身份段首句（两份指令共用），改人设时这里与常量一起改
-_IDENTITY = "你是星期五（Friday）"
+#: 身份锚点：只钉「自称星期五 + 英文名 Friday」，不钉具体措辞（全称/缩写可调整）
+_NAME = "你是星期五"
+_EN = "Friday"
 
 
 @pytest.mark.parametrize("mode", ["builtin", "all"])
 def test_default_persona_is_friday(mode: str) -> None:
     """两种工具模式的默认人设都是星期五，且不再自称贾维斯。"""
     text = rt_mod.default_instructions(mode)
-    assert text.startswith(_IDENTITY)
+    assert text.startswith(_NAME)
+    assert _EN in text
     assert "第二位智能管家" in text
     assert "你是贾维斯" not in text
 
@@ -48,7 +50,8 @@ def test_unknown_mode_falls_back_to_builtin() -> None:
 def test_talk_fallback_uses_friday_persona(mode: str) -> None:
     """终端适配器不传 instructions 时回退到星期五人设，而不是留空给服务端默认。"""
     rt = rt_mod.RealtimeTalk("sk-test", tools_mode=mode)
-    assert rt._instructions.startswith(_IDENTITY)
+    assert rt._instructions.startswith(_NAME)
+    assert _EN in rt._instructions
 
 
 def test_explicit_instructions_win() -> None:
