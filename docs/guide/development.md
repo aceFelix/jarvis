@@ -105,28 +105,37 @@ agent/
 │           render.py / voice_adapter.py # 引擎协作件
 │       （原 pywebview 窗口壳 app/single_instance/win32_icon/window_geometry
 │        与 assets/ 已于 2026-10 退役删除，见 docs/fixlogs/desktop-serve/workbench-gui-retired.md）
-├── voice/             # 语音引擎
+├── audio/             # 音频基础设施（/voice 与 /talk 共用，2026-11-26 下沉）
+│   ├── device.py      # PyAudio 全局单例（防 segfault）
+│   ├── aec.py         # WebRTC AEC3 回声消除
+│   ├── mic_lock.py    # 跨进程麦克风互斥锁（心跳 + TTL）
+│   ├── providers.py   # 语音厂商注册表（STT/TTS/realtime 共用）
+│   └── dsp.py         # 归一化 RMS（16bit mono → 0.0~1.0）
+├── talk/              # /talk 实时全双工链路（2026-11-26 从 voice 拆出）
+│   ├── realtime_engine.py # 协议引擎核心（WebSocket 状态机/静音策略/响应救援，传输无关）
+│   ├── realtime_recv.py # 协议接收循环（mixin）
+│   ├── realtime_rescue.py # 响应收尾/救援/看门狗（mixin）
+│   ├── realtime_const.py # 音频参数与时序阈值（单一来源）
+│   ├── realtime_talk.py # 终端适配器（PyAudio 采集 + ESC + 工具装配）
+│   ├── realtime_audio.py # /talk 音频纯函数（衰减/静音判定/本地 VAD 常量）
+│   ├── realtime_bridge_audio.py # 桌面桥接适配器（BridgeMic/BridgeSpk）
+│   ├── realtime_tools.py # /talk 工具层（内置工具 + MCP 聚合 + Function Calling）
+│   ├── realtime_mcp.py # /talk MCP 工具装配（首个 session.update 前一次性加载）
+│   ├── realtime_events.py # /talk 可观测层（环境音转写 + 事件时间线）
+│   └── talk_history.py # 转写按轮配对落库
+├── voice/             # /voice 半双工管线（STT → LLM → TTS）
 │   ├── tts.py         # CosyVoiceTTS（整段合成 + 流式 start/feed/finish + 打断）
 │   ├── stt/           # STT 识别包（单一后端 QwenASR）
 │   │   ├── common.py    # 音频常量 / RMS 计算 / 停止标志（跨模块共享）
 │   │   ├── qwen.py      # QwenASR（OmniRealtime，服务端 VAD）
 │   │   └── __init__.py  # create_stt() 工厂 + 符号 re-export
 │   ├── stream_tts.py  # StreamTTSPlayer（句子级流式 TTS，逐句播放）
-│   ├── realtime_engine.py # /talk 协议引擎核心（WebSocket 状态机/静音策略/响应救援，传输无关）
-│   ├── realtime_talk.py # /talk 终端适配器（PyAudio 采集 + ESC + 工具装配）
-│   ├── realtime_bridge_audio.py # 桌面桥接适配器（BridgeMic/BridgeSpk，serve 音频帧 ⇄ 引擎）
-│   ├── realtime_audio.py # /talk 音频纯函数（RMS/衰减/静音判定）
-│   ├── realtime_tools.py # /talk 工具层（内置工具 + MCP 注册表聚合 + Function Calling 执行）
-│   ├── realtime_mcp.py # /talk MCP 工具装配（首个 session.update 前一次性加载）
-│   ├── realtime_events.py # /talk 可观测层（环境音转写 + 事件时间线 + 轮次统计）
 │   ├── voice_loop.py  # /voice 语音对话循环（听→想→说 + 对话⇄待机状态机）
 │   ├── voice_config.py # 语音配置（关键词/唤醒词/待机参数/语音 system prompt）
 │   ├── tts_text.py    # TTS 文本清洗（markdown/ 数学公式/工具标签剥离）
-│   ├── barge_in.py    # 打断监听器（ESC 键盘 / 麦克风能量 / 打断词）
-│   ├── tts_voices.py  # TTS 音色目录（/tts-voice 数据源，含音色-模型适配联动）
-│   ├── audio.py       # PyAudio 全局单例（防 segfault）
-│   ├── aec.py         # AEC 回声消除（WebRTC AEC3，外放防自言自语）
-│   └── client_vad.py  # 客户端 VAD（静音检测/语音活动判断）
+│   ├── barge_in.py    # 打断监听器（空格键 / 麦克风能量）
+│   ├── voice_barge.py # /voice 播报期开口打断（AEC + 本地 VAD）
+│   └── tts_voices.py  # TTS 音色目录（/tts-voice 数据源，含音色-模型适配联动）
 ├── bridge/            # 跨设备协同（P3-1）
 │   ├── server.py      # BridgeServer（HTTP 静态文件 + WebSocket 通信）
 │   ├── ui.py          # BridgeUI（UIProtocol 实现，事件转发到 WS）

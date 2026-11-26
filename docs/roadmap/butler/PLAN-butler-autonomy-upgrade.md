@@ -490,8 +490,8 @@ class PerceptEvent:
 
 | 文件 | 改动 |
 |---|---|
-| `agent/voice/realtime_tools.py` | `select_tools_for_turn()`（tool-RAG） |
-| `agent/voice/realtime_engine.py` | 每轮重挂工具子集；"要动手"意图 → 转交后台 |
+| `agent/talk/realtime_tools.py` | `select_tools_for_turn()`（tool-RAG） |
+| `agent/talk/realtime_engine.py` | 每轮重挂工具子集；"要动手"意图 → 转交后台 |
 | `agent/serve/engine/engine.py` | 后台执行结果的异步卡片回报 |
 | `agent/core/memory/facts.py`（新增） | 结构化事实存储 + 时效 + 冲突链 |
 | `agent/core/memory/profile_refiner.py` | 提炼结果同时写入结构化事实 |
@@ -585,4 +585,4 @@ class PerceptEvent:
 - 实时语音待机/唤醒/计费：[PLAN-future-realtime-voice-upgrade.md](../voice/PLAN-future-realtime-voice-upgrade.md)
 - 实时语音工具模式故障复盘：[realtime-talk-tools-mode-default-fix.md](../../fixlogs/voice/realtime-talk-tools-mode-default-fix.md)
 - 关键代码：`agent/core/daemon/{proactive,scheduler,vision_watcher}.py`、
-  `agent/permissions/`、`agent/core/memory/`、`agent/voice/realtime_tools.py`
+  `agent/permissions/`、`agent/core/memory/`、`agent/talk/realtime_tools.py`

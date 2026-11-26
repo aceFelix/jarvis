@@ -130,12 +130,12 @@ ping_timeout = 10                # 心跳超时（秒）
 
 | 文件 | 改动 |
 |---|---|
-| `agent/voice/realtime_talk.py` | 重构：自动重连、抖动缓冲、打断优化、心跳保活、客户端 VAD |
-| `agent/voice/jitter_buffer.py` | 新增：JitterBuffer 实现 |
-| `agent/voice/client_vad.py` | 新增：客户端 VAD 实现 |
+| `agent/talk/realtime_talk.py` | 重构：自动重连、抖动缓冲、打断优化、心跳保活、客户端 VAD |
+| `agent/talk/jitter_buffer.py` | 规划项（未落地）：JitterBuffer 实现 |
+| `agent/voice/client_vad.py` | 曾新增，2026-11-26 已删除（生产零引用的死代码） |
 | `agent/config/settings.py` | 新增 realtime 重连/抖动/VAD 相关配置字段 |
 | `configs/settings.example.toml` | 新增配置示例 |
-| `tests/voice/test_realtime_stability.py` | 新增：单元测试 |
+| `tests/voice/test_realtime_stability.py` | 曾新增，2026-11-26 随死代码删除 |
 
 ## 验收标准
 
@@ -157,11 +157,11 @@ ping_timeout = 10                # 心跳超时（秒）
 
 ## 涉及文件
 
-- `jarvis/agent/voice/realtime_talk.py`（重构）
-- `jarvis/agent/voice/jitter_buffer.py`（新增）
-- `jarvis/agent/voice/client_vad.py`（新增）
+- `jarvis/agent/talk/realtime_talk.py`（重构）
+- `jarvis/agent/talk/jitter_buffer.py`（规划项，未落地）
+- `jarvis/agent/voice/client_vad.py`（已删除：死代码）
 - `jarvis/agent/config/settings.py`（修改）
 - `jarvis/configs/settings.example.toml`（修改）
-- `jarvis/tests/voice/test_realtime_stability.py`（新增）
+- `jarvis/tests/voice/test_realtime_stability.py`（已删除）
 
 @author aceFelix

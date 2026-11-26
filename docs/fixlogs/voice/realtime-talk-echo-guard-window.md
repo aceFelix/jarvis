@@ -83,7 +83,7 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 .\.venv\Scripts\python.exe -m pytest -q                # 2109 passed
 ```
 
-新增 `TestEchoGuard`（`tests/voice/test_realtime_response_lifecycle.py`）：
+新增 `TestEchoGuard`（`tests/talk/test_realtime_response_lifecycle.py`）：
 
 | 用例 | 断言 |
 |---|---|
@@ -116,9 +116,9 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis
 
 | 文件 | 变更 |
 |---|---|
-| `agent/voice/realtime_talk.py` | `ECHO_SUPPRESS_FACTOR` 0.25→0.1；新增 `ECHO_GUARD_RMS`、`_last_mic_rms`；`_send_audio` 记录衰减后电平；`speech_started` 回声保护分支 |
-| `agent/voice/realtime_events.py` | `echo_guard_hits` 计数、`note_echo_guard()`；`report_lines()` 重构为可叠加三类信号 |
-| `tests/voice/test_realtime_response_lifecycle.py` | 新增 `TestEchoGuard`（4 项） |
-| `tests/voice/test_realtime_observability.py` | `test_speech_started_records_active_response` 设高电平避开回声保护 |
+| `agent/talk/realtime_talk.py` | `ECHO_SUPPRESS_FACTOR` 0.25→0.1；新增 `ECHO_GUARD_RMS`、`_last_mic_rms`；`_send_audio` 记录衰减后电平；`speech_started` 回声保护分支 |
+| `agent/talk/realtime_events.py` | `echo_guard_hits` 计数、`note_echo_guard()`；`report_lines()` 重构为可叠加三类信号 |
+| `tests/talk/test_realtime_response_lifecycle.py` | 新增 `TestEchoGuard`（4 项） |
+| `tests/talk/test_realtime_observability.py` | `test_speech_started_records_active_response` 设高电平避开回声保护 |
 | `docs/architecture/06-语音系统.md` | 补「回声保护窗口」小节；衰减系数 0.25→0.1 |
 | `docs/architecture/12-配置系统.md` / `config-docs/voice-setup.md` / 两份 `settings.example.toml` | 系数与回声保护说明同步 |

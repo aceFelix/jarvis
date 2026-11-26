@@ -19,7 +19,7 @@
 
 ### 第一阶段：摸清链路与实机环境
 
-- 通读 `agent/voice/realtime_talk.py`（当时 820 行），确认五路并发协程：
+- 通读 `agent/talk/realtime_talk.py`（当时 820 行），确认五路并发协程：
   `_send_audio`（麦克风 → AEC → 回声衰减 → `input_audio_buffer.append`）、
   `_recv_events`（服务端事件分发）、`_esc_watcher`、`_load_mcp_tools_async`、`_watchdog`
 - 实测依赖：`aec-audio-processing` **NOT INSTALLED**，`dashscope` / `pyaudio` / `numpy` 正常
@@ -70,9 +70,9 @@
 
 | 新文件 | 行数 | 职责 |
 |---|---|---|
-| `agent/voice/realtime_tools.py` | 214 | 工具层：`BUILTIN_TOOLS` / `execute_builtin_tool` / `build_all_tools` / `execute_tool` |
-| `agent/voice/realtime_events.py` | 195 | 可观测层：`TalkEventLog`（环境音转写 + 事件时间线 + 轮次统计） |
-| `agent/voice/realtime_talk.py` | 820 → 711 | 会话轮次编排 + 事件分发（工具块迁出，留注释指向新模块） |
+| `agent/talk/realtime_tools.py` | 214 | 工具层：`BUILTIN_TOOLS` / `execute_builtin_tool` / `build_all_tools` / `execute_tool` |
+| `agent/talk/realtime_events.py` | 195 | 可观测层：`TalkEventLog`（环境音转写 + 事件时间线 + 轮次统计） |
+| `agent/talk/realtime_talk.py` | 820 → 711 | 会话轮次编排 + 事件分发（工具块迁出，留注释指向新模块） |
 
 搬迁时保留契约：拆分后用参数化断言锁定旧私有名（`_BUILTIN_TOOLS` /
 `_build_all_tools` / `_execute_builtin_tool`）**必须取不到**，防回潮。
@@ -117,10 +117,10 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; python -m pytest te
 ```
 
 - `tests/voice/` **147 passed**
-- 新增 `tests/voice/test_realtime_observability.py`（9 个测试类），
+- 新增 `tests/talk/test_realtime_observability.py`（9 个测试类），
   其中 `TestRecvEventsWiring` 用 `_FakeWS` + `_FakeTalkUI` 直接喂事件给 `_recv_events`，
   断言 `🔇` 行的出现/不出现、四项计数与时间线内容
-- `tests/voice/test_talk_terminal.py` 补 `event_log` 透传断言
+- `tests/talk/test_talk_terminal.py` 补 `event_log` 透传断言
 
 ---
 
@@ -175,15 +175,15 @@ Set-Location e:\2.MyProjects\MyAgentChat\J.A.R.V.I.S\jarvis; python -m pytest te
 
 | 文件 | 说明 |
 |---|---|
-| `agent/voice/realtime_tools.py` | 新建，工具层（214 行） |
-| `agent/voice/realtime_events.py` | 新建，可观测层（195 行） |
-| `agent/voice/realtime_talk.py` | 拆出工具层 + 接入可观测性（820 → 711 行） |
+| `agent/talk/realtime_tools.py` | 新建，工具层（214 行） |
+| `agent/talk/realtime_events.py` | 新建，可观测层（195 行） |
+| `agent/talk/realtime_talk.py` | 拆出工具层 + 接入可观测性（820 → 711 行） |
 | `agent/config/settings.py` | `realtime_event_log` 字段与 TOML 映射 |
 | `configs/settings.example.toml` / `agent/configs/settings.example.toml` | `[realtime_talk]` 段 |
 | `agent/commands/handlers/voice_commands.py` | `/talk` 装配点透传 |
 | `agent/serve/engine/engine.py` | 工作台装配点透传 |
-| `tests/voice/test_realtime_observability.py` | 新建，9 个测试类 |
-| `tests/voice/test_talk_terminal.py` | 补 `event_log` 透传断言 |
+| `tests/talk/test_realtime_observability.py` | 新建，9 个测试类 |
+| `tests/talk/test_talk_terminal.py` | 补 `event_log` 透传断言 |
 | `docs/architecture/06-语音系统.md` | 新增"环境音转写与事件时间线"整节 |
 | `docs/architecture/12-配置系统.md` | `event_log` 映射说明 |
 | `docs/architecture/01-总体架构.md` | 目录树 |

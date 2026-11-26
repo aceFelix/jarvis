@@ -64,7 +64,7 @@ UI 回调是同步签名（`on_ai_transcript(text)`），而 `advance_session` �
 
 ### 4.1 新增转写配对适配器
 
-`agent/voice/talk_history.py::TalkHistoryRecorder`：
+`agent/talk/talk_history.py::TalkHistoryRecorder`：
 
 - 包装真实 UI（`__getattr__` 透传），覆盖
   `on_user_speaking` / `on_user_transcript` / `on_ai_transcript` /
@@ -100,7 +100,7 @@ UI 回调是同步签名（`on_ai_transcript(text)`），而 `advance_session` �
 
 ## 5. 验证结果
 
-新增 `tests/voice/test_talk_history.py`（9 条）：
+新增 `tests/talk/test_talk_history.py`（9 条）：
 
 - 配对规则 7 条：正常顺序、转写滞后、开场白、回声丢弃、打断轮、
   flush 残轮、透传/增量兼容；
@@ -118,10 +118,10 @@ UI 回调是同步签名（`on_ai_transcript(text)`），而 `advance_session` �
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/voice/talk_history.py` | 新增 `TalkHistoryRecorder`（转写配对 + flush） |
+| `agent/talk/talk_history.py` | 新增 `TalkHistoryRecorder`（转写配对 + flush） |
 | `agent/commands/handlers/voice_commands.py` | `_realtime_talk` 接 `cmd_ctx`、串行落库 worker、退出 flush |
 | `agent/commands/handlers/voice_commands.py::handle_talk` | 传入 `CommandContext` |
-| `tests/voice/test_talk_history.py` | 新增 9 条测试 |
+| `tests/talk/test_talk_history.py` | 新增 9 条测试 |
 | `README.md` / `README.en.md` | 语音能力行补充“两种语音都写入会话历史” |
 | `docs/guide/voice.md` | `/talk` 增加“会话落库与标题”说明 |
 | `CHANGELOG.md` | Unreleased 记录本功能 |

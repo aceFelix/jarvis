@@ -60,7 +60,7 @@ Jarvis 提供两套独立的语音系统：
 **传输无关引擎（`RealtimeEngine`）+ 终端/桌面双适配器**：
 
 - **人设：星期五（Friday）**（2026-11-26 起）：贾维斯（JARVIS）之外的第二位智能管家，
-  被问身份时自称星期五。人设硬编码在 `agent/voice/realtime_talk.py` 的
+  被问身份时自称星期五。人设硬编码在 `agent/talk/realtime_talk.py` 的
   `default_instructions()`（终端与桌面同口径），**无配置项可改**；`/voice` 与文本模式
   仍走 `agent/prompts/system.py` 的人设/画像注入，不受此影响
 - **server_vad 轮次检测（默认）**：声学 VAD + 静音时长判停，尾音延长当前轮而非误触发新
@@ -88,7 +88,7 @@ Jarvis 提供两套独立的语音系统：
   历史，并与文本、`/voice` 共用 `advance_session`（每轮保存 + 15 字标题）。
   配对规则与桌面 `WorkbenchRealtimeUI` 同口径：正常顺序、转写滞后（回答先到先暂存）、
   开场白单独落库、回声轮丢弃、打断轮先落旧问句、退出时 flush 残轮。
-  实现见 `agent/voice/talk_history.py`（`TalkHistoryRecorder`）。
+  实现见 `agent/talk/talk_history.py`（`TalkHistoryRecorder`）。
 - **图形化实时聊天**：由 jarvis-desktop 桌面应用（真全双工）承担（本仓库的三栏
   工作台 `--gui` 已于 2026-10 退役，见
   [workbench-gui-retired](../fixlogs/desktop-serve/workbench-gui-retired.md)）

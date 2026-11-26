@@ -42,7 +42,7 @@
 
 把默认指令回退提为模块级函数，两条路径共用：
 
-- `agent/voice/realtime_talk.py`：新增 `default_instructions(tools_mode)` 模块函数
+- `agent/talk/realtime_talk.py`：新增 `default_instructions(tools_mode)` 模块函数
   （builtin → `_INSTRUCTIONS_BUILTIN`，all → `_INSTRUCTIONS_ALL`）；
   `RealtimeTalk.__init__` 改为调用它（行为不变）。
 - `agent/serve/engine/engine.py` `_handle_start_talk_duplex`：构造 `RealtimeEngine` 时
@@ -59,7 +59,7 @@ AI 气泡已建时插到它前面」，修复用户转写气泡排在 AI 回复�
 ## 验证结果
 
 - `python -m compileall` 两个改动文件通过；
-- `pytest tests/voice/test_realtime_response_lifecycle.py tests/ui/test_workbench_engine_api.py`
+- `pytest tests/talk/test_realtime_response_lifecycle.py tests/ui/test_workbench_engine_api.py`
   → **72 passed**；
 - 人工验证（待用户复测）：桌面壳实时语音问「你是谁」，应自称贾维斯。
 
@@ -67,7 +67,7 @@ AI 气泡已建时插到它前面」，修复用户转写气泡排在 AI 回复�
 
 | 文件 | 改动说明 |
 |---|---|
-| `agent/voice/realtime_talk.py` | 新增 `default_instructions()`；`RealtimeTalk.__init__` 改用它 |
+| `agent/talk/realtime_talk.py` | 新增 `default_instructions()`；`RealtimeTalk.__init__` 改用它 |
 | `agent/serve/engine/engine.py` | `_handle_start_talk_duplex` 构造 `RealtimeEngine` 时传贾维斯指令 |
 | `agent/ui/workbench/assets/app.js` | `user_transcript` 插到流式 AI 气泡前（同轮顺带修复用户气泡顺序） |
 
