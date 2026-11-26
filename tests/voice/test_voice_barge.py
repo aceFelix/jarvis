@@ -8,6 +8,7 @@ stop 清理活跃 watcher。麦克风/AEC 用替身，不依赖真实音频设�
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -106,6 +107,38 @@ class TestVoiceBarge:
         assert voice_barge._active is w
         w.stop()
         assert voice_barge._active is None
+
+    def test_stop_closes_stream_only_inside_reader_thread(self, monkeypatch, no_aec):
+        """stop 只能 join，流必须由监听线程自己关——否则 read/close 并发会崩进程。
+
+        2026-11-26 实机：close_first 在第 4 轮必现 0xC0000005（进程静默退出），
+        join_first 60/60 干净；本用例把“close 发生在 read 线程内”钉成契约。
+        """
+
+        class _ThreadRecordingStream:
+            def __init__(self) -> None:
+                self.read_thread: int | None = None
+                self.close_thread: int | None = None
+
+            def read(self, n, exception_on_overflow=False):
+                self.read_thread = threading.get_ident()
+                time.sleep(0.02)
+                return b"\x00\x00" * n
+
+            def close(self) -> None:
+                self.close_thread = threading.get_ident()
+
+        stream = _ThreadRecordingStream()
+        monkeypatch.setattr(voice_barge, "get_pyaudio", lambda: _FakePa(stream))
+        w = voice_barge.VoiceBargeWatcher(lambda: None)
+        w.start()
+        time.sleep(0.1)
+        w.stop()
+
+        assert stream.read_thread is not None
+        assert stream.close_thread == stream.read_thread, "流必须在监听线程内关闭"
+        assert stream.close_thread != threading.get_ident(), "不得在主线程 close"
+        assert w._stream is None
 
     def test_runs_without_pyaudio_module(self, monkeypatch, no_aec):
         """CI runner 未装 pyaudio：模块导入不能依赖真实 pyaudio 常量。"""

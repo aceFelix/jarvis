@@ -7,8 +7,11 @@
 安全约束（Windows PortAudio 非线程安全）：
 - 麦克风输入流从 ``audio.get_pyaudio()`` 全局实例开（TTS 输出已用它），
   **绝不新建 PyAudio()、绝不 terminate()**；单实例双流已由 /talk 验证。
-- 只在 STT 录音结束后的「推理+播报」窗口运行（voice_loop 的轮询线程生命周期），
+- 生命周期约束：只在 STT 录音结束后的「推理+播报」窗口运行（voice_loop 的轮询线程生命周期），
   不与 stt.listen() 的录音并发。
+- **关流只能由监听线程自己做**：另一线程在 ``read()`` 期间 ``close()`` 会让
+  Windows PortAudio 直接访问违例（0xC0000005），进程无 traceback 静默退出；
+  ``stop()`` 只置停止标志并 join，流留给 ``_run`` 的 finally 释放。
 
 @author aceFelix
 """
@@ -97,14 +100,13 @@ class VoiceBargeWatcher:
         with _active_lock:
             if _active is self:
                 _active = None
-        # 只关流，不 terminate（全局实例由 audio.release_pyaudio 统一释放）
-        try:
-            if self._stream is not None:
-                self._stream.close()
-        except Exception:
-            pass
+        # 关键顺序：**先 join 再让线程自己关流**，绝不在这里 close。
+        # 2026-11-26 实机复现（0xC0000005，第 4 轮必现）：另一线程还在
+        # ``stream.read()`` 时从主线程 ``close()``，Windows PortAudio 直接
+        # 访问违例、进程静默消失（/voice 聊完一轮就退回 shell，无 traceback）。
+        # 读单帧最多阻塞 100ms，2s 足够线程退出；幸存流由 _run 的 finally 释放。
         if self._thread is not None:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=2.0)
             self._thread = None
 
     def feed_reference(self, pcm: bytes) -> None:
@@ -118,15 +120,17 @@ class VoiceBargeWatcher:
     # ---- 监听线程 ----
 
     def _run(self) -> None:
+        stream = None
         try:
             pa = get_pyaudio()
-            self._stream = pa.open(
+            stream = pa.open(
                 format=_PA_INT16,
                 channels=1,
                 rate=_RATE,
                 input=True,
                 frames_per_buffer=_FRAMES,
             )
+            self._stream = stream
         except Exception:
             # 麦克风不可用：barge-in 静默降级，手动打断仍可用
             return
@@ -139,37 +143,40 @@ class VoiceBargeWatcher:
 
         started = time.time()
         hits = 0
-        while not self._stop.is_set():
-            try:
-                frame = self._stream.read(_FRAMES, exception_on_overflow=False)
-            except Exception:
-                break
-            data = frame
-            if self._aec is not None:
-                try:
-                    data = self._aec.process_mic(frame) or frame
-                except Exception:
-                    data = frame
-            if time.time() - started < self._warmup:
-                hits = 0
-                continue
-            if _rms(data) >= self._threshold:
-                hits += 1
-                if hits >= self._min_frames:
-                    self.triggered = True
-                    try:
-                        self._on_barge()
-                    except Exception:
-                        pass
-                    break
-            else:
-                hits = 0
         try:
-            if self._stream is not None:
-                self._stream.close()
-        except Exception:
-            pass
-        self._stream = None
+            while not self._stop.is_set():
+                try:
+                    frame = stream.read(_FRAMES, exception_on_overflow=False)
+                except Exception:
+                    break
+                data = frame
+                if self._aec is not None:
+                    try:
+                        data = self._aec.process_mic(frame) or frame
+                    except Exception:
+                        data = frame
+                if time.time() - started < self._warmup:
+                    hits = 0
+                    continue
+                if _rms(data) >= self._threshold:
+                    hits += 1
+                    if hits >= self._min_frames:
+                        self.triggered = True
+                        try:
+                            self._on_barge()
+                        except Exception:
+                            pass
+                        break
+                else:
+                    hits = 0
+        finally:
+            # 流只由本线程关闭：与 read() 同线程，不会触发 PortAudio 访问违例
+            try:
+                stream.close()
+            except Exception:
+                pass
+            if self._stream is stream:
+                self._stream = None
 
 
 __all__ = ["VoiceBargeWatcher", "feed_playback"]

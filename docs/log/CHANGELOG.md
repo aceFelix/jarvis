@@ -19,6 +19,15 @@
 
 ## [Unreleased]
 
+### 修复（/voice 聊完一轮后进程静默退出，2026-11-26）
+
+- `VoiceBargeWatcher.stop()` 原实现在主线程先 `close()` 输入流再 join 监听线程；
+  Windows PortAudio 在 read/close 并发时访问违例（0xC0000005），进程无 traceback
+  静默退回 shell（实机第 4 轮必现）。
+- 改为 stop 只置停止标志 + join（2s），流由监听线程在 `finally` 自行关闭；
+  `barge_in` 旧监听器同步修正。新增回归用例锁定「close 必须发生在监听线程内」。
+- 复盘见 [voice-barge-stop-close-race-fix.md](../fixlogs/voice/voice-barge-stop-close-race-fix.md)。
+
 ### 变更（/talk 与 /voice 分层，2026-11-26）
 
 - `/talk` 的 11 个模块（`realtime_*` + `talk_history.py`）迁入同级 `agent/talk/`，
