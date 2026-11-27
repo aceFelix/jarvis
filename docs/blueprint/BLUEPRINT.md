@@ -682,7 +682,7 @@ OSWorld、微软 **WindowsAgentArena**、WebArena、Mind2Web、SWE-bench、τ-be
 | 常驻画像记忆调研（人设卡 vs 全量注入） | [research/always-on-profile-memory.md](../research/always-on-profile-memory.md) |
 | 常驻人设卡 P6 实施计划 | [plans/profile-memory/profile-memory-p6-persona-impl.md](../plans/profile-memory/profile-memory-p6-persona-impl.md) |
 | 画像记忆重复入库修复 | [fixlogs/session-memory/profile-duplicate-memory-fix.md](../fixlogs/session-memory/profile-duplicate-memory-fix.md) |
-| **修复复盘索引（按主题分类，125 篇）** | [fixlogs/README.md](../fixlogs/README.md) |
+| **修复复盘索引（按主题分类，127 篇）** | [fixlogs/README.md](../fixlogs/README.md) |
 | **实施计划索引（按主题分类，21 篇）** | [plans/README.md](../plans/README.md) |
 | 实时语音工具模式故障复盘 | [fixlogs/voice/realtime-talk-tools-mode-default-fix.md](../fixlogs/voice/realtime-talk-tools-mode-default-fix.md) |
 | 语音能力厂商解耦（阶段一计划） | [plans/voice/voice-provider-decoupling.md](../plans/voice/voice-provider-decoupling.md) |

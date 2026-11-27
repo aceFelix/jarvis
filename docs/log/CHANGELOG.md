@@ -9,7 +9,7 @@
 
 | 系列 | 收录版本 | 位置 |
 |---|---|---|
-| 2.6.x | 2.6.0 — 2.6.2 | 本文文件 |
+| 2.6.x | 2.6.0 — 2.6.3 | 本文文件 |
 | 2.5.x | 2.5.0 – 2.5.4 | [changelog/v2.5.md](changelog/v2.5.md) |
 | 2.4.x | 2.4.0 | [changelog/v2.4.md](changelog/v2.4.md) |
 | 2.3.x | 2.3.0 – 2.3.5 | [changelog/v2.3.md](changelog/v2.3.md) |
@@ -18,6 +18,20 @@
 更早的版本记录见 GitHub Releases。
 
 ## [Unreleased]
+
+## [2.6.3] — 2026-11-27
+
+### 修复（npm 安装器被 PATH 中的坏 Python shim 带偏，2026-11-27）
+
+- 实机复现：`npm install -g @acefelix/jarvis` 已成功找到 Python 3.13.14，但检测到 uv 后执行裸
+  `uv pip install`，uv 重新扫描 PATH 并选中坏掉的 Chocolatey `python3.14.exe`
+  （指向不存在的 `C:\python314\python.exe`），导致 postinstall 失败。
+- `npm/install.js` 新增 `resolvePythonExecutable()`：把 `findPython()` 已校验的解释器解析为
+  `sys.executable` 绝对路径；uv 安装改为 `uv pip install --python "<绝对路径>"`，不再让 uv
+  自行挑选解释器。pip 回退路径原本使用 `python -m pip`，保持不动。
+- 新增 `npm/install.test.js` 3 例，锁住「查询 sys.executable / 失败回退 / 带空格路径加引号」；
+  `npm pack --dry-run` 确认测试文件不进入发布包。
+- 复盘见 [npm-uv-python-selection-fix.md](../fixlogs/ci-release/npm-uv-python-selection-fix.md)。
 
 ### 优化（/talk 星期五体验：标签、自然退出、避免误挂断，2026-11-26）
 

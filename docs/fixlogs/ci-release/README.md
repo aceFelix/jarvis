@@ -1,6 +1,6 @@
 # CI · 测试 · 发布与文档门禁
 
-> [修复与复盘日志索引](../README.md) 的第 11 类，共 10 篇。
+> [修复与复盘日志索引](../README.md) 的第 11 类，共 11 篇。
 > 新增一篇时在本表补一行；文件名与路径保持 `<主题>-<简短描述>-fix.md`。
 
 | 文件 | 主题 |
@@ -15,3 +15,4 @@
 | [undefined-name-imports-fix.md](undefined-name-imports-fix.md) | `/doctor` 打崩会话（F821 全仓扫出 17 处） |
 | [window-follow-throttle-uptime-fix.md](window-follow-throttle-uptime-fix.md) | 窗口跟随首动作被节流（Linux CI uptime 回归） |
 | [workbench-single-instance-release-fix.md](workbench-single-instance-release-fix.md) | 单实例守卫端口释放竞态（Linux CI 失败） |
+| [npm-uv-python-selection-fix.md](npm-uv-python-selection-fix.md) | npm postinstall 的 uv 选中 PATH 中的坏 Python shim |

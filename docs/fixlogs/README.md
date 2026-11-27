@@ -20,8 +20,8 @@
 | 8 | 桌面壳与 serve 桥接 | 12 | [desktop-serve/](desktop-serve/README.md) |
 | 9 | 终端 · 驾驶舱 · 爬虫窗 | 16 | [ui/](ui/README.md) |
 | 10 | 扩展生态 | 5 | [ecosystem/](ecosystem/README.md) |
-| 11 | CI · 测试 · 发布与文档门禁 | 10 | [ci-release/](ci-release/README.md) |
-| | **合计** | **126** | |
+| 11 | CI · 测试 · 发布与文档门禁 | 11 | [ci-release/](ci-release/README.md) |
+| | **合计** | **127** | |
 
 ---
 

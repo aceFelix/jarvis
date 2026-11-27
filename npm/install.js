@@ -10,6 +10,7 @@
  *  - 安装成功后根据所选功能提示对应的系统级依赖
  *
  * @author aceFelix
+ * @updated 2026-11-27  # uv 安装显式绑定已校验的解释器，避免 PATH 中的坏 Python shim 抢先
  */
 
 "use strict";
@@ -167,6 +168,45 @@ function findUv() {
   }
 }
 
+/**
+ * 把已通过版本检查的 Python 命令解析成绝对解释器路径。
+ *
+ * uv 默认会重新扫描 PATH 并选择“第一个 Python”，它可能选中坏的 Chocolatey shim
+ * （例如 python3.14.exe 指向不存在的 C:\python314\python.exe），而不是前面
+ * findPython() 已经验证过的 python。因此 uv 安装必须显式绑定这个解释器。
+ *
+ * @param {string} pythonCmd 已验证可用的 Python 命令（python / python3 / py）
+ * @param {Function} run 可注入的命令执行器，供单测使用
+ * @returns {string} sys.executable 的绝对路径；查询失败时退回原命令
+ * @author aceFelix
+ * @since 2026-11-27
+ */
+function resolvePythonExecutable(pythonCmd, run = execSync) {
+  try {
+    const out = run(`${pythonCmd} -c "import sys; print(sys.executable)"`, {
+      encoding: "utf8",
+      timeout: 10000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const resolved = String(out || "").trim();
+    return resolved || pythonCmd;
+  } catch {
+    return pythonCmd;
+  }
+}
+
+/**
+ * 构造 uv 安装前缀：显式指定解释器，避免 uv 自己重新扫描 PATH。
+ *
+ * @param {string} pythonPath findPython() 校验通过的解释器绝对路径
+ * @returns {string} 可直接与 pip 目标拼接的 uv pip install 前缀
+ * @author aceFelix
+ * @since 2026-11-27
+ */
+function buildUvInstallPrefix(pythonPath) {
+  return `uv pip install --python "${pythonPath}"`;
+}
+
 // ─── 交互式选装菜单 ─────────────────────────────────────────────────────────────
 // 返回选中的 extras 数组；特殊值 "all" 表示安装 [all]；空数组表示仅装核心。
 // 非 TTY 环境（CI / 管道）跳过交互，直接返回 ["all"]。
@@ -303,8 +343,10 @@ async function main() {
   let installPrefix;
   const hasUv = findUv();
   if (hasUv) {
-    console.log("[jarvis] ✓ 检测到 uv，使用 uv 加速安装（快 5-10x）");
-    installPrefix = "uv pip install";
+    const pythonPath = resolvePythonExecutable(python.cmd);
+    console.log(`[jarvis] ✓ 检测到 uv，使用 uv 加速安装（快 5-10x）`);
+    console.log(`[jarvis] ✓ 绑定 Python 解释器: ${pythonPath}`);
+    installPrefix = buildUvInstallPrefix(pythonPath);
   } else {
     const pip = findPip(python.cmd);
     if (!pip) {
@@ -345,4 +387,12 @@ async function main() {
   console.log(`\n[jarvis] 运行 "jarvis" 启动贾维斯。\n`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  findPython,
+  resolvePythonExecutable,
+  buildUvInstallPrefix,
+};
